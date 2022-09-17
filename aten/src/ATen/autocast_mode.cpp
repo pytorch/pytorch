@@ -411,10 +411,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
                                  &ADD_NS(native_layer_norm)>::type::call)));
   KERNEL(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
-  // See the note in norm for why choosing fp32_set_opt_dtype
-  KERNEL(ADD_NS(linalg_vector_norm), "linalg_vector_norm", Tensor (const Tensor &, const Scalar&, at::OptionalIntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm", Tensor (const Tensor &, const Scalar&, IntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm.str_ord", Tensor (const Tensor &, c10::string_view, IntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
   KERNEL(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
@@ -598,12 +594,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(linalg_tensorinv), "linalg_tensorinv", Tensor(const Tensor &, int64_t), fp32)
   KERNEL_CPU(ADD_NS(linalg_tensorsolve), "linalg_tensorsolve", Tensor(const Tensor &, const Tensor &, at::OptionalIntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(fake_quantize_per_tensor_affine), "fake_quantize_per_tensor_affine", Tensor (const Tensor &, double, int64_t, int64_t, int64_t), fp32)
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::eig"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 &ADD_NS(eig)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::geqrf"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,

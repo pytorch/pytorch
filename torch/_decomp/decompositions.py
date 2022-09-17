@@ -8,7 +8,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import TensorSequenceType
+from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -754,23 +754,37 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
         return (input, torch.ones_like(input, dtype=torch.bool))
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._softmax)
-@pw_cast_for_opmath
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     unnormalized = torch.exp(x - x_max)
-    return unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._log_softmax)
-@pw_cast_for_opmath
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
-    return shifted - shifted_logsumexp
+    result = shifted - shifted_logsumexp
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
@@ -1275,11 +1289,9 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(
-    [aten.detach, aten.lift, aten.lift_fresh, aten.alias], disable_meta=True
-)
+@register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
 def nop_decomposition(x):
-    return x
+    return aten.alias(x)
 
 
 @register_decomposition(aten.cudnn_batch_norm)
@@ -1312,6 +1324,13 @@ def cudnn_batch_norm(
         weight.new_zeros((0,)),
         input.new_zeros((0,), dtype=torch.uint8),
     )
+
+
+def _broadcast_batch_norm_backward(x, broadcast_mask):
+    for axis, mask in enumerate(broadcast_mask):
+        if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
+            x = x.unsqueeze(axis)
+    return x
 
 
 @register_decomposition(aten.native_batch_norm_backward)
@@ -1372,21 +1391,23 @@ def native_batch_norm_backward(
         if i != axis:
             reduction_axes.append(i)
 
-    mean = torch.reshape(mean, broadcast_mask)  # type: ignore[arg-type]
+    mean = _broadcast_batch_norm_backward(mean, broadcast_mask)  # type: ignore[arg-type]
     norm = 1.0 / num_features
     grad_output_sum = torch.sum(grad_out_cast, reduction_axes)  # type: ignore[arg-type]
-    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)
+    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)  # type: ignore[operator]
 
-    grad_mean = torch.reshape(grad_output_sum * norm, broadcast_mask)
-    proj_scale = torch.reshape(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
+    grad_mean = _broadcast_batch_norm_backward(grad_output_sum * norm, broadcast_mask)
+    proj_scale = _broadcast_batch_norm_backward(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
 
     if weight_cast is None:
-        grad_scale = torch.reshape(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
+        grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
     else:
-        grad_scale = torch.reshape(invstd * weight_cast, broadcast_mask)
+        grad_scale = _broadcast_batch_norm_backward(
+            invstd * weight_cast, broadcast_mask
+        )
 
     if train:
-        proj = (input_cast - mean) * proj_scale
+        proj = (input_cast - mean) * proj_scale  # type: ignore[operator]
         grad_input = ((grad_out_cast - proj) - grad_mean) * grad_scale
     else:
         grad_input = grad_out_cast * grad_scale
@@ -1536,6 +1557,32 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         else:
             ret = ret + vals[..., i, :, j]
     return ret / (length_h * length_w)
+
+
+@register_decomposition(aten.index_add_)
+def index_add_(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    if alpha != 1:
+        python_type = utils.dtype_to_type(x.dtype)
+        utils.check(
+            utils.is_weakly_lesser_type(type(alpha), python_type),
+            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        )
+        tensor = torch._prims.mul(tensor, alpha)
+    idx = (slice(None),) * dim + (index,)
+    torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
+    return x
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
@@ -1914,3 +1961,72 @@ def grid_sampler_2d(
 
         coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
         return cubic_interp1d(coeffs, ty)
+
+
+@register_decomposition(aten.mv)
+@pw_cast_for_opmath
+def mv(self, vec):
+    utils.check(
+        self.dim() == 2 and vec.dim() == 1,
+        lambda: f"matrix @ vector expected, got {self.dim()}, {vec.dim()}",
+    )
+    utils.check(
+        self.size(1) == vec.size(0),
+        lambda: f"size mismatch, got {self.size(0)}x{self.size(1)},{vec.size(0)}",
+    )
+    return (self * vec).sum(dim=1)
+
+
+@register_decomposition(aten.dot, disable_meta=True)
+@pw_cast_for_opmath
+def dot(self, other):
+    if self.is_complex():
+        if self.is_conj():
+            if other.is_conj():
+                return torch.dot(self.conj(), other.conj()).conj()
+            else:
+                return torch.vdot(self.conj(), other)
+        elif other.is_conj():
+            return torch.vdot(other.conj(), self)
+
+    utils.check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+    utils.check(
+        self.dtype == other.dtype,
+        lambda: f"dot : expected both vectors to have same dtype, but found {self.dtype} and {other.dtype}",
+    )
+
+    def numel_error():
+        return (
+            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
+            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
+        )
+
+    utils.check(self.numel() == other.numel(), numel_error)
+
+    return (self * other).sum()
+
+
+@register_decomposition(aten.binary_cross_entropy_with_logits)
+def binary_cross_entropy_with_logits(
+    self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
+):
+    max_val = (-self).clamp_min(0)
+    if pos_weight is not None:
+        log_weight = (pos_weight - 1) * target + 1
+        loss = (1 - target) * self + log_weight * (
+            ((-max_val).exp() + (-self - max_val).exp()).log() + max_val
+        )
+    else:
+        loss = (
+            (1 - target) * self
+            + max_val
+            + ((-max_val).exp() + (-self - max_val).exp()).log()
+        )
+
+    if weight is not None:
+        loss = loss * weight
+
+    return apply_loss_reduction(loss, reduction)

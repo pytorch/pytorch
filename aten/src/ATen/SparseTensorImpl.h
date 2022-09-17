@@ -196,8 +196,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
           alt_options_msg);
     }
 
-    IntArrayRef sizes_and_strides =
-        asIntArrayRefSlow(sizes_and_strides_.sizes_arrayref());
+    IntArrayRef sizes_and_strides = sizes_and_strides_.sizes_arrayref();
     const bool size_equals_sizes = std::equal(
         size.begin(),
         size.end(),

@@ -2,7 +2,6 @@
 
 import copy
 import io
-import unittest
 
 import onnx
 
@@ -186,6 +185,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
@@ -203,6 +203,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL1")
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
@@ -1152,16 +1153,15 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
     @skipIfNoLapack
-    @unittest.skip("It started failing after #80074")
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):
             def forward(self, x):
                 return torch.inverse(x) + x
 
-        def inverse(g, self):
+        def linalg_inv(g, self):
             return g.op("com.microsoft::Inverse", self).setType(self.type())
 
-        register_custom_op_symbolic("::inverse", inverse, 1)
+        register_custom_op_symbolic("::linalg_inv", linalg_inv, 1)
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
         f = io.BytesIO()
