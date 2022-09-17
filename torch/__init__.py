@@ -908,7 +908,10 @@ from torch._classes import classes
 #         buffer = z
 #     return min - torch.log1p(z), buffer
 #     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-if os.environ.get("PYTORCH_JIT", "1") == "1" and __debug__ and not torch._C._is_deploy_enabled():  # type: ignore[attr-defined]
+if (os.environ.get("PYTORCH_JIT", "1") == "1" and
+        __debug__ and
+        not torch._C._is_deploy_enabled() and
+        os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0"):
     from torch._decomp import decompositions_for_jvp
     del decompositions_for_jvp
 
@@ -971,7 +974,7 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-if sys.executable != 'torch_deploy':
+if sys.executable != 'torch_deploy' and os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0":
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
