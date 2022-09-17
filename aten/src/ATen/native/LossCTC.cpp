@@ -468,7 +468,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
     } else {
       // NOTE: Calling data-ptr is not Composite Compliant!,
       // so we call the _ctc_loss.Tensor overload.
-      auto res = std::get<0>(at::_ctc_loss(
+      res = std::get<0>(at::_ctc_loss(
           log_probs_,
           // if the targets are on CPU (which you need for CuDNN, let's move
           // them to GPU as a service for the user)
