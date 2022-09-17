@@ -312,7 +312,8 @@ class TestPySymInt(TestCase):
         shape_env = ShapeEnv()
         a0 = shape_env.create_symint("a0", 2)
         self.assertEqual(a0.guard_int(), 2)
-        self.assertEqual(str(shape_env.guards[0]), "(a0, 2)")
+        self.assertEqual(str(shape_env.guards[0][0]), "a0")
+        self.assertEqual(shape_env.guards[0][1], 2)
 
     @skipIfNoSympy
     def test_int_conversion(self):
