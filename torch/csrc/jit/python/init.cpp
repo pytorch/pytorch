@@ -163,7 +163,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
 
   virtual int64_t int_() override {
     py::gil_scoped_acquire acquire;
-    return getPyObj().attr("__int__").cast<int64_t>();
+    return getPyObj().attr("__int__")().cast<int64_t>();
   }
 
   // TODO: virtualize
