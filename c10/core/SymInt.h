@@ -106,10 +106,25 @@ class C10_API SymInt {
     release_();
   }
 
+  // Require the int to be non-symbolic, and if it is symbolic raise an
+  // error.  This is safe to use for C++ code that doesn't work for symbolic
+  // shapes, and you don't have time to fix it immediately, as if we
+  // try to trigger the path in C++ you'll appropriately get an error
   int64_t expect_int() const {
     SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
     return data_;
   }
+
+  // Insert a guard for the int to be its concrete value, and then return
+  // that value.  This operation always works, even if the int is symbolic,
+  // so long as we know what the underlying value is (e.g., this won't work
+  // if you call it on the size of nonzero output).  Don't blindly put this
+  // everywhere; you can cause overspecialization of PyTorch programs with
+  // this method.
+  //
+  // It should be called as guard_int(__FILE__, __LINE__).  The file and line
+  // number can be used to diagnose overspecialization.
+  int64_t guard_int(const char* file, int64_t line) const;
 
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds

@@ -116,10 +116,10 @@ class PySymInt(object):
         return f"{self.expr}"
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
-    # You can manually trigger a guard
     def __int__(self):
         raise RuntimeError("Trying to extract a concrete int out of a symbolic int")
 
+    # You can manually trigger a guard with this function
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
