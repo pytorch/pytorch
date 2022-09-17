@@ -273,8 +273,6 @@ def _get_qconfig_compatible_with_dtype_config(
         If no changes to the activation post process are required, then the original activation
         post process is returned as is.
         """
-        if dtype_with_constraints is None:
-            return activation_post_process
         extra_keywords = {}
         backend_quant_min = dtype_with_constraints.quant_min
         backend_quant_max = dtype_with_constraints.quant_max
@@ -1284,7 +1282,7 @@ def insert_observers_for_model(
                     assert matched_node_pattern is not None
                     for n in matched_node_pattern:
                         if n.op == "call_module" and n.name in modules:
-                            setattr(modules[n.name], "qconfig", new_qconfig)
+                            modules[n.name].qconfig = new_qconfig  # type: ignore[assignment]
                     matches[node.name] = (last_node, matched_node_pattern, pattern, qhandler, qconfig)  # type: ignore[assignment]
 
             if not skip_inserting_observers and is_supported_by_backend:
