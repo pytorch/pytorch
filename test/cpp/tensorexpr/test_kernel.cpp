@@ -580,6 +580,7 @@ TEST_F(Kernel, CatInputTypesPromotion) {
 }
 
 TEST_F(Kernel, ToDType) {
+#ifdef TORCH_ENABLE_LLVM
   const auto graph_string = R"IR(
       graph(%x.1 : BFloat16(2, 2, strides=[2, 1], requires_grad=0, device=cpu)):
         %1 : NoneType = prim::Constant()
@@ -623,6 +624,7 @@ TEST_F(Kernel, ToDType) {
   ASSERT_EQ(o.sizes(), ref.sizes());
   ASSERT_EQ(o.dtype(), ref.dtype());
   ASSERT_TRUE(at::allclose(o, ref, 4E-3, 4E-3));
+#endif
 }
 
 TEST_F(Kernel, CatAndInlineWithAConstantDim) {

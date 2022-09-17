@@ -2343,6 +2343,7 @@ class TestTEFuser(JitTestCase):
         scr(x)
         self.assertLastGraphAllFused()
 
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
     def test_to_dtype(self):
         def f(x):
             y = torch.sigmoid(x)
@@ -2353,7 +2354,7 @@ class TestTEFuser(JitTestCase):
             return j
 
         x = torch.rand((2, 2), dtype=torch.float32)
-        scr = torch.jit.script(f)
+        scr = torch.jit.trace(f, x)
         scr(x)
         scr(x)
         self.assertLastGraphAllFused()
