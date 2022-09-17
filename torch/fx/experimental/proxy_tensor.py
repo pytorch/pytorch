@@ -104,6 +104,12 @@ def set_meta(proxy, val):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
+def thunkify(f, *args, **kwargs):
+    """
+    Delays computation of f until it's called again
+    Also caches the result
+    """
+    return functools.lru_cache(1)(functools.partial(f, *args, **kwargs))
 
 def track_tensor(tensor, proxy, *, constant, tracer):
     def try_set_proxy_slot(outer_s, proxy_callable, *args):
@@ -111,14 +117,8 @@ def track_tensor(tensor, proxy, *, constant, tracer):
         if isinstance(outer_s, SymInt):
             inner_s = outer_s.get_pyobj()
             assert isinstance(inner_s, PySymInt)
-            proxy = None
 
-            def thunk():
-                nonlocal proxy
-                if proxy is None:
-                    proxy = proxy_callable(inner_s, *args)
-                return proxy
-            set_proxy_slot(inner_s, tracer, thunk)
+            set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
 
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
@@ -210,14 +210,10 @@ def proxy_call(proxy_mode, func, args, kwargs):
             if r is not NotImplemented:
                 return r
 
-    # Some of these are not "real" aten ops and will fail if we
-    # call _dispatch_has_kernel_for_dispatch_key on them.
-    # This list is probably incomplete
-    if func not in [torch.ops.aten.size.default, torch.ops.aten.sym_storage_offset.default]:
-        with proxy_mode.restore():
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
+    with proxy_mode.restore():
+        r = func.decompose(*args, **kwargs)
+        if r is not NotImplemented:
+            return r
 
     tracer = proxy_mode.tracer
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
@@ -470,13 +466,7 @@ class ProxySymDispatchMode(SymDispatchMode):
         finally:
             self.enable_tracing = old
 
-    def __sym_dispatch__(self, func, types, args, kwargs):
-        if not self.enable_tracing:
-            return func(*args, **kwargs)
-        # For speed, we assume there are no nested data structures
-        # (otherwise we could use tree_map)
-        # We also assume there are no keyword arguments.
-        assert not kwargs
+    def _compute_proxy(self, func, args, out):
         n_args = tuple(
             get_proxy_slot(a, self.tracer)().node if a.constant is None else a.constant
             if isinstance(a, (PySymInt, PySymFloat)) else a
@@ -487,10 +477,22 @@ class ProxySymDispatchMode(SymDispatchMode):
         # we gotta do it manually
         n_out = self.tracer.create_node("call_function", func, n_args, {})
         p_out = fx.Proxy(n_out, self.tracer)
-        out = func(*args, **kwargs)
         set_meta(p_out, out)
+        return p_out
+
+    def __sym_dispatch__(self, func, types, args, kwargs):
+        if not self.enable_tracing:
+            return func(*args, **kwargs)
+        # For speed, we assume there are no nested data structures
+        # (otherwise we could use tree_map)
+        # We also assume there are no keyword arguments.
+        assert not kwargs
+        out = func(*args, **kwargs)
         assert isinstance(out, (PySymInt, PySymFloat)), f"{func}(*{args}, **{kwargs}) = {out}"
-        set_proxy_slot(out, self.tracer, lambda: p_out)
+
+        # Delays tracing out the proxies on this op until we actually need it
+        p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
+        set_proxy_slot(out, self.tracer, p_out_thunk)
         return out
 
 
