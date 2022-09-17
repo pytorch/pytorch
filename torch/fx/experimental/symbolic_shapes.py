@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import List, Type, Optional
+from typing import Dict, List, Type, Optional, cast
 import operator
 import functools
 from functools import lru_cache
@@ -66,7 +66,6 @@ def has_symbolic_sizes_strides(elem):
     return (
         any([isinstance(i, torch.SymIntNode) for i in elem.shape])
         or any([isinstance(i, torch.SymIntNode) for i in elem.stride()])
-        or isinstance(elem.numel(), torch.SymIntNode)
         or isinstance(elem.storage_offset(), torch.SymIntNode)
     )
 
@@ -180,7 +179,7 @@ for method, _func in magic_methods.items():
             expr = self.shape_env.replace(self.expr)
             other = self.shape_env.replace(other)
             out = func(expr, other)
-            out = self.shape_env.replace(out)
+            out = sympy.expand(out)
             return PySymInt(out, self.shape_env)
         return magic_impl
 
@@ -220,9 +219,14 @@ def _lru_cache(fn, maxsize=None):
 class ShapeEnv(object):
     def __init__(self):
         self.guards = []
-        self.var_to_val = {}
-        self.replacements = {}
-        self.divisible = {}
+        # Maps symbolic ints to their original concrete values
+        # Currently populated from tensors
+        self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
+        # Maps from sympy ints to expressions representing them
+        # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
+        self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
+        # Keys are Mod(x, y), values are 0 (for ease of substitution)
+        self.divisible: Dict["sympy.Expr", "sympy.Integer"] = {}
 
     def _get_key(self):
         """
@@ -274,7 +278,7 @@ class ShapeEnv(object):
         return shape_groups
 
     @_lru_cache
-    def _maybe_evaluate_static(self, expr: sympy.Expr) -> Optional[sympy.Expr]:
+    def _maybe_evaluate_static(self, expr: "sympy.Expr") -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
         """
@@ -291,8 +295,8 @@ class ShapeEnv(object):
         return None
 
     @_lru_cache
-    def replace(self, expr: sympy.Expr) -> sympy.Expr:
-        replacements = {s: self._find(s) for s in expr.free_symbols}
+    def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
+        replacements = {s: self._find(cast(sympy.Symbol, s)) for s in expr.free_symbols}
         return sympy.expand(expr.xreplace(replacements))
 
     @_lru_cache
@@ -301,38 +305,47 @@ class ShapeEnv(object):
         for k in self.divisible:
             res = self.replace(k)
             if len(res.free_symbols) > 0:
-                new_divisible[k] = 0
+                new_divisible[k] = sympy.Integer(0)
 
         self.divisible = new_divisible
 
     @_lru_cache
-    def simplify(self, expr: sympy.Expr) -> sympy.Expr:
+    def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if len(expr.atoms(sympy.Mod)) > 0:
+        if expr.has(sympy.Mod):
             self._update_divisible()
             expr = expr.xreplace(self.divisible)
             expr = sympy.expand(expr)
         return expr
 
     @lru_cache(256)
-    def size_hint(self, expr: sympy.Expr):
+    def size_hint(self, expr: "sympy.Expr"):
+        """
+        Gets a size hint for a given expression from the underlying shapes we had.
+        Does not introduce a guard, so only use this when you can guarantee that
+        your code is still valid for arbitrary shapes (such as optimization decisions)
+        """
         result_expr = sympy.expand(expr).xreplace(self.var_to_val)
         assert len(result_expr.free_symbols) == 0, "Size hint has variables we don't have underlying values for"
         return result_expr
 
-    def _find(self, a):
+    @_lru_cache
+    def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
         """
-        Implements a DSU to find the variable that represents a
-        TODO: Improve this to handle non-identity transitive replacements
-        """
-        acopy = a
-        while a in self.replacements:
-            a = self.replacements[a]
-        while acopy in self.replacements:
-            self.replacements[acopy], acopy = a, self.replacements[acopy]
-        return a
+        Implements a DSU-like algorithm to find the variable that represents a
+        Also handles transitive non-identity replacements.
 
-    def _maybe_guard_eq(self, expr: sympy.Eq) -> None:
+        a: b + c
+        c: d
+        """
+        if a not in self.replacements:
+            return a
+        res = self.replacements[a]
+        cur_replace = {s: self._find(s) for s in res.free_symbols}
+        self.replacements[a] = self.replacements[a].xreplace(cur_replace)
+        return self.replacements[a]
+
+    def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
         simplify shapes (i.e. a == b or a % 5 == 0)
@@ -344,55 +357,48 @@ class ShapeEnv(object):
 
         assert len(free) > 0, "The expression should not be static by this point"
         # In case of really gnarly expression, we don't blow up
-        if len(free) <= 4:
-            free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
-            lhs = expr.lhs
-            rhs = expr.rhs
+        if len(free) > 5:
+            return
+        free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
+        lhs = expr.lhs
+        rhs = expr.rhs
+        try:
             solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
             if not solutions.is_finite_set:
-                if len(expr.atoms(sympy.Mod)) == 1:
+                if expr.has(sympy.Mod):
                     mod_expr = tuple(expr.atoms(sympy.Mod))[0]
                     solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
                     if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
-                        self.divisible[mod_expr] = 0
+                        self.divisible[mod_expr] = sympy.Integer(0)
                 return
 
             if not isinstance(solutions, sympy.FiniteSet):
                 return
 
             solutions = tuple(solutions)
-            if len(solutions) == 1 and "/" not in str(solutions[0]):
-                new_var = solutions[0]
+            if len(solutions) == 1 and all(t.is_integer for t in sympy.preorder_traversal(solutions[0])):
                 new_var = self._find(solutions[0])
-                self.replacements[free[0]] = new_var
-
-        return
+                self.replacements[cast(sympy.Symbol, free[0])] = new_var
+        except ZeroDivisionError:
+            pass
 
     @lru_cache(256)
-    def evaluate_expr(self, expr: sympy.Expr):
+    def evaluate_expr(self, expr: "sympy.Expr"):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
-        try:
-            if len(list(expr.free_symbols)) == 0:
-                return expr
-            expr = self.simplify(expr)
+        if len(expr.free_symbols) == 0:
+            return expr
+        expr = self.simplify(expr)
 
-            static_expr = self._maybe_evaluate_static(expr)
-            if static_expr is not None:
-                return static_expr
+        static_expr = self._maybe_evaluate_static(expr)
+        if static_expr is not None:
+            return static_expr
 
-            if isinstance(expr, sympy.Eq):
-                self._maybe_guard_eq(expr)
-            concrete_val = self.size_hint(expr)
+        if isinstance(expr, sympy.Eq):
+            self._maybe_guard_eq(expr)
+        concrete_val = self.size_hint(expr)
 
-            # Uncomment this to see what code triggered this guard.
-            # TODO: Save this to the guard representation so you can look
-            # at it later
-            stack = ''.join(traceback.format_stack())
-            self.guards.append((expr, concrete_val, stack))
-            return concrete_val
-        except Exception as e:
-            print(e)
-            print()
-            raise e
+        stack = ''.join(traceback.format_stack())
+        self.guards.append((expr, concrete_val, stack))
+        return concrete_val

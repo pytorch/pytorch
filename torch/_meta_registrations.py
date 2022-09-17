@@ -854,6 +854,11 @@ def meta_index_put_(self, indices, values, accumulate=False):
     return self
 
 
+@register_meta(aten.alias.default, register_dispatcher=False)
+def meta_alias(self):
+    return self.view(self.shape)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs

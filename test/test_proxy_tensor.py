@@ -980,6 +980,21 @@ def forward(self, a_1):
         fx_g = _trace(f, (2, 3, 4), 24)
         self._assert_no_guards(fx_g, 3)
 
+    def test_nonidentity_transitive_guards(self):
+        def f(a, b, c, d, e):
+            vals = [a, b, c, d, e]
+            cat_vals = []
+            for idx in range(len(vals) - 1):
+                cat_vals.append(torch.cat([vals[idx], vals[idx]]))
+            final_vals = []
+            for a, b in reversed(list(zip(cat_vals, vals[1:]))):
+                final_vals.append(a + b)
+            return final_vals
+
+        fx_g = _trace(f, 2, 4, 8, 16, 32)
+        self._assert_no_guards(fx_g, 1)
+
+
 
 make_fx_failures = {
     # unknown
@@ -1008,9 +1023,9 @@ make_fx_failures = {
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
-
     # ???
-    xfail('nn.functional.ctc_loss'),
+    skip('nn.functional.ctc_loss'),  # sometimes it passes
+
     # proxy tensor doesn't support sparse correctly right now
     skip('to_sparse'),
     # segfaults

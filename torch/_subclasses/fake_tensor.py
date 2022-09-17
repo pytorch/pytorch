@@ -266,6 +266,11 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+@register_op_impl(aten._efficientzerotensor.default)
+def efficient_zero(fake_mode, func, *args, **kwargs):
+    return constructors(fake_mode, aten.zeros.default, *args, **kwargs)
+
+
 @register_op_impl(
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
@@ -714,6 +719,15 @@ class FakeTensorMode(TorchDispatchMode):
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
+
+            with no_dispatch():
+                if func == aten.size.default:
+                    sys.stderr.write(
+                        "Trying to call aten.size on a tensor with symbolic shapes. "
+                        "It's likely that this is from calling tensor.shape in C++"
+                    )
+                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
+                    return None
 
             with self.restore():
                 if func in meta_table:
