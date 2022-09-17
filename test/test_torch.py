@@ -1235,6 +1235,48 @@ else:
             'fractional_max_pool3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool1d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool1d(3, 1)
+        input = torch.randn(1, 1, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool2d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool2d(3, 1)
+        input = torch.randn(1, 1, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling2d_forward_out')
+
+    @dtypes(*floating_types_and(torch.half))
+    @onlyNativeDeviceTypes
+    def test_nondeterministic_alert_MaxUnpool3d(self, device, dtype):
+        if dtype == torch.half and torch.device(device).type == 'cpu':
+            self.skipTest('float16 not implemented on CPU')
+
+        module = torch.nn.MaxUnpool3d(3, 1)
+        input = torch.randn(1, 1, 7, 7, 7, dtype=dtype, device=device)
+        indices = torch.zeros_like(input, dtype=torch.long, device=device)
+
+        self.check_nondeterministic_alert(
+            lambda: module(input, indices),
+            'max_unpooling3d_forward_out')
+
     @skipIfMps
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)

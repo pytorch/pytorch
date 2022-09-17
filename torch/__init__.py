@@ -416,6 +416,9 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.MaxUnpool1d`
+        * :class:`torch.nn.MaxUnpool2d`
+        * :class:`torch.nn.MaxUnpool3d`
         * :func:`torch.nn.functional.interpolate` when attempting to differentiate a CUDA tensor
           and one of the following modes is used:
 
