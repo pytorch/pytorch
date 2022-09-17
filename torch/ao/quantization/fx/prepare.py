@@ -249,12 +249,12 @@ def _get_supported_pattern_dtype_config(
             return dtype_config
     return None
 
-def _update_qconfig_based_on_dtype_config(
+def _get_qconfig_compatible_with_dtype_config(
         qconfig: QConfig,
         dtype_config: DTypeConfig,
         pattern: Pattern) -> QConfig:
     """
-    Return an updated QConfig based on constraints from the backend specified through `dtype_config`.
+    Return an updated QConfig that satisfies constraints from the backend specified through `dtype_config`.
 
     We require the QConfig quantization range to be a subset of the backend's quantization range,
     and the QConfig min scale value to be equal to the backend's min scale value. If either the
@@ -312,7 +312,7 @@ def _update_qconfig_based_on_dtype_config(
             return activation_post_process.with_args(**extra_keywords)
 
     if qconfig is None:
-        return
+        return qconfig
     activation = qconfig.activation
     weight = qconfig.weight
     # For now, assume input and output constraints match on the backend
@@ -1273,18 +1273,19 @@ def insert_observers_for_model(
                 supported_dtype_config = None
                 is_supported_by_backend = True
 
-            # Update the QConfig subject to constraints from the backend, if any
+            # Use an updated version of the QConfig that satisfies constraints from the backend, if any
             if qconfig is not None and supported_dtype_config is not None:
-                new_qconfig = _update_qconfig_based_on_dtype_config(qconfig, supported_dtype_config, pattern)
+                new_qconfig = _get_qconfig_compatible_with_dtype_config(qconfig, supported_dtype_config, pattern)
                 # Note: if the new QConfig is not the same as the old one, then we also need to update
                 #   (1) The qconfigs that were previously already attached to the matched modules
                 #   (2) The qconfigs in `matches`
                 if new_qconfig is not qconfig:
                     qconfig = new_qconfig
+                    assert matched_node_pattern is not None
                     for n in matched_node_pattern:
                         if n.op == "call_module" and n.name in modules:
-                            modules[n.name].qconfig = new_qconfig
-                    matches[node.name] = (last_node, matched_node_pattern, pattern, qhandler, qconfig)
+                            setattr(modules[n.name], "qconfig", new_qconfig)
+                    matches[node.name] = (last_node, matched_node_pattern, pattern, qhandler, qconfig)  # type: ignore[assignment]
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
