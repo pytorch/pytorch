@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Owner(s): ["module: comparison"]
+# Owner(s): ["module: internals"]
 
 import torch
 from torch.testing._internal.common_utils import TestCase
