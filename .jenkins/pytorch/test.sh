@@ -664,7 +664,7 @@ elif [[ "${TEST_CONFIG}" == *dynamo* || "${TEST_CONFIG}" == *inductor* ]] && [[ 
     install_triton
   fi
   install_torchvision
-  install_torchdynamo
+  checkout_install_torchdynamo
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* || "${TEST_CONFIG}" == *inductor* ]] && [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
