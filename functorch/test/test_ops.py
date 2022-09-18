@@ -1391,7 +1391,7 @@ class TestOperators(TestCase):
         skip('ldexp', dtypes=(torch.float32,), device_type='cpu'),  # fails on all but mac
         skip('__rmatmul__'),  # flaky needs investigation
         skip('matmul'),  # flaky needs investigation
-        skip('nn.functional.conv3d'),
+        skip('nn.functional.conv3d', dtypes=(torch.float32, torch.complex64), device_types='cpu'),
         skip('nn.functional.conv_transpose3d'),  # flaky needs investigation
         skip('nn.functional.conv_transpose2d'),  # flaky needs investigation
         skip('nn.functional.conv_transpose1d'),  # flaky needs investigation
