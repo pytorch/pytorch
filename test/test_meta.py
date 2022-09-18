@@ -721,6 +721,7 @@ meta_dispatch_device_skips = defaultdict(dict)
 meta_dispatch_device_expected_failures['cuda'] = {
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
+    aten._use_cudnn_ctc_loss.Tensor: {f32, f64},  # aten::_use_cudnn_ctc_loss.Tensor
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d

@@ -15683,6 +15683,9 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32,),
             ),
+            DecorateInfo(unittest.skip("Fails with ASAN"),
+                         'TestProxyTensorOpInfo',
+                         'test_make_fx_fake_exhaustive', active_if=TEST_WITH_ASAN),
         ),
     ),
     OpInfo(

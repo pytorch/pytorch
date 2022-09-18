@@ -693,6 +693,7 @@ class TestOperators(TestCase):
 
         xfail('scatter_reduce', 'prod'),  # item call
 
+        xfail('nn.functional.ctc_loss'),  # Batching rule not implemented for aten::_use_cudnn_ctc_loss.Tensor
         # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
@@ -1248,6 +1249,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail('nn.functional.binary_cross_entropy'),  # vmap: inplace into a regular tensor
+        xfail("nn.functional.ctc_loss"),  # ForwardAD not implemented and no decomposition
         xfail('nn.functional.dropout2d'),  # calls random op
         xfail('nn.functional.dropout3d'),  # calls random op
         xfail('nn.functional.dropout'),  # calls random op
