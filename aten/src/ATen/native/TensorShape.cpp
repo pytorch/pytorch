@@ -3535,8 +3535,7 @@ at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& s
     TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
     auto output = self.clone();
     auto slice = output.as_strided_symint(size, stride, storage_offset);
-    // TODO: restore this test
-    // TORCH_CHECK(slice.sym_sizes() == src.sym_sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sym_sizes(), ", slice size = ", slice.sym_sizes());
+    TORCH_CHECK(slice.sym_sizes() == src.sym_sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sym_sizes(), ", slice size = ", slice.sym_sizes());
     slice.copy_(src);
     return output;
 }
