@@ -152,7 +152,10 @@ class MetaConverter:
             if shape_env is None:
                 return xs
             else:
-                return [shape_env.create_symint(f"t{arg_cnt}.{name}({i})", x) for i, x in enumerate(xs)]
+                return [
+                    shape_env.create_symint(f"t{arg_cnt}.{name}({i})", x)
+                    for i, x in enumerate(xs)
+                ]
 
         def sym_size(t):
             return sym_list("size", t.size())
@@ -224,7 +227,9 @@ class MetaConverter:
                         base = base.view(t.dtype)
 
                     with torch.enable_grad():
-                        r = base.as_strided(sym_size(t), sym_stride(t), sym_storage_offset(t))
+                        r = base.as_strided(
+                            sym_size(t), sym_stride(t), sym_storage_offset(t)
+                        )
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
