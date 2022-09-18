@@ -203,9 +203,40 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   return result;
 }
 
-Tensor& set_(Tensor& result, const Tensor& storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  c10::SymDimVector contiguous_strides;
+  if (stride.data() == nullptr) {
+    // TODO: dedupe this with empty() symbolic logic
+    int64_t dim = size.size();
+    contiguous_strides.resize(dim);
+    if (dim > 0) {
+      const auto last_idx = dim - 1;
+      contiguous_strides.at(last_idx) = 1;
+      for (auto i = last_idx - 1; i >= 0; --i) {
+        // TODO: max with 1
+        contiguous_strides.at(i) = contiguous_strides.at(i+1) * size.at(i+1);
+      }
+    }
+    stride = contiguous_strides;
+  }
+
+  // TODO: implement this
+#if 0
+  const auto itemsize = result.dtype().itemsize();
+  c10::SymInt storage_size = at::detail::computeStorageNbytes(
+      size, stride, itemsize, storage_offset);
+  // resize storage
+#endif
+
+  result.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride, storage_offset);
+  return result;
+}
+
+Tensor& set__symint(Tensor& result, const Tensor& storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
   TORCH_CHECK(storage.is_contiguous(), "passed in tensor to be used as storage must be contiguous");
-  return result.set_(storage.storage(), storage_offset + storage.storage_offset(), size, stride);
+  return result.set__symint(storage.storage(), storage_offset + storage.sym_storage_offset(), size, stride);
 }
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
