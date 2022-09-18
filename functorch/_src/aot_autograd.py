@@ -13,11 +13,13 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses import FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
+from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
@@ -271,12 +273,8 @@ class AOTConfig:
     decompositions: Dict[Callable, Callable]
 
 
-# TODO: switch AOTAutograd default to fake
-TRACING_MODE = "symbolic" if config.use_dynamic_shapes else "real"
-
-
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode=TRACING_MODE)(*flat_args)
+    fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode="real")(*flat_args)
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
     fw_module.print_readable()
@@ -321,7 +319,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
-        fx_g = make_fx(joint_forward_backward, tracing_mode=TRACING_MODE)(*joint_inputs)
+        # NB: tracing_mode is real, as it's assumed the calling context setup
+        # fake tensor mode / symbolic shapes if that is needed
+        fx_g = make_fx(joint_forward_backward, tracing_mode="real")(*joint_inputs)
 
         def fake_fn(primals, tangents):
             with torch.fx.traceback.override_stack_trace():
@@ -332,11 +332,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # view and inplace ops that come from primtorch.
         # Eventually, functionalization should support primtorch view/inplace ops,
         # which will make it ok to run decompositions before functionalization.
-        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions, tracing_mode=TRACING_MODE)(*joint_inputs)
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions, tracing_mode="real")(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions, tracing_mode=TRACING_MODE)(*joint_inputs)
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions, tracing_mode="real")(*joint_inputs)
 
     if config.debug_joint:
         print("====== Joint graph ======")
@@ -414,6 +414,11 @@ def create_aot_dispatcher_function(
     The resulting compiled forward and backward graphs are then wrapped up in a
     ``torch.autograd.Function`` object.
     """
+
+    # This is the main entry point.
+    # TODO: Chillee argues that dynamo itself should pass in fake tensors to
+    # the list of arguments when compiling; at the moment we do not do this
+
     if aot_config.decompositions is None:
         aot_config.decompositions = {}
 
@@ -421,27 +426,19 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
-    fake_mode = FakeTensorMode if config.use_fake_tensor else nullcontext
+    # NB: don't bother setting allow_fallback_kernels; this should not actually
+    # be configurable in fake tensor, we should automatically do the right
+    # thing
+    fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext
+    python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext
+    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
-    with preserve_rng_state(), fake_mode() as mode:
+    with preserve_rng_state(), fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
-            if mode:
-                seen_args = set()
-
+            if config.use_fake_tensor:
                 def convert(x):
-                    # HACK HACK HACK
-                    # preserve the same behavior of the non-fake tensor branch
-                    # of creating a unique tensor impl for each input,
-                    # instead of memoizing the conversion. this has the same
-                    # problem of models that resize their inputs described below,
-                    # but fixes an issue with tied parameters.
-                    # TODO: more full fix
-                    if id(x) in seen_args:
-                        with torch.utils._mode_utils.no_dispatch():
-                            x = x.detach().requires_grad_(x.requires_grad)
-                    seen_args.add(id(x))
-                    return mode.from_tensor(x)
+                    return fake_mode.from_tensor(x, shape_env=shape_env)
 
                 fake_flat_tensor_args = pytree.tree_map_only(Tensor, convert, flat_args)
             else:
