@@ -241,9 +241,13 @@ class FakeTensorConverter(object):
     # However, you're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors
-    def __call__(self, fake_mode, t, device=None, *, make_constant=False, shape_env=None):
+    def __call__(
+        self, fake_mode, t, device=None, *, make_constant=False, shape_env=None
+    ):
         if device is None:
-            return self.from_real_tensor(fake_mode, t, make_constant, shape_env=shape_env)
+            return self.from_real_tensor(
+                fake_mode, t, make_constant, shape_env=shape_env
+            )
         else:
             assert make_constant is False
             assert t.device.type == "meta"

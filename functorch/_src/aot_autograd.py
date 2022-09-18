@@ -429,8 +429,8 @@ def create_aot_dispatcher_function(
     # NB: don't bother setting allow_fallback_kernels; this should not actually
     # be configurable in fake tensor, we should automatically do the right
     # thing
-    fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext
-    python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext
+    fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext()
+    python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
     with preserve_rng_state(), fake_mode, python_dispatcher_mode:
