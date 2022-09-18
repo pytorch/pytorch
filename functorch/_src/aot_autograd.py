@@ -321,7 +321,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # Trace once without decompositions, into a graph of ATen ops.
         # NB: tracing_mode is real, as it's assumed the calling context setup
         # fake tensor mode / symbolic shapes if that is needed
-        fx_g = make_fx(joint_forward_backward, tracing_mode="real")(*joint_inputs)
+        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
 
         def fake_fn(primals, tangents):
             with torch.fx.traceback.override_stack_trace():
@@ -332,11 +332,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # view and inplace ops that come from primtorch.
         # Eventually, functionalization should support primtorch view/inplace ops,
         # which will make it ok to run decompositions before functionalization.
-        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions, tracing_mode="real")(*joint_inputs)
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions, tracing_mode="real")(*joint_inputs)
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
     if config.debug_joint:
         print("====== Joint graph ======")
