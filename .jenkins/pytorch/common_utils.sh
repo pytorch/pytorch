@@ -94,6 +94,12 @@ function install_monkeytype {
   pip_install MonkeyType
 }
 
+function install_triton {
+  TRITON_VERSION=5b04331dd2efdd23f4475823761fa975de60a514
+  pip_install -U "git+https://github.com/openai/triton@$(TRITON_VERSION)#subdirectory=python"
+}
+
+
 function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
