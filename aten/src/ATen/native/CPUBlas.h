@@ -63,7 +63,6 @@ void gemm(
     float beta,
     float *c, int64_t ldc);
 
-#ifdef BLAS_HAS_SBGEMM
 void gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
@@ -72,7 +71,6 @@ void gemm(
     const at::BFloat16 *b, int64_t ldb,
     float beta,
     at::BFloat16 *c, int64_t ldc);
-#endif // BLAS_HAS_SBGEMM
 
 void gemm(
     TransposeType transa, TransposeType transb,

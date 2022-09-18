@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <unordered_set>
@@ -23,29 +24,39 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
   TORCH_INTERNAL_ASSERT(
       root_id->definition() == nullptr, "Not root IterDomain: ", root_id);
 
-  if (tv->definition() == nullptr) {
+  auto def = tv->definition();
+
+  if (def == nullptr) {
     // This is an input tensor, so no rfactor tensor to traverse.
     return false;
   }
 
-  const auto& inputs = tv->definition()->inputs();
-
   // Check the reduction expression that produces tv
-  if (inputs.size() != 1 || !inputs[0]->isA<TensorView>() ||
-      (tv->definition()->getExprType() != ExprType::ReductionOp &&
-       tv->definition()->getExprType() != ExprType::WelfordOp)) {
-    // No rfactor producer found
+  if (!ir_utils::isReductionOp(def) || def->isA<MmaOp>()) {
     return false;
   }
 
-  auto producer = inputs[0]->as<TensorView>();
+  TORCH_INTERNAL_ASSERT(
+      def->inputs().size() == def->outputs().size(),
+      "This logic block assumes number of inputs is the same as number of outputs of reduction ops.");
 
-  if (!producer->hasRFactor()) {
+  // Reduction expr may have multiple inputs, just grab any TV
+  // input. Note that in theory it is possible that a
+  // GroupedReductionOp has rfactor inputs as well as non-rfactor
+  // inputs, so grabbing the one that actually corresponds to tv can
+  // be important. In reality, though, such a GroupedReductionOp
+  // should not happen as we do not group reductions of rfactor and
+  // non-rfactor tensor.
+  auto producer_tv = ir_utils::getTvInput(def);
+
+  TORCH_INTERNAL_ASSERT(producer_tv != nullptr);
+
+  if (!producer_tv->hasRFactor()) {
     return false;
   }
 
-  auto c2p = PairwiseRootDomainMap(producer, tv)
-                 .mapConsumerToProducer(tv->domain(), producer->domain());
+  auto c2p = PairwiseRootDomainMap(producer_tv, tv)
+                 .mapConsumerToProducer(tv->domain(), producer_tv->domain());
 
   auto producer_id_it = c2p.find(root_id);
   if (producer_id_it == c2p.end()) {
@@ -55,7 +66,7 @@ bool traverseToRFactorTensor(TensorView* tv, IterDomain* root_id) {
 
   auto producer_root_id = producer_id_it->second;
 
-  return analyzeIfDerivedFromTrivialReduction(producer, producer_root_id);
+  return analyzeIfDerivedFromTrivialReduction(producer_tv, producer_root_id);
 }
 
 bool analyzeIfDerivedFromTrivialReduction(TensorView* tv, IterDomain* id) {
@@ -107,11 +118,6 @@ void TrivialReductionInfo::build(Fusion* fusion) {
 
 bool TrivialReductionInfo::isDerived(IterDomain* id) const {
   return domains_.find(id) != domains_.end();
-}
-
-bool TrivialReductionInfo::isDerivedFromRoot(IterDomain* id) const {
-  return domains_derived_from_root_.find(id) !=
-      domains_derived_from_root_.end();
 }
 
 } // namespace cuda

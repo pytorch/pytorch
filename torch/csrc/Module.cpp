@@ -15,12 +15,14 @@
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/THConcat.h>
+#include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <unordered_map>
 
@@ -40,6 +42,7 @@
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
+#include <torch/csrc/autograd/python_nested_functions.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_return_types.h>
 #include <torch/csrc/autograd/python_sparse_functions.h>
@@ -52,6 +55,7 @@
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
+#include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
@@ -910,6 +914,18 @@ void initModule(PyObject* module);
 } // namespace torch
 #endif
 
+#ifdef USE_ITT
+namespace torch {
+namespace profiler {
+void initIttBindings(PyObject* module);
+} // namespace profiler
+} // namespace torch
+#endif
+
+namespace torch {
+void initVerboseBindings(PyObject* module);
+} // namespace torch
+
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -1003,14 +1019,20 @@ PyObject* initModule() {
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
+  torch::autograd::initNestedFunctions(module);
   torch::autograd::initSparseFunctions(module);
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
+  torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
+#ifdef USE_ITT
+  torch::profiler::initIttBindings(module);
+#endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+  torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
 #ifdef USE_CUDA
@@ -1241,6 +1263,34 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
+  });
+
+  py_module.def("_add_meta_to_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    local_keyset.included_ = local_keyset.included_ | key_set;
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  });
+  py_module.def("_remove_meta_from_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    auto k = key_set.highestBackendKey();
+    local_keyset.included_ = local_keyset.included_.remove_backend(k);
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  });
+
+  py_module.def("_dump_local_tls_set", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+  });
+
+  py_module.def("_is_deploy_enabled", []() {
+#if defined(USE_DEPLOY)
+    return true;
+#else
+    return false;
+#endif
   });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();

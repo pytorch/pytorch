@@ -2,7 +2,7 @@
 import argparse
 import json
 import sys
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 import yaml
 from gen_op_registration_allowlist import (
@@ -11,8 +11,8 @@ from gen_op_registration_allowlist import (
     load_op_dep_graph,
 )
 from torchgen.selective_build.operator import (
-    SelectiveBuildOperator,
     merge_operator_dicts,
+    SelectiveBuildOperator,
 )
 from torchgen.selective_build.selector import merge_kernel_metadata
 

@@ -223,10 +223,12 @@ Profiler
 ^^^^^^^^
 
 Autograd includes a profiler that lets you inspect the cost of different
-operators inside your model - both on the CPU and GPU. There are two modes
+operators inside your model - both on the CPU and GPU. There are three modes
 implemented at the moment - CPU-only using :class:`~torch.autograd.profiler.profile`.
-and nvprof based (registers both CPU and GPU activity) using
+nvprof based (registers both CPU and GPU activity) using
 :class:`~torch.autograd.profiler.emit_nvtx`.
+and vtune profiler based using
+:class:`~torch.autograd.profiler.emit_itt`.
 
 .. autoclass:: torch.autograd.profiler.profile
 
@@ -240,6 +242,7 @@ and nvprof based (registers both CPU and GPU activity) using
     profiler.profile.total_average
 
 .. autoclass:: torch.autograd.profiler.emit_nvtx
+.. autoclass:: torch.autograd.profiler.emit_itt
 
 
 .. autosummary::

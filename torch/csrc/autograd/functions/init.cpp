@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 #include <torch/csrc/autograd/generated/python_functions.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/autograd/python_variable.h>
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #endif
@@ -161,8 +162,9 @@ void THPAutograd_initFunctions() {
   if (!c_module)
     throw python_error();
 
-  Py_INCREF(module);
+  Py_INCREF(module.get());
   if (PyModule_AddObject(c_module, "_functions", module) < 0) {
+    Py_DECREF(module.get());
     throw python_error();
   }
 }

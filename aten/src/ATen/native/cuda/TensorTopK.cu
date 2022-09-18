@@ -405,12 +405,22 @@ __global__ void computeBlockwiseWithinKCounts(
   int current_bit,
   bool largest,
   // outputs:
-  uint32_t* withinKCounts   // size: num_slices * blocks_per_slice == num_blocks
+  uint32_t* withinKCounts,  // size: num_slices * blocks_per_slice == num_blocks
+  uint32_t num_blocks
 ) {
   // This kernel should be launched with the same number of blocks as the `radixFindKthValues` kernel.
   int tidx = threadIdx.x;
   uint32_t block_idx = getLinearBlockId<uint32_t>();
   uint32_t slice_idx = block_idx / blocks_per_slice;
+
+  // The grid is computed from `getGridFromTiles`, when there are lots of
+  // elements, we will use both blockIdx.x and blockIdx.y, and maybe blockIdx.z
+  // when this is the case, the number of blocks that we are launching can be
+  // more than the number of blocks we need. So we need to check the range of
+  // `block_idx`.
+  if (block_idx >= num_blocks) {
+    return;
+  }
 
   Bitwise desired = doLdg(desires + slice_idx);
   Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS);
@@ -702,7 +712,7 @@ void launch(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #if CUB_SUPPORTS_SCAN_BY_KEY()
     computeBlockwiseWithinKCounts<Bitwise><<<grid, RADIX_DIGITS, 0, stream>>>(
-      desired, counts, blocks_per_slice, current_bit, largest, withinKCounts);
+      desired, counts, blocks_per_slice, current_bit, largest, withinKCounts, num_blocks);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
     desiredMask = at::cuda::Bitfield<Bitwise>::setBitfield(desiredMask, RADIX_MASK, current_bit, RADIX_BITS);

@@ -36,7 +36,7 @@ jobs:
       - name: Checkout
         shell: bash
         run: |
-          git clone https://github.com/pytorch/${{ inputs.repo-name }}.git --depth=1 --quiet
+          git clone https://github.com/pytorch/${{ inputs.repo-name }}.git --quiet
 
       - name: Check if there already exists a PR
         shell: bash

@@ -6,9 +6,9 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
-struct NVTXThreadLocalState : ProfilerThreadLocalStateBase {
+struct NVTXThreadLocalState : ProfilerStateBase {
   explicit NVTXThreadLocalState(const ProfilerConfig& config)
-      : ProfilerThreadLocalStateBase(config) {
+      : ProfilerStateBase(config) {
     // Only `report_input_shapes` makes sense in this context.
     TORCH_CHECK(!config.profile_memory);
     TORCH_CHECK(!config.with_stack);
@@ -25,7 +25,7 @@ struct NVTXThreadLocalState : ProfilerThreadLocalStateBase {
       override {}
 
   static NVTXThreadLocalState* getTLS() {
-    auto tls = ProfilerThreadLocalStateBase::getTLS();
+    auto tls = ProfilerStateBase::get(/*global=*/false);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::NVTX);
     return static_cast<NVTXThreadLocalState*>(tls);
@@ -129,7 +129,7 @@ template <bool report_input_shapes>
 std::unique_ptr<at::ObserverContext> enterNVTX(const at::RecordFunction& fn) {
   if (NVTXThreadLocalState::getTLS() != nullptr) {
     auto input_op_ids = getInputTensorOpIds(fn);
-    torch::profiler::impl::cudaStubs()->nvtxRangePushA(
+    torch::profiler::impl::cudaStubs()->rangePush(
         torch::profiler::impl::getNvtxStr(
             fn.name(),
             fn.seqNr(),
@@ -164,7 +164,7 @@ void pushNVTXCallbacks(
               ? &enterNVTX</*report_input_shapes=*/true>
               : &enterNVTX</*report_input_shapes=*/false>,
           [](const at::RecordFunction& fn, at::ObserverContext* ctx) {
-            torch::profiler::impl::cudaStubs()->nvtxRangePop();
+            torch::profiler::impl::cudaStubs()->rangePop();
             updateOutputTensorTracker(fn);
           })
           .needsInputs(config.report_input_shapes)

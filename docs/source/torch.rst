@@ -86,6 +86,7 @@ Indexing, Slicing, Joining, Mutating Ops
     argwhere
     cat
     concat
+    concatenate
     conj
     chunk
     dsplit
@@ -533,6 +534,7 @@ Other Operations
     tril_indices
     triu
     triu_indices
+    unflatten
     vander
     view_as_real
     view_as_complex
@@ -557,7 +559,6 @@ BLAS and LAPACK Operations
     cholesky_inverse
     cholesky_solve
     dot
-    eig
     geqrf
     ger
     inner

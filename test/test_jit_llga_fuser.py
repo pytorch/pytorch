@@ -482,6 +482,50 @@ class TestFusionPattern(JitLlgaTestCase):
 
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
+class TestEnableDisableLlgaFuser(JitTestCase):
+    def setUp(self):
+        super().setUp()
+        self.is_enabled = torch._C._jit_set_llga_enabled(False)
+
+    def tearDown(self):
+        torch._C._jit_set_llga_enabled(self.is_enabled)
+        super().tearDown()
+
+    def test_context_manager(self):
+        x = torch.randn(4, 8)
+        y = torch.randn(4, 8)
+        with torch.jit.fuser('fuser3'):
+            with torch.jit.fuser('fuser3'):
+
+                def t1(x, y):
+                    o = x + y
+                    o = o + 2.0
+                    return o
+                t_jit = torch.jit.script(t1)
+                t_jit(x, y)
+                t_jit(x, y)
+                self.assertGraphContains(t_jit.graph_for(x, y), LLGA_FUSION_GROUP)
+
+            def t2(x, y):
+                o = x + y
+                o = o + 3.0
+                return o
+            t_jit_2 = torch.jit.script(t2)
+            t_jit_2(x, y)
+            t_jit_2(x, y)
+            self.assertGraphContains(t_jit_2.graph_for(x, y), LLGA_FUSION_GROUP)
+
+        def t3(x, y):
+            o = x + y
+            o = o + 4.0
+            return o
+        t_jit_3 = torch.jit.script(t3)
+        t_jit_3(x, y)
+        t_jit_3(x, y)
+        self.assertGraphContainsExactly(t_jit_3.graph_for(x, y), LLGA_FUSION_GROUP, 0)
+
+
+@unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestModel(JitLlgaTestCase):
     @skipIfNoTorchVision
     def _test_vision(self, model_name):
