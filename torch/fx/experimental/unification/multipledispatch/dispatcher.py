@@ -95,6 +95,7 @@ class Dispatcher(object):
     Use ``dispatch`` to add implementations
     Examples
     --------
+    >>> # xdoctest: +SKIP("bad import name")
     >>> from multipledispatch import dispatch
     >>> @dispatch(int)
     ... def f(x):
@@ -178,9 +179,9 @@ class Dispatcher(object):
         Traceback (most recent call last):
         ...
         NotImplementedError: Could not find signature for add: <int, float>
-        When ``add`` detects a warning it calls the ``on_ambiguity`` callback
-        with a dispatcher/itself, and a set of ambiguous type signature pairs
-        as inputs.  See ``ambiguity_warn`` for an example.
+        >>> # When ``add`` detects a warning it calls the ``on_ambiguity`` callback
+        >>> # with a dispatcher/itself, and a set of ambiguous type signature pairs
+        >>> # as inputs.  See ``ambiguity_warn`` for an example.
         """
         # Handle annotations
         if not signature:
@@ -280,6 +281,7 @@ class Dispatcher(object):
         """Deterimine appropriate implementation for this type signature
         This method is internal.  Users should call this object as a function.
         Implementation resolution occurs within the ``__call__`` method.
+        >>> # xdoctest: +SKIP
         >>> from multipledispatch import dispatch
         >>> @dispatch(int)
         ... def inc(x):
@@ -331,7 +333,7 @@ class Dispatcher(object):
         self.name = d['name']
         self.funcs = d['funcs']
         self._ordering = ordering(self.funcs)
-        self._cache = dict()
+        self._cache = {}
 
     @property
     def __doc__(self):

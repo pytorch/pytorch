@@ -9,10 +9,11 @@ and it will directly output root ops as the allowlist.
 """
 
 import argparse
-import yaml
 
 from collections import defaultdict
 from typing import Dict, List, Set
+
+import yaml
 
 DepGraph = Dict[str, Set[str]]
 

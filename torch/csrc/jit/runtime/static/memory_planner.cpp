@@ -89,7 +89,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   auto assignToAvailableStorageGroup = [&](const Value* value) {
     DCHECK(!free_storage_groups.empty());
     const auto storage_group = free_storage_groups.back();
-    DCHECK_LT(storage_group, managed_tensor_groups.size());
+    TORCH_DCHECK_LT(storage_group, managed_tensor_groups.size());
     storage_group_mapping.emplace(value, storage_group);
     auto* tensor_ptr = tensor_value_to_tensor.at(value);
     managed_tensor_groups[storage_group].addTensor(tensor_ptr);
@@ -260,7 +260,7 @@ void MemoryPlanner::allocateOutputTensors() {
     if (tensor_size == 0) {
       continue;
     }
-    DCHECK_LE(offset + tensor_size, output_buffer_bytes_);
+    TORCH_DCHECK_LE(offset + tensor_size, output_buffer_bytes_);
     void* src = static_cast<void*>(start + offset);
     // NOTE: Populating `ctx` enables clients to take the ownership of a
     // tensor managed by Static Runtime. Some clients use "move" semantics to
@@ -282,7 +282,7 @@ void MemoryPlanner::allocateOutputTensors() {
     tensor->storage().set_nbytes(tensor_size);
     offset += tensor_size;
   }
-  DCHECK_EQ(offset, output_buffer_bytes_);
+  TORCH_DCHECK_EQ(offset, output_buffer_bytes_);
 }
 
 void MemoryPlanner::allocate() {
@@ -376,16 +376,16 @@ void StandardMemoryPlanner::allocateManagedTensors() {
       continue;
     }
     at::StorageImpl* storageImpl = &ms.second;
-    DCHECK_LE(offset + tensor_size, managed_bytes_);
+    TORCH_DCHECK_LE(offset + tensor_size, managed_bytes_);
     void* src = static_cast<void*>(start + offset);
 
 #ifndef NDEBUG
-    DCHECK_EQ(tensor_size, managed_tensors_[group_idx].maxTensorSize());
+    TORCH_DCHECK_EQ(tensor_size, managed_tensors_[group_idx].maxTensorSize());
     for (auto* tensor : managed_tensors_[group_idx].group()) {
-      DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
+      TORCH_DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
     }
 #endif
-    DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
+    TORCH_DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
     reused_tensors_ += managed_tensors_[group_idx].numManagedTensors() - 1;
     storageImpl->set_data_ptr_noswap(
         at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
@@ -394,7 +394,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
     offset += tensor_size;
     group_idx++;
   }
-  DCHECK_EQ(offset, managed_bytes_);
+  TORCH_DCHECK_EQ(offset, managed_bytes_);
 }
 
 void StandardMemoryPlanner::deallocateManagedTensors() {
@@ -457,7 +457,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
                     &managed_tensor_storage_impls_[group_idx].second,
                     tensors.size())));
       }
-      DCHECK_EQ(
+      TORCH_DCHECK_EQ(
           tensor->storage().unsafeGetStorageImpl(),
           &managed_tensor_storage_impls_[group_idx].second);
       max = std::max(max, current_size);
@@ -472,7 +472,8 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
     managed_bytes_ += max;
   }
 
-  DCHECK_EQ(managed_tensor_storage_impls_.size(), managed_tensors_.size());
+  TORCH_DCHECK_EQ(
+      managed_tensor_storage_impls_.size(), managed_tensors_.size());
   VLOG(1) << "managed_bytes: " << managed_bytes_;
 }
 

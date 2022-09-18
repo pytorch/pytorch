@@ -4,6 +4,7 @@ import argparse
 import array
 import glob
 import os
+import re
 import sys
 import subprocess
 from torchgen.code_template import CodeTemplate
@@ -14,6 +15,33 @@ DEFAULT_ENV = {"precision": "highp", "format": "rgba32f"}
 
 def getName(filePath):
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
+
+def isDescriptorLine(lineStr):
+    descriptorLineId = r"^layout\(set"
+    return re.search(descriptorLineId, lineStr)
+
+typeIdMapping = {
+    r"image[123]D\b": "VK_DESCRIPTOR_TYPE_STORAGE_IMAGE",
+    r"sampler[123]D\b": "VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER",
+    r"\bbuffer\b": "VK_DESCRIPTOR_TYPE_STORAGE_BUFFER",
+    r"\buniform\b.*\bBlock\b": "VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER",
+}
+
+def determineDescriptorType(lineStr):
+    for identifier, typeNum in typeIdMapping.items():
+        if re.search(identifier, lineStr):
+            return typeNum
+
+    raise Exception("Could not identify descriptor type of line: {}".format(lineStr))
+
+def getLayout(srcFilePath):
+    layout = []
+    with open(srcFilePath, 'r') as srcFile:
+        for line in srcFile:
+            if isDescriptorLine(line):
+                layout.append(determineDescriptorType(line))
+
+    return layout
 
 def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
     print("hFilePath:{} cppFilePath:{} srcDirPath:{} glslcPath:{} tmpDirPath:{}".format(
@@ -27,7 +55,7 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
             templateSrcPaths.sort()
     print("templateSrcPaths:{}".format(templateSrcPaths))
 
-    spvPaths = []
+    spvPaths = {}
     for templateSrcPath in templateSrcPaths:
         print("templateSrcPath {}".format(templateSrcPath))
         name = getName(templateSrcPath).replace("_glsl", "")
@@ -52,23 +80,30 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         print("\nglslc cmd:", cmd)
 
         subprocess.check_call(cmd)
-        spvPaths.append(spvPath)
+        spvPaths[spvPath] = templateSrcPath
 
     h = "#pragma once\n"
     h += "#include <stdint.h>\n"
-    nsbegin = "\nnamespace at { namespace native { namespace vulkan { \n"
-    nsend = "\n} } } //namespace at::native::vulkan\n"
+    h += "#include <vector>\n"
+    h += "#include <ATen/native/vulkan/api/vk_api.h>"
+
+    nsbegin = "\nnamespace at {\nnamespace native {\nnamespace vulkan {\n"
+    nsend = "\n}\n}\n} //namespace at::native::vulkan\n"
 
     h += nsbegin
 
     cpp = "#include <ATen/native/vulkan/{}>".format(H_NAME)
     cpp += nsbegin
 
-    for spvPath in spvPaths:
+    for spvPath, srcPath in spvPaths.items():
         name = getName(spvPath)
         name_len = name + "_len"
         h += "extern const uint32_t {}[];\n".format(name)
         h += "extern const uint32_t {};\n".format(name_len)
+
+        layout = getLayout(srcPath)
+        name_layout = name + "_layout"
+        h += "extern const std::vector<VkDescriptorType> {};\n".format(name_layout)
 
         cpp += "const uint32_t " + name + "[] = {\n"
         sizeBytes = 0
@@ -79,6 +114,12 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
                 sizeBytes += 4
             cpp += "};\n"
         cpp += "const uint32_t {} = {};\n".format(name_len, sizeBytes)
+
+        # Add layout
+        cpp += "const std::vector<VkDescriptorType> {} = {{\n".format(name_layout)
+        for descriptor in layout:
+            cpp += "  {},\n".format(descriptor)
+        cpp += "};\n"
 
     cpp += nsend
     h += nsend

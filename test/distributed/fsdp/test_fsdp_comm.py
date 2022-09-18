@@ -11,7 +11,13 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, NestedWrappedModule
+from torch.testing._internal.common_fsdp import (
+    CUDAInitMode,
+    FSDPInitMode,
+    FSDPTest,
+    NestedWrappedModule,
+    TransformerWithSharedParams,
+)
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
@@ -45,19 +51,25 @@ class TestCommunication(FSDPTest):
         sharding_strategy: ShardingStrategy,
         device: torch.device,
     ):
-        group = dist.distributed_c10d._get_default_group()
+        fsdp_kwargs = {"sharding_strategy": sharding_strategy}
         if nested_model:
-            model = NestedWrappedModule(
-                group, wrap_fsdp=True, sharding_strategy=sharding_strategy,
+            model = NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_AFTER,
+                fsdp_kwargs,
             )
             fsdp_model: FSDP = FSDP(
-                model, group, sharding_strategy=sharding_strategy,
+                model,
+                self.process_group,
+                **fsdp_kwargs,
             ).to(device)
         else:
-            fsdp_model: FSDP = self._get_wrapped_model(
-                group,
-                cuda_first=False,
-                config={"sharding_strategy": sharding_strategy},
+            fsdp_model: FSDP = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.RECURSIVE,
+                CUDAInitMode.CUDA_BEFORE,
+                fsdp_kwargs,
             )
         return fsdp_model
 
@@ -137,9 +149,9 @@ class TestCommunication(FSDPTest):
                 f"sharding_strategy={sharding_strategy}"
         if is_first_iter and pass_type == PassType.FWD:
             # With execution order validation, on the first iteration, we have
-            # an additional all-gather before every actual all-gather in the
-            # forward pass
-            num_all_gathers *= 2
+            # an additional two all-gathers before every actual all-gather in
+            # the forward pass
+            num_all_gathers *= 3
         return num_all_gathers
 
     def _print_ref_num_all_gathers_in_pass(

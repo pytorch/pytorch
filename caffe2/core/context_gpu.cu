@@ -437,7 +437,7 @@ CUDAContext::CUDAContext(const DeviceOption& option)
           option.has_random_seed() ? option.random_seed()
                                    : RandomNumberSeed()) {
   static Caffe2CudaInitializerHelper g_cuda_initializer_;
-  DCHECK_EQ(option.device_type(), PROTO_CUDA);
+  TORCH_DCHECK_EQ(option.device_type(), PROTO_CUDA);
 }
 
 CUDAContext::~CUDAContext() {

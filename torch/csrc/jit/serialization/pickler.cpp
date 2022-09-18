@@ -569,6 +569,14 @@ void Pickler::pushTensorReference(const IValue& ivalue) {
 void Pickler::startTypeTag() {
   pushGlobal("torch.jit._pickle", "restore_type_tag");
 }
+namespace {
+c10::optional<std::string> type_printer(const c10::Type& type) {
+  if (auto dyn = type.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str(type_printer);
+  }
+  return c10::nullopt;
+}
+} // namespace
 
 // See startTypeTag
 void Pickler::endTypeTag(const IValue& ivalue) {
@@ -576,11 +584,10 @@ void Pickler::endTypeTag(const IValue& ivalue) {
 
   // Push the dict type
   TORCH_INTERNAL_ASSERT(ivalue.type());
+
   auto type = ivalue.type();
-  if (auto dyn = type->castRaw<c10::DynamicType>()) {
-    type = dyn->fallback();
-  }
-  pushString(type->annotation_str());
+  auto annot_str = type->annotation_str(type_printer);
+  pushString(annot_str);
 
   // Pop the dict and type into a tuple
   push<PickleOpCode>(PickleOpCode::TUPLE2);

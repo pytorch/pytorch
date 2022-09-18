@@ -3526,7 +3526,7 @@ void _multihead_attn_test_helper(
     const torch::Tensor V = K;
     const torch::Tensor Q =
         decoder_state.clone().resize_({batch_sz, 1, d_model});
-    auto attn_mask = torch::randint(0, 2, {1, seq_len});
+    auto attn_mask = torch::randint(0, 2, {1, seq_len}, torch::kFloat);
     const torch::Tensor attn_mask_tensor = attn_mask.clone();
     attn_mask_tensor.masked_fill_(
         attn_mask_tensor == 0, -std::numeric_limits<double>::infinity());
