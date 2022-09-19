@@ -302,7 +302,35 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    joint_forward_backward = create_joint_forward_backward(flat_fn)
+    seen_args = {}
+    deduped_flat_args = []
+    drop_args = set()
+    add_dupe_map = {}
+    duped_arg_len = len(flat_args)
+    for i, t in enumerate(flat_args):
+        if t in seen_args:
+            drop_args.add(i)
+            add_dupe_map[i] = seen_args[t]
+            continue
+        seen_args[t] = len(deduped_flat_args)
+        add_dupe_map[i] = len(deduped_flat_args)
+        deduped_flat_args.append(t)
+
+    def remove_dupe_args(args):
+        r = []
+        for i, t in enumerate(args):
+            if i in drop_args:
+                continue
+            r.append(t)
+        return r
+
+    def add_dupe_args(args):
+        r = []
+        for i in range(duped_arg_len):
+            r.append(args[add_dupe_map[i]])
+        return r
+
+    joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
 
     out = flat_fn(*flat_args)
     out = pytree.tree_map(
@@ -315,7 +343,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     else:
         _num_outs = 1
 
-    joint_inputs = (flat_args, out)
+    joint_inputs = (deduped_flat_args, out)
 
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
@@ -353,10 +381,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             bw_module.print_readable()
 
         with track_graph_compiling("forward"):
-            compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
+            compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args)
 
         if config.debug_partitioner:
-            fw_outs = call_func_with_args(compiled_fw_func, flat_args)
+            fw_outs = call_func_with_args(compiled_fw_func, deduped_flat_args)
             activation_sizes = 0
             for out in fw_outs[_num_outs:]:
                 if isinstance(out, torch.Tensor):
@@ -370,9 +398,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
         @staticmethod
         @disable_torchdynamo
-        def forward(ctx, *flat_tensor_args):
+        def forward(ctx, *deduped_flat_tensor_args):
             fw_outs = call_func_with_args(
-                CompiledFunction.compiled_fw, flat_tensor_args
+                CompiledFunction.compiled_fw, deduped_flat_tensor_args
             )
             num_outs = CompiledFunction.num_outs
             ctx.save_for_backward(*fw_outs[num_outs:])
@@ -395,7 +423,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
             return tuple(out)
 
-    return CompiledFunction.apply
+    return lambda *args: CompiledFunction.apply(*remove_dupe_args(args))
 
 
 @dynamo_timed
