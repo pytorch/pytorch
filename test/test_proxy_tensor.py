@@ -805,7 +805,8 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(4, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(25, 5)))
-        assert len(shape_env.guards) == 1
+        # one guard for size/stride contiguity, and one substantive guard
+        assert len(shape_env.guards) == 2, "\n" + shape_env.format_guards()
 
     def test_binary_broadcast(self):
         def f(a, b):
@@ -893,8 +894,8 @@ def forward(self, a_1):
         self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
 
     def _assert_no_guards(self, fx_g, free_symbols):
-        self.assertEqual(_get_free_symbols(fx_g.shape_env), free_symbols)
-        self.assertEqual(len(fx_g.shape_env.get_nontrivial_guards()), 0)
+        assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
+        assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
 
     def test_guards_equal(self):
         def f(a, b):
@@ -907,7 +908,7 @@ def forward(self, a_1):
         self._assert_no_guards(fx_g, 3)
 
         fx_g = _trace(f, (5, 1), (1, 5))
-        self._assert_no_guards(fx_g, 2)
+        self._assert_no_guards(fx_g, 3)
 
         def f(a, b, c, d):
             a = a + b
