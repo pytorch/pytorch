@@ -618,12 +618,12 @@ TEST_PACKED_1x4_SPARSE_OP(
     4,
     8,
     pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon,
-    pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon)
+    pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA_w32__aarch32_neon)
 TEST_PACKED_8x1_SPARSE_OP(
     4,
     8,
     pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon,
-    pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon)
+    pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA_w32__aarch32_neon)
 
 #endif
 
@@ -633,12 +633,12 @@ TEST_PACKED_1x4_SPARSE_OP(
     8,
     8,
     pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon,
-    pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA__aarch64_neon)
+    pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA_w32__aarch64_neon)
 TEST_PACKED_8x1_SPARSE_OP(
     8,
     8,
     pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon,
-    pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon)
+    pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA_w32__aarch64_neon)
 
 #endif
 
@@ -648,7 +648,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(3).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_strided_a) {
@@ -662,7 +662,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_strided_a) {
       .aStride(37)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_strided_c) {
@@ -676,21 +676,21 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_strided_c) {
       .cStride(17)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_qmin128) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(3).qmin(128).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_qmax128) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(3).qmax(128).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_azp0) {
@@ -704,7 +704,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_azp0) {
       .aZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_bzp0) {
@@ -718,7 +718,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_bzp0) {
       .bZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_nozp) {
@@ -733,14 +733,14 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_4_nozp) {
       .bZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(5).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_strided_a) {
@@ -754,7 +754,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_strided_a) {
       .aStride(37)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_strided_c) {
@@ -768,21 +768,21 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_strided_c) {
       .cStride(17)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_qmin128) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(5).qmin(128).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_qmax128) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(5).qmax(128).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_azp0) {
@@ -796,7 +796,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_azp0) {
       .aZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_bzp0) {
@@ -810,7 +810,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_bzp0) {
       .bZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_nozp) {
@@ -825,14 +825,14 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_lt_8_nozp) {
       .bZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(8).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_strided_a) {
@@ -846,7 +846,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_strided_a) {
       .aStride(37)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_strided_c) {
@@ -860,21 +860,21 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_strided_c) {
       .cStride(17)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_qmin128) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(8).qmin(128).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_qmax128) {
   TEST_REQUIRES_X86_SSE2;
   GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(8).qmax(128).test_packed(
       pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+      pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_azp0) {
@@ -888,7 +888,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_azp0) {
       .aZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_bzp0) {
@@ -902,7 +902,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_bzp0) {
       .bZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_nozp) {
@@ -917,7 +917,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_eq_8_nozp) {
       .bZeroPoint(0)
       .test_packed(
           pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+          pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
 }
 
 TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8) {
@@ -925,7 +925,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8) {
   for (size_t k = 9; k < 16; k++) {
     GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(k).test_packed(
         pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -941,7 +941,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_strided_a) {
         .aStride(37)
         .test_packed(
             pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -957,7 +957,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_strided_c) {
         .cStride(17)
         .test_packed(
             pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -973,7 +973,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_azp0) {
         .aZeroPoint(0)
         .test_packed(
             pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -989,7 +989,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_bzp0) {
         .bZeroPoint(0)
         .test_packed(
             pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -1006,7 +1006,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_nozp) {
         .bZeroPoint(0)
         .test_packed(
             pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -1024,7 +1024,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_gt_8_subtile) {
             .iterations(3)
             .test_packed(
                 pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-                pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+                pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
       }
     }
   }
@@ -1035,7 +1035,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_div_8) {
   for (size_t k = 16; k < 128; k += 8) {
     GemmBlockSparseMicrokernelTester().mr(8).nr(4).m(8).n(4).k(k).test_packed(
         pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -1051,7 +1051,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_div_8_strided_a) {
         .aStride(171)
         .test_packed(
             pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -1067,7 +1067,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_div_8_strided_c) {
         .cStride(17)
         .test_packed(
             pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+            pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
   }
 }
 
@@ -1085,7 +1085,7 @@ TEST(Q8GEMM_8x4c1x4__SSE2, packedA_k_div_8_subtile) {
             .iterations(3)
             .test_packed(
                 pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
-                pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2);
+                pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA_w32__sse2);
       }
     }
   }
