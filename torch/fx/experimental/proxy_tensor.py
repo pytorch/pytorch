@@ -17,6 +17,7 @@ from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
 import weakref
+import operator
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from torch._subclasses import FakeTensor
@@ -483,6 +484,14 @@ class ProxySymDispatchMode(SymDispatchMode):
     def __sym_dispatch__(self, func, types, args, kwargs):
         if not self.enable_tracing:
             return func(*args, **kwargs)
+
+        # Peephole optimize multiply by one
+        if func == operator.mul:
+            if isinstance(args[1], PySymInt) and args[1].constant == 1:
+                return args[0]
+            elif isinstance(args[0], PySymInt) and args[0].constant == 1:
+                return args[1]
+
         # For speed, we assume there are no nested data structures
         # (otherwise we could use tree_map)
         # We also assume there are no keyword arguments.
