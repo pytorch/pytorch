@@ -264,6 +264,59 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
   }
 };
 
+static void expect_at_least_rank(
+    const Tensor& tensor,
+    optional<int64_t> tensor_bdim,
+    int64_t expected_rank,
+    const char* name) {
+  auto rank = rankWithoutBatchDim(tensor, tensor_bdim);
+  TORCH_CHECK(rank >= expected_rank,
+      name, " should have at least ", expected_rank, " dimensions, but has ",
+      rank, " dimensions instead.");
+}
+
+oneOutput linalg_lu_solve_batch_rule(
+    const Tensor& LU, optional<int64_t> LU_bdim,
+    const Tensor& pivots, optional<int64_t> pivots_bdim,
+    const Tensor& B, optional<int64_t> B_bdim,
+    bool left, bool adjoint) {
+  const auto LU_min_rank = 2;
+  const auto pivots_min_rank = 1;
+  const auto B_min_rank = 2;
+
+  expect_at_least_rank(LU, LU_bdim, LU_min_rank, "LU");
+  expect_at_least_rank(pivots, pivots_bdim, pivots_min_rank, "pivots");
+  expect_at_least_rank(B, B_bdim, B_min_rank, "B");
+
+  auto LU_ = moveBatchDimToFront(LU, LU_bdim);
+  auto pivots_ = moveBatchDimToFront(pivots, pivots_bdim);
+  auto B_ = moveBatchDimToFront(B, B_bdim);
+
+  // LU and pivots's first {N-2} (for LU), {N-1} (for pivots) dimensions must match
+  // So if only one of them is being vmapped over, we must expand out that dimension.
+  if (LU_bdim.has_value() ^ pivots_bdim.has_value()) {
+    auto bdim_size = get_bdim_size2(LU, LU_bdim, pivots, pivots_bdim);
+    LU_ = ensure_has_bdim(LU_, LU_bdim.has_value(), bdim_size);
+    pivots_ = ensure_has_bdim(pivots_, pivots_bdim.has_value(), bdim_size);
+    pivots_bdim = 0;
+    LU_bdim = 0;
+  }
+
+  // Now, {LU, pivots} and B's first dimensions are allowed to broadcast.
+  // The rest of the logic handles that.
+  const auto LU_num_batch_dims = rankWithoutBatchDim(LU_, LU_bdim) - LU_min_rank;
+  const auto pivots_num_batch_dims = rankWithoutBatchDim(pivots_, pivots_bdim) - pivots_min_rank;
+  const auto B_num_batch_dims = rankWithoutBatchDim(B_, B_bdim) - B_min_rank;
+  const auto max_num_batch_dims = std::max(std::max(LU_num_batch_dims, pivots_num_batch_dims), B_num_batch_dims);
+
+  LU_ = maybePadToLogicalRank(LU_, LU_bdim, max_num_batch_dims + LU_min_rank);
+  pivots_ = maybePadToLogicalRank(pivots_, pivots_bdim, max_num_batch_dims + pivots_min_rank);
+  B_ = maybePadToLogicalRank(B_, B_bdim, max_num_batch_dims + B_min_rank);
+
+  const auto result = at::linalg_lu_solve(LU_, pivots_, B_, left, adjoint);
+  return std::make_tuple(result, 0);
+}
+
 oneOutput cholesky_solve_batch_rule(
     const Tensor& self, c10::optional<int64_t> self_bdim,
     const Tensor& A, c10::optional<int64_t> A_bdim,
@@ -541,6 +594,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(mv, mv_batch_rule);
   VMAP_SUPPORT(mm, mm_batch_rule);
   m.impl("linear", linear_decomp);
+  VMAP_SUPPORT(linalg_lu_solve, linalg_lu_solve_batch_rule);
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
