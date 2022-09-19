@@ -750,7 +750,6 @@ class TestOperators(TestCase):
         skip('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.fractional_max_pool2d'),  # Cannot access data pointer of Tensor that doesn't have storage
         xfail('nn.functional.fractional_max_pool3d'),  # Cannot access data pointer of Tensor that doesn't have storage
-        xfail('_masked.mean'),
         # Not actually a problem: embedding with max_norm mutates the weight
         # and causes different runs to produce different results.
         # skip because this is flaky depending on what the max_norm is!
