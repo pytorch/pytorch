@@ -3200,6 +3200,36 @@ torch.cuda.synchronize()
             except Exception as e:
                 raise RuntimeError("Failed on ", op) from e
 
+            # Do the same operations varying seeds
+            seeds = [6, 128, 9999]
+
+            for seed in seeds:
+                torch.cuda.manual_seed(seed)
+                graph_in.copy_(a)
+                for _ in range(3):
+                    g.replay()
+
+                # If the random seed was not updated then the graph would
+                # generate the same output as in previous check.
+                try:
+                    self.assertNotEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
+                # Now repeat the same operations in non-graphed mode.
+                torch.cuda.manual_seed(seed)
+                for _ in range(3):
+                    eager_out.copy_(a)
+                    eager_out = op(eager_out, **kwargs)
+                    eager_out = op(eager_out, **kwargs)
+
+                # In the end, graph_out and eager_out must be equal
+                # as they went under the same set of operations.
+                try:
+                    self.assertEqual(eager_out, graph_out)
+                except Exception as e:
+                    raise RuntimeError("Failed on ", op) from e
+
             # We hold references to all tensors used across streams up til this sync,
             # so no need to call record_stream on those tensors.
             torch.cuda.synchronize()
@@ -3283,22 +3313,36 @@ torch.cuda.synchronize()
             except Exception as e:
                 raise RuntimeError("Failed on " + module + "." + op) from e
 
-            # Runs a dummy op prelude, as for controls, to make sure replay()
-            # picks up the dummy op's state increment.
-            if module == "torch":
-                dummy = getattr(torch, op)(*args, **kwargs)
-            else:
-                dummy = alloc.clone()
-                getattr(dummy, op)(*args)
+            # Set a new seed to check if graph would use it
+            for seed in [6, 314, 271]:
+                torch.cuda.manual_seed(seed)
+                # Runs a dummy op prelude, as for controls, to make sure replay()
+                # picks up the dummy op's state increment.
+                if (module == "torch"):
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                    control1 = getattr(torch, op)(*args, **kwargs)
+                    control2 = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
+                    getattr(control1, op)(*args)
+                    getattr(control2, op)(*args)
 
-            # Runs RNG ops that fill t1 and t2.
-            g.replay()
+                torch.cuda.manual_seed(seed)
+                if (module == "torch"):
+                    dummy = getattr(torch, op)(*args, **kwargs)
+                else:
+                    getattr(dummy, op)(*args)
 
-            try:
-                self.assertEqual(control1, t1)
-                self.assertEqual(control2, t2)
-            except Exception as e:
-                raise RuntimeError("Failed on " + module + "." + op) from e
+                t1.copy_(alloc)
+                t2.copy_(alloc)
+                # Runs RNG ops that fill t1 and t2.
+                g.replay()
+
+                try:
+                    self.assertEqual(control1, t1)
+                    self.assertEqual(control2, t2)
+                except Exception as e:
+                    raise RuntimeError("Failed on " + module + "." + op) from e
 
             # We hold references to all tensors used across streams up til this sync,
             # so no need to call record_stream on those tensors.
@@ -3542,8 +3586,8 @@ torch.cuda.synchronize()
              delta_cudaMalloc_bytes_post_del_g,
              pool_string) in cases:
             if pool_string == "small_pool":
-                delta_active_blocks = 2  # one from "b" plus a sneaky one from CUDAGraph's one-element rng offset holder
-                delta_active_bytes = numel * elem + 512  # + 512 for CUDAGraph's rng offset holder
+                delta_active_blocks = 3  # one from "b" plus a sneaky two from CUDAGraph's one-element rng seed and offset holders
+                delta_active_bytes = numel * elem + 1024  # + 1024 for CUDAGraph's rng seed and offset holders each
             else:
                 delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
                 delta_active_bytes = numel * elem
@@ -4425,6 +4469,60 @@ class TestCudaComm(TestCase):
 
         finally:
             torch.cuda.memory._record_memory_history(False)
+
+
+    def test_allocator_settings(self):
+        def power2_div(size, div_factor):
+            pow2 = 1
+            while pow2 < size:
+                pow2 = pow2 * 2
+            if pow2 == size:
+                return pow2
+            step = pow2 / 2 / div_factor
+            ret = pow2 / 2
+            while ret < size:
+                ret = ret + step
+            return ret
+
+        torch.cuda.memory.empty_cache()
+        key = 'active_bytes.all.allocated'
+
+        nelems = 21 * 1024 * 1024
+        nbytes = 4 * nelems  # floats are 4 bytes
+
+        start_mem = torch.cuda.memory_stats()[key]
+        torch.cuda.memory._set_allocator_settings("")
+        x = torch.rand(nelems, device='cuda')
+
+        reg_mem = torch.cuda.memory_stats()[key]
+        torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:4")
+        y = torch.rand(nelems, device='cuda')
+
+        pow2_div4_mem = torch.cuda.memory_stats()[key]
+
+        self.assertTrue(reg_mem - start_mem == nbytes)
+        self.assertTrue(pow2_div4_mem - reg_mem == power2_div(nbytes, 4))
+
+        torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:0.5")
+        torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:0.5,max_split_size_mb:40")
+
+        # should have reset the power2 divisions now
+        torch.cuda.memory.empty_cache()
+        start_mem = torch.cuda.memory_stats()[key]
+        z = torch.rand(nelems, device='cuda')
+        reg_mem = torch.cuda.memory_stats()[key]
+        self.assertTrue(reg_mem - start_mem == nbytes)
+
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("foo:1,bar:2")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("garbage_collection_threshold:1.2")
+
+        with self.assertRaises(RuntimeError):
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:2")
+
 
     def test_raises_oom(self):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
