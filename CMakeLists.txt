@@ -355,6 +355,8 @@ option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers f
 cmake_dependent_option(
     BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend, not compatible with mobile builds" ON
     "NOT INTERN_BUILD_MOBILE" OFF)
+cmake_dependent_option(
+    BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 
 
 if(USE_CCACHE)
@@ -622,6 +624,7 @@ if(INTERN_BUILD_MOBILE)
     set(INTERN_DISABLE_AUTOGRAD ON)
   endif()
   set(BUILD_PYTHON OFF)
+  set(BUILD_FUNCTORCH OFF)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
@@ -720,6 +723,13 @@ endif()
 set(BUILD_ONEDNN_GRAPH OFF)
 
 include(cmake/Dependencies.cmake)
+
+# Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
+option(USE_FLASH_ATTENTION "Whether to build the flash_attention kernel for scaled dot product attention" OFF)
+if(USE_FLASH_ATTENTION)
+    ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
+ENDIF()
+
 
 if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
   # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
@@ -1167,4 +1177,8 @@ caffe2_print_configuration_summary()
 # ---[ Torch Deploy
 if(USE_DEPLOY)
   add_subdirectory(torch/csrc/deploy)
+endif()
+
+if(BUILD_FUNCTORCH)
+  add_subdirectory(functorch)
 endif()

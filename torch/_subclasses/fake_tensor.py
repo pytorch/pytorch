@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -264,6 +265,11 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
         return op_impl
 
     return impl_decorator
+
+
+@register_op_impl(aten._efficientzerotensor.default)
+def efficient_zero(fake_mode, func, *args, **kwargs):
+    return constructors(fake_mode, aten.zeros.default, *args, **kwargs)
 
 
 @register_op_impl(
@@ -660,7 +666,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return args[0].fake_device
 
         flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
             any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
         )
@@ -720,20 +726,31 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
 
-        if has_symbolic_sizes:
+        functions_with_cpp_meta_impl_that_support_symint = [
+            aten.empty_strided.default,
+            aten.as_strided.default,
+            aten.zeros.default,
+            aten.clone.default,
+            aten.detach.default,
+        ]
+        # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
+        if (
+            has_symbolic_sizes
+            and func not in functions_with_cpp_meta_impl_that_support_symint
+        ):
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
 
             with no_dispatch():
-                if symbolic_shapes.is_symbolic_op(func):
-                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
-                    raise RuntimeError(
+                    sys.stderr.write(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
                         "It's likely that this is from calling tensor.shape in C++"
                     )
+                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
+                    return None
 
             with self.restore():
                 if func in meta_table:
@@ -761,8 +778,7 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            constructors = [aten.empty.memory_format]
-            if func not in constructors:
+            if func not in functions_with_cpp_meta_impl_that_support_symint:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
