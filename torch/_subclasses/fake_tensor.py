@@ -635,6 +635,14 @@ class FakeTensorMode(TorchDispatchMode):
         self.in_kernel_invocation = False
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        try:
+            return self.inner_torch_dispatch(func, types, args, kwargs)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def inner_torch_dispatch(self, func, types, args, kwargs):
         kwargs = kwargs if kwargs else {}
 
         if func == torch.ops.prim.device.default:
