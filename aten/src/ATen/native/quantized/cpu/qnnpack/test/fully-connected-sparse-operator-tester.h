@@ -241,7 +241,7 @@ class FullyConnectedSparseOperatorTester {
       } while (max_elem == min_elem);
 
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-        qnnpack::generateBlockCSRMatrix(
+        qnnpack::generateBlockCSRMatrix<uint32_t>(
             kernel.data(),
             outputChannels(),
             inputChannels(),
@@ -320,8 +320,8 @@ class FullyConnectedSparseOperatorTester {
                     outputChannels(),
                     inputZeroPoint,
                     kernelZeroPoints.data(),
-                    (const void*)bcsr_matrix->col_indices.data(),
-                    (const void*)bcsr_matrix->row_values.data(),
+                    bcsr_matrix->col_indices_data_ptr(),
+                    bcsr_matrix->row_values_data_ptr(),
                     bcsr_matrix->values.data(),
                     bcsr_matrix->row_block_size,
                     bcsr_matrix->col_block_size,
@@ -442,7 +442,7 @@ class FullyConnectedSparseOperatorTester {
         min_elem = *std::min_element(kernel.cbegin(), kernel.cend());
       } while (max_elem == min_elem);
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-        qnnpack::generateBlockCSRMatrix(
+        qnnpack::generateBlockCSRMatrix<uint32_t>(
             kernel.data(),
             outputChannels(),
             inputChannels(),
@@ -521,8 +521,8 @@ class FullyConnectedSparseOperatorTester {
                     outputChannels(),
                     inputZeroPoint,
                     kernelZeroPoints.data(),
-                    (const void*)bcsr_matrix->col_indices.data(),
-                    (const void*)bcsr_matrix->row_values.data(),
+                    bcsr_matrix->col_indices_data_ptr(),
+                    bcsr_matrix->row_values_data_ptr(),
                     bcsr_matrix->values.data(),
                     bcsr_matrix->row_block_size,
                     bcsr_matrix->col_block_size,

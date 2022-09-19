@@ -11,7 +11,7 @@ namespace sparse {
 using LinearPackedSerializationType =
     std::tuple<at::Tensor, c10::optional<at::Tensor>, std::vector<int64_t>>;
 
-#define SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION 1
+#define SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION 2
 
 using BCSRSerializationType =
     std::tuple<
@@ -22,8 +22,8 @@ using BCSRSerializationType =
         at::Tensor,                 // Weight Scales (single element vector if per-tensor) (float)
         at::Tensor,                 // Wrapper for Weight Zero Points (single element vector if per-tensor) (int8_t)
         bool,                       // Quantization Scheme (true: per tensor, false: per channel)
-        at::Tensor,                 // Wrapper for Row Block Indices (int32_t)
-        at::Tensor,                 // Wrapper for Column Block Indices (int32_t)
+        at::Tensor,                 // Wrapper for Row Block Indices (int8_t, int16_t, or int32_t)
+        at::Tensor,                 // Wrapper for Column Block Indices (int8_t, int16_t, or int32_t)
         at::Tensor,                 // Wrapper for Non-Zero Weight Values, each +128 (uint8_t)
         int64_t,                    // Number of Output Channels
         int64_t                     // Number of Input Channels
