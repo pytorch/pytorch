@@ -8098,6 +8098,52 @@ Example::
 )
 
 add_docstr(
+    torch.narrow_copy,
+    r"""
+narrow_copy(input, dim, start, length, *, out=None) -> Tensor
+
+Same as :meth:`Tensor.narrow` except this returns a copy rather
+than shared storage. This is primarily for sparse tensors, which
+do not have a shared-storage narrow method.
+
+Args:
+    input (Tensor): the tensor to narrow
+    dim (int): the dimension along which to narrow
+    start (int): the starting offset
+    length (int): the distance to the ending dimension
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> torch.narrow_copy(x, 0, 0, 2)
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
+    >>> torch.narrow_copy(x, 1, 1, 2)
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
+    >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
+    >>> torch.narrow_copy(s, 0, 0, 1)
+    tensor(indices=tensor([[0, 0],
+                        [0, 1]]),
+        values=tensor([[[0, 1],
+                        [2, 3]],
+
+                        [[4, 5],
+                        [6, 7]]]),
+        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+
+.. seealso::
+
+        :func:`torch.narrow` for a non copy variant
+
+""",
+)
+
+add_docstr(
     torch.nan_to_num,
     r"""
 nan_to_num(input, nan=0.0, posinf=None, neginf=None, *, out=None) -> Tensor
