@@ -391,16 +391,26 @@ def _dim_size(a, dims):
     return reduction_size
 
 
+def _restore_reduced_dims(a, dims, shape):
+    unsqueezed_a = _unsqueeze_dims(a, dims, len(shape))
+    return _expand(a, shape)
+
+
+# Reference: https://github.com/pytorch/pytorch/blob/master/tools/autograd/derivatives.yaml#L1109-L1115
+def _amax_amin_vjp(grad, result, self, dims, keepdim):
+    expanded_grad = _restore_reduced_dims(grad, dims, self.shape)
+    expanded_result = _restore_reduced_dims(result, dims, self.shape)
+    mask = torch.eq(expanded_result, self)
+    return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask
+
+
 def _sum_vjp(grad, result, self, dims):
-    grad = _unsqueeze_dims(grad, dims, self.ndim)
-    return _expand(grad, self.shape), None
+    return _restore_reduced_dims(grad, dims, self.shape), None
 
 
 def _mean_vjp(grad, self, dims):
     mean_local_grad = 1.0 / _dim_size(self, dims)
-    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
-    expanded_grad = _expand(unsqueezed_grad, self.shape)
-    return expanded_grad * mean_local_grad
+    return _restore_reduced_dims(grad, dims, self.shape) * mean_local_grad
 
 
 def _var_vjp(grad, mean, self, dims, unbiased):
@@ -410,11 +420,8 @@ def _var_vjp(grad, mean, self, dims, unbiased):
     constant = 2.0 / var_reduction_size
 
     # expand grad and mean tensors to self tensor size
-    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
-    expanded_grad = _expand(unsqueezed_grad, self.shape)
-    unsqueezed_mean = _unsqueeze_dims(mean, dims, self.ndim)
-    expanded_mean = _expand(unsqueezed_mean, self.shape)
-
+    expanded_grad = _restore_reduced_dims(grad, dims, self.shape)
+    expanded_mean = _restore_reduced_dims(mean, dims, self.shape)
     var_local_grad = constant * torch.sub(self, expanded_mean)
     return expanded_grad * var_local_grad
 
@@ -425,8 +432,8 @@ _vjp_impls: Dict[str, Any] = {
         grad, prims.neg(prims.rsqrt(prims.sub(1, prims.pow(self, 2))))
     ),
     "add": lambda grad, result, self, other: (grad, grad),
-    "amax": None,  # TODO
-    "amin": None,  # TODO
+    "amax": _amax_amin_vjp,
+    "amin": _amax_amin_vjp,
     "asin": lambda grad, result, self: prims.mul(
         grad, prims.rsqrt(prims.sub(1, prims.pow(self, 2)))
     ),
