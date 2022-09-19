@@ -775,9 +775,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
              << rop->getRNGOffset() << ";\n";
     indent() << "if (rng_subseq != rng_subseq" << rop->name()
              << " || rng_offset != rng_offset" << rop->name() << ") {\n";
-    indent() << "  rng_result = philox(philox_args.seed_, rng_subseq"
-             << rop->name() << ", philox_offset / 4 + rng_offset" << rop->name()
-             << ");\n";
+    indent() << "  rng_result = philox(seed, rng_subseq" << rop->name()
+             << ", philox_offset / 4 + rng_offset" << rop->name() << ");\n";
     indent() << "  rng_subseq = rng_subseq" << rop->name() << ";\n";
     indent() << "  rng_offset = rng_offset" << rop->name() << ";\n";
     indent() << "}\n";
