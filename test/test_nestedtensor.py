@@ -1027,11 +1027,11 @@ class TestNestedTensorDeviceType(TestCase):
         actual = torch.nested.to_padded_tensor(torch.matmul(nt0, nt1), 0.0)
         expect = torch.matmul(torch.nested.to_padded_tensor(nt0, 0.0), torch.nested.to_padded_tensor(nt1, 0.0))
         self.assertEqual(actual, expect)
-        # normal nested tensor: 4D
-        nt0 = torch.nested_tensor([torch.randn((8, 2, 4)),
+        # normal nested tensor: 4D (with testing for batch_size=1)
+        nt0 = torch.nested_tensor([torch.randn((1, 2, 4)),
                                    torch.randn((8, 3, 7))],
                                   device=device, dtype=dtype)
-        nt1 = torch.nested_tensor([torch.randn((8, 4, 6)),
+        nt1 = torch.nested_tensor([torch.randn((1, 4, 6)),
                                    torch.randn((8, 7, 5))],
                                   device=device, dtype=dtype)
         actual = torch.nested.to_padded_tensor(torch.matmul(nt0, nt1), 0.0)

@@ -909,8 +909,8 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
     if (batch_size == 1) {
       at::mm_out(
           output_unbind[i],
-          self_buffer.as_strided(self_size, self_strides[i], self_offsets[i]),
-          mat2_buffer.as_strided(mat2_size, mat2_strides[i], mat2_offsets[i])
+          self_buffer.as_strided(self_size, self_strides[i], self_offsets[i]).squeeze(0),
+          mat2_buffer.as_strided(mat2_size, mat2_strides[i], mat2_offsets[i]).squeeze(0)
           );
     }
     else {
