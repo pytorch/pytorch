@@ -4133,12 +4133,11 @@ Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 
 Args:
     n (int): the number of rows
-    m (int, optional): the number of columns with default being :attr:`n`
-    k (int, optional): the diagonal offset, a positive value refers to an upper diagonal, and a negative value
-           to a lower diagonal, with the default being 0, the main diagonal
+    m (int, optional): the number of columns. Default:  :attr:`n`
 
 Keyword arguments:
-    {k}
+    k (int, optional): the diagonal offset, a positive value refers to an upper diagonal, and a negative value
+           to a lower diagonal. Default: ``0``
     {out}
     {dtype}
     {layout}
@@ -8084,7 +8083,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (Tensor or int): the starting dimension
     length (int): the distance to the ending dimension
 
 Example::
