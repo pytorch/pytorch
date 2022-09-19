@@ -75,11 +75,12 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
             output_channels_,
             q_input_contig.q_zero_point(),
             w_zero_points_.data(),
-            bcsr_matrix_->col_indices.data(),
-            bcsr_matrix_->row_values.data(),
+            static_cast<const void*>(bcsr_matrix_->col_indices.data()),
+            static_cast<const void*>(bcsr_matrix_->row_values.data()),
             bcsr_matrix_->values.data(),
             bcsr_matrix_->row_block_size, /* out_features_block_size */
             bcsr_matrix_->col_block_size, /* in_features_block_size */
+            pytorch_qnnp_sparse_matrix_indices_dtype_uint32_t,
             0, /* output zero point: not used */
             std::numeric_limits<uint8_t>::min(),
             std::numeric_limits<uint8_t>::max(),

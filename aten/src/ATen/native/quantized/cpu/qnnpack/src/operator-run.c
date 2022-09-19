@@ -1132,24 +1132,24 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       }
 
       struct q8gemm_prepackA_sparse_dq_context
-        q8gemm_prepack_sparse_dq_context = {
-          .k = group_input_channels,
-          .a = op->input,
-          .a_stride = op->input_pixel_stride,
-          .a_packed = op->prepacked_a,
-          .a_packed_stride = k_stride * mr,
-          .log2_mr = log2_mr,
-          .log2_row_block_size = log2_row_block_size,
-          .kernel_col_indices = op->sparse_matrix.col_indices,
-          .kernel_row_values = op->sparse_matrix.row_values,
-          .kernel_values = op->sparse_matrix.values,
-          .bias = (const float*)op->bias,
-          .c = (float*)op->output,
-          .c_stride = op->output_pixel_stride,
-          .quantization_params = op->dynamic_conv_quantization_params,
-          .ukernel = compute_kernel,
-          .prepack_ukernel = prepack_kernel,
-      };
+          q8gemm_prepack_sparse_dq_context = {
+              .k = group_input_channels,
+              .a = op->input,
+              .a_stride = op->input_pixel_stride,
+              .a_packed = op->prepacked_a,
+              .a_packed_stride = k_stride * mr,
+              .log2_mr = log2_mr,
+              .log2_row_block_size = log2_row_block_size,
+              .kernel_col_indices = op->sparse_matrix.col_indices_w32,
+              .kernel_row_values = op->sparse_matrix.row_values_w32,
+              .kernel_values = op->sparse_matrix.values,
+              .bias = (const float*)op->bias,
+              .c = (float*)op->output,
+              .c_stride = op->output_pixel_stride,
+              .quantization_params = op->dynamic_conv_quantization_params,
+              .ukernel = compute_kernel,
+              .prepack_ukernel = prepack_kernel,
+          };
 
       // This batch size is not the actual batch size of the op
       // The batch size is modified in fully-connected-sparse.c
