@@ -1793,7 +1793,7 @@ def _to_other(
 
 # remove to_kwargs that is already present in `a`
 def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
-    options_to_check = ["dtype", "device", "layout"]
+    options_to_check = ["dtype", "device", "layout", "memory_format"]
     # "device" option could be passed a str instead torch.device
     if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
         to_kwargs["device"] = torch.device(to_kwargs["device"])
