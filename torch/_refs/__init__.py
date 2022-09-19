@@ -610,7 +610,7 @@ def lgamma(a):
 
 
 # alias
-mvlgamma = torch.special.multigammaln
+mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -4280,6 +4280,7 @@ def _make_r_binary_op(base_op):
 rtruediv = _make_r_binary_op(true_divide)
 rfloordiv = _make_r_binary_op(floor_divide)
 rpow = _make_r_binary_op(pow)
+
 
 @register_decomposition(torch.ops.aten.triu)
 @out_wrapper()
