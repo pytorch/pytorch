@@ -6,6 +6,7 @@
 import dataclasses
 import numbers
 import re
+import typing
 from typing import Any, Dict, Iterable, Iterator, List, Tuple, Union
 
 from typing_extensions import Protocol
@@ -20,6 +21,7 @@ from torch.onnx._internal import _beartype
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
+@typing.runtime_checkable
 class GraphLike(Protocol):
     """Implements all methods defined in torch.Graph, as well as `op()` and `at()`."""
 
