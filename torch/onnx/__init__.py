@@ -1,5 +1,4 @@
 """ONNX exporter."""
-import warnings
 
 from torch import _C
 from torch._C import _onnx as _C_onnx
@@ -61,6 +60,7 @@ __all__ = [
     "symbolic_opset14",
     "symbolic_opset15",
     "symbolic_opset16",
+    "symbolic_opset17",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",
