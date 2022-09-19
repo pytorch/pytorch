@@ -8,7 +8,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import TensorSequenceType
+from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -754,23 +754,37 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
         return (input, torch.ones_like(input, dtype=torch.bool))
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._softmax)
-@pw_cast_for_opmath
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     unnormalized = torch.exp(x - x_max)
-    return unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._log_softmax)
-@pw_cast_for_opmath
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
-    return shifted - shifted_logsumexp
+    result = shifted - shifted_logsumexp
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
@@ -1275,11 +1289,9 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(
-    [aten.detach, aten.lift, aten.lift_fresh, aten.alias], disable_meta=True
-)
+@register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
 def nop_decomposition(x):
-    return x
+    return aten.alias(x)
 
 
 @register_decomposition(aten.cudnn_batch_norm)
@@ -1545,6 +1557,32 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
         else:
             ret = ret + vals[..., i, :, j]
     return ret / (length_h * length_w)
+
+
+@register_decomposition(aten.index_add_)
+def index_add_(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    if alpha != 1:
+        python_type = utils.dtype_to_type(x.dtype)
+        utils.check(
+            utils.is_weakly_lesser_type(type(alpha), python_type),
+            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        )
+        tensor = torch._prims.mul(tensor, alpha)
+    idx = (slice(None),) * dim + (index,)
+    torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
+    return x
 
 
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
