@@ -62,21 +62,3 @@ def _functorch_str(tensor, *, tensor_contents=None):
 
 
 torch._tensor_str._str = _functorch_str
-
-
-# Monkeypatch .backward() to error out if any transforms are active.
-# TODO: remove the monkeypatching and add an extension point into PyTorch core
-_old_backward = torch.Tensor.backward
-
-
-@functools.wraps(_old_backward)
-def _backward(*args, **kwargs):
-    if _C.are_transforms_active():
-        raise RuntimeError(
-            "backward() called inside a functorch transform. This is not "
-            "supported, please use functorch.grad or functorch.vjp instead "
-            "or call backward() outside of functorch transforms.")
-    return _old_backward(*args, **kwargs)
-
-
-torch.Tensor.backward = _backward
