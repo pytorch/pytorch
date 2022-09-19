@@ -1088,6 +1088,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
+    "aten/src/ATen/native/ComparisonUtils.cpp",
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
