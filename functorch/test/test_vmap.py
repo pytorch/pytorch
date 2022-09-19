@@ -3277,7 +3277,9 @@ class TestVmapOperatorsOpInfo(TestCase):
              {torch.float32: tol(atol=1e-04, rtol=1e-02)}, device_type='cuda'),
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
-    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
+        xfail('cat'),
+    }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = (
@@ -3293,12 +3295,17 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('cat'),
         xfail('complex'),
         xfail('copysign'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
         xfail('nanmean'),
+        xfail('scatter_reduce', 'sum'),
+        xfail('scatter_reduce', 'mean'),
+        xfail('scatter_reduce', 'amax'),
+        xfail('scatter_reduce', 'amin'),
         # `index_put` OpInfo in pytorch/pytorch has
         # masked index as input which is not supported
         xfail('index_put', ''),

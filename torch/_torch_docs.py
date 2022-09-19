@@ -2311,6 +2311,15 @@ Alias of :func:`torch.cat`.
 )
 
 add_docstr(
+    torch.concatenate,
+    r"""
+concatenate(tensors, axis=0, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""",
+)
+
+add_docstr(
     torch.ceil,
     r"""
 ceil(input, *, out=None) -> Tensor
@@ -8072,7 +8081,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (Tensor or int): the starting dimension
     length (int): the distance to the ending dimension
 
 Example::
