@@ -1803,7 +1803,7 @@ def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
             if (
                 (kw == "memory_format" and to_kwargs[kw] is torch.preserve_format) or
                 (kw == "device" and to_kwargs[kw].type == a.device.type and (not to_kwargs[kw].index or to_kwargs[kw].index == a.device.index)) or
-                (getattr(a, kw, None) == to_kwargs[kw])
+                (getattr(a, kw, None) == to_kwargs[kw])  # this also handles {"memory_format": None}
             ):
                 to_kwargs.pop(kw)
 
@@ -1816,9 +1816,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     # TODO: is_pinned is not currently supported in refs or fake_tensor
     # https://github.com/pytorch/pytorch/issues/84925
     assert "pin_memory" not in kwargs
-    print("prior to canonicalize: ", kwargs)
     canonicalize_to_arguments(a, kwargs)
-    print("post canonicalize: ", kwargs)
 
     if _to_will_alias(a, **kwargs):
         return a
