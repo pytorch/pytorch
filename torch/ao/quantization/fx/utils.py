@@ -754,38 +754,6 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
 
     Return the node `lstm_output_dq`.
     """
-    # (0) Gather original users of the LSTM node, to be used in step (4)
-    # Note: We need to do this here before we add nodes to the graph, since these
-    # added nodes will become users of the LSTM node
-    original_lstm_users = list(node.users.keys())
-    original_getitem_0_users, original_getitem_0_node = [], None
-    original_getitem_1_users, original_getitem_1_node = [], None
-    original_getitem_1_0_users, original_getitem_1_0_node = [], None
-    original_getitem_1_1_users, original_getitem_1_1_node = [], None
-    for user in node.users:
-        if not _is_getitem_node(user):
-            continue
-        if user.args[1] == 0:
-            # Found lstm_output[0], to be replaced with `output_dq`
-            original_getitem_0_node = user
-            original_getitem_0_users = list(user.users.keys())
-        elif user.args[1] == 1:
-            # Found lstm_output[1], to be replaced with `hidden_dq`
-            original_getitem_1_node = user
-            for getitem_1_user in user.users:
-                if _is_getitem_node(getitem_1_user):
-                    if getitem_1_user.args[1] == 0:
-                        # Found lstm_output[1][0], to be replaced with `hidden0_dq`
-                        original_getitem_1_0_node = getitem_1_user
-                        original_getitem_1_0_users = list(getitem_1_user.users.keys())
-                    elif getitem_1_user.args[1] == 1:
-                        # Found lstm_output[1][1], to be replaced with `hidden1_dq`
-                        original_getitem_1_1_node = getitem_1_user
-                        original_getitem_1_1_users = list(getitem_1_user.users.keys())
-                else:
-                    # Not getitem, these nodes consume the whole tuple (hidden0, hidden1)
-                    original_getitem_1_users.append(getitem_1_user)
-
     # (1) Split the LSTM node into (output, (hidden0, hidden1))
     # (2) Insert a DeQuantStub after each internal node
     original_lstm_users = list(node.users.keys())
@@ -808,16 +776,26 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
         lstm_output_dq = graph.call_function(tuple, ([output_dq, hidden_dq],))
 
     # (4) Reroute all consumers of the original LSTM node
-    for user in original_lstm_users:
-        user.replace_input_with(node, lstm_output_dq)
-    for user in original_getitem_0_users:
-        user.replace_input_with(original_getitem_0_node, output_dq)
-    for user in original_getitem_1_users:
-        user.replace_input_with(original_getitem_1_node, hidden_dq)
-    for user in original_getitem_1_0_users:
-        user.replace_input_with(original_getitem_1_0_node, hidden0_dq)
-    for user in original_getitem_1_1_users:
-        user.replace_input_with(original_getitem_1_1_node, hidden1_dq)
+    # First, gather the original LSTM nodes
+    node_to_replacement = {node: lstm_output_dq}
+    for user in list(node.users.keys()):
+        if _is_getitem_node(user) and user.args[1] == 0:
+            node_to_replacement[user] = output_dq  # lstm_output[0]
+        if _is_getitem_node(user) and user.args[1] == 1:
+            node_to_replacement[user] = hidden_dq  # lstm_output[1]
+            for hidden_user in list(user.users.keys()):
+                if _is_getitem_node(hidden_user) and hidden_user.args[1] == 0:
+                    node_to_replacement[hidden_user] = hidden0_dq  # lstm_output[1][0]
+                if _is_getitem_node(hidden_user) and hidden_user.args[1] == 1:
+                    node_to_replacement[hidden_user] = hidden1_dq  # lstm_output[1][1]
+    # Do not reroute nodes we added or the original nodes that will be consumed
+    nodes_added = [output, output_dq, hidden, hidden_dq, hidden0, hidden0_dq, hidden1, hidden1_dq]
+    nodes_to_skip = set(node_to_replacement.keys()).union(nodes_added)
+    for original_node, replacement in node_to_replacement.items():
+        for user in list(original_node.users.keys()):
+            if user not in nodes_to_skip:
+                user.replace_input_with(original_node, replacement)
+
     return lstm_output_dq
 
 def _get_custom_module_lstm_from_node_arg(
