@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 using namespace torch::jit::tensorexpr;
 
@@ -185,7 +186,7 @@ public:
     for (int i = numTensorArgs; i < PyTuple_Size(args); i++) {
       PyObject *arg = PyTuple_GET_ITEM(args, i);
       assert(PyLong_Check(arg));
-      cacheKey.push_back(PyLong_AsLong(arg));
+      cacheKey.push_back(THPUtils_unpackLong(arg));
     }
     return cacheKey;
   }
