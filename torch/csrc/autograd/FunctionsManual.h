@@ -632,12 +632,6 @@ Tensor linalg_qr_backward(
     const Tensor& Q,
     const Tensor& R,
     const c10::string_view mode);
-Tensor eig_backward(
-    const std::vector<torch::autograd::Variable>& grads,
-    const Tensor& self,
-    bool eigenvectors,
-    const Tensor& lambda,
-    const Tensor& v);
 Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
@@ -987,6 +981,17 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     bool transposed,
     int64_t groups,
     ::std::array<bool, 2> output_mask);
+
+Tensor scatter_reduce_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int dim,
+    const Tensor& index,
+    const Tensor& src_p,
+    const Tensor& src_t,
+    c10::string_view reduce,
+    bool include_self,
+    const Tensor& result);
 
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& grad,

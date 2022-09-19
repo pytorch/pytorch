@@ -446,8 +446,9 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
     assert ex_idx > 0 and ex_idx <= rank
 
 
-# "Wraps" a dim (up to one time) for the given rank, allowing
-# dims to be specified using negative indices
+# "Wraps" a dim (up to one time) for the given rank, allowing dims to be
+# specified using negative indices. For scalar tensors with rank 0, then idx
+# must be in the range [-1, 0]. Otherwise, idx should be in the range [-rank, rank-1].
 def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if rank < 0:
         msg = f"Rank cannot be negative but got {rank}"

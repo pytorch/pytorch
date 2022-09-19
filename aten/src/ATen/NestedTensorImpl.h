@@ -109,7 +109,6 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   }
   IntArrayRef sizes_custom() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
-  c10::SymIntArrayRef sym_sizes() const override;
   IntArrayRef strides_custom() const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
 
@@ -168,7 +167,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
    * is generated and redispatched to a non-nested kernel this function
    * generates the key set used by that buffer tensor
    *
-   * @return A newly constructed view tensor
+   * @return Appropriate key set for non-nested tensor
    */
   inline c10::DispatchKeySet generate_buffer_key_set() const {
     auto buffer_key_set = this->key_set();
@@ -185,6 +184,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     buffer_key_set = Autograd
         ? c10::DispatchKeySet{c10::DispatchKey::Autograd} | buffer_key_set
         : buffer_key_set;
+
     return buffer_key_set;
   }
 };
