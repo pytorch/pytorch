@@ -166,6 +166,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/utils/warnings.cpp",
+    "torch/csrc/autograd/jit_decomp_interface.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
@@ -483,6 +484,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/reducer.cpp",
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
+    "torch/csrc/distributed/c10d/Work.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -729,6 +731,9 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/partial_split_map.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
+    "torch/csrc/jit/codegen/cuda/python_frontend/fusion_cache.cpp",
+    "torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.cpp",
+    "torch/csrc/jit/codegen/cuda/python_frontend/fusion_interface.cpp",
     "torch/csrc/jit/codegen/cuda/register_interface.cpp",
     "torch/csrc/jit/codegen/cuda/root_domain_map.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/pointwise.cpp",
@@ -891,7 +896,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.cpp",
-    "torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.cpp",
