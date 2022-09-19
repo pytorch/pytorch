@@ -5167,7 +5167,25 @@ def multi_head_attention_forward(
     #
     # (deep breath) calculate attention and out projection
     #
-    attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
+    def scaled_dot_product(q, k, v,
+                           attn_mask=None,
+                           dropout_p=0.0):
+        B, Nt, E = q.shape
+        q = q / math.sqrt(E)
+        # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
+        if attn_mask is not None:
+            attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
+        else:
+            attn = torch.bmm(q, k.transpose(-2, -1))
+
+        attn = torch.nn.functional.softmax(attn, dim=-1)
+        if dropout_p > 0.0:
+            attn = torch.nn.functional.dropout(attn, p=dropout_p)
+        # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
+        output = torch.bmm(attn, v)
+        return output, attn
+
+    attn_output, attn_output_weights = scaled_dot_product(q, k, v, attn_mask, dropout_p)
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
     attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))
