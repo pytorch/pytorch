@@ -1665,8 +1665,11 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # This appears to be a different algorithm on cpu vs gpu
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(
+                unittest.skip("cpu vs gpu is sometimes the same"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
     ),
     OpInfo(
