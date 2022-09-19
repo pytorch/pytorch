@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <vector>
 #include <ATen/core/TensorBody.h>
+#include <c10/util/OptionalArrayRef.h>
 
 namespace at {
 
