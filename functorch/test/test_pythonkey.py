@@ -370,7 +370,6 @@ class TestAOTAutograd(AOTTestCase):
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
-    @unittest.skip("hack")
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -401,7 +400,6 @@ class TestAOTAutograd(AOTTestCase):
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    @unittest.skip
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)

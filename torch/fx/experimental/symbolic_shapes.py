@@ -114,8 +114,6 @@ class PySymInt(object):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
     def __str__(self):
-        # TODO: Figure out when to give one or the other
-        return str(self.shape_env.size_hint(self.expr))
         return f"{self.expr}"
 
     def __repr__(self):
@@ -426,15 +424,6 @@ class ShapeEnv(object):
                 new_var = self._find(solutions[0])
                 self.replacements[cast(sympy.Symbol, free[0])] = new_var
         except ZeroDivisionError:
-            pass
-        # TODO: hack; repro error with
-        # python test/test_proxy_tensor.py -k
-        # test_make_fx_symbolic_exhaustive_nn_functional_max_pool2d_cpu_float32
-        except AttributeError:
-            pass
-        # TODO: hack; repro error with
-        # python functorch/test/test_pythonkey.py -k TestPartitioning.test_autocast
-        except ValueError:
             pass
 
     @lru_cache(256)
