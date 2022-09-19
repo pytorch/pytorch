@@ -6,7 +6,7 @@ import warnings
 
 from collections.abc import Iterable
 from enum import Enum
-from functools import partial, reduce, wraps, singledispatch
+from functools import partial, reduce, singledispatch, wraps
 from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
@@ -1694,7 +1694,7 @@ def _to_will_alias(
     layout: Optional[torch.layout] = None,
     memory_format: Optional[torch.memory_format] = None,
     pin_memory: Optional[bool] = False,
-    non_blocking: bool = False  # not using non_blocking
+    non_blocking: bool = False,  # not using non_blocking
 ) -> bool:
     return (
         not copy
@@ -1710,6 +1710,7 @@ def _to_will_alias(
         )
     )
 
+
 @singledispatch
 def _to_dispatch(*args, **kwargs):
     raise NotImplementedError
@@ -1723,7 +1724,13 @@ def _to_device(
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
 ):
-    kwargs = {"device": device, "dtype": dtype, "non_blocking": non_blocking, "copy": copy, "memory_format": memory_format}
+    kwargs = {
+        "device": device,
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
     return kwargs
 
 
@@ -1735,7 +1742,13 @@ def _to_device_str(
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
 ):
-    kwargs = {"device": torch.device(device), "dtype": dtype, "non_blocking": non_blocking, "copy": copy, "memory_format": memory_format}
+    kwargs = {
+        "device": torch.device(device),
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
     return kwargs
 
 
@@ -1746,7 +1759,12 @@ def _to_dtype(
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
 ):
-    kwargs = {"dtype": dtype, "non_blocking": non_blocking, "copy": copy, "memory_format": memory_format}
+    kwargs = {
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
     return kwargs
 
 
@@ -1762,20 +1780,31 @@ def _to_other(
     layout = other.layout
     # is_pinned issue #84925
     # pin_memory = other.is_pinned()
-    kwargs = {"device": device, "dtype": dtype, "layout": layout, "non_blocking": non_blocking, "copy": copy, "memory_format": memory_format}
+    kwargs = {
+        "device": device,
+        "dtype": dtype,
+        "layout": layout,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
     return kwargs
 
 
 def _clean_to_kwargs(a: Tensor, to_kwargs: dict):
     options_to_check = ["dtype", "device"]
-    
+
     for kw in options_to_check:
         if kw in to_kwargs:
             if a.dtype == to_kwargs[kw]:
                 to_kwargs.pop(kw)
 
-    if "memory_format" in to_kwargs and (to_kwargs["memory_format"] is None or to_kwargs["memory_format"] is torch.preserve_format):
+    if "memory_format" in to_kwargs and (
+        to_kwargs["memory_format"] is None
+        or to_kwargs["memory_format"] is torch.preserve_format
+    ):
         to_kwargs.pop("memory_format")
+
 
 def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     if len(args) != 0:
@@ -1786,7 +1815,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     assert "pin_memory" not in kwargs
     # remove stub arguments
     _clean_to_kwargs(a, kwargs)
-    
+
     if _to_will_alias(a, **kwargs):
         return a
 
