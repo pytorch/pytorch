@@ -15548,9 +15548,7 @@ class TestNNDeviceType(NNTestCase):
             yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
             yy.backward(yy)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol = torch.testing._comparison._DTYPE_PRECISIONS[dtype][0]
-            atol = torch.testing._comparison._DTYPE_PRECISIONS[dtype][1]
-            atol = 0.001 if dtype is torch.half else atol
+            rtol, atol = torch.testing._comparison.get_tolerances(dtype, atol=1e-3 if dtype is torch.half else None)
             self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
             # x is half
             self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad,
