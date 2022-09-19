@@ -384,17 +384,29 @@ def _dim_size(a, dims):
 
 
 def _restore_reduced_dims(a, dims, shape):
+    if a.size() == shape:
+        return a
     unsqueezed_a = _unsqueeze_dims(a, dims, len(shape))
-    return _expand(a, shape)
+    return _expand(unsqueezed_a, shape)
 
 
 # Reference: https://github.com/pytorch/pytorch/blob/master/tools/autograd/derivatives.yaml#L1109-L1115
-def _amax_amin_vjp(grad, result, self, dims, keepdim):
+def _amax_amin_vjp(grad, result, self, dims, keepdim: Optional[bool] = None):
     expanded_grad = _restore_reduced_dims(grad, dims, self.shape)
     expanded_result = _restore_reduced_dims(result, dims, self.shape)
     mask = torch.eq(expanded_result, self)
-    # Return None for each dim and for keepdim argument.
-    return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask, *(None,) * (len(dims) + 1)
+
+    num_extra_none_results = len(dims)
+    if keepdim is not None:
+        num_extra_none_results += 1
+
+    if num_extra_none_results == 0:
+        return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask
+    else:
+        # Return None for each dim and for keepdim argument.
+        return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask, *(
+            None,
+        ) * num_extra_none_results
 
 
 def _sum_vjp(grad, result, self, dims):
