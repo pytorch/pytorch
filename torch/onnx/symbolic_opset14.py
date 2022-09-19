@@ -13,7 +13,7 @@ Updated operators:
 """
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in REAMDME.md
+# see Note [Edit Symbolic Files] in README.md
 
 import functools
 
