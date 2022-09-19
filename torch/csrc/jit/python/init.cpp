@@ -2136,8 +2136,7 @@ void initJITBindings(PyObject* module) {
       [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
           -> std::shared_ptr<jit::PythonFutureWrapper> {
         auto typePtr =
-            futures.empty() ? AnyType::get() :
-            futures[0]  == nullptr ? AnyType::get() : futures[0]->fut->elementType();
+            futures.empty()  || futures[0] == nullptr? AnyType::get() : futures[0]->fut->elementType();
         c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
             c10::FutureType::create(typePtr));
         asList.reserve(futures.size());
