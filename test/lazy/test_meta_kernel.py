@@ -17,21 +17,18 @@ class TestMetaKernel(TestCase):
 
         fc_nobias = torch.nn.Linear(2, 2, bias=False, dtype=float32).to("lazy")
 
-        try:
+        with self.assertRaises(Exception):
             out_nobias = fc_nobias(input)
-            self.assertTrue(False)  # Should never reach here as the above line should throw exception
-        except Exception as e:
-            self.assertTrue(True)
 
     def test_addmm(self):
         """Tests that the addmm meta kernel returns the correct output type"""
         input = torch.ones(2, 2, dtype=torch.float16).to("lazy")
-        self.assertTrue(input.dtype == torch.float16)
+        self.assertEqual(input.dtype, torch.float16)
 
         fc_nobias = torch.nn.Linear(2, 2, bias=False, dtype=float16).to("lazy")
         out_nobias = fc_nobias(input)
-        self.assertTrue(out_nobias.dtype == torch.float16)
+        self.assertEqual(out_nobias.dtype, torch.float16)
 
         fc_bias = torch.nn.Linear(2, 2, bias=True, dtype=float16).to("lazy")
         out_bias = fc_bias(input)
-        self.assertTrue(out_bias.dtype == torch.float16)
+        self.assertEqual(out_bias.dtype, torch.float16)
