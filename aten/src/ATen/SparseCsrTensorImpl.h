@@ -3,7 +3,6 @@
 #include <ATen/Tensor.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
-
 namespace at {
 
 // Struct implementing a sparse CSR tensor. It uses three 1-D tensors for
@@ -33,6 +32,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
  public:
   explicit SparseCsrTensorImpl(
       at::DispatchKeySet,
+      at::Device device,
       Layout layout,
       const caffe2::TypeMeta);
 
@@ -109,7 +109,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       const c10::VariableVersion& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
-        key_set(), layout_impl(), dtype());
+        key_set(), device(), layout_impl(), dtype());
     copy_tensor_metadata(
         /*src_impl=*/this,
         /*dest_impl=*/impl.get(),
@@ -129,7 +129,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
       c10::VariableVersion&& version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseCsrTensorImpl>(
-        key_set(), layout_impl(), dtype());
+        key_set(), device(), layout_impl(), dtype());
     copy_tensor_metadata(
         /*src_impl=*/this,
         /*dest_impl=*/impl.get(),

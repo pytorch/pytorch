@@ -336,13 +336,23 @@ class TestSparseCompressed(TestCase):
         self.assertIn(str(layout), {'torch.sparse_csr', 'torch.sparse_csc', 'torch.sparse_bsr', 'torch.sparse_bsc'})
         self.assertEqual(type(layout), torch.layout)
 
-    @parametrize('shape_and_device_inference', [subtest(False, name='_'), subtest(False, name='shape_and_device_inference')])
+    @parametrize('shape_and_device_inference', [subtest(False, name='_'), subtest(True, name='shape_and_device_inference')])
     @parametrize('use_factory_function', [subtest(False, name='_'), subtest(True, name='factory')])
     @parametrize('input_kind', [subtest('tensor', name='from_tensor'), subtest('list', name='from_list')])
     @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_sparse_compressed_constructor(self, layout, device, dtype,
                                            use_factory_function, shape_and_device_inference, input_kind):
+        if input_kind == 'list' and shape_and_device_inference and torch.device(device).type == 'cuda':
+            # list inputs to factory/constructor function without
+            # specifying device will result a sparse compressed tensor
+            # on CPU. So, skip testing against cuda device as unused.
+            self.skipTest("nothing to test")
+
+        expected_devices = [torch.device(device)]
+        if TEST_CUDA and torch.device(device).type == 'cuda' and torch.cuda.device_count() >= 2 and not shape_and_device_inference:
+            expected_devices.append(torch.device('cuda:1'))
+
         factory_function = {
             torch.sparse_csr: torch.sparse_csr_tensor,
             torch.sparse_csc: torch.sparse_csc_tensor,
@@ -351,43 +361,48 @@ class TestSparseCompressed(TestCase):
         }[layout]
         compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[layout]
         for index_dtype in [torch.int32, torch.int64]:
-            for compressed_indices, plain_indices, values, size in self._generate_small_inputs(layout, device, dtype, index_dtype):
-                if input_kind == 'list':
-                    if size == (0, 0):
-                        # for this degenerate case, plain_indices must
-                        # remain a tensor because
-                        # tensor(plain_indices) results a float dtype
-                        # when plain_indices is an empty list
-                        if index_dtype == torch.int32:
-                            # skip testing int32 case because
-                            # tensor(compressed_indices) results a
-                            # int64 dtype when compressed_indices is
-                            # [0] (a list of single int zero).
-                            continue
+            for expected_device in expected_devices:
+                for compressed_indices, plain_indices, values, size in self._generate_small_inputs(
+                        layout, expected_device, dtype, index_dtype):
+                    if input_kind == 'list':
+                        if size == (0, 0):
+                            # for this degenerate case, plain_indices must
+                            # remain a tensor because
+                            # tensor(plain_indices) results a float dtype
+                            # when plain_indices is an empty list
+                            if index_dtype == torch.int32:
+                                # skip testing int32 case because
+                                # tensor(compressed_indices) results a
+                                # int64 dtype when compressed_indices is
+                                # [0] (a list of single int zero).
+                                continue
+                        else:
+                            plain_indices = plain_indices.tolist()
+                        compressed_indices = compressed_indices.tolist()
+                        values = values.tolist()
+                        if size == (0, 0) and layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                            # in the block sparse case, values of type list needs to represent a 3-D tensor
+                            values = [[[]]]
+
+                    if use_factory_function:
+                        if shape_and_device_inference:
+                            sparse = factory_function(compressed_indices, plain_indices, values)
+                        else:
+                            sparse = factory_function(compressed_indices, plain_indices, values, size,
+                                                      dtype=dtype, device=expected_device)
                     else:
-                        plain_indices = plain_indices.tolist()
-                    compressed_indices = compressed_indices.tolist()
-                    values = values.tolist()
-                    if size == (0, 0) and layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                        # in the block sparse case, values of type list needs to represent a 3-D tensor
-                        values = [[[]]]
-                if use_factory_function:
-                    if shape_and_device_inference:
-                        sparse = factory_function(compressed_indices, plain_indices, values)
-                    else:
-                        sparse = factory_function(compressed_indices, plain_indices, values, size,
-                                                  dtype=dtype, device=device)
-                else:
-                    if shape_and_device_inference:
-                        sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, layout=layout)
-                    else:
-                        sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
-                                                                dtype=dtype, layout=layout, device=device)
-                self.assertEqual(layout, sparse.layout)
-                self.assertEqual(size, sparse.shape)
-                self.assertEqual(compressed_indices, compressed_indices_mth(sparse))
-                self.assertEqual(plain_indices, plain_indices_mth(sparse))
-                self.assertEqual(values, sparse.values())
+                        if shape_and_device_inference:
+                            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, layout=layout)
+                        else:
+                            sparse = torch.sparse_compressed_tensor(compressed_indices, plain_indices, values, size,
+                                                                    dtype=dtype, layout=layout, device=expected_device)
+                    self.assertEqual(layout, sparse.layout)
+                    self.assertEqual(size, sparse.shape)
+                    self.assertEqual(compressed_indices, compressed_indices_mth(sparse))
+                    self.assertEqual(plain_indices, plain_indices_mth(sparse))
+                    self.assertEqual(values, sparse.values())
+                    self.assertEqual(sparse.device, sparse.values().device)
+                    self.assertEqual(sparse.device, expected_device)
 
     @skipMeta
     @sparse_compressed_nonblock_layouts()
@@ -843,6 +858,20 @@ class TestSparseCompressed(TestCase):
                    values([1, 2, 3, 4], device='cuda'),
                    shape((2, 3)),
                    r'Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!')
+
+        if TEST_CUDA and torch.device(device).type == 'cuda' and torch.cuda.device_count() >= 2:
+            yield ('indices and values mismatch of device index',
+                   torch.tensor([0, 2, 4], device='cuda:0'),
+                   torch.tensor([0, 1, 0, 1], device='cuda:0'),
+                   values([1, 2, 3, 4], device='cuda:1'),
+                   shape((2, 3)),
+                   r'device of compressed_indices \(=cuda:0\) must match device of values \(=cuda:1\)')
+            yield ('compressed_indices and values mismatch of device index',
+                   torch.tensor([0, 2, 4], device='cuda:0'),
+                   torch.tensor([0, 1, 0, 1], device='cuda:1'),
+                   values([1, 2, 3, 4], device='cuda:0'),
+                   shape((2, 3)),
+                   r'Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cuda:1!')
 
     @skipMeta
     @all_sparse_compressed_layouts()
@@ -2411,6 +2440,7 @@ class TestSparseCSR(TestCase):
             self.assertTrue(transpose._base is subject)
 
         def _check_layout_invariants(transpose):
+            self.assertEqual(transpose.device, torch.device(device))
             compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[transpose.layout]
             compressed_indices, plain_indices = compressed_indices_mth(transpose), plain_indices_mth(transpose)
             # note: invariant check for bsr/bsc values is too strict wrt to value contiguity (invariant 3.7)
@@ -2424,8 +2454,6 @@ class TestSparseCSR(TestCase):
             else:
                 torch._validate_sparse_compressed_tensor_args(compressed_indices, plain_indices, transpose.values(),
                                                               transpose.shape, transpose.layout)
-
-
 
         def check_good_transpose(subject, subject_dense, dim0, dim1, expected_layout):
             transpose = subject.transpose(dim0, dim1)

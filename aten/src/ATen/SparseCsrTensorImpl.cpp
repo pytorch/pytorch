@@ -8,22 +8,10 @@
 #include <ATen/native/Resize.h>
 
 namespace at {
-namespace {
-DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
-  if (key_set.has(DispatchKey::SparseCsrCPU)) {
-    return kCPU;
-  } else if (key_set.has(DispatchKey::SparseCsrCUDA)) {
-    return kCUDA;
-  } else {
-    TORCH_CHECK(false,
-        "Cannot construct SparseCsrTensor with non-sparse tensor type ID ",
-        key_set);
-  }
-}
-} // namespace
 
 SparseCsrTensorImpl::SparseCsrTensorImpl(
     at::DispatchKeySet key_set,
+    at::Device device,
     at::Layout layout,
     const caffe2::TypeMeta data_type)
     : SparseCsrTensorImpl(
@@ -32,19 +20,19 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
           at::empty(
               {0},
               at::initialTensorOptions()
-                  .device(SparseCsrTensorSetToDeviceType(key_set))
+                  .device(device)
                   .dtype(ScalarType::Int)) // crow_indices
           ,
           at::empty(
               {0},
               at::initialTensorOptions()
-                  .device(SparseCsrTensorSetToDeviceType(key_set))
+                  .device(device)
                   .dtype(ScalarType::Int)) // col_indices
           ,
           at::empty(
               {0},
               at::initialTensorOptions()
-                  .device(SparseCsrTensorSetToDeviceType(key_set))
+                  .device(device)
                   .dtype(data_type)) // values
           ,
           layout
@@ -66,6 +54,11 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
   TORCH_WARN_ONCE("Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensor support is in beta state. "
                   "If you miss a functionality in the sparse tensor support, please submit a feature request "
                   "to https://github.com/pytorch/pytorch/issues.");
+
+  TORCH_INTERNAL_ASSERT(((key_set.has(DispatchKey::SparseCsrCPU) && device().type() == kCPU)
+                         || (key_set.has(DispatchKey::SparseCsrCUDA) && device().type() == kCUDA)),
+                        "Inconsistent key_set (=", key_set, ") and device (=", device(), ")");
+
   set_storage_access_should_throw();
   is_non_overlapping_and_dense_ = false;
   set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
@@ -73,8 +66,12 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
   // comparing devices only involves comparing the type and index (two integers), we
   // can move this to a DEBUG only assert. Until then this confirms and maintains a
   // crucial invariance.
-  TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and crow_indices need to be on the same device.");
-  TORCH_CHECK(values_.device() == col_indices_.device(), "Values and col_indices need to be on the same device.");
+  TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and ",
+              at::sparse_csr::compressedIndicesName(layout_), " need to be on the same device.");
+  TORCH_CHECK(values_.device() == col_indices_.device(), "Values and ",
+              at::sparse_csr::plainIndicesName(layout_), " need to be on the same device.");
+  TORCH_INTERNAL_ASSERT(values_.device() == device(),
+                        "Values and compressed sparse tensor instance need to have the same device.");
 }
 
 const char* SparseCsrTensorImpl::tensorimpl_type_name() const {
@@ -183,7 +180,6 @@ void SparseCsrTensorImpl::set_member_tensors(
       ") must match dtype of sparse tensor (",
       typeMetaToScalarType(dtype()),
       ")");
-
   crow_indices_ = crow_indices;
   col_indices_ = col_indices;
   values_ = values;
@@ -194,8 +190,12 @@ void SparseCsrTensorImpl::set_member_tensors(
   // comparing devices only involves comparing the type and index (two integers), we
   // can move this to a DEBUG only assert. Until then this confirms and maintains a
   // crucial invariance.
-  TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and crow_indices need to be on the same device.");
-  TORCH_CHECK(values_.device() == col_indices_.device(), "Values and col_indices need to be on the same device.");
+  TORCH_CHECK(values_.device() == crow_indices_.device(), "Values and ",
+              at::sparse_csr::compressedIndicesName(layout_), " need to be on the same device.");
+  TORCH_CHECK(values_.device() == col_indices_.device(), "Values and ",
+              at::sparse_csr::plainIndicesName(layout_), " need to be on the same device.");
+  TORCH_CHECK(values_.device() == device(),
+              "Values and compressed tensor instance need to be on the same device.");
 }
 
 IntArrayRef SparseCsrTensorImpl::strides_custom() const {
