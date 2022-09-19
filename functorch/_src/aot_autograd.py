@@ -302,6 +302,29 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+    # Deduplicate inputs.  Suppose you have:
+    #
+    #   [a, b, a, c]
+    #
+    # We want:
+    #
+    #   remove_dupe_args([a, b, a, c]) == [a, b, c]
+    #   add_dupe_args([a, b, c]) == [a, b, a, c]
+    #
+    # This is done via (respectively):
+    #
+    #   seen_args = {2}  # what to drop
+    #   add_dupe_map = {  # how to get args from the deduped list
+    #       0: 0,
+    #       1: 1,
+    #       2: 0,
+    #       3: 2,
+    #   }
+    #
+    # Whether to use flat_args or deduped_flat_args?  flat_fn takes flat_args,
+    # and the autograd.Function must take deduped_flat_args; everything
+    # else is just getting the types right.
+
     seen_args = {}
     deduped_flat_args = []
     drop_args = set()
@@ -468,28 +491,9 @@ def create_aot_dispatcher_function(
                 def convert(x):
                     return fake_mode.from_tensor(x, shape_env=shape_env)
 
-                fake_flat_tensor_args = pytree.tree_map_only(Tensor, convert, flat_args)
+                return pytree.tree_map_only(Tensor, convert, flat_args)
             else:
-                # The detach().requires_grad_() pattern can cause some subtle bugs.
-                # These will be fixed once FakeTensor is always-on for AOTAutograd.
-                #
-                # For models that might resize their inputs, the input tensors
-                # must have allow_tensor_metadata_change() set to true.
-                # detach() returns a view tensor, but with that field set to false.
-                #
-                # Specifically, this breaks quantized models
-                # (resnet50_quantized_qat and mobilenet_v2_quantized_qat)
-                # because they use a "running-mean" style op that requires
-                # resizing the running counter buffers stored on the module.
-                def make_input(x):
-                    return x.detach().requires_grad_(x.requires_grad)
-
-                fake_flat_tensor_args = pytree.tree_map_only(
-                    Tensor,
-                    make_input,
-                    flat_args,
-                )
-            return fake_flat_tensor_args
+                return flat_args
 
         fake_flat_tensor_args = process_inputs(flat_args)
 

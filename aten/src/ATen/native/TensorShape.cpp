@@ -223,15 +223,23 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     stride = contiguous_strides;
   }
 
-  // TODO: implement this
-#if 0
-  const auto itemsize = result.dtype().itemsize();
-  c10::SymInt storage_size = at::detail::computeStorageNbytes(
-      size, stride, itemsize, storage_offset);
-  // resize storage
-#endif
-
+  // Run this before storage setting so we can access numel
   result.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride, storage_offset);
+
+  // Matches maybe_resize_storage_cpu no-numel behavior
+  if (result.numel() != 0) {
+    // maybe_resize_storage_cpu can handle no storage exists at all but
+    // that should never be the case here
+    TORCH_INTERNAL_ASSERT(storage);
+    TORCH_CHECK(storage.resizable(), "Trying to resize storage that is not resizable");
+    // All meta data pointers are the same, so we don't have to "re" allocate
+    // it.  TODO: Actually this might not quite be correct if we use special
+    // pointers to track whether or not fake cuda tensors are pinned or not
+    const auto itemsize = result.dtype().itemsize();
+    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
+        size, stride, itemsize, storage_offset);
+    storage.set_nbytes(size_bytes);
+  }
   return result;
 }
 
