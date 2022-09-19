@@ -369,6 +369,32 @@ class TestAOTAutograd(AOTTestCase):
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
 
+    def test_dupe_arg(self):
+        def f(x, y):
+            return x + y
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.verify_aot_autograd(f, [x, x])
+
+    def test_resize_input(self):
+        def f(x, y):
+            y.resize_(4)
+            y.zero_()
+            self.assertEqual(x.shape, (4,))
+            return y
+
+        # NB: don't use verify_aot_autograd as the inputs get
+        # mutated and I don't trust verify to do it right
+
+        compiled_f = aot_function(f, nop)
+        ref_x = torch.randn(0)
+        ref_out = f(ref_x, ref_x)
+
+        test_x = torch.randn(0)
+        test_out = compiled_f(test_x, test_x)
+
+        self.assertEqual(ref_out, test_out)
+
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_batch_norm_amp(self):
         device = "cuda"
