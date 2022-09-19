@@ -3203,6 +3203,7 @@ def exp(g, self):
     return g.op("Exp", self)
 
 
+@_onnx_symbolic("aten::dropout_")
 @_onnx_symbolic("aten::dropout")
 @symbolic_helper.parse_args("v", "f", "i")
 @_beartype.beartype
@@ -3225,7 +3226,6 @@ def dropout(g, input, p, train):
 @_onnx_symbolic(
     "aten::feature_dropout_", decorate=[_apply_params("aten::feature_dropout_")]
 )
-@_onnx_symbolic("aten::dropout_", decorate=[_apply_params("aten::dropout_")])
 @_onnx_symbolic(
     "aten::feature_alpha_dropout",
     decorate=[_apply_params("aten::feature_alpha_dropout")],
