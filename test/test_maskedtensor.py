@@ -242,7 +242,7 @@ class TestReductions(TestCase):
         d = torch.tensor([[0, 1, 2], [3, 4, 5.0]])
         m = torch.tensor([[True, False, False], [False, True, False]])
         mt = MaskedTensor(d, m)
-        with self.assertRaisesRegex(TypeError, "no implementation found for 'torch.ops.aten.max'"):
+        with self.assertRaisesRegex(TypeError, "no implementation found for 'torch._ops.aten.max.default'"):
             mt.max()
 
     def test_sum(self):
