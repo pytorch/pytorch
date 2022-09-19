@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
 import os
 import shutil
 import tempfile
@@ -106,6 +105,23 @@ class TestDistributedStateDictSaveLoad(TestCase):
             state_dict_to_save = MyTestModule().state_dict()
 
             fs_writer = FileSystemWriter(path=path)
+            save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+            # Load from file without any resharding
+            fs_reader = FileSystemReader(path=path)
+            load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader, no_dist=True)
+
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+
+            fs_writer = FileSystemWriter(path=path, single_file_per_rank=True)
             save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
 
             state_dict_to_load_to = MyTestModule().state_dict()

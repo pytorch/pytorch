@@ -264,6 +264,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       indent()
           << "  static_cast<uint64_t>(*(philox_args.offset_.ptr) + philox_args.offset_intragraph_) :\n";
       indent() << "  philox_args.offset_.val;\n";
+      indent() << "auto seed = philox_args.captured_ ?\n";
+      indent()
+          << "  static_cast<uint64_t>(*(philox_args.seed_.ptr)) : philox_args.seed_.val;\n";
       indent() << "uint4 rng_result;\n";
       indent() << "nvfuser_index_t rng_subseq = -1;\n";
       indent() << "nvfuser_index_t rng_offset = -1;\n";
@@ -282,7 +285,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // Shared memory
     if (has_dynamic_smem || has_reductions || has_parallel_welford) {
       indent() << "alignas("
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
                << 16 // always align to 16B for any shared mem allocation
 #else
                << 8 // for HIP, we want 8-aligned even for smaller datatypes
@@ -718,9 +721,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                  << uop->getRNGOffset() << ";\n";
         indent() << "if (rng_subseq != subseq" << uop->name()
                  << " || rng_offset != offset" << uop->name() << ") {\n";
-        indent() << "  rng_result = philox(philox_args.seed_, subseq"
-                 << uop->name() << ", offset / 4 + offset" << uop->name()
-                 << ");\n";
+        indent() << "  rng_result = philox(seed, subseq" << uop->name()
+                 << ", offset / 4 + offset" << uop->name() << ");\n";
         indent() << "  rng_subseq = subseq" << uop->name() << ";\n";
         indent() << "  rng_offset = offset" << uop->name() << ";\n";
         indent() << "}\n";

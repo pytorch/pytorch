@@ -105,9 +105,9 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         # using zero bias here since the bias for original conv
         # will be added later
         if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
+            zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device, dtype=input.dtype)
         conv = self._conv_forward(input, scaled_weight, zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:

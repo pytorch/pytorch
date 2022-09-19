@@ -26,6 +26,10 @@ if(NOT __NCCL_INCLUDED)
         ProcessorCount(NUM_HARDWARE_THREADS)
         # Assume 2 hardware threads per cpu core
         math(EXPR MAX_JOBS "${NUM_HARDWARE_THREADS} / 2")
+        # ProcessorCount might return 0, set to a positive number
+        if(MAX_JOBS LESS 2)
+            set(MAX_JOBS 2)
+        endif()
       endif()
 
       # Parallel build with CPU load limit to avoid oversubscription
@@ -46,6 +50,7 @@ if(NOT __NCCL_INCLUDED)
         "BUILDDIR=${__NCCL_BUILD_DIR}"
         "VERBOSE=0"
       BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
+      PATCH_COMMAND "${CMAKE_CURRENT_LIST_DIR}/apply_nccl_patch.sh" "${PROJECT_SOURCE_DIR}"
       INSTALL_COMMAND ""
       )
 

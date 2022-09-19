@@ -1294,6 +1294,10 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (*data, data[0] + data[2]), fn_n1, [0, 2], -1)
         _helper(lambda data: (*data, (-data[1], -data[2], data[1] + data[2])), fn_nn, [1, 2], -1)
 
+        # Handling built-in functions (e.g. `dict`, `iter`, `int`, `str`) whose signatures cannot be inspected
+        _helper(lambda data: (str(data[0]), data[1], data[2]), str, 0)
+        _helper(lambda data: (data[0], data[1], int(data[2])), int, 2)
+
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
@@ -1765,7 +1769,7 @@ class TestFunctionalMapDataPipe(TestCase):
         _ = next(it)
         self._serialization_test_helper(dp, use_dill)
         # 3. Testing for serialization after DataPipe is fully read
-        _ = list(it)
+        _ = list(dp)
         self._serialization_test_helper(dp, use_dill)
 
     def test_serializable(self):
@@ -1888,15 +1892,15 @@ class TestFunctionalMapDataPipe(TestCase):
         with self.assertRaisesRegex(IndexError, r"out of range"):
             input_dp1.zip(input_dp2, input_dp3)[5]
 
-        # Functional Test: Ensure `zip` can combine `Shuffler` with others
+        # Functional Test: Ensure `zip` can combine `Batcher` with others
         dp1 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp1 = dp1.shuffle()
+        shuffle_dp1 = dp1.batch(2)
         dp2 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp2 = dp2.shuffle()
-        zip_dp = shuffle_dp1.zip(shuffle_dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        shuffle_dp2 = dp2.batch(3)
+        zip_dp1 = shuffle_dp1.zip(shuffle_dp2)
+        self.assertEqual(4, len(list(zip_dp1)))
         zip_dp2 = shuffle_dp1.zip(dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        self.assertEqual(5, len(list(zip_dp2)))
 
         # __len__ Test: returns the length of the shortest DataPipe
         zip_dp = input_dp1.zip(input_dp2, input_dp3)
@@ -1911,10 +1915,27 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(set(range(10)), set(shuffler_dp))
 
         # Functional Test: Custom indices are working
-        shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
+        shuffler_dp = input_dp2.shuffle(indices=['a', 'b', 'c', 'd', 'e'])
         self.assertEqual(set(range(1, 6)), set(shuffler_dp))
 
-        # # Reset Test:
+        # Functional Test: With global seed
+        torch.manual_seed(123)
+        shuffler_dp = input_dp1.shuffle()
+        res = list(shuffler_dp)
+        torch.manual_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
+
+        # Functional Test: Set seed
+        shuffler_dp = input_dp1.shuffle().set_seed(123)
+        res = list(shuffler_dp)
+        shuffler_dp.set_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
+
+        # Functional Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_dp1.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_dp1))
+
+        # Reset Test:
         shuffler_dp = input_dp1.shuffle()
         n_elements_before_reset = 5
         res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
@@ -1926,6 +1947,19 @@ class TestFunctionalMapDataPipe(TestCase):
         # __len__ Test: returns the length of the input DataPipe
         shuffler_dp = input_dp1.shuffle()
         self.assertEqual(10, len(shuffler_dp))
+
+        # Serialization Test
+        from torch.utils.data.datapipes._hook_iterator import _SnapshotState
+
+        shuffler_dp = input_dp1.shuffle()
+        it = iter(shuffler_dp)
+        for _ in range(2):
+            next(it)
+        shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
+
+        exp = list(it)
+        shuffler_dp_copy._snapshot_state = _SnapshotState.Restored
+        self.assertEqual(exp, list(shuffler_dp_copy))
 
     def test_map_mapdatapipe(self):
         arr = range(10)
@@ -3132,7 +3166,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng = rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
 
         # Test Case: fast forward works with list
         rng.manual_seed(0)
@@ -3165,7 +3199,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._fast_forward_graph_test_helper(graph3, _simple_graph_snapshot_restoration,
                                              expected_res=res3)
@@ -3185,7 +3219,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         cdp1, cdp2 = graph5.fork(2)
         graph6 = cdp1.zip(cdp2)
         rng = rng.manual_seed(100)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph6, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph6, rng)
         res6 = [(x, x) for x in res5]
         self._fast_forward_graph_test_helper(graph6, _simple_graph_snapshot_restoration,
                                              expected_res=res6)
@@ -3216,7 +3250,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
         it = iter(datapipe)
         for _ in range(n_iter):
             next(it)
@@ -3243,7 +3277,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._snapshot_test_helper(graph3, expected_res=res3)
 
@@ -3273,13 +3307,13 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
 
         # Get expected result
         expected_res = list(graph)
 
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
         it = iter(graph)
         n_iter = 3
         for _ in range(n_iter):

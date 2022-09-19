@@ -1,96 +1,22 @@
-import io
-from typing import Any, Dict, List, Tuple, Optional, cast
-from torch.distributed._shard.metadata import ShardMetadata
-from torch.distributed._shard.sharded_tensor.shard import Shard
+from typing import Any, Dict, Optional
 
-import torch
 import torch.distributed as dist
-from torch import Tensor
-from torch.distributed._shard.sharded_tensor import (
-    ShardedTensor,
-)
 
-from .metadata import (
-    BytesReadRequest,
-    BytesStorageMetadata,
-    TensorReadRequest,
-    TensorStorageMetadata,
-    Metadata,
-    MetadataIndex,
-)
-from .resharding import (
-    _prepare_generic_tensor_read,
-)
 from .storage import (
     StorageReader,
 )
+from .planner import LoadPlanner
+from .default_planner import DefaultLoadPlanner
 
 from .utils import _DistWrapper
-
-def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
-    return ShardMetadata(
-        shard_offsets=[0] * len(size),
-        shard_sizes=list(size),
-    )
-
-def _create_shard_for(tensor: Tensor) -> Shard:
-    return Shard(
-        tensor=tensor,
-        metadata=_create_shard_metadata(tensor.size()),
-    )
-
-def _reshard_and_prepare_read_request(
-    state_dict: Dict[str, Any], metadata_from_storage: Metadata
-) -> Tuple[List[BytesReadRequest], List[TensorReadRequest]]:
-    """
-    Use the loaded metadata and the current state dict to map the saved tensors to current tensor
-    """
-    tensor_read_requests = []
-    bytes_read_requests = []
-    storage_md = cast(Dict[MetadataIndex, str], metadata_from_storage.storage_data)
-    for fqn, obj in state_dict.items():
-        md = metadata_from_storage.state_dict_metadata[fqn]
-        if isinstance(obj, ShardedTensor):
-            local_shards = obj.local_shards()
-        elif isinstance(obj, torch.Tensor):
-            local_shards = [_create_shard_for(obj)]
-        else:
-            if isinstance(md, BytesStorageMetadata):
-                bytes_io = io.BytesIO()
-                brr = BytesReadRequest(
-                    bytes=bytes_io,
-                    storage_key=storage_md[MetadataIndex(fqn)],
-                    fqn=fqn
-                )
-                bytes_read_requests.append(brr)
-            else:
-                raise ValueError(
-                    f"Invalid checkpoint metadata for {fqn}, " +
-                    f"expected BytesStorageMetadata but found {type(md)}"
-                )
-            continue
-
-        if isinstance(md, TensorStorageMetadata):
-            checkpoint_shards = md.chunks
-        else:
-            raise ValueError(
-                f"Invalid checkpoint metadata for {fqn}, " +
-                f"expected TensorStorageMetadata but found {type(md)}"
-            )
-
-        tensor_read_requests += _prepare_generic_tensor_read(fqn, checkpoint_shards, local_shards, storage_md)
-
-
-
-    return (bytes_read_requests, tensor_read_requests)
-
 
 def load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
     process_group: Optional[dist.ProcessGroup] = None,
     coordinator_rank: int = 0,
-    no_dist: bool = False
+    no_dist: bool = False,
+    planner: LoadPlanner = None
 ) -> None:
     """
     Load a distributed state_dict in SPMD style.
@@ -150,25 +76,34 @@ def load_state_dict(
         has an individual GPU, via ``torch.cuda.set_device()``
     """
     distW = _DistWrapper(process_group, not no_dist, coordinator_rank)
+    if planner is None:
+        planner = DefaultLoadPlanner()
 
-    def load_model():
+
+    def local_step():
+        assert planner is not None
         metadata = storage_reader.read_metadata()
-        bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
-            state_dict=state_dict, metadata_from_storage=metadata
-        )
-        bytes_futures = storage_reader.read_bytes(bytes_read_requests)
-        tensor_futures = storage_reader.read_tensors(tensor_read_requests)
+        planner.init(state_dict, metadata, distW.is_coordinator)
+        storage_reader.init(metadata, distW.is_coordinator)
 
-        bytes_futures.wait()
+        local_plan = planner.create_local_plan()
+        local_plan = storage_reader.prepare_local_plan(local_plan)
+        return local_plan
 
-        # Addtional steps are required to convert the bytes to its original type
-        # Note that this is NOT inplace,
-        # it creating a new object and replace what's in the state dict
-        for req in bytes_read_requests:
-            # Ensure the BytesIO is rewound
-            req.bytes.seek(0)
-            state_dict[req.fqn] = torch.load(req.bytes)
+    def global_step(all_local_plans):
+        assert planner is not None
+        all_local_plans = planner.create_global_plan(all_local_plans)
+        all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
+        return all_local_plans
 
-        tensor_futures.wait()
+    central_plan = distW.reduce_scatter("plan", local_step, global_step)
 
-    distW.all_gather("checkpoint read", load_model)
+    def read_data():
+        assert planner is not None
+        final_local_plan = planner.finish_plan(central_plan)
+        all_reads = storage_reader.read_data(final_local_plan, planner)
+
+        all_reads.wait()
+        return None
+
+    _ = distW.all_gather("read", read_data)

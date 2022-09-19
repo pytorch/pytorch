@@ -784,8 +784,11 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     @torch.jit.export
     def reset_min_max_vals(self):
         """Resets the min/max values."""
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        # This used to be torch.ones but that does not work because
+        # JIT compiler can optimize it via common subexpression elimination
+        # in which case both min_val and max_val point to the same tensor.
+        self.min_val = torch.rand(0, )
+        self.max_val = torch.rand(0, )
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -1253,6 +1256,9 @@ class HistogramObserver(UniformQuantizationObserverBase):
             unexpected_keys,
             error_msgs,
         )
+
+    def extra_repr(self):
+        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
 
 
 class FixedQParamsObserver(ObserverBase):

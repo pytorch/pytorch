@@ -213,7 +213,7 @@ static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "storage_offset");
   }
   auto& self = THPVariable_Unpack(self_);
-  return wrap(self.storage_offset());
+  return py::cast(self.sym_storage_offset()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -920,6 +920,10 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
         "Can't call map_() on Variable that requires grad. Use "
         "var.detach().map_() instead.");
   }
+  TORCH_CHECK(
+      !self_.unsafeGetTensorImpl()->is_python_dispatch() && !other.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map_ is not supported for tensor subclasses.");
+
   return THPVariable_Wrap(torch::utils::map_(self_, other, r.pyobject(1)));
   END_HANDLE_TH_ERRORS
 }
@@ -945,6 +949,9 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
         "Can't call map2_() on Variable that requires grad. Use "
         "var.detach().map2_() instead.");
   }
+  TORCH_CHECK(
+      !x.unsafeGetTensorImpl()->is_python_dispatch() && !y.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map2_ is not supported for tensor subclasses.");
   return THPVariable_Wrap(torch::utils::map2_(self_, x, y, r.pyobject(2)));
   END_HANDLE_TH_ERRORS
 }
