@@ -1271,8 +1271,7 @@ struct hash<RecordFunctor*> {
   }
 };
 template <>
-struct equal_to<RecordFunctor*>
-    : public binary_function<RecordFunctor*, RecordFunctor*, bool> {
+struct equal_to<RecordFunctor*> {
   bool operator()(const RecordFunctor* p, const RecordFunctor* q) const {
     TORCH_CHECK(
         p,

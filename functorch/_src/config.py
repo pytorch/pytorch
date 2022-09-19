@@ -11,8 +11,7 @@ import os
 
 use_functionalize = True
 
-# TODO Benchmark
-use_fake_tensor = False
+use_fake_tensor = True
 
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
 # Prints out forward + backwards FX graphs
