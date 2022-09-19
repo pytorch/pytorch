@@ -427,8 +427,13 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.trace_state = {}
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        with self.sym_mode.enable(False):
-            return self.inner_torch_dispatch(func, types, args, kwargs)
+        try:
+            with self.sym_mode.enable(False):
+                return self.inner_torch_dispatch(func, types, args, kwargs)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            raise
 
     @contextmanager
     def restore(self):
