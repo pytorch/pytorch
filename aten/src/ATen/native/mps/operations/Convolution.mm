@@ -40,7 +40,7 @@ void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
 }
 
 static
-MPSShape* get_mps_conv_shape(bool is_channels_last, const Tensor& tensor) {
+MPSShape* get_mps_conv_shape(const Tensor& tensor, bool is_channels_last) {
   if (is_channels_last) {
     const auto tensorSizes = tensor.sizes();
     const NSUInteger N = tensorSizes[0];
@@ -139,7 +139,7 @@ Tensor _mps_convolution(
                                     + mps::getTensorsStringKey({input_t, weight_t}) + ":"
                                     + to_string(bias_defined) + ":" + bias_shape_key;
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
-    MPSShape* inputShape = get_mps_conv_shape(is_channels_last, input_t);
+    MPSShape* inputShape = get_mps_conv_shape(input_t, is_channels_last);
     if(!cachedGraph) {
       native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
 
@@ -335,8 +335,8 @@ Tensor mps_convolution_backward_weights(
   CheckedFrom c = "mps_convolution_backward_weights";
   auto memory_format = input_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-  MPSShape* inputShape = get_mps_conv_shape(is_channels_last, input_t);
-  MPSShape* gradOutputShape = get_mps_conv_shape(is_channels_last, grad_output_t);
+  MPSShape* inputShape = get_mps_conv_shape(input_t, is_channels_last);
+  MPSShape* gradOutputShape = get_mps_conv_shape(grad_output_t, is_channels_last);
 
   // For uniformity with everything else, although it seems grad_weight
   // would be unambiguous too.
