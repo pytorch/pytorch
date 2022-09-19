@@ -3235,7 +3235,7 @@ def dropout(g, input, p, train):
 )
 @_beartype.beartype
 def _unsupported_dropout(name: str):
-    @symbolic_helper.parse_args("v", "f", "i")
+    @symbolic_helper.parse_args("v", "none", "b")
     @_beartype.beartype
     def feature_dropout(g, input, p, train):
         # NB: In inference mode, FeatureDropout is exported as an identity op.
