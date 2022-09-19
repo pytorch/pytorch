@@ -67,7 +67,6 @@ __all__ = [
     "exp",
     "expm1",
     "exp2",
-    "fill",
     "floor",
     "frac",
     "index_add",
@@ -176,6 +175,7 @@ __all__ = [
     #
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
+    "fill",
     "item",  # TODO: add OpInfo
     "to",
     #
@@ -266,6 +266,7 @@ __all__ = [
     "ones",
     "ones_like",
     "randn",
+    "randn_like",
     "scalar_tensor",
     "zeros",
     "zeros_like",
@@ -496,34 +497,6 @@ def expm1(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def exp2(a):
     return prims.exp2(a)
-
-
-# Fill has its own implementation because it has a value parameter
-# CompositeImplicitAutograd - don't register decomp
-@out_wrapper()
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
-)
-def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-
-    assert isinstance(a, TensorLike)
-    assert isinstance(value, Number)
-
-    python_type = utils.dtype_to_type(a.dtype)
-    if not utils.is_weakly_lesser_type(type(value), python_type):
-        msg = "value argument of type {0} cannot be safely cast to type {1}!".format(
-            type(value), python_type
-        )
-        raise ValueError(msg)
-
-    return prims.fill(a, value)
-
-
-def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-    r = prims.fill(a, value)
-    prims.copy_to(a, r)
-    return a
 
 
 def zero_(a: TensorLikeType) -> TensorLikeType:
@@ -1674,6 +1647,44 @@ def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     return prims.copy_to(a, b)
 
 
+# NOTE: functional fill is not an operation in torch or ATen
+# The operation creates a new tensor with a's metadata but values from value
+# CompositeImplicitAutograd - don't register decomp
+@out_wrapper()
+def fill(a: TensorLikeType, value: Union[NumberType, TensorLikeType]) -> TensorLikeType:
+
+    assert isinstance(a, TensorLike)
+    assert isinstance(value, (Number, TensorLike))
+
+    # TODO: make these weakly lesser checks a utils helper
+    if isinstance(value, Number):
+        python_type = utils.dtype_to_type(a.dtype)
+        if not utils.is_weakly_lesser_type(type(value), python_type):
+            msg = (
+                "value argument of type {0} cannot be safely cast to type {1}!".format(
+                    type(value), python_type
+                )
+            )
+            raise ValueError(msg)
+        return prims.fill(a, value)
+    else:
+        # isinstance(value, TensorLike)
+        # NOTE: mypy can't deduce that value is not a Number in this expression
+        utils.check(
+            utils.can_safe_cast_to(cast_to=a.dtype, cast_from=value.dtype),  # type: ignore[union-attr]
+            lambda: f"values of dtype {value.dtype} cannot be safely cast to dtype {a.dtype}",  # type: ignore[union-attr]
+        )
+        b = torch.broadcast_to(value, a.shape)
+        return prims.fill(a, b)
+
+
+# NOTE: inplace fill_ is an operation in PyTorch
+def fill_(a: TensorLikeType, value: NumberType) -> TensorLikeType:
+    r = prims.fill(a, value)
+    prims.copy_to(a, r)
+    return a
+
+
 @register_decomposition(torch.ops.aten.item)
 def item(a: TensorLikeType) -> NumberType:
     if a.numel() != 1:
@@ -2227,6 +2238,7 @@ def broadcast_tensors(*tensors) -> List[TensorLikeType]:
 
 
 # CompositeImplicitAutograd - don't register decomp
+# TODO: make the broadcast conditional on the shapes being distinct
 def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     start = len(size) - len(a.shape)
     dims = tuple(range(start, len(a.shape) + start))
@@ -4151,6 +4163,8 @@ def full_like(
 ones_like = partial(full_like, fill_value=True)
 
 # TODO: add pin_memory support
+# TODO: add memory_format support for consistency
+# TODO: add generator support (not part of torch or ATen)
 @register_decomposition(torch.ops.aten.randn)
 @out_wrapper()
 def randn(
@@ -4178,6 +4192,43 @@ def randn(
         device=device,
         requires_grad=requires_grad,
     )
+
+
+# TODO: add generator support (not part of torch or ATen)
+# NOTE: torch.randn_like and aten.randn_like both have an optional memory_format kwarg
+@register_decomposition(torch.ops.aten.randn_like)
+def randn_like(
+    a: TensorLikeType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
+    requires_grad: bool = False,
+    pin_memory: Optional[bool] = None,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> TensorLikeType:
+
+    e = torch.empty_like(
+        a,
+        dtype=dtype,
+        device=device,
+        layout=layout,
+        requires_grad=requires_grad,
+        pin_memory=pin_memory,
+        memory_format=memory_format,
+    )
+
+    # TODO: consider pin_memory and memory_format support (needs randn update)
+    r = torch.randn(
+        a.shape,
+        dtype=e.dtype,
+        device=e.device,
+        layout=e.layout,
+        requires_grad=False,
+    )
+
+    # Explicitly calls refs.fill because out-of-place fill is not part of torch
+    return fill(e, r)
 
 
 # TODO: missing kwargs (e.g. layout)

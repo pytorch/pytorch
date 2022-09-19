@@ -753,6 +753,7 @@ def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
 
     shapes = (
+        (0,),
         (M,),
         (S, S)
     )
@@ -13888,11 +13889,14 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            supports_sparse_csr=True,
            skips=(
-               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
+               # Tests that have issues with how random values are drawn
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Expected: randn_like is not comparable between dtypes"),
                             'TestCommon', 'test_complex_half_reference_testing'),
+               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
            )),
     OpInfo('rand_like',
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
@@ -17517,6 +17521,17 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_neg_conj_view'),
         ),
+    ),
+    PythonRefInfo(
+        "_refs.randn_like",
+        torch_opinfo_name="randn_like",
+        op=lambda inp, *args, **kwargs:
+            wrapper_set_seed(refs.randn_like, inp, *args, **kwargs),
+        skips=(
+            # see https://github.com/pytorch/pytorch/issues/85121
+            DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"),
+                         'TestCommon',
+                         'test_python_ref_executor'),),
     ),
     PythonRefInfo(
         "_refs.eye",

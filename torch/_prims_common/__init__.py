@@ -577,6 +577,7 @@ def canonicalize_device(device: DeviceLikeType) -> torch.device:
 # Asserts if any of the following are true:
 #   - a non-scalar or non-Tensor is given
 #   - the shape of any tensors is distinct
+# TODO: rename the kwarg allow_cpu_scalar_tensors to be clearer
 def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     Checks that all Tensors in args have the same shape.

@@ -628,23 +628,33 @@ exp2 = _make_elementwise_unary_prim(
 )
 
 
-def _fill_meta(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-    return _elementwise_meta(
-        a, type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT
-    )
+def _fill_meta(
+    a: TensorLikeType, value: Union[NumberType, TensorLikeType]
+) -> TensorLikeType:
+    utils.check_same_shape(a, value, allow_cpu_scalar_tensors=False)
+    utils.check_same_dtype(a, value)
+    utils.check_same_device(a, value, allow_cpu_scalar_tensors=False)
+    return TensorMeta(a)
 
 
 # See https://github.com/pytorch/pytorch/issues/77932 for out-of-place fill request
-def _fill_aten(a: Tensor, value: NumberType) -> Tensor:
-    t = a * False
+def _fill_aten(a: Tensor, value: Union[NumberType, TensorLikeType]) -> Tensor:
+    t = torch.clone(a)
     with torch.no_grad():
-        t.fill_(value)  # type: ignore[arg-type]
+        # Inplace implementation operations use a no_grad context because
+        # they need to mimick functional operations
+        if isinstance(value, Number):
+            t.fill_(value)  # type: ignore[arg-type, call-overload]
+        else:
+            # isinstance(value, TensorLike)
+            t.copy_(value)
     return t
 
 
 # NOTE: fill uses _make_prim directly because it has a value parameter
+# NOTE: this is a functional version of fill_
 fill = _make_prim(
-    schema="fill(Tensor self, Scalar value) -> Tensor",
+    schema="fill(Tensor self, Tensor value) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_fill_meta,
     impl_aten=_fill_aten,
