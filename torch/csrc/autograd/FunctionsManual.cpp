@@ -727,9 +727,6 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.numel() == 0) {
-    return input;
-  }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim) {
     // `prod` reduces the dimension at `dim`,
@@ -737,6 +734,13 @@ Tensor prod_backward(
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
+  if (input.numel() == 0) {
+    // When input has a zero sized dimension (empty tensor),
+    // we don't need to actually compute.
+    // So we just reshape `grad` as `input`.
+    return grad.expand_as(input);
+  }
+
   if (is_meta_in_composite_kernels(input)) {
     return prod_safe_zeros_backward(grad, input, dim);
   }
