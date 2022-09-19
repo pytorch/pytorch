@@ -202,16 +202,28 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
 
   if (max_index <= std::numeric_limits<uint8_t>::max()) {
     // Cast from uint8_t range to int8_t
-    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_matrix_, {return wrap_vector<int8_t>(typed_bcsr->row_values, c10::kChar);});
-    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_matrix_, {return wrap_vector<int8_t>(typed_bcsr->col_indices, c10::kChar);});
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int8_t>(typed_bcsr->row_values, c10::kChar); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int8_t>(typed_bcsr->col_indices, c10::kChar); });
   } else if (max_index <= std::numeric_limits<uint16_t>::max()) {
     // Cast from uint16_t range to int16_t
-    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_matrix_, {return wrap_vector<int16_t>(typed_bcsr->row_values, c10::kShort);});
-    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_matrix_, {return wrap_vector<int16_t>(typed_bcsr->col_indices, c10::kShort);});
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int16_t>(typed_bcsr->row_values, c10::kShort); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int16_t>(typed_bcsr->col_indices, c10::kShort); });
   } else {
     // Cast from uint32_t range to int32_t
-    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_matrix_, {return wrap_vector<int>(typed_bcsr->row_values, c10::kInt);});
-    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_matrix_, {return wrap_vector<int>(typed_bcsr->col_indices, c10::kInt);});
+    wrapped_row_values = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int>(typed_bcsr->row_values, c10::kInt); });
+    wrapped_col_indices = QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(
+        bcsr_matrix_,
+        { return wrap_vector<int>(typed_bcsr->col_indices, c10::kInt); });
   }
 
   return BCSRSerializationType(

@@ -15,9 +15,9 @@
 #ifndef _WIN32
 #include <qnnpack/AlignedAllocator.h>
 #endif
+#include <pytorch_qnnpack.h>
 #include <qnnpack/common.h>
 #include <qnnpack/math.h>
-#include <pytorch_qnnpack.h>
 
 #ifdef QNNPACK_BCSRMATRIX_DEBUG
 #include <iostream>
@@ -133,7 +133,8 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
     const uint32_t col_block_size,
     const uint8_t* zero_points) {
   assert(K > 0);
-  std::unique_ptr<TypedBCSRMatrix<INDICES_DTYPE>> bcsr_mat = std::make_unique<TypedBCSRMatrix<INDICES_DTYPE>>();
+  std::unique_ptr<TypedBCSRMatrix<INDICES_DTYPE>> bcsr_mat =
+      std::make_unique<TypedBCSRMatrix<INDICES_DTYPE>>();
   auto& row_values = bcsr_mat->row_values.vector();
   auto& col_indices = bcsr_mat->col_indices.vector();
   auto& values = bcsr_mat->values.vector();
@@ -207,7 +208,8 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
     const int64_t values_size,
     const int64_t row_block_size,
     const int64_t col_block_size) {
-  std::unique_ptr<TypedBCSRMatrix<INDICES_DTYPE>> bcsr_mat = std::make_unique<TypedBCSRMatrix<INDICES_DTYPE>>();
+  std::unique_ptr<TypedBCSRMatrix<INDICES_DTYPE>> bcsr_mat =
+      std::make_unique<TypedBCSRMatrix<INDICES_DTYPE>>();
   bcsr_mat->col_indices =
       OwnedOrBorrowedVector<INDICES_DTYPE>(col_indices, col_indices_size);
   bcsr_mat->row_values =
@@ -243,7 +245,7 @@ struct IndicesDtypeEnumTrait<uint8_t> {
       pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t;
 };
 
-template<typename INDICES_DTYPE>
+template <typename INDICES_DTYPE>
 TypedBCSRMatrix<INDICES_DTYPE>::TypedBCSRMatrix() {
   indices_dtype = IndicesDtypeEnumTrait<INDICES_DTYPE>::dtype;
 }
@@ -264,7 +266,12 @@ void TypedBCSRMatrix<INDICES_DTYPE>::print() const {
   std::cout << "row block size:" << row_block_size << std::endl;
   std::cout << "col block size:" << col_block_size << std::endl;
   std::cout << "row ptr\n";
-  std::cout << "indices dtype: uint" << static_cast<std::underlying_type_t<pytorch_qnnp_sparse_matrix_indices_dtype>>(indices_dtype) << "_t" << std::endl;
+  std::cout
+      << "indices dtype: uint"
+      << static_cast<
+             std::underlying_type_t<pytorch_qnnp_sparse_matrix_indices_dtype>>(
+             indices_dtype)
+      << "_t" << std::endl;
   for (uint32_t i = 0; i < row_values.size(); i++) {
     std::cout << (uint32_t)row_values[i] << ", ";
   }
@@ -324,14 +331,11 @@ void TypedBCSRMatrix<INDICES_DTYPE>::unpack(
 
 template <typename INDICES_DTYPE>
 uint32_t TypedBCSRMatrix<INDICES_DTYPE>::max_index() const {
-  return static_cast<uint32_t>(
-      std::max(
-          *std::max_element(
-              row_values.data(),
-              row_values.data() + row_values.size()),
-          *std::max_element(
-              col_indices.data(),
-              col_indices.data() + col_indices.size())));
+  return static_cast<uint32_t>(std::max(
+      *std::max_element(
+          row_values.data(), row_values.data() + row_values.size()),
+      *std::max_element(
+          col_indices.data(), col_indices.data() + col_indices.size())));
 }
 
 /**
@@ -340,30 +344,38 @@ uint32_t TypedBCSRMatrix<INDICES_DTYPE>::max_index() const {
  * 1) The BCSRMatrix's underlying TypedBCSRMatrix, called typed_bcsr
  * 2) The TypedBCSRMatrix's indices data type, called INDICES_DTYPE
  */
-#define QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_, dispatch_body) [&bcsr=bcsr_]() {  \
-  switch (bcsr->indices_dtype) {                                               \
-    case pytorch_qnnp_sparse_matrix_indices_dtype_uint32_t: {                  \
-      using INDICES_DTYPE = uint32_t;                                          \
-      const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>* typed_bcsr = static_cast<const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>*>(bcsr.get()); \
-      return [&typed_bcsr]() dispatch_body();                                  \
-    }                                                                          \
-    case pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t: {                  \
-      using INDICES_DTYPE = uint16_t;                                          \
-      const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>* typed_bcsr = static_cast<const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>*>(bcsr.get()); \
-      return [&typed_bcsr]() dispatch_body();                                  \
-    }                                                                         \
-    case pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t: {                   \
-      using INDICES_DTYPE = uint8_t;                                           \
-      const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>* typed_bcsr = static_cast<const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>*>(bcsr.get()); \
-      return [&typed_bcsr]() dispatch_body();                                  \
-    }                                                                          \
-    case pytorch_qnnp_sparse_matrix_indices_dtype_invalid: {                   \
-      assert(false);                                                           \
-      /* std::abort() to avoid the following error: */                         \
-      /* "non-void lambda does not return a value in all control paths" */     \
-      std::abort();                                                            \
-    }                                                                          \
-  }                                                                            \
-}()
+#define QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE(bcsr_, dispatch_body)            \
+  [&bcsr = bcsr_]() {                                                              \
+    switch (bcsr->indices_dtype) {                                                 \
+      case pytorch_qnnp_sparse_matrix_indices_dtype_uint32_t: {                    \
+        using INDICES_DTYPE = uint32_t;                                            \
+        const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>* typed_bcsr =                \
+            static_cast<const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>*>(           \
+                bcsr.get());                                                       \
+        return [&typed_bcsr]() dispatch_body();                                    \
+      }                                                                            \
+      case pytorch_qnnp_sparse_matrix_indices_dtype_uint16_t: {                    \
+        using INDICES_DTYPE = uint16_t;                                            \
+        const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>* typed_bcsr =                \
+            static_cast<const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>*>(           \
+                bcsr.get());                                                       \
+        return [&typed_bcsr]() dispatch_body();                                    \
+      }                                                                            \
+      case pytorch_qnnp_sparse_matrix_indices_dtype_uint8_t: {                     \
+        using INDICES_DTYPE = uint8_t;                                             \
+        const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>* typed_bcsr =                \
+            static_cast<const qnnpack::TypedBCSRMatrix<INDICES_DTYPE>*>(           \
+                bcsr.get());                                                       \
+        return [&typed_bcsr]() dispatch_body();                                    \
+      }                                                                            \
+      case pytorch_qnnp_sparse_matrix_indices_dtype_invalid: {                     \
+        assert(false);                                                             \
+        /* throw exception to avoid the following error: */                        \
+        /* "non-void lambda does not return a value in all control paths" */       \
+        throw std::invalid_argument(                                               \
+            "Invalid indices dtype in QNNPACK_BCSRMATRIX_DISPATCH_INDICES_DTYPE"); \
+      }                                                                            \
+    }                                                                              \
+  }()
 
 } // namespace qnnpack

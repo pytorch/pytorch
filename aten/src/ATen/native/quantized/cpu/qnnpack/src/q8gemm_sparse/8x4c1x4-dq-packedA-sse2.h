@@ -42,7 +42,6 @@ void KERNEL_NAME(
     size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params
         quantization_params[RESTRICT_STATIC 1]) {
-
   const __m128i va_zero_point = _mm_set1_epi16(quantization_params->input_zero_point);
   const __m128 vbias = _mm_load_ps(b);
   const __m128i vzero = _mm_setzero_si128();

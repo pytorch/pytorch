@@ -128,8 +128,10 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
         return static_cast<int8_t>(static_cast<int16_t>(v) - 128);
       });
 
-  const at::Tensor row_block_indices = std::get<row_block_indices_index>(serialized);
-  const at::Tensor col_block_indices = std::get<col_block_indices_index>(serialized);
+  const at::Tensor row_block_indices =
+      std::get<row_block_indices_index>(serialized);
+  const at::Tensor col_block_indices =
+      std::get<col_block_indices_index>(serialized);
   // Unpack as non backend specific untiled BCSR then pack as Fbgemm tiled BCSR
   // because untiled Fbgemm BCSR currently doesn't exist
   unpack_bcsr(
@@ -138,12 +140,12 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
           row_block_indices.scalar_type(),
           "packed_linear_weight_fbgemm_setup_bcsr",
           [&] {
-              return ao::sparse::BCSR(
-                  std::move(weight_values),
-                  unwrap_vector<scalar_t, int32_t>(
-                      std::get<row_block_indices_index>(serialized)),
-                  unwrap_vector<scalar_t, int32_t>(
-                      std::get<col_block_indices_index>(serialized)));
+            return ao::sparse::BCSR(
+                std::move(weight_values),
+                unwrap_vector<scalar_t, int32_t>(
+                    std::get<row_block_indices_index>(serialized)),
+                unwrap_vector<scalar_t, int32_t>(
+                    std::get<col_block_indices_index>(serialized)));
           }),
       output_channels,
       input_channels,
@@ -168,24 +170,24 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::deserialize(
   return c10::make_intrusive<PackedLinearWeightQnnp>(serialized);
 }
 
-template<typename INDICES_DTYPE>
+template <typename INDICES_DTYPE>
 struct UnsignedIndicesTypeTrait {
   static_assert(
       sizeof(INDICES_DTYPE) == 0,
       "Invalid dtype for UnsignedIndicesTypeTrait");
 };
 
-template<>
+template <>
 struct UnsignedIndicesTypeTrait<int32_t> {
   using t = uint32_t;
 };
 
-template<>
+template <>
 struct UnsignedIndicesTypeTrait<int16_t> {
   using t = uint16_t;
 };
 
-template<>
+template <>
 struct UnsignedIndicesTypeTrait<int8_t> {
   using t = uint8_t;
 };
@@ -203,13 +205,16 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
               : c10::kPerChannelAffine),
       output_channels_(std::get<num_output_channels_index>(serialized)),
       input_channels_(std::get<num_input_channels_index>(serialized)) {
-
-  const int64_t serialization_version = std::get<serialization_version_index>(serialized);
+  const int64_t serialization_version =
+      std::get<serialization_version_index>(serialized);
   TORCH_CHECK(
       serialization_version <= SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION,
       "Attemped to deserialize sparse qlinear packed params with an ",
-      "incompatible serialization version (", serialization_version, " > ",
-      SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION, ")");
+      "incompatible serialization version (",
+      serialization_version,
+      " > ",
+      SPARSE_LINEAR_PACKED_PARAM_SERIALIZATION_VERSION,
+      ")");
 
   if (orig_bias_.has_value()) {
     bias_ = orig_bias_.value();
@@ -280,13 +285,14 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       std::get<col_block_indices_index>(serialized);
   deserialized_bcsr_weight_values_ = std::get<weight_values_index>(serialized);
 
-#define AT_DISPATCH_CASE_BCSR_INDICES_TYPES(...)                               \
-  AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__)                          \
-  AT_DISPATCH_CASE(at::ScalarType::Int, __VA_ARGS__)                           \
+#define AT_DISPATCH_CASE_BCSR_INDICES_TYPES(...)      \
+  AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Int, __VA_ARGS__)  \
   AT_DISPATCH_CASE(at::ScalarType::Short, __VA_ARGS__)
 
-#define AT_DISPATCH_BCSR_INDICES_TYPES(TYPE, NAME, ...)                        \
-  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_BCSR_INDICES_TYPES(__VA_ARGS__))
+#define AT_DISPATCH_BCSR_INDICES_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE, NAME, AT_DISPATCH_CASE_BCSR_INDICES_TYPES(__VA_ARGS__))
 
   bcsr_matrix_ = AT_DISPATCH_BCSR_INDICES_TYPES(
       deserialized_bcsr_row_block_indices_.scalar_type(),
@@ -294,19 +300,20 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
       [&] {
         using unsigned_t = UnsignedIndicesTypeTrait<scalar_t>::t;
         return qnnpack::generateBlockCSRMatrix<unsigned_t>(
-                reinterpret_cast<unsigned_t*>(deserialized_bcsr_col_block_indices_.data_ptr<scalar_t>()),
-                reinterpret_cast<unsigned_t*>(deserialized_bcsr_row_block_indices_.data_ptr<scalar_t>()),
-                deserialized_bcsr_weight_values_.data_ptr<uint8_t>(),
-                deserialized_bcsr_col_block_indices_.numel(),
-                deserialized_bcsr_row_block_indices_.numel(),
-                deserialized_bcsr_weight_values_.numel(),
-                out_features_block_size_,
-                in_features_block_size_);
+            reinterpret_cast<unsigned_t*>(
+                deserialized_bcsr_col_block_indices_.data_ptr<scalar_t>()),
+            reinterpret_cast<unsigned_t*>(
+                deserialized_bcsr_row_block_indices_.data_ptr<scalar_t>()),
+            deserialized_bcsr_weight_values_.data_ptr<uint8_t>(),
+            deserialized_bcsr_col_block_indices_.numel(),
+            deserialized_bcsr_row_block_indices_.numel(),
+            deserialized_bcsr_weight_values_.numel(),
+            out_features_block_size_,
+            in_features_block_size_);
       });
 
 #undef AT_DISPATCH_CASE_BCSR_INDICES_TYPES
 #undef AT_DISPATCH_BCSR_INDICES_TYPES
-
 }
 #endif // USE_PYTORCH_QNNPACK
 
