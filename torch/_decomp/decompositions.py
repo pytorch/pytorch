@@ -1,4 +1,6 @@
 import functools
+import sys
+from argparse import ArgumentError
 from enum import Enum
 from itertools import product
 from typing import Callable, Iterable, List, Optional, Tuple
@@ -601,41 +603,93 @@ def slice(
     dim: int = 0,
     start: Optional[int] = None,
     end: Optional[int] = None,
-    step: Optional[int] = 1,
+    step: int = 1,
 ):
-    new_size = list(self.size())
-    new_stride = list(self.stride())
-    new_offset = self.storage_offset()
-    dimsize = self.size()[dim]
-    if not start:
-        start = 0
-    if not end:
-        end = dimsize
 
-    if start < 0:
-        start += dimsize
-    if end < 0:
-        end += dimsize
-    if start < 0:
-        start = 0
-    elif start >= dimsize:
-        start = dimsize
-    if end < start:
-        end = start
-    elif end >= dimsize:
-        end = dimsize
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    sizes = list(self.size())
+    strides = list(self.stride())
 
-    canonical_start = start
-    canonical_end = end
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
 
-    new_offset += canonical_start * self.stride()[dim]
+    start_val = start if start is not None else 0
+    end_val = end if end is not None else sys.maxsize  # 2^63 – 1
 
-    new_size[dim] = (canonical_end - canonical_start + step - 1) // step
+    if start_val < 0:
+        start_val += sizes[dim]
 
-    if step != 1:
-        new_stride[dim] *= step
+    if end_val < 0:
+        end_val += sizes[dim]
 
-    return self.as_strided(new_size, new_stride, new_offset)
+    if start_val < 0:
+        start_val = 0
+    elif start_val >= sizes[dim]:
+        start_val = sizes[dim]
+
+    if end_val < start_val:
+        end_val = start_val
+    elif end_val >= sizes[dim]:
+        end_val = sizes[dim]
+
+    storage_offset = self.storage_offset() + start_val * strides[dim]
+    len = end_val - start_val
+    sizes[dim] = (len + step - 1) // step
+    strides[dim] *= step
+
+    if self.is_quantized:
+        raise NotImplementedError(
+            "Slice decomposition for quantized tensors aren't implemented"
+        )
+    else:
+        return self.as_strided(sizes, strides, storage_offset)
+
+
+# @register_decomposition(aten.slice.Tensor)
+# def slice(
+#     # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
+#     self: Tensor,
+#     dim: int = 0,
+#     start: Optional[int] = None,
+#     end: Optional[int] = None,
+#     step: Optional[int] = 1,
+# ):
+#     new_size = list(self.size())
+#     new_stride = list(self.stride())
+#     new_offset = self.storage_offset()
+#     dimsize = self.size()[dim]
+#     if not start:
+#         start = 0
+#     if not end:
+#         end = dimsize
+
+#     if start < 0:
+#         start += dimsize
+#     if end < 0:
+#         end += dimsize
+#     if start < 0:
+#         start = 0
+#     elif start >= dimsize:
+#         start = dimsize
+#     if end < start:
+#         end = start
+#     elif end >= dimsize:
+#         end = dimsize
+
+#     canonical_start = start
+#     canonical_end = end
+
+#     new_offset += canonical_start * self.stride()[dim]
+
+#     new_size[dim] = (canonical_end - canonical_start + step - 1) // step
+
+#     if step != 1:
+#         new_stride[dim] *= step
+
+#     return self.as_strided(new_size, new_stride, new_offset)
 
 
 @register_decomposition(aten.select_backward)
