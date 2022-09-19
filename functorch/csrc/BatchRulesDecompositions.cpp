@@ -181,6 +181,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(pairwise_distance);
   OP_DECOMPOSE(pinverse);
   OP_DECOMPOSE(poisson_nll_loss);
+  OP_DECOMPOSE(positive);
   OP_DECOMPOSE(qr);
   OP_DECOMPOSE(ravel);
   OP_DECOMPOSE2(repeat_interleave, self_int);

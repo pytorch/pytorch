@@ -64,7 +64,10 @@ void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
     UNSUPPORTED_DYNAMIC(nonzero);
     UNSUPPORTED_DYNAMIC(where);
-    UNSUPPORTED_DYNAMIC(unique);
+    UNSUPPORTED_DYNAMIC(unique_dim);
+    UNSUPPORTED_DYNAMIC(unique_consecutive);
+    UNSUPPORTED_DYNAMIC(unique_dim_consecutive);
+    UNSUPPORTED_DYNAMIC(_unique2);
     m.impl("_local_scalar_dense", torch::CppFunction::makeFromBoxedFunction<&unsupportedLocalScalarDense>());
     m.impl("item", torch::CppFunction::makeFromBoxedFunction<&unsupportedItem>());
     m.impl("is_nonzero", torch::CppFunction::makeFromBoxedFunction<&unsupportedIsNonzero>());
