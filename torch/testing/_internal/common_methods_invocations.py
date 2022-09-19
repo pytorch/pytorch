@@ -1046,22 +1046,17 @@ def template_reference_inputs_bmm_sparse(self, input_layout, device, dtype, requ
                                   args=(b_sparse.detach().requires_grad_(requires_grad),),
                                   kwargs=sample_input.kwargs)
 
-    if input_layout not in {torch.sparse_csr, torch.sparse_csc,
-                            torch.sparse_bsr, torch.sparse_bsc}:
-        # TODO: sparse compressed tensors require equal NSE in batches
-        # (see PR 84834 that removes this restriction). After PR 84834
-        # (or equivalent) lands, enable this if-block for all layouts.
-        a = make_tensor((2 * S, S + 2, S + 3), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
-        a[0].fill_(0)
-        a[2].fill_(0)
-        a[3, 1].fill_(0)
-        a[4, :, 1].fill_(0)
-        b = make_tensor((2 * S, S + 3, S + 1), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
-        b[1].fill_(0)
-        b[2].fill_(0)
-        b[3, 2].fill_(0)
-        b[4, :, 2].fill_(0)
-        yield SampleInput(torch.sparse._to_layout(a, input_layout), args=(b,))
+    a = make_tensor((2 * S, S + 2, S + 3), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
+    a[0].fill_(0)
+    a[2].fill_(0)
+    a[3, 1].fill_(0)
+    a[4, :, 1].fill_(0)
+    b = make_tensor((2 * S, S + 3, S + 1), dtype=dtype, device=device, requires_grad=requires_grad, exclude_zero=True)
+    b[1].fill_(0)
+    b[2].fill_(0)
+    b[3, 2].fill_(0)
+    b[4, :, 2].fill_(0)
+    yield SampleInput(torch.sparse._to_layout(a, input_layout), args=(b,))
 
 
 def reference_inputs_sparse_coo_bmm(self, device, dtype, requires_grad, **kwargs):
