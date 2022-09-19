@@ -497,7 +497,7 @@ _vjp_impls: Dict[str, Any] = {
     ),
     "remainder": lambda grad, result, self, other: (
         grad,
-        prims.mul(grad, prims.floor(prims.div(self, other))),
+        prims.neg(prims.mul(grad, prims.floor(prims.div(self, other)))),
     ),
     "round": lambda grad, result, self: prims.mul(grad, 0),
     "rsqrt": lambda grad, result, self: prims.mul(
