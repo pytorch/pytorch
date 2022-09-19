@@ -78,6 +78,7 @@ class DispatchKey(Enum):
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
 
+    Python = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -93,6 +94,7 @@ class DispatchKey(Enum):
 
     Autograd = auto()
     CompositeImplicitAutograd = auto()
+    CompositeImplicitAutogradNestedTensor = auto()
     CompositeExplicitAutograd = auto()
     CompositeExplicitAutogradNonFunctional = auto()
 
@@ -217,6 +219,7 @@ dispatch_keys = [
     DispatchKey.QuantizedCPU,
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
+    DispatchKey.CompositeImplicitAutogradNestedTensor,
     DispatchKey.CompositeExplicitAutograd,
     DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
@@ -237,6 +240,7 @@ def is_generic_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeImplicitAutogradNestedTensor,
     }
 
 
@@ -485,6 +489,7 @@ class NativeFunction:
 
     # Whether or not the NativeFunction contains a backend-agnostic kernel
     has_composite_implicit_autograd_kernel: bool
+    has_composite_implicit_autograd_nested_tensor_kernel: bool
     has_composite_explicit_autograd_kernel: bool
     has_composite_explicit_autograd_non_functional_kernel: bool
 
@@ -699,9 +704,20 @@ class NativeFunction:
             if d == DispatchKey.CompositeExplicitAutograd
             or d == DispatchKey.CompositeExplicitAutogradNonFunctional
             or d == DispatchKey.CompositeImplicitAutograd
+            or d == DispatchKey.CompositeImplicitAutogradNestedTensor
         ]
 
-        assert len(composites_in_dispatch) <= 1, (
+        assert len(composites_in_dispatch) <= 1 or (
+            len(composites_in_dispatch) == 2
+            and (
+                DispatchKey.CompositeExplicitAutogradNonFunctional
+                not in composites_in_dispatch
+            )
+            and (
+                DispatchKey.CompositeImplicitAutogradNestedTensor
+                in composites_in_dispatch
+            )
+        ), (
             "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
             "or CompositeImplicitAutograd on a single kernel; each "
             "strictly subsumes the other.  If you wanted to provide an explicit autograd "
@@ -756,10 +772,22 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             is_abstract = True
         else:
-            is_abstract = dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+            is_abstract = (
+                dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+                and dispatch.keys()
+                != {DispatchKey.CompositeImplicitAutogradNestedTensor}
+                and dispatch.keys()
+                != {
+                    DispatchKey.CompositeImplicitAutograd,
+                    DispatchKey.CompositeImplicitAutogradNestedTensor,
+                }
+            )
 
         has_composite_implicit_autograd_kernel = (
             DispatchKey.CompositeImplicitAutograd in dispatch.keys()
+        )
+        has_composite_implicit_autograd_nested_tensor_kernel = (
+            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch.keys()
         )
         has_composite_explicit_autograd_kernel = (
             DispatchKey.CompositeExplicitAutograd in dispatch.keys()
@@ -808,6 +836,7 @@ class NativeFunction:
                 cpp_no_default_args=cpp_no_default_args,
                 is_abstract=is_abstract,
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
+                has_composite_implicit_autograd_nested_tensor_kernel=has_composite_implicit_autograd_nested_tensor_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
                 has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
@@ -899,6 +928,9 @@ class NativeFunction:
             self.has_composite_implicit_autograd_kernel
             or self.has_composite_explicit_autograd_kernel
             or self.has_composite_explicit_autograd_non_functional_kernel
+        ) or (
+            self.has_composite_implicit_autograd_kernel
+            and self.has_composite_implicit_autograd_nested_tensor_kernel
         )
 
     @property
@@ -976,7 +1008,10 @@ class NativeFunctionsGroup:
         if self.structured:
             # For now, structured composite kernels are not supported (need some
             # design work to figure out how to make the composite case work)
-            assert not self.out.has_composite_implicit_autograd_kernel
+            assert (
+                not self.out.has_composite_implicit_autograd_kernel
+                and not self.out.has_composite_implicit_autograd_nested_tensor_kernel
+            )
 
             assert self.functional.structured_delegate == self.out.func.name, (
                 f"{self.functional.func.name} delegates to {self.functional.structured_delegate} "
@@ -1069,6 +1104,9 @@ class BackendMetadata:
     # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
     cpp_namespace: str
 
+    def supports_symint(self) -> bool:
+        return "_symint" in self.kernel
+
 
 @dataclass(frozen=True)
 class UfuncInnerLoop:
@@ -1112,8 +1150,6 @@ class BackendIndex:
     external: bool
     # Other backend-specific information that is on a per-operator basis
     index: Dict["OperatorName", BackendMetadata]
-    # Whether or not this backend handles symbolic ints or not
-    symint: bool
 
     @staticmethod
     def grow_index(
@@ -2509,6 +2545,14 @@ class NativeFunctionsViewGroup:
                 assert self.view_inplace.has_composite_implicit_autograd_kernel, (
                     f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
                     " both have CompositeImplicitAutograd kernels, or both not have composite kernels."
+                )
+        if self.view.has_composite_implicit_autograd_nested_tensor_kernel:
+            if self.view_inplace is not None:
+                assert (
+                    self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel
+                ), (
+                    f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
+                    " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
                 )
 
     def functions(self, *, include_copy: bool = True) -> Iterator[NativeFunction]:
