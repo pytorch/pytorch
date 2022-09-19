@@ -16,6 +16,7 @@
     - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
+- [Merging your Change](#merging-your-change)
 - [Writing documentation](#writing-documentation)
   - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
@@ -434,6 +435,13 @@ ghstack submit
 **NB**: It is not recommended to use this workflow unless you are also using
 [`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
 of very low signal to reviewers.
+
+## Merging your Change
+If you know the right people or team that should approve your PR, add them to the Reviewers list.
+
+If not, your PR will get triaged and assigend to the appropriate person in a couple business days.
+
+Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge`
 
 ## Writing documentation
 
