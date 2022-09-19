@@ -209,15 +209,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
 WINDOWS_BINARY_SMOKE_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS,
-        package_type="wheel",
-        build_configs=generate_binary_build_matrix.generate_wheels_matrix(
-            OperatingSystem.WINDOWS,
-            arches=["11.3"],
-            python_versions=["3.7"]),
-        branches="master",
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
         package_type="libtorch",
         abi_version=generate_binary_build_matrix.RELEASE,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(

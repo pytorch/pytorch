@@ -28,8 +28,6 @@ from torch.overrides import (
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    # functools.wraps doesn't work well with methods in python 2
-    method_assignments = ("__name__", "__doc__")
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
@@ -637,6 +635,11 @@ class Tensor(torch._C._TensorBase):
         from ._linalg_utils import solve
 
         return solve(self, other)
+
+    def eig(self, eigenvectors=False):
+        from ._linalg_utils import eig
+
+        return eig(self, eigenvectors=eigenvectors)
 
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
