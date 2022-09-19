@@ -7,26 +7,32 @@
 
 import math
 from functools import wraps
-from typing import Any, Callable, Dict, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import torch
 
 import torch._prims_common as utils
-
 from torch._prims_common import (
     DimsSequenceType,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
     ShapeType,
     TensorLikeType,
 )
-from torch._prims_common.wrappers import backwards_not_supported
+from torch._prims_common.wrappers import (
+    backwards_not_supported,
+    elementwise_type_promotion_wrapper,
+)
 from torch.utils._mode_utils import autodispatch_below_autograd
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 nvprim_namespace = "nvprims"
 nvprim = torch.library.Library(nvprim_namespace, "DEF")
 nvprim_impl = torch.library.Library(
     nvprim_namespace, "IMPL", "CompositeExplicitAutograd"
+)
+nvprim_implicit_impl = torch.library.Library(
+    nvprim_namespace, "IMPL", "CompositeImplicitAutograd"
 )
 nvprim_autograd_impl = torch.library.Library(nvprim_namespace, "IMPL", "Autograd")
 nvprim_meta_impl = torch.library.Library(nvprim_namespace, "IMPL", "Meta")
@@ -58,6 +64,7 @@ nvprim_names = [
     "neg",
     "round",
     "rsqrt",
+    "sign",
     "sin",
     "sinh",
     "sqrt",
@@ -81,6 +88,8 @@ nvprim_names = [
     "pow",
     "remainder",
     "sub",
+    "squeeze",
+    "view_of",
     "broadcast_in_dim",
     "where",
     "convert_element_type",
@@ -119,6 +128,7 @@ _nvfuser_unary_ops = {
     "real",
     "round",
     "rsqrt",
+    "sign",
     "sin",
     "sinh",
     "sqrt",
@@ -216,6 +226,17 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
+def _squeeze_nvfuser(fd, a, a_shape, dimensions):
+    for idx in reversed(sorted(dimensions)):
+        a = fd.ops.squeeze(a, a_shape, idx)
+        a_shape = a_shape[:idx] + a_shape[idx + 1 :]
+    return a
+
+
+def _view_of_nvfuser(fd, a):
+    return fd.ops.set(a)
+
+
 def _sum_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -235,6 +256,23 @@ def _var_nvfuser(
 ):
     keep_dims = False
     return fd.ops.var(a, dims, correction, keep_dims)
+
+
+def _var_mean_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+    unbiased: Optional[bool] = None,
+    keepdim: bool = False,
+    *,
+    correction: int,
+):
+    # Unbiased arg shouldn't be set when this function is called
+    assert unbiased is None
+    # Ignore keepdim arg, because currently it's automatically converted into nvfuser's symbolic scalar
+    # keepdim is handled by the reference implementation
+    keepdim = False
+    return fd.ops.var_mean(a, dims, correction, keepdim)
 
 
 def _amax_nvfuser(
@@ -257,8 +295,11 @@ def _amin_nvfuser(
 
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
+_nvfuser_impls["squeeze"] = _squeeze_nvfuser
+_nvfuser_impls["view_of"] = _view_of_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
+_nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
 
@@ -268,7 +309,8 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     Switches the interpretation of torch.ops.prims.* functions to
     use nvFuser's prims in torch.ops.nvprims.*
 
-    >>> with NvfuserPrimMode():
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode():
     ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
 
     By default, this context manager will fall back on the torch.ops.prims* if the
@@ -307,6 +349,8 @@ def _unsqueeze(a, dim):
     return torch._prims.expand_dims(a, (dim,))
 
 
+# add dimensions in canonicalized, sorted order
+# so that the tensor has the appropriate rank.
 def _unsqueeze_dims(a, dims, rank):
     dims = utils.canonicalize_dim(rank, dims)
     for dim in sorted(dims):
@@ -338,8 +382,8 @@ def _expand(a, *shape):
     )
 
 
-def _reduction_size(a, dims):
-    dims = utils.canonicalize_dim(a.ndim + 1, dims)
+def _dim_size(a, dims):
+    dims = utils.canonicalize_dim(a.ndim, dims)
     reduction_size = 1
     for idx, size in enumerate(a.size()):
         if idx in dims:
@@ -353,21 +397,24 @@ def _sum_vjp(grad, result, self, dims):
 
 
 def _mean_vjp(grad, self, dims):
-    mean_local_grad = 1.0 / _reduction_size(self, dims)
+    mean_local_grad = 1.0 / _dim_size(self, dims)
     unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
     expanded_grad = _expand(unsqueezed_grad, self.shape)
     return expanded_grad * mean_local_grad
 
 
 def _var_vjp(grad, mean, self, dims, unbiased):
-    var_reduction_size = _reduction_size(self, dims)
+    var_reduction_size = _dim_size(self, dims)
     if unbiased:
         var_reduction_size -= 1
     constant = 2.0 / var_reduction_size
+
+    # expand grad and mean tensors to self tensor size
     unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
     expanded_grad = _expand(unsqueezed_grad, self.shape)
     unsqueezed_mean = _unsqueeze_dims(mean, dims, self.ndim)
     expanded_mean = _expand(unsqueezed_mean, self.shape)
+
     var_local_grad = constant * torch.sub(self, expanded_mean)
     return expanded_grad * var_local_grad
 
@@ -443,7 +490,6 @@ _vjp_impls: Dict[str, Any] = {
     "log1p": lambda grad, result, self: prims.div(grad, prims.add(self, 1)),
     "log2": lambda grad, result, self: prims.div(grad, prims.mul(self, math.log(2))),
     "lt": None,  # Output is not differentiable
-    "mean": _mean_vjp,
     "mul": lambda grad, result, self, other: (
         prims.mul(grad, other),
         prims.mul(grad, self),
@@ -558,8 +604,107 @@ def _register_vjp(prim, vjp_impl):
     return _autograd_impl
 
 
+def register_var_mean():
+    """This function is used to register the var_mean function in torch.ops.nvprims module."""
+    name = "var_mean.main"
+
+    # This overload must be default for correct dispatching of var_mean(Tensor, bool)
+    nvprim.define("var_mean(Tensor inp, bool unbiased) -> (Tensor, Tensor)")
+
+    # This signature tries to combine several overloads of the torch.var_mean function into one overload.
+    nvprim.define(
+        f"{name}(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, int? correction=None)"
+        + " -> (Tensor, Tensor)"
+    )
+
+    # This function is used for device="meta" Tensors.
+    def _meta_var_mean(inp, dim=None, unbiased=None, keepdim=False, *, correction=None):
+        if torch._prims_common.is_complex_dtype(inp.dtype):
+            output_dtype = torch._prims_common.corresponding_real_dtype(inp.dtype)
+        else:
+            output_dtype = inp.dtype
+        var = torch._prims._reduction_meta(inp, dim, output_dtype=output_dtype)
+        mean = torch._prims._reduction_meta(inp, dim, output_dtype=inp.dtype)
+        if keepdim:
+            output_shape = [
+                inp.shape[i] if i not in dim else 1 for i in range(inp.ndim)
+            ]
+            broadcast_dims = [i for i in range(inp.ndim) if i not in dim]
+            var = torch.ops.nvprims.broadcast_in_dim(var, output_shape, broadcast_dims)
+            mean = torch.ops.nvprims.broadcast_in_dim(
+                mean, output_shape, broadcast_dims
+            )
+        return (var, mean)
+
+    # This function is used under _AutoDispatchBelowAutograd context
+    def _prim_impl(inp, dim=None, unbiased=None, keepdim=False, *, correction=None):
+        correction = torch._prims_common.set_correction(unbiased, correction)
+        return torch.var_mean(inp, dim, correction=correction, keepdim=keepdim)
+
+    nvprim_impl.impl(name, _prim_impl)
+    nvprim_meta_impl.impl(name, _meta_var_mean)
+
+    prim_packet = torch.ops.nvprims.var_mean
+    prim = prim_packet.main
+
+    def _unbiased_overload_impl(inp, unbiased):
+        return prim(inp, dim=None, unbiased=unbiased)
+
+    nvprim_implicit_impl.impl("var_mean", _unbiased_overload_impl)
+
+    @elementwise_type_promotion_wrapper(
+        type_promoting_args=("a",),
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    )
+    def _var_mean_ref(a, dim=None, unbiased=None, keepdim=False, *, correction=None):
+        correction = torch._prims_common.set_correction(unbiased, correction)
+        # reduces over all dimensions if dim=() is passed
+        if dim == () or dim == []:
+            dim = None
+        dim = torch._prims_common.reduction_dims(a.shape, dim)
+
+        # For complex tensors eager computes the variance as the sum of variances of
+        # the real and imaginary parts
+        # TODO: Creating a complex tensor from real and imaginary parts is not supported
+        if torch._prims_common.is_complex_dtype(a.dtype):
+            raise NotImplementedError("Complex tensors are not supported")
+
+        var_mean = prim(a, dim, correction=correction)
+
+        if keepdim:
+            output_shape = [a.shape[i] if i not in dim else 1 for i in range(a.ndim)]
+            broadcast_dims = [i for i in range(a.ndim) if i not in dim]
+            var, mean = var_mean
+            var = torch.ops.nvprims.broadcast_in_dim(var, output_shape, broadcast_dims)
+            mean = torch.ops.nvprims.broadcast_in_dim(
+                mean, output_shape, broadcast_dims
+            )
+            var_mean = (var, mean)
+        return var_mean
+
+    def _var_mean_autograd(
+        a, dim=None, unbiased=None, keepdim=False, *, correction=None
+    ):
+        # This wrapper is needed to convert prims calls inside
+        # elementwise_type_promotion_wrapper to nvprims calls
+        from torch._prims.context import NvfuserPrimsMode
+
+        with NvfuserPrimsMode():
+            return backwards_not_supported(_var_mean_ref)(
+                a, dim, unbiased, keepdim, correction=correction
+            )
+
+    nvprim_autograd_impl.impl(name, _var_mean_autograd)
+
+    for p in (prim_packet, prim):
+        p.__doc__ = "Computes the variance and mean of x over the list of dimensions specified in the dim argument"
+        p.impl_nvfuser = _nvfuser_impls["var_mean"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
+
+
 def register_nvprims():
     """Registers all nvFuser primitives in the torch.ops.nvprims module."""
+    register_var_mean()
     for name in nvprim_names:
         main_prim = getattr(torch.ops.prims, name)
 

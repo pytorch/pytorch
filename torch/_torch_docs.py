@@ -2311,6 +2311,15 @@ Alias of :func:`torch.cat`.
 )
 
 add_docstr(
+    torch.concatenate,
+    r"""
+concatenate(tensors, axis=0, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""",
+)
+
+add_docstr(
     torch.ceil,
     r"""
 ceil(input, *, out=None) -> Tensor
@@ -3996,92 +4005,6 @@ Example::
     tensor([16.+1.j])
     >>> torch.vdot(b, a)
     tensor([16.-1.j])
-""",
-)
-
-add_docstr(
-    torch.eig,
-    r"""
-eig(input, eigenvectors=False, *, out=None) -> (Tensor, Tensor)
-
-Computes the eigenvalues and eigenvectors of a real square matrix.
-
-.. note::
-    Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-    if eigenvalues and eigenvectors are all real valued.
-
-    When :attr:`input` is on CUDA, :func:`torch.eig() <torch.eig>` causes
-    host-device synchronization.
-
-.. warning::
-
-    :func:`torch.eig` is deprecated in favor of :func:`torch.linalg.eig`
-    and will be removed in a future PyTorch release.
-    :func:`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble`
-    rather than real tensors mimicking complex tensors.
-
-    ``L, _ = torch.eig(A)`` should be replaced with
-
-    .. code :: python
-
-        L_complex = torch.linalg.eigvals(A)
-
-    ``L, V = torch.eig(A, eigenvectors=True)`` should be replaced with
-
-    .. code :: python
-
-        L_complex, V_complex = torch.linalg.eig(A)
-
-Args:
-    input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
-        will be computed
-    eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors;
-        otherwise, only eigenvalues will be computed
-
-Keyword args:
-    out (tuple, optional): the output tensors
-
-Returns:
-    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
-
-        - **eigenvalues** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``input``,
-          where the first element is the real part and the second element is the imaginary part.
-          The eigenvalues are not necessarily ordered.
-        - **eigenvectors** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
-          Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
-          eigenvectors of corresponding eigenvalues as follows.
-          If the corresponding `eigenvalues[j]` is a real number, column `eigenvectors[:, j]` is the eigenvector
-          corresponding to `eigenvalues[j]`.
-          If the corresponding `eigenvalues[j]` and `eigenvalues[j + 1]` form a complex conjugate pair, then the
-          true eigenvectors can be computed as
-          :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
-          :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
-
-Example::
-
-    Trivial example with a diagonal matrix. By default, only eigenvalues are computed:
-
-    >>> a = torch.diag(torch.tensor([1, 2, 3], dtype=torch.double))
-    >>> e, v = torch.eig(a)
-    >>> e
-    tensor([[1., 0.],
-            [2., 0.],
-            [3., 0.]], dtype=torch.float64)
-    >>> v
-    tensor([], dtype=torch.float64)
-
-    Compute also the eigenvectors:
-
-    >>> e, v = torch.eig(a, eigenvectors=True)
-    >>> e
-    tensor([[1., 0.],
-            [2., 0.],
-            [3., 0.]], dtype=torch.float64)
-    >>> v
-    tensor([[1., 0., 0.],
-            [0., 1., 0.],
-            [0., 0., 1.]], dtype=torch.float64)
-
 """,
 )
 
@@ -7095,7 +7018,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 
 Args:
     {input}
-    {dim} If `None`, reduces all dimensions. Default is `None`.
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -8158,7 +8081,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (Tensor or int): the starting dimension
     length (int): the distance to the ending dimension
 
 Example::
@@ -10806,7 +10729,7 @@ any correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -10971,7 +10894,7 @@ If :attr:`dim` is a list of dimensions, reduce over all of them.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
     {keepdim}
 
 Keyword args:
@@ -11664,6 +11587,20 @@ If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` then the
 resulting :attr:`out` tensor *does not* share the underlying storage
 with the :attr:`input` tensor.
 
+If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` with compressed
+layout (SparseCSR, SparseBSR, SparseCSC or SparseBSC) the arguments
+:attr:`dim0` and :attr:`dim1` must be both batch dimensions, or must
+both be sparse dimensions. The batch dimensions of a sparse tensor are the
+dimensions preceding the sparse dimensions.
+
+.. note::
+    Transpositions which interchange the sparse dimensions of a `SparseCSR`
+    or `SparseCSC` layout tensor will result in the layout changing between
+    the two options. Transposition of the sparse dimensions of a ` SparseBSR`
+    or `SparseBSC` layout tensor will likewise generate a result with the
+    opposite layout.
+
+
 Args:
     {input}
     dim0 (int): the first dimension to be transposed
@@ -12228,7 +12165,7 @@ correction.
 
 Args:
     {input}
-    {dim}
+    {opt_dim}
 
 Keyword args:
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
@@ -13523,6 +13460,7 @@ Returns:
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
     >>> g_cpu = torch.Generator()
     >>> g_cuda = torch.Generator(device='cuda')
 """,

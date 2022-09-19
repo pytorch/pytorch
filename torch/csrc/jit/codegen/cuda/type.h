@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -127,6 +128,7 @@ enum class ExprType {
   BlockSync,
   GridSync,
   CpAsyncWait,
+  CpAsyncCommit,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
@@ -179,6 +181,9 @@ enum class UnaryOpType {
   Tan,
   Tanh,
   Trunc,
+
+  // Tools to help debugging
+  Print,
 
   // Might be a bitwise operator or boolean operator.
   Not,
@@ -263,6 +268,9 @@ enum class ParallelType {
   Serial
 };
 
+TORCH_CUDA_CU_API std::unordered_set<ParallelType> allParallelTypesExcept(
+    const std::unordered_set<ParallelType>& except);
+
 static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::BIDx,
     ParallelType::BIDy,
@@ -326,6 +334,9 @@ enum class DoubleBufferLoopStage { NotApplicable, Prolog, Main, Epilog };
 //!    doesn't have the same type.
 enum class Swizzle2DType { NoSwizzle = 0, ZShape, Transpose, XOR, Scatter };
 
+//! Modes of swizzle, see [Note on swizzle mode].
+enum class SwizzleMode { NoSwizzle = 0, Data, Loop };
+
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);
@@ -357,6 +368,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream&,
     const DoubleBufferLoopStage);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const Swizzle2DType&);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const SwizzleMode&);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);

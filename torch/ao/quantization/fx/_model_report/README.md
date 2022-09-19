@@ -202,3 +202,16 @@ These tests include:
 
 If you wish to add a Detector, make sure to create a test class modeled after one of the exisiting classes and test your detector.
 Because users will be interacting with the Detectors through the `ModelReport` class and not directly, ensure that the tests follow this as well.
+
+# Future Tasks and Improvements
+
+Below is a list of tasks that can help further improve the API or bug fixes that give the API more stability:
+
+- [ ] For DynamicStaticDetector, change method of calculating stationarity from variance to variance of variance to help account for outliers
+- [ ] Add more types of visualizations for data
+- [ ] Add ability to visualize histograms of histogram observers
+- [ ] Automatically generate QConfigs from given suggestions
+- [ ] Tune default arguments for detectors with further research and analysis on what appropriate thresholds are
+- [ ] Merge the generation of the reports and the qconfig generation together
+- [ ] Make a lot of the dicts returned object classes
+- [ ] Change type of equalization config from `QConfigMapping` to `EqualizationMapping`

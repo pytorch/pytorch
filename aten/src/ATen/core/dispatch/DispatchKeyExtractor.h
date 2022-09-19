@@ -114,6 +114,9 @@ namespace detail {
  *    they have been registered as fallthrough.  The set of excluded backends
  *    varies from operator, as some operators may have overridden the
  *    fallthrough with custom behavior.
+ *
+ *   Note - this should maintain identical impl to the py dispatcher key extraction logic
+ *   at pytorch/torch/dispatcher.py
  */
 struct TORCH_API DispatchKeyExtractor final {
 public:
@@ -142,7 +145,7 @@ public:
         // no safe toTensorRef method, alas)
         ks = ks | ivalue.unsafeToTensorImpl()->key_set();
       } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const at::Tensor tensor : ivalue.toTensorList()) {
+        for (const at::Tensor& tensor : ivalue.toTensorList()) {
           ks = ks | tensor.key_set();
         }
       }

@@ -983,7 +983,7 @@ class TestBinaryUfuncs(TestCase):
             [1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
             dtype=dtype,
         )
-        # Divide by zero is tested seperately
+        # Divide by zero is tested separately
         denom = num[num != 0]
 
         a, b = num[None, :].clone(), denom[:, None].clone()
@@ -4128,6 +4128,22 @@ class TestBinaryUfuncs(TestCase):
         # Special Values Scalar-Tensor
         test_zeros_special_helper(*xlogy_fns, scalar=True)
         test_zeros_special_helper(*xlog1py_fns, scalar=True)
+
+    @dtypes(torch.float64)
+    def test_xlogy_xlog1py_gradients(self, device, dtype):
+        make_arg = partial(torch.tensor, dtype=dtype, device=device, requires_grad=True)
+
+        zeros = torch.zeros((2,), dtype=dtype, device=device)
+
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-1.5, 0.0])
+        torch.special.xlogy(x, y).sum().backward()
+        self.assertEqual(x.grad, zeros)
+
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-2.5, -1.0])
+        torch.special.xlog1py(x, y).sum().backward()
+        self.assertEqual(x.grad, zeros)
 
     def test_xlogy_xlog1py_scalar_type_promotion(self, device):
         # Test that python numbers don't participate in type promotion at the same

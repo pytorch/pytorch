@@ -129,7 +129,7 @@ void OptOutMutator::mutate(UnaryOp* uop) {
   auto container = uop->container();
   auto uop_type = uop->getUnaryOpType();
   container->removeExpr(uop);
-  IrBuilder::create<UnaryOp>(container, uop_type, out, in);
+  IrBuilder::create<UnaryOp>(container, uop_type, out, in, uop->getRNGOffset());
 }
 
 void OptOutMutator::mutate(BinaryOp* bop) {
@@ -475,6 +475,9 @@ void OptOutMutator::mutate(kir::GridSync*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::CpAsyncWait*) {
+  TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
+}
+void OptOutMutator::mutate(kir::CpAsyncCommit*) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
 }
 void OptOutMutator::mutate(kir::InitMagicZero*) {
