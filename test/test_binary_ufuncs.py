@@ -1128,6 +1128,16 @@ class TestBinaryUfuncs(TestCase):
                 # Cases that throw warnings
                 op(*inputs, out=torch.empty(2, device=device))
                 self.assertEqual(len(w), 1)
+        # test that multi-d out doesn't trigger segfault
+        arg1 = (torch.ones(2, 1, device=device), torch.ones(1, device=device))
+        arg2 = (torch.ones(2, device=device), torch.ones(1, 1, device=device))
+        outs = (torch.ones(2, 1, 1, 1, device=device), torch.ones(2, 2, 2, 2, device=device))
+
+        for a1, a2, o in zip(arg1, arg2, outs):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                torch.mul(a1, a2, out=o)
+                self.assertEqual(len(w), 1)
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @expectedFailureMeta  # UserWarning not triggered
