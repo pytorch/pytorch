@@ -5,11 +5,13 @@
 # can be added in the future for the corresponding higher-level torch/aten
 # functions.
 
+import math
 from functools import wraps
-from typing import Any, Dict, Callable, Sequence
+from typing import Any, Callable, Dict, Sequence
 
 import torch
-import math
+
+import torch._prims_common as utils
 
 from torch._prims_common import (
     DimsSequenceType,
@@ -17,10 +19,9 @@ from torch._prims_common import (
     ShapeType,
     TensorLikeType,
 )
-
 from torch._prims_common.wrappers import backwards_not_supported
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 from torch.utils._mode_utils import autodispatch_below_autograd
+from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 nvprim_namespace = "nvprims"
 nvprim = torch.library.Library(nvprim_namespace, "DEF")
@@ -294,73 +295,143 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
                     return nvfunc(*args, **kwargs)
         return orig_func(*args, **kwargs)
 
+
 prims = torch.ops.prims
 
+
+def _unsqueeze(a, dim):
+    utils.check(
+        dim <= a.ndim and dim >= (-a.ndim - 1),
+        lambda: "unsqueeze: dimension out of range!",
+    )
+    return torch._prims.expand_dims(a, (dim,))
+
+
+def _unsqueeze_dims(a, dims, rank):
+    dims = utils.canonicalize_dim(rank, dims)
+    for dim in sorted(dims):
+        a = _unsqueeze(a, dim)
+    return a
+
+
+def _expand(a, *shape):
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        shape = tuple(shape[0])
+    utils.check(
+        len(shape) >= len(a.shape),
+        lambda: "expand: the requested shape has too few dimensions!",
+    )
+    offset = len(shape) - len(a.shape)
+    shape_ = list(shape)
+    for idx, x in enumerate(a.shape):
+        offset_idx = idx + offset
+        requested_length = shape[offset_idx]
+        utils.check(
+            requested_length == x or x == 1 or requested_length == -1,
+            lambda: f"expand: attempting to expand a dimension of length {x}!",
+        )
+
+        shape_[offset_idx] = requested_length if requested_length != -1 else x
+    utils.validate_shape(shape_)
+    return prims.broadcast_in_dim(
+        a, shape_, tuple(range(offset, len(a.shape) + offset))
+    )
+
+
+def _reduction_size(a, dims):
+    dims = utils.canonicalize_dim(a.ndim + 1, dims)
+    reduction_size = 1
+    for idx, size in enumerate(a.size()):
+        if idx in dims:
+            reduction_size *= size
+    return reduction_size
+
+
 def _sum_vjp(grad, result, self, dims):
-    def unsqueeze(a, dim):
-        dim = torch._prims_common.canonicalize_dim(a.ndim + 1, dim)
-        return torch._prims.expand_dims(a, (dim,))
+    grad = _unsqueeze_dims(grad, dims, self.ndim)
+    return _expand(grad, self.shape), None
 
-    def unsqueeze_multiple(a, dims, ndim):
-        for i in range(ndim):
-            if i in dims:
-                a = unsqueeze(a, i)
-        return a
 
-    def expand(a, *shape):
-        if len(shape) == 1 and isinstance(shape[0], Sequence):
-            shape = tuple(shape[0])
-        torch._prims_common.check(
-            len(shape) >= len(a.shape),
-            lambda: "expand: the requested shape has too few dimensions!",
-        )
-        offset = len(shape) - len(a.shape)
-        shape_ = list(shape)
-        for idx, x in enumerate(a.shape):
-            offset_idx = idx + offset
-            requested_length = shape[offset_idx]
-            torch._prims_common.check(
-                requested_length == x or x == 1 or requested_length == -1,
-                lambda: f"expand: attempting to expand a dimension of length {x}!",
-            )
+def _mean_vjp(grad, self, dims):
+    mean_local_grad = 1.0 / _reduction_size(self, dims)
+    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
+    expanded_grad = _expand(unsqueezed_grad, self.shape)
+    return expanded_grad * mean_local_grad
 
-            shape_[offset_idx] = requested_length if requested_length != -1 else x
-        torch._prims_common.validate_shape(shape_)
-        return prims.broadcast_in_dim(
-            a, shape_, tuple(range(offset, len(a.shape) + offset))
-        )
 
-    grad = unsqueeze_multiple(grad, dims, self.ndim)
-    return expand(grad, self.shape), None
+def _var_vjp(grad, mean, self, dims, unbiased):
+    var_reduction_size = _reduction_size(self, dims)
+    if unbiased:
+        var_reduction_size -= 1
+    constant = 2.0 / var_reduction_size
+    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
+    expanded_grad = _expand(unsqueezed_grad, self.shape)
+    unsqueezed_mean = _unsqueeze_dims(mean, dims, self.ndim)
+    expanded_mean = _expand(unsqueezed_mean, self.shape)
+    var_local_grad = constant * torch.sub(self, expanded_mean)
+    return expanded_grad * var_local_grad
 
 
 _vjp_impls: Dict[str, Any] = {
     "abs": lambda grad, result, self: prims.mul(grad, prims.sign(self)),
-    "acos": lambda grad, result, self: prims.mul(grad, prims.neg(prims.rsqrt(prims.sub(1, prims.pow(self, 2))))),
+    "acos": lambda grad, result, self: prims.mul(
+        grad, prims.neg(prims.rsqrt(prims.sub(1, prims.pow(self, 2))))
+    ),
     "add": lambda grad, result, self, other: (grad, grad),
     "amax": None,  # TODO
     "amin": None,  # TODO
-    "asin": lambda grad, result, self: prims.mul(grad, prims.rsqrt(prims.sub(1, prims.pow(self, 2)))),
-    "atan": lambda grad, result, self: prims.mul(grad, prims.reciprocal(prims.add(1, prims.pow(self, 2)))),
-    "atan2": lambda grad, result, self, other: (prims.mul(grad, prims.div(other, prims.add(prims.pow(self, 2), prims.pow(other, 2)))), prims.mul(grad, prims.div(prims.neg(self), prims.add(prims.pow(self, 2), prims.pow(other, 2))))),
-    "atanh": lambda grad, result, self: prims.mul(grad, prims.reciprocal(prims.sub(1, prims.pow(self, 2)))),
+    "asin": lambda grad, result, self: prims.mul(
+        grad, prims.rsqrt(prims.sub(1, prims.pow(self, 2)))
+    ),
+    "atan": lambda grad, result, self: prims.mul(
+        grad, prims.reciprocal(prims.add(1, prims.pow(self, 2)))
+    ),
+    "atan2": lambda grad, result, self, other: (
+        prims.mul(
+            grad, prims.div(other, prims.add(prims.pow(self, 2), prims.pow(other, 2)))
+        ),
+        prims.mul(
+            grad,
+            prims.div(
+                prims.neg(self), prims.add(prims.pow(self, 2), prims.pow(other, 2))
+            ),
+        ),
+    ),
+    "atanh": lambda grad, result, self: prims.mul(
+        grad, prims.reciprocal(prims.sub(1, prims.pow(self, 2)))
+    ),
     "bitwise_and": None,  # Only integers supported
     "bitwise_not": None,  # Only integers supported
     "bitwise_or": None,  # Only integers supported
     "bitwise_xor": None,  # Only integers supported
     "broadcast_in_dim": None,  # TODO
     "ceil": lambda grad, result, self: prims.mul(grad, 0),
-    "convert_element_type": lambda grad, result, self, dtype: (prims.convert_element_type(grad, self.dtype), None),
+    "convert_element_type": lambda grad, result, self, dtype: (
+        prims.convert_element_type(grad, self.dtype),
+        None,
+    ),
     "cos": lambda grad, result, self: prims.mul(grad, prims.neg(prims.sin(self))),
     "cosh": lambda grad, result, self: prims.mul(grad, prims.sinh(self)),
-    "div": lambda grad, result, self, other: (prims.div(grad, other), prims.mul(prims.mul(prims.neg(grad), self), prims.pow(other, -2))),
+    "div": lambda grad, result, self, other: (
+        prims.div(grad, other),
+        prims.mul(prims.mul(prims.neg(grad), self), prims.pow(other, -2)),
+    ),
     "eq": None,
-    "erf": lambda grad, result, self: prims.mul(grad, prims.mul(2 / math.sqrt(math.pi), prims.exp(prims.neg(prims.pow(self, 2))))),
-    "erfc": lambda grad, result, self: prims.mul(grad, prims.mul(-2 / math.sqrt(math.pi), prims.exp(prims.neg(prims.pow(self, 2))))),
+    "erf": lambda grad, result, self: prims.mul(
+        grad,
+        prims.mul(2 / math.sqrt(math.pi), prims.exp(prims.neg(prims.pow(self, 2)))),
+    ),
+    "erfc": lambda grad, result, self: prims.mul(
+        grad,
+        prims.mul(-2 / math.sqrt(math.pi), prims.exp(prims.neg(prims.pow(self, 2)))),
+    ),
     "exp": lambda grad, result, self: prims.mul(grad, result),
     "expm1": lambda grad, result, self: prims.mul(grad, prims.add(result, 1)),
     "floor": lambda grad, result, self: prims.mul(grad, 0),
-    "fmod": lambda grad, result, self, other: (grad, prims.mul(prims.neg(grad), prims.trunc(prims.div(self, other)))),
+    "fmod": lambda grad, result, self, other: (
+        grad,
+        prims.mul(prims.neg(grad), prims.trunc(prims.div(self, other))),
+    ),
     "ge": None,  # Output is not differentiable
     "gt": None,  # Output is not differentiable
     "imag": None,  # TODO
@@ -372,25 +443,51 @@ _vjp_impls: Dict[str, Any] = {
     "log1p": lambda grad, result, self: prims.div(grad, prims.add(self, 1)),
     "log2": lambda grad, result, self: prims.div(grad, prims.mul(self, math.log(2))),
     "lt": None,  # Output is not differentiable
-    "mul": lambda grad, result, self, other: (prims.mul(grad, other), prims.mul(grad, self)),
+    "mean": _mean_vjp,
+    "mul": lambda grad, result, self, other: (
+        prims.mul(grad, other),
+        prims.mul(grad, self),
+    ),
     "ne": None,  # Output is not differentiable
     "neg": lambda grad, result, self: prims.neg(grad),
-    "pow": lambda grad, result, self, other: (prims.mul(grad, prims.mul(other, prims.pow(self, prims.sub(other, 1)))), prims.mul(grad, prims.mul(prims.log(self), result))),
+    "pow": lambda grad, result, self, other: (
+        prims.mul(grad, prims.mul(other, prims.pow(self, prims.sub(other, 1)))),
+        prims.mul(grad, prims.mul(prims.log(self), result)),
+    ),
     "real": None,  # TODO
-    "reciprocal": lambda grad, result, self: prims.mul(grad, prims.neg(prims.pow(result, 2))),
-    "remainder": lambda grad, result, self, other: (grad, prims.mul(grad, prims.floor(prims.div(self, other)))),
+    "reciprocal": lambda grad, result, self: prims.mul(
+        grad, prims.neg(prims.pow(result, 2))
+    ),
+    "remainder": lambda grad, result, self, other: (
+        grad,
+        prims.mul(grad, prims.floor(prims.div(self, other))),
+    ),
     "round": lambda grad, result, self: prims.mul(grad, 0),
-    "rsqrt": lambda grad, result, self: prims.mul(grad, prims.mul(-0.5, prims.div(result, self))),
+    "rsqrt": lambda grad, result, self: prims.mul(
+        grad, prims.mul(-0.5, prims.div(result, self))
+    ),
     "sin": lambda grad, result, self: prims.mul(grad, prims.cos(self)),
     "sinh": lambda grad, result, self: prims.mul(grad, prims.cosh(self)),
     "sqrt": lambda grad, result, self: prims.mul(grad, prims.div(0.5, result)),
     "sub": lambda grad, result, self, other: (grad, prims.neg(grad)),
     "sum": _sum_vjp,
-    "tan": lambda grad, result, self: prims.mul(grad, prims.add(1, prims.pow(result, 2))),
-    "tanh": lambda grad, result, self: prims.mul(grad, prims.sub(1, prims.pow(result, 2))),
+    "tan": lambda grad, result, self: prims.mul(
+        grad, prims.add(1, prims.pow(result, 2))
+    ),
+    "tanh": lambda grad, result, self: prims.mul(
+        grad, prims.sub(1, prims.pow(result, 2))
+    ),
     "trunc": lambda grad, result, self: prims.mul(grad, 0),
-    "var": None,  # TODO
-    "where": lambda grad, result, condition, self, other: (None, prims.where(condition, grad, 0), prims.where(condition, 0, grad)),
+    "var": _var_vjp,
+    "var_mean": lambda grad_var, grad_mean, var, mean, self, dims, unbiased: _var_vjp(
+        grad_var, mean, self, dims, unbiased
+    )
+    + _mean_vjp(grad_mean, self, dims),
+    "where": lambda grad, result, condition, self, other: (
+        None,
+        prims.where(condition, grad, 0),
+        prims.where(condition, 0, grad),
+    ),
 }
 
 
@@ -424,13 +521,20 @@ def _register_vjp(prim, vjp_impl):
             print(f"calling backward for prim {prim}")
 
             # TODO: use save for backward to save the args
-            fw_tensorargs = iter(ctx.saved_tensors[ctx.nout : ctx.nout + ctx.ntensorargs])
-            fw_args = [a if not isinstance(a, torch.Tensor) else next(fw_tensorargs) for a in ctx.args]
-            fw_out = ctx.saved_tensors[:ctx.nout]
+            fw_tensorargs = iter(
+                ctx.saved_tensors[ctx.nout : ctx.nout + ctx.ntensorargs]
+            )
+            fw_args = [
+                a if not isinstance(a, torch.Tensor) else next(fw_tensorargs)
+                for a in ctx.args
+            ]
+            fw_out = ctx.saved_tensors[: ctx.nout]
 
             with NvfuserPrimsMode():
                 vjp_result = vjp_impl(*bw_args, *fw_out, *fw_args)
-            vjp_result = (vjp_result,) if isinstance(vjp_result, torch.Tensor) else vjp_result
+            vjp_result = (
+                (vjp_result,) if isinstance(vjp_result, torch.Tensor) else vjp_result
+            )
 
             print(f"vjp_result: {vjp_result}")
             print(f"fw_args: {fw_args}")
@@ -440,7 +544,10 @@ def _register_vjp(prim, vjp_impl):
             assert len(vjp_result) == len(fw_args)
 
             # Replace the output with None for each non-tensor argument
-            vjp_result = tuple(None if not isinstance(a, torch.Tensor) else t for a, t in zip(fw_args, vjp_result))
+            vjp_result = tuple(
+                None if not isinstance(a, torch.Tensor) else t
+                for a, t in zip(fw_args, vjp_result)
+            )
             return None, *vjp_result
 
     @wraps(prim)
@@ -449,6 +556,7 @@ def _register_vjp(prim, vjp_impl):
         return PrimFunction.apply(args_spec, *flat_args)
 
     return _autograd_impl
+
 
 def register_nvprims():
     """Registers all nvFuser primitives in the torch.ops.nvprims module."""
