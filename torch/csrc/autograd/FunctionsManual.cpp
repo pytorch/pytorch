@@ -905,7 +905,7 @@ std::vector<Tensor> stack_tensors_backward(
   bool grad_is_complex = grad.is_complex();
   for (const auto i : c10::irange(dtypes.size())) {
     auto gr = grad.select(dim, i);
-    if (!at::isComplexType(dtypes[i]) && grad_is_complex) {
+    if (grad_is_complex && !at::isComplexType(dtypes[i])) {
       gr = at::real(gr);
     }
     grad_inputs[i] = gr;
