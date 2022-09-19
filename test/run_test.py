@@ -283,6 +283,7 @@ CI_SERIAL_LIST = [
     'distributions/test_distributions',
     'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
+    'test_modules',  # failed test due to mismatched elements
 ]
 
 
