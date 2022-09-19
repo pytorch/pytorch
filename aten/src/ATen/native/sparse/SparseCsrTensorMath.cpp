@@ -472,11 +472,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
       mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
       mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
-  if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
-    return addmm_out_sparse_compressed_cpu(
-        self, mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
-  }
-
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
   if (&result == &self) {
@@ -571,48 +566,21 @@ Tensor& _sparse_csr_mm_out(
 }
 
 Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
-    // Return sparse
-    // TODO: replace with at::zeros when it's implemented for sparse csr
-    return at::addmm(
-        at::empty({mat1.size(0), mat2.size(1)}, mat2.options()),
-        mat1,
-        mat2,
-        0.0,
-        1.0);
+  Tensor result;
+  // If either input is strided result will be strided
+  if (mat1.layout() == kStrided) {
+    result = at::zeros({mat1.size(-2), mat2.size(-1)}, mat1.options());
+  } else if (mat2.layout() == kStrided) {
+    result = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
+  } else {
+    // Otherwise the result is sparse, result layout must be csr for resize of
+    // output to mat1/mat2 will be coerced to mm compatible layout if possible
+    result = at::empty(
+        {mat1.size(-2), mat2.size(-1)}, mat1.options().layout(kSparseCsr));
   }
-  if ((mat1.layout() == kSparseCsc || mat1.layout() == kSparseCsr) &&
-      (mat2.layout() == kSparseCsc || mat2.layout() == kSparseCsr)) {
-    // TODO: Expensive conversion to CSR. Should add native support for CSC.
-    // Covers CSC @ CSR
-    // Covers CSR @ CSC
-    // Covers CSC @ CSC
-    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2.to_sparse_csr());
-  }
-  if (mat1.layout() == kSparseCsc && mat2.layout() == c10::kStrided) {
-    // TODO: This is a costly conversion. We should have
-    // native support for CSC.
-    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2);
-  }
-  if (mat1.is_sparse_csr() && mat2.layout() == c10::kStrided) {
-    // Return dense
-    return at::addmm(
-        at::zeros({mat1.size(0), mat2.size(1)}, mat2.options()),
-        mat1,
-        mat2,
-        0.0,
-        1.0);
-  }
-  if (mat1.layout() == c10::kStrided && mat2.is_sparse_csr()) {
-    // Return dense
-    return at::addmm(
-        at::zeros({mat1.size(0), mat2.size(1)}, mat1.options()),
-        mat1,
-        mat2,
-        0.0,
-        1.0);
-  }
-  AT_ERROR("_sparse_csr_mm does not support matrix multiplication of ", mat1.layout(), " @ ", mat2.layout());
+  // Let the implementation handle layout/order swaps and layout compatibility
+  // checks
+  return at::addmm(result, mat1, mat2, 0.0, 1.0);
 }
 
 Tensor _sparse_csr_addmm(

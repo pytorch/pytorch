@@ -1,3 +1,4 @@
+#include "c10/util/Exception.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -832,21 +833,73 @@ void addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat1.layout() == kSparseBsr && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return block_sparse_mm(mat1, mat2, beta, alpha, result);
+  TORCH_INTERNAL_ASSERT(
+      !((mat1.layout() == kStrided) && (mat2.layout() == kStrided) &&
+        (result.layout() == kStrided)),
+      "Expected at least one sparse input");
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kStrided) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spmm(
+            mat2.transpose(0, 1).to_sparse_csr(),
+            mat1.transpose(0, 1),
+            beta,
+            alpha,
+            result.transpose(0, 1));
+      }
+    } else if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        return spmm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
+  } else if (mat1.layout() == kSparseCsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        return spmm(mat1, mat2, beta, alpha, result);
+      }
+    } else if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kSparseCsr) {
+        return spgemm(mat1, mat2, beta, alpha, result);
+      }
+    } else if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kSparseCsr) {
+        return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
+      }
+    }
+  } else if (mat1.layout() == kSparseCsc) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+      }
+    } else if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kSparseCsr)
+        return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+    } else if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kSparseCsr) {
+        return spgemm(
+            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+      }
+    }
+  } else if (mat1.layout() == kSparseBsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided)
+        return block_sparse_mm(mat1, mat2, beta, alpha, result);
+    }
   }
-  if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return spmm(mat1, mat2, beta, alpha, result);
-  }
-  if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
-    // TODO: Add native CSC support via cuSPARSE if supported.
-    return spmm(mat2.transpose(0, 1).to_sparse_csr(), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
-  }
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    return spgemm(mat1, mat2, beta, alpha, result);
-  }
-  TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
-              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
+  TORCH_CHECK(
+      false,
+      "addmm: computation on CUDA is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
 }
 
 /*
