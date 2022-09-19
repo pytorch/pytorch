@@ -1465,6 +1465,13 @@ def error_inputs_eye(op_info, device, **kwargs):
         error_regex="m must be greater or equal to 0, got -3"
     )
 
+    # Test the RuntimeError raised when k is out of bounds
+    for n, m, k in ((5, 5, -5), (5, 5, 7), (5, 3, 4)):
+        yield ErrorInput(
+            SampleInput(n, args=(m,), kwargs={**_kwargs, "k": k}),
+            error_regex="< k <"
+        )
+
 
 def sample_inputs_new_full(self, device, dtype, requires_grad, **kwargs):
     def get_val(dtype):
