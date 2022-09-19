@@ -172,8 +172,9 @@ void handle_tensor_tensor_binary_op(const at::Tensor& self, const at::Tensor& ot
                                                      getMetalType(other),
                                                      kernel_name);
   uint32_t length = output.numel();
-  if (length == 0)
+  if (length == 0) {
     return;
+  }
   dispatch_sync(stream->queue(), ^(){
     id<MTLCommandBuffer> buffer = stream->commandBuffer();
     id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];
@@ -204,8 +205,9 @@ void handle_tensor_scalar_binary_op(const at::Tensor& self, const at::Scalar& ot
                                                      kernel_name);
   uint64_t sval = other.to<int64_t>();
   uint32_t length = output.numel();
-  if (length == 0)
+  if (length == 0) {
     return;
+  }
   dispatch_sync(stream->queue(), ^(){
     id<MTLCommandBuffer> buffer = stream->commandBuffer();
     id<MTLComputeCommandEncoder> commandEncoder = [buffer computeCommandEncoder];
