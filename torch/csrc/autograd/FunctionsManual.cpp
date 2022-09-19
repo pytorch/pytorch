@@ -710,6 +710,7 @@ Tensor prod_backward(
     return grad.expand_as(input);
   }
   if (is_meta_in_composite_kernels(input) || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -747,22 +748,18 @@ Tensor prod_backward(
     return grad.expand_as(input);
   }
 
-  if (is_meta_in_composite_kernels(input)) {
+  if (is_meta_in_composite_kernels(input) || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
-  if (isTensorSubclassLike(input)) {
-    // For Composite Compliance, always take the safer (and slower) path
-    return prod_safe_zeros_backward(grad, input, dim);
+  Tensor zero_mask = (input == 0);
+  Tensor slice_zero_count = zero_mask.sum(dim, true);
+  auto total_zeros = slice_zero_count.sum();
+  if (total_zeros.item<int64_t>() == 0) {
+    return grad * (result / input).conj();
   } else {
-    Tensor zero_mask = (input == 0);
-    Tensor slice_zero_count = zero_mask.sum(dim, true);
-    auto total_zeros = slice_zero_count.sum();
-    if (total_zeros.item<int64_t>() == 0) {
-      return grad * (result / input).conj();
-    } else {
-      return prod_safe_zeros_backward(grad, input, dim);
-    }
+    return prod_safe_zeros_backward(grad, input, dim);
   }
 }
 
