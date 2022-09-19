@@ -18,7 +18,6 @@ namespace mkldnn {
 
 const std::vector<std::string> zero_scalar_operand =
     std::vector<std::string>({});
-const std::string algorithm_indicator = std::string("%algorithm");
 
 std::string construct_operand_list(
     std::vector<std::string> scalar_input,
@@ -40,6 +39,10 @@ std::string construct_operand_list(
 }
 
 const std::map<std::string, PostOp>& fusion_rewrite_map() {
+  // The fusion_rewrite_map's key is the fused element-wise OP's name,
+  // such as "relu", the "none" means that there doesn't have a post fusuion OP.
+  // The fusion_rewrite_map's value is the post fusuion OP's parameters, such as
+  // gelu, there has a scalar parameter.
   static const std::map<std::string, PostOp> fusion_rewrite_map{
       {"none", {zero_scalar_operand}},
       // For element-wise OP that only has the activation as input:

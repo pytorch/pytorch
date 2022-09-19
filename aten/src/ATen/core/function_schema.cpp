@@ -17,9 +17,23 @@ const std::vector<Argument>& FunctionSchema::getCorrectList(SchemaArgType type) 
   }
 }
 
-FunctionSchema FunctionSchema::cloneWithRealTypes() const {
-  auto cloneWithRealTypes = [](const Argument& a) {
-    return a.cloneWithType(a.real_type());
+FunctionSchema FunctionSchema::cloneWithRealTypes(bool with_symint) const {
+  auto cloneWithRealTypes = [&](const Argument& a) {
+    if (with_symint) {
+      return a.cloneWithType(a.real_type());
+    }
+    // Don't use real type if it looks like a SymInt
+    // NB: keep this in sync with unpackSymInt in KernelFunction_impl.h
+    if (
+      *a.real_type() == *getTypePtr<c10::SymInt>() ||
+      *a.real_type() == *getTypePtr<c10::optional<c10::SymInt>>() ||
+      *a.real_type() == *getTypePtr<c10::SymIntArrayRef>()
+    ) {
+      // Keep the fake type
+      return a.cloneWithType(a.type());
+    } else {
+      return a.cloneWithType(a.real_type());
+    }
   };
   std::vector<Argument> new_arguments, new_returns;
   std::transform(arguments().begin(), arguments().end(), std::back_inserter(new_arguments), cloneWithRealTypes);

@@ -500,8 +500,6 @@ Tensor computeMkldnnPrepackedConvSumRun(
     dtype = Dtype(*outputType);
   }
 
-  // BufHandle ResultBuf(
-  //     "computeMkldnnPrepackedConvSumRun", outputShape, outputStrides, dtype);
   BufHandle ResultBuf = c10::get<BufHandle>(inputs[1]);
   const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
   const BufHandle& other = c10::get<BufHandle>(inputs[1]);

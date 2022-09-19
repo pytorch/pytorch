@@ -239,13 +239,7 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    # SymInt doesnt support empty_strided yet
-    if any(
-        isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
-    ):
-        return torch.empty(shape, dtype=dtype, device=device)
-    else:
-        return torch.empty_strided(shape, strides, dtype=dtype, device=device)
+    return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
 
 def _make_prim(
@@ -388,6 +382,8 @@ def _elementwise_meta(
     # Number case
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
+    assert not isinstance(number, torch.SymIntNode), "NYI"
+    assert not isinstance(number, torch.SymFloatNode), "NYI"
     return TensorMeta(number)
 
 
