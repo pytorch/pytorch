@@ -1801,9 +1801,17 @@ def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
     for kw in options_to_check:
         if kw in to_kwargs:
             if (
-                (kw == "memory_format" and to_kwargs[kw] is torch.preserve_format) or
-                (kw == "device" and to_kwargs[kw].type == a.device.type and (not to_kwargs[kw].index or to_kwargs[kw].index == a.device.index)) or
-                (getattr(a, kw, None) == to_kwargs[kw])  # this also handles {"memory_format": None}
+                (kw == "memory_format" and to_kwargs[kw] is torch.preserve_format)
+                or (
+                    kw == "device"
+                    and to_kwargs[kw].type == a.device.type
+                    and (
+                        not to_kwargs[kw].index or to_kwargs[kw].index == a.device.index
+                    )
+                )
+                or (
+                    getattr(a, kw, None) == to_kwargs[kw]
+                )  # this also handles {"memory_format": None}
             ):
                 to_kwargs.pop(kw)
 
@@ -1832,7 +1840,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         and ("device" not in kwargs)
         and ("layout" not in kwargs)
         # is_pinned issue #84925
-        # and (pin_memory is None or pin_memory == a.is_pinned())
+        # and ("pin_memory" not in kwargs)
     ):
         return prims.convert_element_type(a, kwargs.get("dtype", a.dtype))
 
