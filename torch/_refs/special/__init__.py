@@ -62,7 +62,7 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
-@register_decomposition(torch.ops.aten.special_multigammaln)
+@register_decomposition(torch.ops.aten.mvlgamma)
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
