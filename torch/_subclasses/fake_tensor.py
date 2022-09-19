@@ -192,7 +192,7 @@ class FakeTensorConverter(object):
         weakref.finalize(t, del_ten)
         self.tensor_memo[th] = v
 
-    def from_real_tensor(self, fake_mode, t, make_constant=False):
+    def from_real_tensor(self, fake_mode, t, make_constant=False, shape_env=None):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -201,7 +201,7 @@ class FakeTensorConverter(object):
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         with no_dispatch():
-            meta_t = self.meta_converter(t)
+            meta_t = self.meta_converter(t, shape_env=shape_env)
             if meta_t.device.type != "meta":
                 raise UnsupportedFakeTensorException("meta converter nyi")
             out = FakeTensor(
@@ -241,9 +241,13 @@ class FakeTensorConverter(object):
     # However, you're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors
-    def __call__(self, fake_mode, t, device=None, *, make_constant=False):
+    def __call__(
+        self, fake_mode, t, device=None, *, make_constant=False, shape_env=None
+    ):
         if device is None:
-            return self.from_real_tensor(fake_mode, t, make_constant)
+            return self.from_real_tensor(
+                fake_mode, t, make_constant, shape_env=shape_env
+            )
         else:
             assert make_constant is False
             assert t.device.type == "meta"
@@ -483,9 +487,7 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def from_tensor(t, fake_mode):
-        existing_device = t.device
-        # TODO: this should use meta converter
-        return FakeTensor(fake_mode, t.to(device="meta"), existing_device)
+        return fake_mode.from_tensor(t)
 
     # TODO: resolve error in default __repr__
     def __repr__(self):
@@ -895,8 +897,8 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor):
-        return self.fake_tensor_converter(self, tensor)
+    def from_tensor(self, tensor, shape_env=None):
+        return self.fake_tensor_converter(self, tensor, shape_env=shape_env)
 
 
 # NB: returns fake tensors
