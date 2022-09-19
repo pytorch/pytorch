@@ -1728,6 +1728,18 @@ def _to_device(
 
 
 @_to_dispatch.register
+def _to_device_str(
+    device: str,
+    dtype: torch.dtype,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    kwargs = {"device": torch.device(device), "dtype": dtype, "non_blocking": non_blocking, "copy": copy, "memory_format": memory_format}
+    return kwargs
+
+
+@_to_dispatch.register
 def _to_dtype(
     dtype: torch.dtype,
     non_blocking: bool = False,
@@ -1762,8 +1774,8 @@ def _clean_to_kwargs(a: Tensor, to_kwargs: dict):
             if a.dtype == to_kwargs[kw]:
                 to_kwargs.pop(kw)
 
-    if "memory_format" in to_kwargs and (to_kwargs["memory_format"] is None or to_kwargs["memory_format"] is torch.preserve_format or to_kwargs["memory_format"] == a.memory_format)
-        to_kwargs.pop(kw)
+    if "memory_format" in to_kwargs and (to_kwargs["memory_format"] is None or to_kwargs["memory_format"] is torch.preserve_format):
+        to_kwargs.pop("memory_format")
 
 def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     if len(args) != 0:
@@ -1780,15 +1792,15 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
 
     # short-circuit to `prims.convert_element_type` when `to` is just a dtype change
     if (
-        (copy or dtype != a.dtype)
-        and (memory_format is None or memory_format == torch.preserve_format)
+        (kwargs["copy"] or ("dtype" in kwargs and kwargs["dtype"] != a.dtype))
         and (not kwargs["non_blocking"])
+        and ("memory_format" not in kwargs)
         and ("device" not in kwargs)
         and ("layout" not in kwargs)
         # is_pinned issue #84925
         # and (pin_memory is None or pin_memory == a.is_pinned())
     ):
-        return prims.convert_element_type(a, dtype)
+        return prims.convert_element_type(a, kwargs.get("dtype", a.dtype))
 
     kwargs.pop("copy")
     kwargs.pop("non_blocking")
