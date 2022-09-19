@@ -1065,8 +1065,7 @@ class FullyShardedDataParallel(nn.Module):
         # Used for guarding against mistargeted backward prefetches
         self._needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
         # The data structures use tuples of handles to generalize over the case
-        # where a module's forward involves multiple handles. The two forward
-        # order structures are populated and finalized in the first iteration.
+        # where a module's forward involves multiple handles.
 
         # `_state_dict_type` controls the `state_dict()` behavior, which is
         # implemented using post-save and pre-load hooks
@@ -1523,7 +1522,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         if not handles:
             return
-        assert len(handles) == len(free_unsharded_flat_params), (
+        p_assert(
+            len(handles) == len(free_unsharded_flat_params),
             "Expects both lists to have equal length but got "
             f"{len(handles)} and {len(free_unsharded_flat_params)}"
         )
@@ -1851,7 +1851,7 @@ class FullyShardedDataParallel(nn.Module):
         # transfer.
         if self.cpu_offload.offload_params:
             assert p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-            p._local_shard.pin_memory()  # type: ignore[attr-defined]
+            p._local_shard = p._local_shard.pin_memory()  # type: ignore[attr-defined]
             # When offloading parameters, also move the grad shard to CPU during
             # backward pass. In this case, it's important to pre-allocate the
             # CPU grad shard in pinned memory so that we can do a non-blocking
@@ -2642,7 +2642,11 @@ class FullyShardedDataParallel(nn.Module):
             )
             self._pre_forward(self._handles, unshard_fn, unused, unused)
             for handle in self._handles:
-                assert handle.flat_param.device == self.compute_device
+                p_assert(
+                    handle.flat_param.device == self.compute_device,
+                    "Expected `FlatParameter` to be on the compute device "
+                    f"{self.compute_device} but got {handle.flat_param.device}"
+                )
             output = self._fsdp_wrapped_module(*args, **kwargs)
             return self._post_forward(self._handles, reshard_fn, unused, unused, output)
 
@@ -2667,17 +2671,16 @@ class FullyShardedDataParallel(nn.Module):
             module (nn.Module): Unused; expected by the hook signature.
             input (Any): Unused; expected by the hook signature.
         """
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
-            self.training_state = TrainingState_.FORWARD
-            self._exec_order_data.record_pre_forward(handles, self.training)
-            for handle in handles:
-                handle._training_state = HandleTrainingState.FORWARD
-            if unshard_fn is not None:
-                unshard_fn()
-            # Register post-backward hooks to reshard the parameters and
-            # reduce-scatter their gradients. They must be re-registered every
-            # forward pass in case the `grad_fn` is mutated.
-            self._register_post_backward_hooks(handles)
+        self.training_state = TrainingState_.FORWARD
+        self._exec_order_data.record_pre_forward(handles, self.training)
+        for handle in handles:
+            handle._training_state = HandleTrainingState.FORWARD
+        if unshard_fn is not None:
+            unshard_fn()
+        # Register post-backward hooks to reshard the parameters and
+        # reduce-scatter their gradients. They must be re-registered every
+        # forward pass in case the `grad_fn` is mutated.
+        self._register_post_backward_hooks(handles)
 
     def _pre_forward_unshard(
         self,
@@ -2715,17 +2718,16 @@ class FullyShardedDataParallel(nn.Module):
         Postcondition: Each ``FlatParameter`` 's data points to the sharded
         flattened parameter.
         """
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
-            self._exec_order_data.record_post_forward(handles)
-            if reshard_fn is not None:
-                reshard_fn()
-            # Register pre-backward hooks to unshard the flattened parameters
-            # for the gradient computation (if needed)
-            output = self._register_pre_backward_hooks(output, handles)
-            self.training_state = TrainingState_.IDLE
-            for handle in handles:
-                handle._training_state = HandleTrainingState.IDLE
-            return output
+        self._exec_order_data.record_post_forward(handles)
+        if reshard_fn is not None:
+            reshard_fn()
+        # Register pre-backward hooks to unshard the flattened parameters
+        # for the gradient computation (if needed)
+        output = self._register_pre_backward_hooks(output, handles)
+        self.training_state = TrainingState_.IDLE
+        for handle in handles:
+            handle._training_state = HandleTrainingState.IDLE
+        return output
 
     def _cast_forward_inputs(self, *args, **kwargs):
         """Moves the forward inputs to the compute device and casts them to the
@@ -2752,7 +2754,7 @@ class FullyShardedDataParallel(nn.Module):
         inputs appropriately. If this is called on a non-root FSDP instance,
         then the forward inputs are returned directly.
         """
-        assert self._is_root is not None, "Expects a root FSDP to have been set"
+        p_assert(self._is_root is not None, "Expects a root FSDP to have been set")
         if not self._is_root:
             return args, kwargs
         self._wait_for_previous_optim_step()
@@ -3088,9 +3090,11 @@ class FullyShardedDataParallel(nn.Module):
                 continue
             # Get the `AccumulateGrad` object
             temp_flat_param = flat_param.expand_as(flat_param)
-            assert (
-                temp_flat_param.grad_fn is not None
-            ), "The `grad_fn` is needed to access the `AccumulateGrad` and register the post-backward hook"
+            p_assert(
+                temp_flat_param.grad_fn is not None,
+                "The `grad_fn` is needed to access the `AccumulateGrad` and "
+                "register the post-backward hook"
+            )
             acc_grad = temp_flat_param.grad_fn.next_functions[0][0]
             hook_handle = acc_grad.register_hook(
                 functools.partial(self._post_backward_hook, handle)

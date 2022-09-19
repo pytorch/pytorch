@@ -1657,11 +1657,9 @@ class TestRefsOpsInfo(TestCase):
         '_refs.empty_like',  # missing "layout"
         '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
-        '_refs.ones',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
-        '_refs.zeros',  # missing "layout"
         '_refs.zeros_like',  # missing "layout"
         # other
         '_refs.expand_as',
