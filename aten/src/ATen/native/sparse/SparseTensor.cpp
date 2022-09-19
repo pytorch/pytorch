@@ -207,17 +207,6 @@ Tensor empty_sparse(
       size.size(), 0, size, dtype, layout, device, pin_memory);
 }
 
-/** Empty init **/
-Tensor empty_symint_sparse(
-    c10::SymIntArrayRef size,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<MemoryFormat> optional_memory_format) {
-      return at::native::empty_sparse(c10::asIntArrayRefSlow(size), dtype, layout, device, pin_memory, optional_memory_format);
-}
-
 /* Shape init */
 Tensor sparse_coo_tensor(IntArrayRef size,
     c10::optional<ScalarType> dtype,
@@ -524,7 +513,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor nz = self.nonzero().transpose(0, 1);
   if (nz.size(1) == 0) {
-    return new_with_dims_sparse(
+    auto sparse = new_with_dims_sparse(
         sparse_dim,
         dims - sparse_dim,
         sizes,
@@ -532,6 +521,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
         sparse_options.layout_opt(),
         sparse_options.device_opt(),
         sparse_options.pinned_memory_opt());
+    return sparse._coalesced_(true);
   }
   Tensor indices;
   if (sparse_dim == dims) {

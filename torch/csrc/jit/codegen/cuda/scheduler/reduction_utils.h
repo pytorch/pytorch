@@ -22,7 +22,7 @@ TensorView* scheduleReductionTV(
     bool has_iter_axis);
 
 // Inlining function intended for single or multi reduction fusions.
-void multiReductionInliner(
+TORCH_CUDA_CU_API void multiReductionInliner(
     Fusion* fusion,
     const ReductionParams& rparams,
     TensorView* reduction_tv,
@@ -41,7 +41,7 @@ void multiReductionInliner(
 // Rfactored axes are reductions bound to grid or blocks. If no axes are bound
 // to a grid or block dimension it will rfactor the r-unswitch dimension.
 // Reduction inliner expects an rfactored domain.
-TensorView* sortAndRFactor(TensorView* reference_tv);
+TORCH_CUDA_CU_API TensorView* sortAndRFactor(TensorView* reference_tv);
 
 // Take all projectable persistent buffers, and move them to the inputs.
 TORCH_CUDA_CU_API void projectPersistentBuffers(Fusion* fusion);

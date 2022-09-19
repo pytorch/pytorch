@@ -12,7 +12,8 @@
 
 #include <c10/util/StringUtil.h>
 
-PyObject *THPException_FatalError, *THPException_LinAlgError;
+PyObject *THPException_FatalError, *THPException_LinAlgError,
+    *THPException_OutOfMemoryError;
 
 #define ASSERT_TRUE(cond) \
   if (!(cond))            \
@@ -34,6 +35,7 @@ For example, you can the torch.linalg.inv function will raise torch.linalg.LinAl
 a matrix is not invertible.\n \
 \n\
 Example:\n \
+>>> # xdoctest: +REQUIRES(env:TORCH_DOCKTEST_LAPACK)\n \
 >>> matrix = torch.eye(3, 3)\n \
 >>> matrix[-1, -1] = 0\n \
 >>> matrix\n \
@@ -50,6 +52,16 @@ could not be completed because the input matrix is singular.",
   ASSERT_TRUE(
       PyModule_AddObject(module, "_LinAlgError", THPException_LinAlgError) ==
       0);
+
+  ASSERT_TRUE(
+      THPException_OutOfMemoryError = PyErr_NewExceptionWithDoc(
+          "torch.cuda.OutOfMemoryError",
+          "Exception raised when CUDA is out of memory",
+          PyExc_RuntimeError,
+          nullptr));
+  ASSERT_TRUE(
+      PyModule_AddObject(
+          module, "_OutOfMemoryError", THPException_OutOfMemoryError) == 0);
 
   return true;
 }

@@ -38,6 +38,7 @@ TensorView* makeContigConcreteTensor(
 
 std::string toString(ReductionParams rparams);
 std::string toString(PointwiseParams params);
+std::string toString(const std::shared_ptr<HeuristicParams>& params);
 std::string toString(LaunchParams lparams);
 
 // Run benchmark iterations with provided inputs. If not segmented, report
@@ -54,26 +55,27 @@ class CudaKernelTimer {
  public:
   CudaKernelTimer() {
     // Setup
-    cudaEventCreate(&start_event);
-    cudaEventCreate(&finish_event);
-    cudaEventRecord(start_event);
+    C10_CUDA_CHECK(cudaEventCreate(&start_event));
+    C10_CUDA_CHECK(cudaEventCreate(&finish_event));
+    C10_CUDA_CHECK(cudaEventRecord(start_event));
   }
 
   ~CudaKernelTimer() {
-    cudaEventDestroy(start_event);
-    cudaEventDestroy(finish_event);
+    C10_CUDA_IGNORE_ERROR(cudaEventDestroy(start_event));
+    C10_CUDA_IGNORE_ERROR(cudaEventDestroy(finish_event));
   }
 
   void restart() {
-    cudaEventRecord(start_event);
+    C10_CUDA_CHECK(cudaEventRecord(start_event));
   }
 
   float elapsed() {
     // Record
-    cudaEventRecord(finish_event);
-    cudaEventSynchronize(start_event);
-    cudaEventSynchronize(finish_event);
-    cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event);
+    C10_CUDA_CHECK(cudaEventRecord(finish_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(start_event));
+    C10_CUDA_CHECK(cudaEventSynchronize(finish_event));
+    C10_CUDA_CHECK(
+        cudaEventElapsedTime(&kernel_time_ms_, start_event, finish_event));
     return kernel_time_ms_;
   }
 
