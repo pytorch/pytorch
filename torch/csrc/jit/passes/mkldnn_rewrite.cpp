@@ -40,11 +40,9 @@ std::string construct_operand_list(
 
 const std::map<std::string, PostOp>& fusion_rewrite_map() {
   // The fusion_rewrite_map's key is the fused element-wise OP's name,
-  // such as "relu", the "none" means that there doesn't have a post fusuion OP.
-  // The fusion_rewrite_map's value is the post fusuion OP's parameters, such as
-  // gelu, there has a scalar parameter.
+  // such as "relu". The fusion_rewrite_map's value is the post fusuion OP's
+  // parameters, such as gelu, there has a scalar parameter.
   static const std::map<std::string, PostOp> fusion_rewrite_map{
-      {"none", {zero_scalar_operand}},
       // For element-wise OP that only has the activation as input:
       {"relu", {zero_scalar_operand}},
   };
@@ -204,9 +202,6 @@ void RewriteEltwiseGraph(
 
   for (auto const& it : fusion_rewrite_map) {
     std::string op = it.first;
-    if (op == std::string("none")) {
-      continue;
-    }
     std::vector<std::string> op_input = it.second.scalar_input;
     std::string algorithm_input = it.second.algorithm_input;
 

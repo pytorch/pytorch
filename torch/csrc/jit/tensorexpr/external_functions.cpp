@@ -1450,7 +1450,6 @@ void nnc_mkldnn_prepacked_conv_sum_run(
 
   at::Tensor& result = tensors[0];
   const at::Tensor& x = tensors[1];
-  // const at::Tensor& other = tensors[2];
   auto context = reinterpret_cast<ConvOpContext*>(buf_data[3]);
 
   context->sum_run(x, result);
