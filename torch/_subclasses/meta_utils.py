@@ -63,7 +63,6 @@ class MetaConverter:
         self.hit = 0
         self.miss = 0
         self.del_hook = None
-        self.arg_cnt = 0
 
     def successful(self):
         return self.hit > 0 and self.miss == 0
@@ -138,40 +137,7 @@ class MetaConverter:
         return self.storage_memo[swr]
 
     # This function assumes that it's possible to do the conversion
-    def meta_tensor(self, t, shape_env=None):
-        arg_cnt = self.arg_cnt
-        self.arg_cnt += 1
-
-        def sym(name, x):
-            if shape_env is None:
-                return x
-            else:
-                return shape_env.create_symint(f"t{arg_cnt}.{name}()", x)
-
-        def sym_list(name, xs):
-            if shape_env is None:
-                return xs
-            else:
-                return [
-                    shape_env.create_symint(f"t{arg_cnt}.{name}({i})", x)
-                    for i, x in enumerate(xs)
-                ]
-
-        def sym_size(t):
-            return sym_list("size", t.size())
-
-        def sym_stride(t):
-            return sym_list("stride", t.stride())
-
-        # NB: Although sym_stride variables initially have no correlation
-        # with size, we will immediately introduce guards based on contiguity.
-        # Thus, if the input tensor is contiguous, the stride variables
-        # will typically immediately get reexpressed in terms of the size
-        # variables.
-
-        def sym_storage_offset(t):
-            return sym("storage_offset", t.storage_offset())
-
+    def meta_tensor(self, t):
         # see expired-storages
         self.check_expired_count += 1
         if self.check_expired_count >= self.check_expired_frequency:
@@ -181,7 +147,6 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    assert shape_env is None, "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = torch.ops.aten._sparse_coo_tensor_with_dims(
                         t.sparse_dim(),
@@ -227,9 +192,7 @@ class MetaConverter:
                         base = base.view(t.dtype)
 
                     with torch.enable_grad():
-                        r = base.as_strided(
-                            sym_size(t), sym_stride(t), sym_storage_offset(t)
-                        )
+                        r = base.as_strided(t.size(), t.stride(), t.storage_offset())
                 else:
                     is_leaf = safe_is_leaf(t)
                     # Fake up some autograd history.
@@ -254,7 +217,7 @@ class MetaConverter:
                     s = self.meta_storage(t.storage())
                     with no_dispatch():
                         with torch.no_grad():
-                            r.set_(s, sym_storage_offset(t), sym_size(t), sym_stride(t))
+                            r.set_(s, t.storage_offset(), t.size(), t.stride())
 
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -262,7 +225,7 @@ class MetaConverter:
 
         return self.get_tensor_memo(t)
 
-    def __call__(self, t, shape_env=None):
+    def __call__(self, t):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
         from torch._subclasses.fake_tensor import FakeTensor
@@ -300,7 +263,7 @@ class MetaConverter:
                 return t
             else:
                 self.hit += 1
-                r = self.meta_tensor(t, shape_env=shape_env)
+                r = self.meta_tensor(t)
                 if type(t) is torch.nn.Parameter:
                     r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
                 return r

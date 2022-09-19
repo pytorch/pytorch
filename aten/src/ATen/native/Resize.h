@@ -124,9 +124,8 @@ static inline void checkInBoundsForStorage(
       new_storage_size_bytes);
 }
 
-template <typename T>
-static inline void checkSetStorage(Tensor& result, Storage storage, T storage_offset,
-                                   ArrayRef<T> size, ArrayRef<T> stride) {
+static inline void checkSetStorage(Tensor& result, Storage storage, int64_t storage_offset,
+                                   IntArrayRef size, IntArrayRef stride) {
   // FIXME: stride should be optional
   if (stride.data()) {
     TORCH_CHECK(size.size() == stride.size(), "unequal size length (", size.size(),
