@@ -12607,10 +12607,6 @@
 - func: nested_to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   python_module: nested
   variants: function
-  dispatch:
-    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
-    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
-  autogen: nested_to_padded_tensor.out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
