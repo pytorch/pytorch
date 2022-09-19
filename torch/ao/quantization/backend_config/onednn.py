@@ -103,7 +103,7 @@ embedding_op_dtype_configs = [
 # |  FUSER METHODS  |
 # ===================
 
-def fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
+def _fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
     r"""Given the linear, bn and leaky_relu modules, fuses them and returns the fused module
     Args:
         is_qat: a flag for whether we are using quantization aware training fusion
@@ -115,7 +115,7 @@ def fuse_linear_bn_leaky_relu(is_qat, linear, bn, leaky_relu):
         >>> m1 = nn.Linear(20, 10)
         >>> b1 = nn.BatchNorm1d(10)
         >>> lr = nn.LeakyReLU(0.01)
-        >>> m2 = fuse_linear_bn_leaky_relu(m1, b1, lr)
+        >>> m2 = _fuse_linear_bn_leaky_relu(m1, b1, lr)
     """
     assert(linear.training == bn.training and bn.training == leaky_relu.training),\
         "Linear, BN and LeakyReLU all must be in the same mode (train or eval)."
@@ -167,7 +167,7 @@ linear_configs.append(
 linear_configs.append(
     BackendPatternConfig((nn.LeakyReLU, (nn.BatchNorm1d, nn.Linear)))
         .set_dtype_configs(linear_dtype_configs)  # noqa: E131
-        .set_fuser_method(reverse3(fuse_linear_bn_leaky_relu))
+        .set_fuser_method(reverse3(_fuse_linear_bn_leaky_relu))
         .set_fused_module(nni.LinearLeakyReLU))
 
 # 1.2 linear module + leaky_relu, fused module configs
