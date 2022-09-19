@@ -497,16 +497,16 @@ class TestFuseFx(QuantizationTestCase):
         ]
 
         for with_bn in [True, False]:
-          m = LinearBnLeakyReluModel(with_bn).eval()
-          example_inputs = (torch.rand(5, 5),)
-          prepared = prepare_fx(m, qconfig_mapping, example_inputs=example_inputs,
-                                backend_config=get_onednn_backend_config())
+            m = LinearBnLeakyReluModel(with_bn).eval()
+            example_inputs = (torch.rand(5, 5),)
+            prepared = prepare_fx(m, qconfig_mapping, example_inputs=example_inputs,
+                                  backend_config=get_onednn_backend_config())
 
-          prepared(*example_inputs)
-          quantized = convert_fx(prepared,
-                                backend_config=get_onednn_backend_config())
+            prepared(*example_inputs)
+            quantized = convert_fx(prepared,
+                                   backend_config=get_onednn_backend_config())
 
-          self.checkGraphModuleNodes(quantized, expected_node_list=linearLeakyRelu_node_list)
+            self.checkGraphModuleNodes(quantized, expected_node_list=linearLeakyRelu_node_list)
 
     def test_problematic_fuse_example(self):
         class LinearRelu(nn.Sequential):
