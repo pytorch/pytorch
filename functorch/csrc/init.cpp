@@ -14,7 +14,7 @@
 #include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/BatchRulesHelper.h>
-#include <functorch/csrc/CompileCache.h>
+#include <torch/csrc/functorch/CompileCache.h>
 #include <c10/core/AutogradState.h>
 #include <functorch/csrc/dim/dim.h>
 
@@ -407,7 +407,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
   m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
 
-  at::functorch::initCompileCacheBindings(m.ptr());
+  torch::functorch::initCompileCacheBindings(m.ptr());
 
   // initialize first-class dims and install it as a submodule on _C
   auto dim = Dim_init();
