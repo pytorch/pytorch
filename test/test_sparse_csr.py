@@ -1338,6 +1338,18 @@ class TestSparseCSR(TestCase):
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
 
+        # test dense x bsc by transposing the entire test case
+        a_t = a.transpose(-2, -1)
+        b_t = b.transpose(-2, -1)
+        c_t = c.transpose(-2, -1)
+        actual_t = addmv_addmm(c_t, b_t, a_t, alpha=alpha, beta=beta)
+        out_t = torch.empty_like(out.transpose(-2, -1))
+        addmv_addmm(c_t, b_t, a_t, alpha=alpha, beta=beta, out=out_t)
+
+        expected_t = alpha * (b.cpu().resolve_conj().numpy().transpose() * a_bsr.transpose()) + beta * c.cpu().numpy().transpose()
+        self.assertEqual(actual_t, out_t)
+        self.assertEqual(actual_t, expected_t)
+
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])

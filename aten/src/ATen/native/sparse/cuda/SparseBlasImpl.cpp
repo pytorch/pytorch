@@ -1,4 +1,4 @@
-#include "c10/util/Exception.h"
+#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -851,6 +851,15 @@ void addmm_out_sparse_csr(
     } else if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
         return spmm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    } else if (mat2.layout() == kSparseBsc) {
+      if (result.layout() == kStrided) {
+        return block_sparse_mm(
             mat2.transpose(-2, -1),
             mat1.transpose(-2, -1),
             beta,
