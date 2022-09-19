@@ -401,7 +401,8 @@ def _amax_amin_vjp(grad, result, self, dims, keepdim):
     expanded_grad = _restore_reduced_dims(grad, dims, self.shape)
     expanded_result = _restore_reduced_dims(result, dims, self.shape)
     mask = torch.eq(expanded_result, self)
-    return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask
+    # Return None for each dim and for keepdim argument.
+    return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask, *(None,) * (len(dims) + 1)
 
 
 def _sum_vjp(grad, result, self, dims):
