@@ -1399,6 +1399,8 @@ def _export(
     onnx_shape_inference=True,
     export_modules_as_functions=False,
 ):
+    assert GLOBALS.in_onnx_export is False
+
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
@@ -1409,21 +1411,35 @@ def _export(
             "unwrap model from torch.nn.DataParallel. Try "
             "torch.onnx.export(model.module, ...)"
         )
-    assert GLOBALS.in_onnx_export is False
-    GLOBALS.in_onnx_export = True
+
+    GLOBALS.onnx_shape_inference = onnx_shape_inference
+
+    if opset_version is None:
+        opset_version = _constants.ONNX_DEFAULT_OPSET
+
+    if export_modules_as_functions and opset_version < 15:
+        raise ValueError(
+            "`export_modules_as_functions` is not supported for `opset_version` < 15."
+            "This is because `opset_version` < 15 implies IR version < 8, which means "
+            "no local function support. "
+        )
+    if not operator_export_type:
+        if _C_onnx._CAFFE2_ATEN_FALLBACK:
+            operator_export_type = _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+        else:
+            operator_export_type = _C_onnx.OperatorExportTypes.ONNX
+
+    # By default, training=TrainingMode.EVAL,
+    # which is good because running a model in training mode could result in
+    # internal buffers getting updated, dropout getting applied, etc.
+    # If you really know what you're doing, you can turn
+    # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
+    # (to preserve whatever the original training mode was.)
+    GLOBALS.export_onnx_opset_version = opset_version
+    GLOBALS.operator_export_type = operator_export_type
+
     try:
-
-        symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
-
-        if opset_version is None:
-            opset_version = _constants.ONNX_DEFAULT_OPSET
-
-        if export_modules_as_functions and opset_version < 15:
-            raise ValueError(
-                "`export_modules_as_functions` is not supported for `opset_version` < 15."
-                "This is because `opset_version` < 15 implies IR version < 8, which means "
-                "no local function support. "
-            )
+        GLOBALS.in_onnx_export = True
 
         module_typenames_to_export_as_functions: Set[str] = set()
         if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
@@ -1431,20 +1447,6 @@ def _export(
                 model, export_modules_as_functions
             )
 
-        if not operator_export_type:
-            if _C_onnx._CAFFE2_ATEN_FALLBACK:
-                operator_export_type = _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-            else:
-                operator_export_type = _C_onnx.OperatorExportTypes.ONNX
-
-        # By default, training=TrainingMode.EVAL,
-        # which is good because running a model in training mode could result in
-        # internal buffers getting updated, dropout getting applied, etc.
-        # If you really know what you're doing, you can turn
-        # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
-        # (to preserve whatever the original training mode was.)
-        GLOBALS.export_onnx_opset_version = opset_version
-        GLOBALS.operator_export_type = operator_export_type
         with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(
                 keep_initializers_as_inputs, operator_export_type, opset_version
