@@ -87,7 +87,8 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#ifndef USE_ROCM
+#if !defined(USE_ROCM) && CUDA_VERSION >= 11000
+  // cublasSetWorkspace not available on CUDA 10.2
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
   if (handle_stream_to_workspace.find(key) == handle_stream_to_workspace.end()) {
