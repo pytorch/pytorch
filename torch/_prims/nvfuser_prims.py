@@ -7,10 +7,11 @@
 
 import math
 from functools import wraps
-from typing import Any, Callable, Dict, Sequence, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 
 import torch
 
+import torch._prims_common as utils
 from torch._prims_common import (
     DimsSequenceType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -18,13 +19,12 @@ from torch._prims_common import (
     ShapeType,
     TensorLikeType,
 )
-
 from torch._prims_common.wrappers import (
     backwards_not_supported,
     elementwise_type_promotion_wrapper,
 )
 from torch.utils._mode_utils import autodispatch_below_autograd
-from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 nvprim_namespace = "nvprims"
 nvprim = torch.library.Library(nvprim_namespace, "DEF")
@@ -341,42 +341,82 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
 prims = torch.ops.prims
 
 
+def _unsqueeze(a, dim):
+    utils.check(
+        dim <= a.ndim and dim >= (-a.ndim - 1),
+        lambda: "unsqueeze: dimension out of range!",
+    )
+    return torch._prims.expand_dims(a, (dim,))
+
+
+# add dimensions in canonicalized, sorted order
+# so that the tensor has the appropriate rank.
+def _unsqueeze_dims(a, dims, rank):
+    dims = utils.canonicalize_dim(rank, dims)
+    for dim in sorted(dims):
+        a = _unsqueeze(a, dim)
+    return a
+
+
+def _expand(a, *shape):
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
+        shape = tuple(shape[0])
+    utils.check(
+        len(shape) >= len(a.shape),
+        lambda: "expand: the requested shape has too few dimensions!",
+    )
+    offset = len(shape) - len(a.shape)
+    shape_ = list(shape)
+    for idx, x in enumerate(a.shape):
+        offset_idx = idx + offset
+        requested_length = shape[offset_idx]
+        utils.check(
+            requested_length == x or x == 1 or requested_length == -1,
+            lambda: f"expand: attempting to expand a dimension of length {x}!",
+        )
+
+        shape_[offset_idx] = requested_length if requested_length != -1 else x
+    utils.validate_shape(shape_)
+    return prims.broadcast_in_dim(
+        a, shape_, tuple(range(offset, len(a.shape) + offset))
+    )
+
+
+def _dim_size(a, dims):
+    dims = utils.canonicalize_dim(a.ndim, dims)
+    reduction_size = 1
+    for idx, size in enumerate(a.size()):
+        if idx in dims:
+            reduction_size *= size
+    return reduction_size
+
+
 def _sum_vjp(grad, result, self, dims):
-    def unsqueeze(a, dim):
-        dim = torch._prims_common.canonicalize_dim(a.ndim + 1, dim)
-        return torch._prims.expand_dims(a, (dim,))
+    grad = _unsqueeze_dims(grad, dims, self.ndim)
+    return _expand(grad, self.shape), None
 
-    def unsqueeze_multiple(a, dims, ndim):
-        for i in range(ndim):
-            if i in dims:
-                a = unsqueeze(a, i)
-        return a
 
-    def expand(a, *shape):
-        if len(shape) == 1 and isinstance(shape[0], Sequence):
-            shape = tuple(shape[0])
-        torch._prims_common.check(
-            len(shape) >= len(a.shape),
-            lambda: "expand: the requested shape has too few dimensions!",
-        )
-        offset = len(shape) - len(a.shape)
-        shape_ = list(shape)
-        for idx, x in enumerate(a.shape):
-            offset_idx = idx + offset
-            requested_length = shape[offset_idx]
-            torch._prims_common.check(
-                requested_length == x or x == 1 or requested_length == -1,
-                lambda: f"expand: attempting to expand a dimension of length {x}!",
-            )
+def _mean_vjp(grad, self, dims):
+    mean_local_grad = 1.0 / _dim_size(self, dims)
+    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
+    expanded_grad = _expand(unsqueezed_grad, self.shape)
+    return expanded_grad * mean_local_grad
 
-            shape_[offset_idx] = requested_length if requested_length != -1 else x
-        torch._prims_common.validate_shape(shape_)
-        return prims.broadcast_in_dim(
-            a, shape_, tuple(range(offset, len(a.shape) + offset))
-        )
 
-    grad = unsqueeze_multiple(grad, dims, self.ndim)
-    return expand(grad, self.shape), None
+def _var_vjp(grad, mean, self, dims, unbiased):
+    var_reduction_size = _dim_size(self, dims)
+    if unbiased:
+        var_reduction_size -= 1
+    constant = 2.0 / var_reduction_size
+
+    # expand grad and mean tensors to self tensor size
+    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
+    expanded_grad = _expand(unsqueezed_grad, self.shape)
+    unsqueezed_mean = _unsqueeze_dims(mean, dims, self.ndim)
+    expanded_mean = _expand(unsqueezed_mean, self.shape)
+
+    var_local_grad = constant * torch.sub(self, expanded_mean)
+    return expanded_grad * var_local_grad
 
 
 _vjp_impls: Dict[str, Any] = {
@@ -484,7 +524,11 @@ _vjp_impls: Dict[str, Any] = {
         grad, prims.sub(1, prims.pow(result, 2))
     ),
     "trunc": lambda grad, result, self: prims.mul(grad, 0),
-    "var": None,  # TODO
+    "var": _var_vjp,
+    "var_mean": lambda grad_var, grad_mean, var, mean, self, dims, unbiased: _var_vjp(
+        grad_var, mean, self, dims, unbiased
+    )
+    + _mean_vjp(grad_mean, self, dims),
     "where": lambda grad, result, condition, self, other: (
         None,
         prims.where(condition, grad, 0),
