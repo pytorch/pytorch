@@ -341,20 +341,12 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
 prims = torch.ops.prims
 
 
-def _unsqueeze(a, dim):
-    utils.check(
-        dim <= a.ndim and dim >= (-a.ndim - 1),
-        lambda: "unsqueeze: dimension out of range!",
-    )
-    return torch._prims.expand_dims(a, (dim,))
-
-
 # add dimensions in canonicalized, sorted order
 # so that the tensor has the appropriate rank.
 def _unsqueeze_dims(a, dims, rank):
-    dims = utils.canonicalize_dim(rank, dims)
+    dims = utils.canonicalize_dims(rank, dims)
     for dim in sorted(dims):
-        a = _unsqueeze(a, dim)
+        a = torch._refs.unsqueeze(a, dim)
     return a
 
 
@@ -383,7 +375,7 @@ def _expand(a, *shape):
 
 
 def _dim_size(a, dims):
-    dims = utils.canonicalize_dim(a.ndim, dims)
+    dims = utils.canonicalize_dims(a.ndim, dims)
     reduction_size = 1
     for idx, size in enumerate(a.size()):
         if idx in dims:
@@ -406,7 +398,8 @@ def _amax_amin_vjp(grad, result, self, dims, keepdim):
 
 
 def _sum_vjp(grad, result, self, dims):
-    return _restore_reduced_dims(grad, dims, self.shape), None
+    # Return None for each dim.
+    return _restore_reduced_dims(grad, dims, self.shape), *(None,) * len(dims)
 
 
 def _mean_vjp(grad, self, dims):
@@ -414,17 +407,25 @@ def _mean_vjp(grad, self, dims):
     return _restore_reduced_dims(grad, dims, self.shape) * mean_local_grad
 
 
-def _var_vjp(grad, mean, self, dims, unbiased):
+def _var_vjp(grad, result, self, dims, correction):
     var_reduction_size = _dim_size(self, dims)
-    if unbiased:
-        var_reduction_size -= 1
+    var_reduction_size -= correction
     constant = 2.0 / var_reduction_size
 
     # expand grad and mean tensors to self tensor size
     expanded_grad = _restore_reduced_dims(grad, dims, self.shape)
-    expanded_mean = _restore_reduced_dims(mean, dims, self.shape)
-    var_local_grad = constant * torch.sub(self, expanded_mean)
-    return expanded_grad * var_local_grad
+    mean = torch._refs.mean(self, dims, keepdim=True)
+    expanded_mean = torch._refs.broadcast_to(mean, self.shape)
+    var_local_grad = constant * prims.sub(self, expanded_mean)
+    # Return None for each dim and for correction argument.
+    return expanded_grad * var_local_grad, *(None,) * (len(dims) + 1)
+
+
+def _broadcast_in_dim_vjp(grad, result, self, shape, broadcast_dimensions):
+    # TODO: implement prims.sum_to and nvprims.sum_to
+    grad = grad.sum_to_size(self.shape)
+    # TODO: squeeze op is missing here
+    return grad, *(None,) * (len(shape) + len(broadcast_dimensions))
 
 
 _vjp_impls: Dict[str, Any] = {
@@ -459,7 +460,7 @@ _vjp_impls: Dict[str, Any] = {
     "bitwise_not": None,  # Only integers supported
     "bitwise_or": None,  # Only integers supported
     "bitwise_xor": None,  # Only integers supported
-    "broadcast_in_dim": None,  # TODO
+    "broadcast_in_dim": _broadcast_in_dim_vjp,
     "ceil": lambda grad, result, self: prims.mul(grad, 0),
     "convert_element_type": lambda grad, result, self, dtype: (
         prims.convert_element_type(grad, self.dtype),
@@ -514,7 +515,7 @@ _vjp_impls: Dict[str, Any] = {
     ),
     "remainder": lambda grad, result, self, other: (
         grad,
-        prims.mul(grad, prims.floor(prims.div(self, other))),
+        prims.neg(prims.mul(grad, prims.floor(prims.div(self, other)))),
     ),
     "round": lambda grad, result, self: prims.mul(grad, 0),
     "rsqrt": lambda grad, result, self: prims.mul(
@@ -523,6 +524,7 @@ _vjp_impls: Dict[str, Any] = {
     "sin": lambda grad, result, self: prims.mul(grad, prims.cos(self)),
     "sinh": lambda grad, result, self: prims.mul(grad, prims.cosh(self)),
     "sqrt": lambda grad, result, self: prims.mul(grad, prims.div(0.5, result)),
+    "squeeze": None,  # TODO
     "sub": lambda grad, result, self, other: (grad, prims.neg(grad)),
     "sum": _sum_vjp,
     "tan": lambda grad, result, self: prims.mul(
@@ -564,6 +566,7 @@ def _register_vjp(prim, vjp_impl):
             ctx.save_for_backward(*out_packed, *args_tensors)
 
             ctx.args = args
+            ctx.kwargs = kwargs
             # ctx.save_for_backward(*out_packed)
             return out
 
@@ -572,7 +575,7 @@ def _register_vjp(prim, vjp_impl):
             if vjp_impl is None:
                 raise RuntimeError(f"backwards not supported on prim {prim.name}")
 
-            print(f"calling backward for prim {prim}")
+            # print(f"calling backward for prim {prim}")
 
             # TODO: use save for backward to save the args
             fw_tensorargs = iter(
@@ -585,22 +588,23 @@ def _register_vjp(prim, vjp_impl):
             fw_out = ctx.saved_tensors[: ctx.nout]
 
             with NvfuserPrimsMode():
-                vjp_result = vjp_impl(*bw_args, *fw_out, *fw_args)
+                vjp_result = vjp_impl(*bw_args, *fw_out, *fw_args, **ctx.kwargs)
             vjp_result = (
                 (vjp_result,) if isinstance(vjp_result, torch.Tensor) else vjp_result
             )
 
-            print(f"vjp_result: {vjp_result}")
-            print(f"fw_args: {fw_args}")
+            # print(f"vjp_result: {vjp_result}")
+            # print(f"fw_args: {fw_args}")
             # print len
-            print(f"len(vjp_result): {len(vjp_result)}")
-            print(f"len(fw_args): {len(fw_args)}")
-            assert len(vjp_result) == len(fw_args)
+            flat_args_kwargs, _ = tree_flatten((ctx.args, ctx.kwargs))
+            # print(f"len(vjp_result): {len(vjp_result)}")
+            # print(f"len(flat_args_kwargs): {len(flat_args_kwargs)}")
+            assert len(vjp_result) == len(flat_args_kwargs)
 
             # Replace the output with None for each non-tensor argument
             vjp_result = tuple(
                 None if not isinstance(a, torch.Tensor) else t
-                for a, t in zip(fw_args, vjp_result)
+                for a, t in zip(flat_args_kwargs, vjp_result)
             )
             return None, *vjp_result
 
