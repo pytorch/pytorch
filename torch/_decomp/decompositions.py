@@ -1980,6 +1980,38 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
+# @register_decomposition(aten.dot, disable_meta=True)
+@pw_cast_for_opmath
+def dot(self, other):
+    if self.is_complex():
+        if self.is_conj():
+            if other.is_conj():
+                return torch.dot(self.conj(), other.conj()).conj()
+            else:
+                return torch.vdot(self.conj(), other)
+        elif other.is_conj():
+            return torch.vdot(other.conj(), self)
+
+    utils.check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+    utils.check(
+        self.dtype == other.dtype,
+        lambda: f"dot : expected both vectors to have same dtype, but found {self.dtype} and {other.dtype}",
+    )
+
+    def numel_error():
+        return (
+            f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
+            f"same number of elements, but got {self.numel()} and {other.numel()} elements respectively"
+        )
+
+    utils.check(self.numel() == other.numel(), numel_error)
+
+    return (self * other).sum()
+
+
 @register_decomposition(aten.binary_cross_entropy_with_logits)
 def binary_cross_entropy_with_logits(
     self, target, weight=None, pos_weight=None, reduction=Reduction.MEAN.value
@@ -2030,7 +2062,7 @@ def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
         return False
 
 
-@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+# @torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
@@ -2042,6 +2074,8 @@ def matmul(tensor1, tensor2):
     elif dim_tensor1 == 1 and dim_tensor2 == 2:
         return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
     elif dim_tensor1 == 2 and dim_tensor2 == 2:
+        # if tensor1.shape[1] != tensor2.shape[0]:
+        #     breakpoint()
         return torch.mm(tensor1, tensor2)
     elif should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1):
         # NB: Much of this was written with Copilot! (although still had to fix a bunch of issues)
