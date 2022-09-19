@@ -9,10 +9,16 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-QueryPool::QueryPool(const VkDevice device, const QueryPoolConfig& config)
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+
+QueryPool::QueryPool(
+    const VkDevice device,
+    const QueryPoolConfig& config,
+    float timestamp_period)
     : mutex_{},
       device_(device),
       config_(config),
+      timestamp_period_(timestamp_period),
       querypool_(VK_NULL_HANDLE),
       shader_log_{},
       in_use_(0u) {
@@ -117,24 +123,13 @@ void QueryPool::extract_results() {
       flags)); // flags
 
   for (ShaderDuration& entry : shader_log_) {
-    entry.start_time_ns = query_data.at(entry.start_query_idx);
-    entry.end_time_ns = query_data.at(entry.end_query_idx);
+    entry.start_time_us =
+        query_data.at(entry.start_query_idx) * timestamp_period() / 1000.0;
+    entry.end_time_us =
+        query_data.at(entry.end_query_idx) * timestamp_period() / 1000.0;
 
-    entry.execution_duration_ns = entry.end_time_ns - entry.start_time_ns;
+    entry.execution_duration_us = entry.end_time_us - entry.start_time_us;
   }
-}
-
-std::ostream& operator<<(std::ostream& os, const VkExtent3D& extents) {
-  os << "{" << extents.width << ", " << extents.height << ", " << extents.depth
-     << "}";
-  return os;
-}
-
-std::string stringize(const VkExtent3D& extents) {
-  std::stringstream ss;
-  ss << "{" << extents.width << ", " << extents.height << ", " << extents.depth
-     << "}";
-  return ss.str();
 }
 
 std::string QueryPool::generate_string_report() {
@@ -146,10 +141,11 @@ std::string QueryPool::generate_string_report() {
   int global_size_w = 15;
   int duration_w = 25;
 
+  ss << std::fixed << std::setprecision(2);
   ss << std::left;
   ss << std::setw(kernel_name_w) << "Kernel Name";
   ss << std::setw(global_size_w) << "Workgroup Size";
-  ss << std::right << std::setw(duration_w) << "Duration (ns)";
+  ss << std::right << std::setw(duration_w) << "Duration (us)";
   ss << std::endl;
 
   ss << std::left;
@@ -159,13 +155,10 @@ std::string QueryPool::generate_string_report() {
   ss << std::endl;
 
   for (ShaderDuration& entry : shader_log_) {
-    std::chrono::duration<size_t, std::nano> exec_duration_ns(
-        entry.execution_duration_ns);
-
     ss << std::left;
     ss << std::setw(kernel_name_w) << entry.kernel_name;
     ss << std::setw(global_size_w) << stringize(entry.global_workgroup_size);
-    ss << std::right << std::setw(duration_w) << exec_duration_ns.count();
+    ss << std::right << std::setw(duration_w) << entry.execution_duration_us;
     ss << std::endl;
   }
 
@@ -176,12 +169,12 @@ void QueryPool::print_results() {
   std::cout << generate_string_report() << std::endl;
 }
 
-uint64_t QueryPool::get_total_op_ns(std::string op_name) {
+uint64_t QueryPool::get_total_op_us(std::string op_name) {
   std::lock_guard<std::mutex> lock(mutex_);
   uint64_t sum = 0;
   for (ShaderDuration& entry : shader_log_) {
     if (entry.kernel_name == op_name) {
-      sum += entry.execution_duration_ns;
+      sum += entry.execution_duration_us;
     }
   }
   return sum;
@@ -192,6 +185,8 @@ void QueryPool::shader_log_for_each(
   std::lock_guard<std::mutex> lock(mutex_);
   std::for_each(shader_log_.begin(), shader_log_.end(), fn);
 }
+
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
 } // namespace api
 } // namespace vulkan

@@ -17,6 +17,8 @@ struct QueryPoolConfig final {
   uint32_t initialReserveSize;
 };
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+
 struct ShaderDuration final {
   uint32_t idx;
 
@@ -30,14 +32,14 @@ struct ShaderDuration final {
   uint32_t end_query_idx;
 
   // Timings
-  uint64_t start_time_ns;
-  uint64_t end_time_ns;
-  uint64_t execution_duration_ns;
+  float start_time_us;
+  float end_time_us;
+  float execution_duration_us;
 };
 
 class QueryPool final {
  public:
-  explicit QueryPool(const VkDevice, const QueryPoolConfig&);
+  explicit QueryPool(const VkDevice, const QueryPoolConfig&, float);
 
   QueryPool(const QueryPool&) = delete;
   QueryPool& operator=(const QueryPool&) = delete;
@@ -52,6 +54,7 @@ class QueryPool final {
 
   VkDevice device_;
   QueryPoolConfig config_;
+  float timestamp_period_;
 
   VkQueryPool querypool_;
 
@@ -68,6 +71,10 @@ class QueryPool final {
     return VK_NULL_HANDLE != querypool_;
   }
 
+  inline float timestamp_period() {
+    return timestamp_period_;
+  }
+
   void reset(const CommandBuffer&);
 
   uint32_t shader_profile_begin(
@@ -79,9 +86,15 @@ class QueryPool final {
 
   void extract_results();
   void print_results();
-  uint64_t get_total_op_ns(std::string op_name);
+  uint64_t get_total_op_us(std::string op_name);
   void shader_log_for_each(std::function<void(const ShaderDuration&)> fn);
+
+  inline const std::vector<ShaderDuration>& shader_log() {
+    return shader_log_;
+  }
 };
+
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
 } // namespace api
 } // namespace vulkan

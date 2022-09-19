@@ -375,6 +375,7 @@ std::string Adapter::stringize() const {
      << "," << limits.name[1] << "," << limits.name[2] << std::endl;
 
   ss << "    Physical Device Limits {" << std::endl;
+  ss << std::fixed << std::setprecision(2);
   PRINT_LIMIT_PROP(maxImageDimension1D);
   PRINT_LIMIT_PROP(maxImageDimension2D);
   PRINT_LIMIT_PROP(maxImageDimension3D);
@@ -386,6 +387,7 @@ std::string Adapter::stringize() const {
   PRINT_LIMIT_PROP_VEC3(maxComputeWorkGroupCount);
   PRINT_LIMIT_PROP(maxComputeWorkGroupInvocations);
   PRINT_LIMIT_PROP_VEC3(maxComputeWorkGroupSize);
+  PRINT_LIMIT_PROP(timestampPeriod);
   ss << "    }" << std::endl;
   ss << "  }" << std::endl;
   ;

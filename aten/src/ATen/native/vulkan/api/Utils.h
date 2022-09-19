@@ -117,6 +117,8 @@ inline VkExtent3D create_extent3d(const utils::uvec3& extents) {
   return VkExtent3D{extents.data[0u], extents.data[1u], extents.data[2u]};
 }
 
+std::string stringize(const VkExtent3D& extents);
+
 } // namespace api
 } // namespace vulkan
 } // namespace native
