@@ -206,15 +206,6 @@ class mm_layouts(_TestParametrizer):
                         other = sample_input.args[0]
                         nse = (other != 0).sum((-2, -1))
                         for other_layout in layouts:
-                            if nse.max() != nse.min() and other_layout in {torch.sparse_csr, torch.sparse_csc,
-                                                                           torch.sparse_bsr, torch.sparse_bsc}:
-                                # TODO: sparse compressed tensors
-                                # require equal NSE in batches (see PR
-                                # 84834 that removes this
-                                # restriction). After PR 84834 (or
-                                # equivalent) lands, remove this
-                                # if-block
-                                continue
                             if other.layout != other_layout:
                                 yield SampleInput(sample_input.input.clone(),
                                                   args=(torch.sparse._to_layout(other, other_layout),),
