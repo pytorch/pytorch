@@ -426,7 +426,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   int64_t n_classes,
   int64_t ignore_index
 ) {
-  int t = static_cast<int>(*target);
+  int64_t t = static_cast<int64_t>(*target);
   if (t != static_cast<int>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     const auto grad = -(size_average ? *grad_output / *total_weight
