@@ -1791,12 +1791,13 @@ def _to_other(
     return kwargs
 
 
-def _clean_to_kwargs(a: Tensor, to_kwargs: dict):
-    options_to_check = ["dtype", "device"]
+# remove to_kwargs that is already present in `a`
+def remove_redundant_to_arguments(a: Tensor, to_kwargs: dict):
+    options_to_check = ["dtype", "device", "layout"]
 
     for kw in options_to_check:
         if kw in to_kwargs:
-            if a.dtype == to_kwargs[kw]:
+            if getattr(a, kw) == to_kwargs[kw]:
                 to_kwargs.pop(kw)
 
     if "memory_format" in to_kwargs and (
@@ -1807,22 +1808,25 @@ def _clean_to_kwargs(a: Tensor, to_kwargs: dict):
 
 
 def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
+    # handled dispatch via positional arguments
     if len(args) != 0:
         kwargs = _to_dispatch(*args, **kwargs)
 
     # TODO: is_pinned is not currently supported in refs or fake_tensor
     # https://github.com/pytorch/pytorch/issues/84925
     assert "pin_memory" not in kwargs
-    # remove stub arguments
-    _clean_to_kwargs(a, kwargs)
+    remove_redundant_to_arguments(a, kwargs)
 
     if _to_will_alias(a, **kwargs):
         return a
 
+    copy = kwargs.pop("copy") if "copy" in kwargs else False
+    non_blocking = kwargs.pop("non_blocking") if "non_blocking" in kwargs else False
+
     # short-circuit to `prims.convert_element_type` when `to` is just a dtype change
     if (
-        (kwargs["copy"] or ("dtype" in kwargs and kwargs["dtype"] != a.dtype))
-        and (not kwargs["non_blocking"])
+        (copy or (kwargs.get("dtype", a.dtype) != a.dtype))
+        and (not non_blocking)
         and ("memory_format" not in kwargs)
         and ("device" not in kwargs)
         and ("layout" not in kwargs)
@@ -1831,11 +1835,8 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     ):
         return prims.convert_element_type(a, kwargs.get("dtype", a.dtype))
 
-    kwargs.pop("copy")
-    kwargs.pop("non_blocking")
-
     result = torch.empty_like(a, **kwargs)
-    # TODO: copy_to should support non_blocking
+    # TODO: non_blocking should be handled by `copy_to`
     copy_to(result, a)
     return result
 
