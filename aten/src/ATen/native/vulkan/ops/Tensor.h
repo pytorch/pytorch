@@ -163,12 +163,24 @@ class vTensor final {
     return view_->strides_;
   }
 
+  inline void set_is_quantized() const {
+    view_->is_quantized_ = true;
+  }
+
   inline bool is_quantized() const {
     return view_->is_quantized_;
   }
 
+  inline void set_scale(const double q_scale) const {
+    view_->q_scale = q_scale;
+  }
+
   inline double get_scale() const {
     return view_->q_scale;
+  }
+
+  inline void set_zero_point(const int64_t q_zero_point) const {
+    view_->q_zero_point = q_zero_point;
   }
 
   inline int64_t get_zero_point() const {
