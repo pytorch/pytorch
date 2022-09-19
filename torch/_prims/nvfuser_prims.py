@@ -410,6 +410,13 @@ def _var_vjp(grad, result, self, dims, correction):
     return expanded_grad * var_local_grad, *(None,) * (len(dims) + 1)
 
 
+def _broadcast_in_dim_vjp(grad, result, self, shape, broadcast_dimensions):
+    # TODO: implement prims.sum_to and nvprims.sum_to
+    grad = grad.sum_to_size(self.shape)
+    # TODO: squeeze op is missing here
+    return grad, *(None,) * (len(shape) + len(broadcast_dimensions))
+
+
 _vjp_impls: Dict[str, Any] = {
     "abs": lambda grad, result, self: prims.mul(grad, prims.sign(self)),
     "acos": lambda grad, result, self: prims.mul(
@@ -442,7 +449,7 @@ _vjp_impls: Dict[str, Any] = {
     "bitwise_not": None,  # Only integers supported
     "bitwise_or": None,  # Only integers supported
     "bitwise_xor": None,  # Only integers supported
-    "broadcast_in_dim": None,  # TODO
+    "broadcast_in_dim": _broadcast_in_dim_vjp,
     "ceil": lambda grad, result, self: prims.mul(grad, 0),
     "convert_element_type": lambda grad, result, self, dtype: (
         prims.convert_element_type(grad, self.dtype),
