@@ -755,8 +755,8 @@ Tensor prod_backward(
 
   Tensor zero_mask = (input == 0);
   Tensor slice_zero_count = zero_mask.sum(dim, true);
-  auto total_zeros = slice_zero_count.sum();
-  if (total_zeros.item<int64_t>() == 0) {
+  int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
+  if (total_zeros == 0) {
     return grad * (result / input).conj();
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
