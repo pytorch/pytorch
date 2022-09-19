@@ -173,10 +173,9 @@ void insertMkldnnPrePackedOps(script::Module& module) {
   }
 }
 
-template <typename T>
 void RewriteEltwiseGraph(
     std::shared_ptr<Graph>& graph,
-    const std::map<std::string, T>& fusion_rewrite_map,
+    const std::map<std::string, mkldnn::PostOp>& fusion_rewrite_map,
     std::string prepack_op_name,
     std::string run_op_name,
     std::string op_context_name,
@@ -251,7 +250,7 @@ void RewriteEltwiseGraph(
 }
 
 void FuseEltwiseWithPackedOps(std::shared_ptr<Graph>& graph) {
-  RewriteEltwiseGraph<mkldnn::PostOp>(
+  RewriteEltwiseGraph(
       graph,
       mkldnn::fusion_rewrite_map(),
       std::string("mkldnn_prepacked::conv2d_prepack"),
