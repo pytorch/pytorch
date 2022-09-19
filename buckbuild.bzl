@@ -1668,6 +1668,7 @@ def define_buck_targets(
         srcs = libtorch_profiler_sources,
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
+            "-DUSE_KINETO_MIN_CHANGE",
             "-DUSE_KINETO",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
