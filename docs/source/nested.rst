@@ -178,17 +178,38 @@ The following functions are related to nested tensors:
 
 .. _supported operations:
 
-[wip] Supported operations
+Supported operations
 ++++++++++++++++++++++++++
 
-The following table summarizes operations that are currently supported on NestedTensor
-and any constraints they have.
+In this section, we summarize the operations that are currently supported on
+NestedTensor and any constraints they have.
 
 .. csv-table::
    :header: "PyTorch operation",  "Constraints"
    :widths: 20, 65
    :delim: ;
 
-   :func:`torch.matmul`;  ``no broadcasting support``
-   :func:`torch.nn.Linear`;  ``-``
-   :func:`torch.nn.functional.softmax`; ``-``
+   :func:`torch.matmul`;  Supports matrix multiplication between two (>= 3d) nested tensors where
+   the last two dimensions are matrix dimensions and the leading (batch) dimensions have the same size
+   (i.e. no broadcasting support for batch dimensions yet)
+   :func:`torch.bmm`; Supports batch matrix multiplication of two 3-d nested tensors.
+   :func:`torch.nn.Linear`;  Supports 3-d nested input and a dense 2-d weight matrix.
+   :func:`torch.nn.functional.softmax`; Supports softmax along all dims except dim=0.
+   :func:`torch.nn.Dropout`; ``-``
+   :func:`torch.relu`; ``-``
+   :func:`torch.gelu`; ``-``
+   :func:`torch.add`; Supports elementwise addition of two nested tensors.
+                      Supports addition of a scalar to a nested tensor.
+   :func:`torch.mul`; Supports elementwise multiplication of two nested tensors.
+                      Supports multipication of a nested tensor by a scalar.
+   :func:`torch.select`; Supports selecting along `dim=0` only (analogously `nt[i]`).
+   :func:`torch.clone`; ``-``
+   :func:`torch.detach`; ``_``
+   :func:`torch.unbind`; Supports unbinding along `dim=0` only.
+   :func:`torch.reshape`; Supports reshaping with size of `dim=0` preserved (i.e. number of tensors nested cannot be changed).
+                          Unlike regular tensors, a size of `-1` here means that
+                          (a) For a pre-existing dimension, the existing size is inherited.
+                          (b) For a new dimension, size inference is not implemented yet and hence size cannot be `-1`.
+   :func:`torch.Tensor.reshape_as`; Similar constraint as for `reshape`.
+   :func:`torch.transpose`; Supports transposing of all dims except `dim=0`.
+   :func:`torch.Tensor.view`; Rules for the new shape are similar to that of `reshape`.
