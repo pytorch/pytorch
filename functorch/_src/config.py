@@ -19,3 +19,5 @@ debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
 debug_graphs = os.environ.get('AOT_FX_GRAPHS', False)
 # Prints out joint graph traced, before partitioning
 debug_joint = os.environ.get('AOT_FX_GRAPHS_JOINT', False)
+
+use_dynamic_shapes = os.getenv('AOT_DYNAMIC_SHAPES', False)
