@@ -139,7 +139,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UNARY_POINTWISE_ALL(mvlgamma);
   UNARY_POINTWISE_ALL(nan_to_num);
   UNARY_POINTWISE_ALL(neg);
-  UNARY_POINTWISE_ALL(positive);
   UNARY_POINTWISE_ALL(rad2deg);
   UNARY_POINTWISE_ALL(reciprocal);
   UNARY_POINTWISE_ALL(round);
