@@ -473,10 +473,10 @@ class TestOperators(TestCase):
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
         # AssertionError: Tensor-likes are not close!
-        # # Mismatched elements: 1 / 15 (6.7%)
-        # # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
-        # # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
-        # # The failure occurred for item [0]
+        # Mismatched elements: 1 / 15 (6.7%)
+        # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
+        # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
+        # The failure occurred for item [0]
         xfail('_masked.prod')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
