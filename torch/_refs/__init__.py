@@ -1792,8 +1792,11 @@ def _to_other(
 
 
 # remove to_kwargs that is already present in `a`
-def remove_redundant_to_arguments(a: Tensor, to_kwargs: dict):
+def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
     options_to_check = ["dtype", "device", "layout"]
+    # "device" option could be passed a str instead torch.device
+    if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
+        to_kwargs["device"] = torch.device(to_kwargs["device"])
 
     for kw in options_to_check:
         if kw in to_kwargs:
@@ -1813,7 +1816,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
     # TODO: is_pinned is not currently supported in refs or fake_tensor
     # https://github.com/pytorch/pytorch/issues/84925
     assert "pin_memory" not in kwargs
-    remove_redundant_to_arguments(a, kwargs)
+    canonicalize_to_arguments(a, kwargs)
 
     if _to_will_alias(a, **kwargs):
         return a
