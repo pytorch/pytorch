@@ -2327,6 +2327,9 @@ ceil(input, *, out=None) -> Tensor
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
+
 .. math::
     \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil
 """
@@ -4163,6 +4166,9 @@ floor(input, *, out=None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. math::
     \text{out}_{i} = \left\lfloor \text{input}_{i} \right\rfloor
@@ -9631,6 +9637,9 @@ round(input, *, decimals=0, out=None) -> Tensor
 
 Rounds elements of :attr:`input` to the nearest integer.
 
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
+
 .. note::
     This function implements the "round half to even" to
     break ties when a number is equidistant from two
@@ -12009,6 +12018,9 @@ trunc(input, *, out=None) -> Tensor
 
 Returns a new tensor with the truncated integer values of
 the elements of :attr:`input`.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 Args:
     {input}
