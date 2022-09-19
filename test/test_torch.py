@@ -6470,6 +6470,56 @@ class TestTorch(TestCase):
         self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
         self.assertIs(complexdouble_storage.dtype, torch.complex128)
 
+    def test_typed_storage_deprecation_warning(self):
+        s0 = torch.FloatStorage(10)
+        funcs = [
+            lambda: torch.FloatStorage(),
+            lambda: torch.FloatStorage.dtype,
+            lambda: s0.fill_(0),
+            lambda: s0.is_cuda,
+            lambda: s0.untyped(),
+            lambda: len(s0),
+            lambda: s0[0],
+        ]
+
+        if torch.cuda.is_available():
+            s1 = torch.cuda.FloatStorage(10)
+            funcs += [
+                lambda: torch.cuda.FloatStorage(),
+                lambda: torch.cuda.FloatStorage.dtype,
+                lambda: s1.fill_(0),
+                lambda: s1.is_cuda,
+                lambda: s1.untyped(),
+                lambda: len(s1),
+                lambda: s1[0],
+            ]
+
+        # Check that each of the TypedStorage function calls produce a warning
+        # if warnings are reset between each
+        for f in funcs:
+            with warnings.catch_warnings(record=True) as w:
+                warnings.resetwarnings()
+                f()
+                self.assertEqual(len(w), 1)
+                warning = w[0].message
+                self.assertTrue(warning, DeprecationWarning)
+                self.assertTrue(re.search(
+                    '^TypedStorage is deprecated',
+                    str(warning)))
+
+        # Check that only one warning is raised from calling multiple
+        # TypedStorage functions if warnings are not reset between each
+        with warnings.catch_warnings(record=True) as w:
+            warnings.resetwarnings()
+            for f in funcs:
+                f()
+            self.assertEqual(len(w), 1)
+            warning = w[0].message
+            self.assertTrue(warning, DeprecationWarning)
+            self.assertTrue(re.search(
+                '^TypedStorage is deprecated',
+                str(warning)))
+
     def test_from_file(self):
         def assert_with_filename(filename):
             size = 10000

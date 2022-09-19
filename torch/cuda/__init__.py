@@ -737,11 +737,12 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import _LegacyStorage
+from torch.storage import _LegacyStorage, _warn_typed_storage_removal
 
 class _CudaLegacyStorage(_LegacyStorage):
     @classmethod
     def from_buffer(cls, *args, **kwargs):
+        _warn_typed_storage_removal()
         raise RuntimeError('from_buffer: Not available for CUDA storage')
 
     @classmethod
@@ -755,61 +756,73 @@ class _CudaLegacyStorage(_LegacyStorage):
 class ByteStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.uint8
 
 class DoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.double
 
 class FloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.float
 
 class HalfStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.half
 
 class LongStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.long
 
 class IntStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.int
 
 class ShortStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.short
 
 class CharStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.int8
 
 class BoolStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.bool
 
 class BFloat16Storage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.bfloat16
 
 class ComplexDoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.cdouble
 
 class ComplexFloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
+        _warn_typed_storage_removal()
         return torch.cfloat
 
 del _LegacyStorage
