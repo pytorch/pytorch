@@ -39,6 +39,10 @@ class TestNvPrims(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
+            # Check if result is boolean
+            if op.torch_opinfo_name in ["eq", "ne", "gt", "ge", "lt", "le", "isfinite"]:
+                self.skipTest("Skipped! Boolean result is not differentiable")
+
             all_args, _ = tree_flatten((sample.input, *sample.args, sample.kwargs))
             gradcheck_args = tuple(
                 x for x in all_args if (isinstance(x, torch.Tensor) and x.requires_grad)
