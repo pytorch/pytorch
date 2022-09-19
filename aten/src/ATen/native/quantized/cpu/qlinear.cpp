@@ -283,22 +283,6 @@ at::Tensor& PackedLinearWeight::apply_relu_out(
   return apply_impl<true>(input, output_scale, output_zero_point, output);
 }
 
-at::Tensor PackedLinearWeight:: apply_leaky_relu(
-    at::Tensor input,
-    double negative_slope,
-    double output_scale,
-    int64_t output_zero_point) {
-  // Reference path
-  auto x_fp32 = input.dequantize();
-  at::Tensor w_q;
-  c10::optional<at::Tensor> bias;
-  std::tie(w_q, bias) = unpack();
-  auto w_fp32 = w_q.dequantize();
-  auto y_fp32 = at::linear(x_fp32, w_fp32, bias);
-  auto z_fp32 = at::leaky_relu(y_fp32, negative_slope);
-  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, input.scalar_type());
-}
-
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -634,22 +618,6 @@ at::Tensor PackedLinearWeightsQnnp::apply_relu(
   return apply_impl<true>(std::move(input), output_scale, output_zero_point);
 }
 
-at::Tensor PackedLinearWeightsQnnp::apply_leaky_relu(
-    at::Tensor input,
-    double negative_slope,
-    double output_scale,
-    int64_t output_zero_point) {
-  // Reference path
-  auto x_fp32 = input.dequantize();
-  at::Tensor w_q;
-  c10::optional<at::Tensor> bias;
-  std::tie(w_q, bias) = unpack();
-  auto w_fp32 = w_q.dequantize();
-  auto y_fp32 = at::linear(x_fp32, w_fp32, bias);
-  auto z_fp32 = at::leaky_relu(y_fp32, negative_slope);
-  return at::quantize_per_tensor(z_fp32, output_scale, output_zero_point, input.scalar_type());
-}
-
 #endif // USE_PYTORCH_QNNPACK
 
 #if AT_MKLDNN_ENABLED()
@@ -798,8 +766,17 @@ class QLinearLeakyReluInt8 final {
       double negative_slope,
       double output_scale,
       int64_t output_zero_point) {
-    return packed_weight->apply_leaky_relu(
-        std::move(input), negative_slope, output_scale, output_zero_point);
+    auto& ctx = at::globalContext();
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+      return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_leaky_relu(
+          std::move(input), negative_slope, output_scale, output_zero_point);
+    }
+#endif
+    TORCH_CHECK(
+        false,
+        "Didn't find engine for operation quantized::linear_leaky_relu ",
+        toString(ctx.qEngine()));
   }
 };
 

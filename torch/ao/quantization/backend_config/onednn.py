@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.nn.intrinsic as nni
+import torch.nn.functional as F
 from ._common_operator_config_utils import (
     _get_binary_op_configs,
     _get_bn_configs,
@@ -68,6 +70,25 @@ onednn_weight_only_quint4x2_dtype_config = DTypeConfig(
     weight_dtype=torch.quint4x2,
 )
 
+conv_dtype_configs = [onednn_weighted_op_int8_dtype_config]
+linear_dtype_configs = [
+    onednn_weighted_op_int8_dtype_config,
+    onednn_default_dynamic_int8_dtype_config,
+    onednn_default_dynamic_float16_dtype_config,
+]
+binary_op_dtype_configs = [onednn_weighted_op_int8_dtype_config]
+default_op_dtype_configs = [onednn_default_op_quint8_dtype_config]
+fixed_qparams_op_dtype_configs = [onednn_weighted_op_int8_dtype_config]
+share_qparams_op_dtype_configs = [onednn_default_op_quint8_dtype_config]
+rnn_op_dtype_configs = [
+    onednn_default_dynamic_int8_dtype_config,
+    onednn_default_dynamic_float16_dtype_config,
+]
+embedding_op_dtype_configs = [
+    onednn_weight_only_quint8_dtype_config,
+    onednn_weight_only_quint4x2_dtype_config,
+]
+
 # ===================
 # |  FUSER METHODS  |
 # ===================
@@ -120,90 +141,79 @@ linear_configs = _get_linear_configs(linear_dtype_configs)
 # -------------------
 # 1.1 linear module + leaky_relu fusion config
 # linear leaky_relu, linear module + leaky_relu module
-linear_configs.append({
-    "pattern": (torch.nn.LeakyReLU, torch.nn.Linear),
-    "dtype_configs": dtype_configs,
-    "fuser_method": reverse_sequential_wrapper2(nni.LinearLeakyReLU),
-    "fused_module": nni.LinearLeakyReLU,
-})
+linear_configs.append(
+    BackendPatternConfig((torch.nn.LeakyReLU, torch.nn.Linear))
+        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_fuser_method(reverse_sequential_wrapper2(nni.LinearLeakyReLU))
+        .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + functional leaky_relu
-linear_configs.append({
-    "pattern": (torch.nn.functional.leaky_relu, torch.nn.Linear),
-    "dtype_configs": dtype_configs,
-    "fuser_method": reverse_sequential_wrapper2(nni.LinearLeakyReLU),
-    "fused_module": nni.LinearLeakyReLU,
-})
+linear_configs.append(
+    BackendPatternConfig((torch.nn.functional.leaky_relu, torch.nn.Linear))
+        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_fuser_method(reverse_sequential_wrapper2(nni.LinearLeakyReLU))
+        .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + BN + leaky_relu
-linear_configs.append({
-    "pattern": (nn.LeakyReLU, (nn.BatchNorm1d, nn.Linear)),
-    "dtype_configs": dtype_configs,
-    "fuser_method": reverse3(fuse_linear_bn_leaky_relu),
-    "fused_module": nni.LinearLeakyReLU,
-})
+linear_configs.append(
+    BackendPatternConfig((nn.LeakyReLU, (nn.BatchNorm1d, nn.Linear)))
+        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_fuser_method(reverse3(fuse_linear_bn_leaky_relu))
+        .set_fused_module(nni.LinearLeakyReLU))
+
 # 1.2 linear module + leaky_relu, fused module configs
 # linear leaky_relu, fused module
-linear_configs.append({
-    "pattern": nni.LinearLeakyReLU,
-    "observation_type": observation_type,
-    "dtype_configs": dtype_configs,
-    "root_module": torch.nn.Linear,
-    "reference_quantized_module_for_root": nnqr.Linear,
-})
+linear_configs.append(
+    BackendPatternConfig(nni.LinearLeakyReLU)
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        .set_root_module(torch.nn.Linear)
+        .set_reference_quantized_module(nnqr.Linear))
 # 1.3 functional linear + leaky_relu configs
 # linear leaky_relu, functional linear + leaky_relu module
-linear_configs.append({
-    "pattern": (torch.nn.LeakyReLU, F.linear),
-    "observation_type": observation_type,
-    "dtype_configs": dtype_configs,
-})
+linear_configs.append(
+    BackendPatternConfig((torch.nn.LeakyReLU, F.linear))
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs))
 # linear leaky_relu, functional linear + functional leaky_relu
-linear_configs.append({
-    "pattern": (F.leaky_relu, F.linear),
-    "observation_type": observation_type,
-    "dtype_configs": dtype_configs,
-})
+linear_configs.append(
+    BackendPatternConfig((F.leaky_relu, F.linear))
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs))
 
 # (2) Linear + tanh
 # -------------------
 # 2.1 linear module + tanh fusion config
 # linear tanh, linear module + tanh module
-linear_configs.append({
-    "pattern": (torch.nn.Tanh, torch.nn.Linear),
-    "dtype_configs": dtype_configs,
-    "fuser_method": reverse_sequential_wrapper2(nni.LinearTanh),
-    "fused_module": nni.LinearTanh,
-})
+linear_configs.append(
+    BackendPatternConfig((torch.nn.Tanh, torch.nn.Linear))
+        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_fuser_method(reverse_sequential_wrapper2(nni.LinearTanh))
+        .set_fused_module(nni.LinearTanh))
 # linear tanh, linear module + functional tanh
-linear_configs.append({
-    "pattern": (torch.nn.functional.tanh, torch.nn.Linear),
-    "dtype_configs": dtype_configs,
-    "fuser_method": reverse_sequential_wrapper2(nni.LinearTanh),
-    "fused_module": nni.LinearTanh,
-})
+linear_configs.append(
+    BackendPatternConfig((torch.nn.functional.tanh, torch.nn.Linear))
+        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_fuser_method(reverse_sequential_wrapper2(nni.LinearTanh))
+        .set_fused_module(nni.LinearTanh))
 
 # 2.2 linear module + tanh, fused module configs
 # linear tanh, fused module
-linear_configs.append({
-    "pattern": nni.LinearTanh,
-    "observation_type": observation_type,
-    "dtype_configs": dtype_configs,
-    "root_module": torch.nn.Linear,
-    "reference_quantized_module_for_root": nnqr.Linear,
-    # "qat_module": nniqat.LinearLeakyReLU,
-})
+linear_configs.append(
+    BackendPatternConfig(nni.LinearTanh)
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        .set_root_module(torch.nn.Linear)
+        .set_reference_quantized_module(nnqr.Linear))
 # 2.3 functional linear + tanh configs
 # linear tanh, functional linear + tanh module
-linear_configs.append({
-    "pattern": (torch.nn.Tanh, F.linear),
-    "observation_type": observation_type,
-    "dtype_configs": dtype_configs,
-})
+linear_configs.append(
+    BackendPatternConfig((torch.nn.Tanh, F.linear))
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs))
 # linear tanh, functional linear + functional tanh
-linear_configs.append({
-    "pattern": (F.tanh, F.linear),
-    "observation_type": observation_type,
-    "dtype_configs": dtype_configs,
-})
+linear_configs.append(
+    BackendPatternConfig((F.tanh, F.linear))
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs))
 
 # =====================
 # |  BACKEND CONFIGS  |
@@ -213,24 +223,6 @@ def get_onednn_backend_config() -> BackendConfig:
     """
     Return the `BackendConfig` for PyTorch's native ONEDNN backend.
     """
-    conv_dtype_configs = [onednn_weighted_op_int8_dtype_config]
-    linear_dtype_configs = [
-        onednn_weighted_op_int8_dtype_config,
-        onednn_default_dynamic_int8_dtype_config,
-        onednn_default_dynamic_float16_dtype_config,
-    ]
-    binary_op_dtype_configs = [onednn_weighted_op_int8_dtype_config]
-    default_op_dtype_configs = [onednn_default_op_quint8_dtype_config]
-    fixed_qparams_op_dtype_configs = [onednn_weighted_op_int8_dtype_config]
-    share_qparams_op_dtype_configs = [onednn_default_op_quint8_dtype_config]
-    rnn_op_dtype_configs = [
-        onednn_default_dynamic_int8_dtype_config,
-        onednn_default_dynamic_float16_dtype_config,
-    ]
-    embedding_op_dtype_configs = [
-        onednn_weight_only_quint8_dtype_config,
-        onednn_weight_only_quint4x2_dtype_config,
-    ]
     return BackendConfig("onednn") \
         .set_backend_pattern_configs(conv_configs) \
         .set_backend_pattern_configs(linear_configs) \

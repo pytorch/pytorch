@@ -206,7 +206,7 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
       at::Tensor input,
       double negative_slope,
       double output_scale,
-      int64_t output_zero_point) override;
+      int64_t output_zero_point);
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
