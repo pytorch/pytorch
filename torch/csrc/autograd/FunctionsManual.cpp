@@ -2735,11 +2735,12 @@ Tensor as_strided_backward(
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
-
   // TODO: properly use sym
   auto sizes = c10::asIntArrayRefSlow(sym_sizes);
   auto strides = c10::asIntArrayRefSlow(sym_strides);
-  auto storage_offset_ = sym_storage_offset_.has_value() ? c10::make_optional(sym_storage_offset_->expect_int()) : c10::nullopt;
+  auto storage_offset_ = sym_storage_offset_.has_value()
+      ? c10::make_optional(sym_storage_offset_->expect_int())
+      : c10::nullopt;
 
   // For output geometry,
   //   check for size 0 dimensions,
