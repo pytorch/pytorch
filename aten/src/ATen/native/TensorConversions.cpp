@@ -1598,7 +1598,7 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
             self.sizes(),
             self_values.scalar_type(),
             self.layout(),
-            self_values.device()),
+            at::kCPU),
         blocksize);
     Tensor result_values = cpu_result.values().to(self_values.options());
     Tensor result_crow_indices =
