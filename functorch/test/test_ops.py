@@ -473,10 +473,10 @@ class TestOperators(TestCase):
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
         # AssertionError: Tensor-likes are not close!
-        # Mismatched elements: 1 / 15 (6.7%)
-        # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
-        # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
-        # The failure occurred for item [0]
+        # # Mismatched elements: 1 / 15 (6.7%)
+        # # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
+        # # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
+        # # The failure occurred for item [0]
         xfail('_masked.prod')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
@@ -581,8 +581,6 @@ class TestOperators(TestCase):
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
-        # (calls nonzero): vmap: We do not support batching operators that can output dynamic shape.
-        xfail("prod"),
         xfail("put"),  # vmap: inplace into a regular tensor
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
@@ -685,7 +683,6 @@ class TestOperators(TestCase):
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('narrow'),  # .item() call
-        xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
 
@@ -770,7 +767,6 @@ class TestOperators(TestCase):
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
-        xfail('prod'),  # .item or data-dependent control flow
 
         skip('pca_lowrank', ''),  # randomness
         skip('svd_lowrank', ''),  # randomness
@@ -933,7 +929,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
-        xfail('prod'),
         xfail('put'),
         xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
@@ -1283,7 +1278,6 @@ class TestOperators(TestCase):
         xfail('normal'),  # calls random op
         xfail('normal', 'number_mean'),  # calls random op
         xfail('pca_lowrank'),  # calls random op
-        xfail('prod'),  # Dynamic shape due to aten::nonzero call
         xfail('quantile'),  # Batching rule not implemented for aten::equal
         xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition

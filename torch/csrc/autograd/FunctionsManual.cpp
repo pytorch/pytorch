@@ -703,7 +703,13 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (is_meta_in_composite_kernels(input)) {
+  if (input.numel() == 0) {
+    // When input has a zero sized dimension (empty tensor),
+    // we don't need to actually compute the grads.
+    // So we just reshape `grad` as `input`.
+    return grad.expand_as(input);
+  }
+  if (is_meta_in_composite_kernels(input) || isTensorSubclassLike(input)) {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -736,7 +742,7 @@ Tensor prod_backward(
   }
   if (input.numel() == 0) {
     // When input has a zero sized dimension (empty tensor),
-    // we don't need to actually compute.
+    // we don't need to actually compute the grads.
     // So we just reshape `grad` as `input`.
     return grad.expand_as(input);
   }
