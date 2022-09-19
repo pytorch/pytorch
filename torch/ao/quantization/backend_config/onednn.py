@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.functional as F
+import torch.nn.quantized._reference as nnqr
 from ._common_operator_config_utils import (
     _get_binary_op_configs,
     _get_bn_configs,
@@ -14,7 +15,16 @@ from ._common_operator_config_utils import (
     _get_rnn_op_configs,
     _get_share_qparams_op_configs,
 )
-from .backend_config import BackendConfig, DTypeConfig
+from .backend_config import (
+    BackendPatternConfig,
+    BackendConfig,
+    DTypeConfig,
+    ObservationType,
+)
+from ..fuser_method_mappings import (
+    reverse_sequential_wrapper2,
+    reverse3,
+)
 
 
 # ===================
@@ -135,6 +145,7 @@ conv_configs = _get_conv_configs(conv_dtype_configs)
 # |  CONFIGS FOR LINEAR  |
 # ========================
 
+observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
 linear_configs = _get_linear_configs(linear_dtype_configs)
 
 # (1) Linear + leaky_relu
@@ -143,19 +154,19 @@ linear_configs = _get_linear_configs(linear_dtype_configs)
 # linear leaky_relu, linear module + leaky_relu module
 linear_configs.append(
     BackendPatternConfig((torch.nn.LeakyReLU, torch.nn.Linear))
-        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_dtype_configs(linear_dtype_configs)  # noqa: E131
         .set_fuser_method(reverse_sequential_wrapper2(nni.LinearLeakyReLU))
         .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + functional leaky_relu
 linear_configs.append(
     BackendPatternConfig((torch.nn.functional.leaky_relu, torch.nn.Linear))
-        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_dtype_configs(linear_dtype_configs)  # noqa: E131
         .set_fuser_method(reverse_sequential_wrapper2(nni.LinearLeakyReLU))
         .set_fused_module(nni.LinearLeakyReLU))
 # linear leaky_relu, linear module + BN + leaky_relu
 linear_configs.append(
     BackendPatternConfig((nn.LeakyReLU, (nn.BatchNorm1d, nn.Linear)))
-        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_dtype_configs(linear_dtype_configs)  # noqa: E131
         .set_fuser_method(reverse3(fuse_linear_bn_leaky_relu))
         .set_fused_module(nni.LinearLeakyReLU))
 
@@ -164,7 +175,7 @@ linear_configs.append(
 linear_configs.append(
     BackendPatternConfig(nni.LinearLeakyReLU)
         .set_observation_type(observation_type)  # noqa: E131
-        .set_dtype_configs(dtype_configs)
+        .set_dtype_configs(linear_dtype_configs)
         .set_root_module(torch.nn.Linear)
         .set_reference_quantized_module(nnqr.Linear))
 # 1.3 functional linear + leaky_relu configs
@@ -172,26 +183,27 @@ linear_configs.append(
 linear_configs.append(
     BackendPatternConfig((torch.nn.LeakyReLU, F.linear))
         .set_observation_type(observation_type)  # noqa: E131
-        .set_dtype_configs(dtype_configs))
+        .set_dtype_configs(linear_dtype_configs))
 # linear leaky_relu, functional linear + functional leaky_relu
 linear_configs.append(
     BackendPatternConfig((F.leaky_relu, F.linear))
         .set_observation_type(observation_type)  # noqa: E131
-        .set_dtype_configs(dtype_configs))
+        .set_dtype_configs(linear_dtype_configs))
 
+'''
 # (2) Linear + tanh
 # -------------------
 # 2.1 linear module + tanh fusion config
 # linear tanh, linear module + tanh module
 linear_configs.append(
     BackendPatternConfig((torch.nn.Tanh, torch.nn.Linear))
-        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_dtype_configs(linear_dtype_configs)  # noqa: E131
         .set_fuser_method(reverse_sequential_wrapper2(nni.LinearTanh))
         .set_fused_module(nni.LinearTanh))
 # linear tanh, linear module + functional tanh
 linear_configs.append(
     BackendPatternConfig((torch.nn.functional.tanh, torch.nn.Linear))
-        .set_dtype_configs(dtype_configs)  # noqa: E131
+        .set_dtype_configs(linear_dtype_configs)  # noqa: E131
         .set_fuser_method(reverse_sequential_wrapper2(nni.LinearTanh))
         .set_fused_module(nni.LinearTanh))
 
@@ -200,7 +212,7 @@ linear_configs.append(
 linear_configs.append(
     BackendPatternConfig(nni.LinearTanh)
         .set_observation_type(observation_type)  # noqa: E131
-        .set_dtype_configs(dtype_configs)
+        .set_dtype_configs(linear_dtype_configs)
         .set_root_module(torch.nn.Linear)
         .set_reference_quantized_module(nnqr.Linear))
 # 2.3 functional linear + tanh configs
@@ -208,12 +220,13 @@ linear_configs.append(
 linear_configs.append(
     BackendPatternConfig((torch.nn.Tanh, F.linear))
         .set_observation_type(observation_type)  # noqa: E131
-        .set_dtype_configs(dtype_configs))
+        .set_dtype_configs(linear_dtype_configs))
 # linear tanh, functional linear + functional tanh
 linear_configs.append(
     BackendPatternConfig((F.tanh, F.linear))
         .set_observation_type(observation_type)  # noqa: E131
-        .set_dtype_configs(dtype_configs))
+        .set_dtype_configs(linear_dtype_configs))
+'''
 
 # =====================
 # |  BACKEND CONFIGS  |

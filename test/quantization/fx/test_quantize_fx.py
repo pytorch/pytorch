@@ -164,6 +164,7 @@ from torch.testing._internal.common_quantization import (
     test_only_train_fn,
     ModelForConvTransposeBNFusion,
     get_supported_device_types,
+    skipIfNoONEDNN,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -361,7 +362,10 @@ class TestFuseFx(QuantizationTestCase):
             expected_node_list=expected_nodes,
             expected_node_occurrence=expected_occurrence)
 
+    @skipIfNoONEDNN
     def test_fuse_linear_bn_leaky_relu_eval(self):
+        # for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
         expected_nodes = [
             ns.call_module(nni.LinearLeakyReLU),
         ]
@@ -374,7 +378,8 @@ class TestFuseFx(QuantizationTestCase):
             # test eval mode
             m = LinearBnLeakyReluModel(with_bn).eval()
             # fuse_fx is a top level api and only supports eval mode
-            m = fuse_fx(m)
+            m = fuse_fx(m,
+                        backend_config=get_onednn_backend_config())
             self.checkGraphModuleNodes(
                 m,
                 expected_node_list=expected_nodes,
@@ -447,9 +452,7 @@ class TestFuseFx(QuantizationTestCase):
             "": None,
             "object_type": [(nn.Linear, default_qconfig),
                             (nn.ReLU, default_qconfig),
-                            (F.relu, default_qconfig),
-                            (nn.LeakyReLU, default_qconfig),
-                            (F.leaky_relu, default_qconfig)]
+                            (F.relu, default_qconfig)]
         }
 
         linearRelu_node_list = [
@@ -465,15 +468,8 @@ class TestFuseFx(QuantizationTestCase):
             ns.call_method('dequantize')
         ]
 
-        linearLeakyRelu_node_list = [
-            ns.call_function(torch.quantize_per_tensor),
-            ns.call_module(nniq.LinearLeakyReLU),
-            ns.call_method('dequantize')
-        ]
-
         tests = [(LinearReluModel, linearRelu_node_list),
-                 (LinearReluLinearModel, linearReluLinear_node_list),
-                 (LinearBnLeakyReluModel, linearLeakyRelu_node_list)]
+                 (LinearReluLinearModel, linearReluLinear_node_list)]
 
         for M, node_list in tests:
             m = M().eval()
@@ -484,6 +480,33 @@ class TestFuseFx(QuantizationTestCase):
             quantized = convert_fx(prepared)
 
             self.checkGraphModuleNodes(quantized, expected_node_list=node_list)
+
+    @skipIfNoONEDNN
+    def test_qconfig_linear_leaky_relu(self):
+        # for onednn backend only
+        from torch.ao.quantization.backend_config import get_onednn_backend_config
+        qconfig_mapping = get_default_qconfig_mapping('onednn')
+        qconfig_mapping.set_object_type(nn.Linear, default_qconfig) \
+                       .set_object_type(nn.LeakyReLU, default_qconfig) \
+                       .set_object_type(F.leaky_relu, default_qconfig)
+
+        linearLeakyRelu_node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nniq.LinearLeakyReLU),
+            ns.call_method('dequantize')
+        ]
+
+        for with_bn in [True, False]:
+          m = LinearBnLeakyReluModel(with_bn).eval()
+          example_inputs = (torch.rand(5, 5),)
+          prepared = prepare_fx(m, qconfig_mapping, example_inputs=example_inputs,
+                                backend_config=get_onednn_backend_config())
+
+          prepared(*example_inputs)
+          quantized = convert_fx(prepared,
+                                backend_config=get_onednn_backend_config())
+
+          self.checkGraphModuleNodes(quantized, expected_node_list=linearLeakyRelu_node_list)
 
     def test_problematic_fuse_example(self):
         class LinearRelu(nn.Sequential):
