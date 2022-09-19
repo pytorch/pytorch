@@ -693,7 +693,8 @@ class TestOperators(TestCase):
 
         xfail('scatter_reduce', 'prod'),  # item call
 
-        xfail('nn.functional.ctc_loss'),  # Batching rule not implemented for aten::_use_cudnn_ctc_loss.Tensor
+        # Batching rule not implemented for aten::_use_cudnn_ctc_loss.Tensor
+        xfail('nn.functional.ctc_loss', device_type='cuda'),
         # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
