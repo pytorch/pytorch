@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type
 from torch.ao.quantization.quant_type import QuantType
 import torch
 import copy
-import operator
 import warnings
 from torch.fx import (
     GraphModule,
@@ -52,6 +51,7 @@ from ._equalize import update_obs_for_equalization, convert_eq_obs
 from torch.nn.utils.parametrize import type_before_parametrizations
 from .utils import (
     _is_custom_module_lstm,
+    _is_dequant_stub,
     get_custom_module_class_keys,
     get_quantize_node_info,
     create_getattr_from_value,
@@ -268,7 +268,6 @@ def insert_dequantize_node(
         for user_node in dict(node.users):
             if user_node is not dequantize_node:
                 user_node.replace_input_with(node, dequantize_node)
-        return dequantize_node
 
 def maybe_get_observer_for_node(
         node: Node,
@@ -476,88 +475,6 @@ def _remove_previous_dequantize_in_custom_module(node: Node, prev_node: Node, gr
         if len(prev_node.users) == 0:
             graph.erase_node(prev_node)
 
-def _convert_custom_module_lstm(node: Node, graph: Graph):
-    """
-    Ensure the inputs of the custom module LSTM are quantized and the outputs are dequantized.
-
-    For custom module LSTM, the inputs are tuples in the form (input, (hidden0, hidden1)).
-    We assume there is a quantize-dequantize pair inserted before each of the three nodes,
-    so here we remove the dequantize for each node to ensure all three tensors are quantized.
-    Similarly, the outputs are tuples in the form (output, (hidden0, hidden1)). We assume
-    all three nodes are already quantized, so we insert a dequantize after each node.
-    """
-    assert (
-        len(node.args) == 2 and
-        isinstance(node.args[1], tuple) and
-        len(node.args[1]) == 2
-    )
-    (inputs, (hidden0, hidden1)) = node.args
-    _remove_previous_dequantize_in_custom_module(node, inputs, graph)
-    _remove_previous_dequantize_in_custom_module(node, hidden0, graph)
-    _remove_previous_dequantize_in_custom_module(node, hidden1, graph)
-
-    # For the outputs, we need to:
-    #     (1) Split the LSTM node into (output, (hidden0, hidden1))
-    #     (2) Insert the dequantize nodes after each internal node
-    #     (3) Recombine the dequantize nodes into the same format as before
-    #     (4) Update all consumers of the original LSTM node to use the new one
-    #
-    # Before:
-    #                lstm_output
-    #                     |
-    #                     v
-    #               original_user(s)
-    # After:
-    #                lstm_output
-    #               /           \\
-    #              /  (getitem)  \\
-    #             /               \\
-    #            v                 v
-    #          output            hidden
-    #            |               /   \\
-    #            v              (getitem)
-    #        dequantize        /       \\
-    #            |            v         v
-    #            |         hidden0    hidden1
-    #            |            |         |
-    #            |            v         v
-    #            |      dequantize   dequantize
-    #            |            \\       /
-    #            |              (tuple)
-    #            |              \\   /
-    #            |               v  v
-    #            |         hidden_dequantized
-    #            \\               /
-    #             \\   (tuple)   /
-    #              v            v
-    #          lstm_output_dequantized
-    #                    |
-    #                    v
-    #               original_user(s)
-
-    original_users = list(node.users.keys())
-    # (1) Split the LSTM node into (output, (hidden0, hidden1))
-    # (2) Insert the dequantize nodes after each internal node
-    with graph.inserting_after(node):
-        output = graph.call_function(operator.getitem, (node, 0))
-        output_dq = insert_dequantize_node(output, graph)
-    with graph.inserting_after(output_dq):
-        hidden = graph.call_function(operator.getitem, (node, 1))
-    with graph.inserting_after(hidden):
-        hidden0 = graph.call_function(operator.getitem, (hidden, 0))
-        hidden0_dq = insert_dequantize_node(hidden0, graph)
-    with graph.inserting_after(hidden0_dq):
-        hidden1 = graph.call_function(operator.getitem, (hidden, 1))
-        hidden1_dq = insert_dequantize_node(hidden1, graph)
-    # (3) Recombine the dequantize nodes into the same format as before
-    with graph.inserting_after(hidden1_dq):
-        hidden_dq = graph.call_function(tuple, ([hidden0_dq, hidden1_dq],))
-    with graph.inserting_after(hidden_dq):
-        lstm_output_dequantized = graph.call_function(tuple, ([output_dq, hidden_dq],))
-    # (4) Update all consumers of the original LSTM node to use the new one
-    for user in original_users:
-        user.replace_input_with(node, lstm_output_dequantized)
-
 def convert_custom_module(
         node: Node,
         graph: Graph,
@@ -594,10 +511,25 @@ def convert_custom_module(
     if activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)
         if _is_custom_module_lstm(node, modules):
-            _convert_custom_module_lstm(node, graph)
+            # The inputs are tuples in the form (input, (hidden0, hidden1))
+            # Ensure all three input nodes are quantized
+            assert (
+                len(node.args) == 2 and
+                isinstance(node.args[1], tuple) and
+                len(node.args[1]) == 2
+            )
+            (inputs, (hidden0, hidden1)) = node.args  # type: ignore[misc]
+            assert isinstance(inputs, Node)
+            assert isinstance(hidden0, Node)
+            assert isinstance(hidden1, Node)
+            _remove_previous_dequantize_in_custom_module(node, inputs, graph)
+            _remove_previous_dequantize_in_custom_module(node, hidden0, graph)
+            _remove_previous_dequantize_in_custom_module(node, hidden1, graph)
         else:
             # remove the previous dequant node to ensure the inputs are quantized
-            _remove_previous_dequantize_in_custom_module(node, node.args[0], graph)
+            arg = node.args[0]
+            assert isinstance(arg, Node)
+            _remove_previous_dequantize_in_custom_module(node, arg, graph)
             # absorb the following observer into the module conversion
             activation_post_process = maybe_get_observer_for_node(node, modules)
             assert activation_post_process is not None
@@ -776,7 +708,8 @@ def convert(
 
     # this is a temporary hack for custom module, we may want to implement
     # this properly after the custom module class design is finalized
-    def replace_observer_with_dequantize_node(node: Node, graph: Graph):
+    # TODO: Use this only for replacing DeQuantStubs; currently it's also used for replacing observers
+    def replace_with_dequantize_node(node: Node, graph: Graph):
         call_custom_module_node = node.args[0]
         assert isinstance(call_custom_module_node, Node), \
             f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
@@ -832,11 +765,13 @@ def convert(
             if is_activation_post_process(modules[node.target]):
                 observed_node = node.args[0]
                 if observed_node in statically_quantized_custom_module_nodes:
-                    replace_observer_with_dequantize_node(node, model.graph)
+                    replace_with_dequantize_node(node, model.graph)
                 else:
                     replace_observer_with_quantize_dequantize_node(
                         model, model.graph, node, modules, node_name_to_scope,
                         qconfig_map)
+            elif _is_dequant_stub(node, modules):
+                replace_with_dequantize_node(node, model.graph)
             elif is_observed_standalone_module(modules[node.target]):
                 convert_standalone_module(
                     node, modules, model, is_reference, backend_config)

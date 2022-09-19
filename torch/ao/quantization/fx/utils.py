@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torch.ao.quantization import QuantType
 from torch.ao.quantization.backend_config import BackendConfig
+from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import is_per_tensor, is_per_channel
 from torch.ao.quantization.quantize import is_activation_post_process
 
@@ -641,11 +642,241 @@ def get_skipped_module_name_and_classes(
 
     return skipped_module_names, skipped_module_classes
 
-def _is_custom_module_lstm(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
+def _is_custom_module_lstm(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
     """
     Return whether this refers to the custom module LSTM flow.
     """
-    if node.op != "call_module" or str(node.target) not in modules:
+    if node.op != "call_module" or str(node.target) not in named_modules:
         return False
-    mod = modules[str(node.target)]
+    mod = named_modules[str(node.target)]
     return isinstance(mod, torch.nn.LSTM) or isinstance(mod, torch.ao.nn.quantizable.LSTM)
+
+def _is_getitem_node(node: Node) -> bool:
+    """
+    Return whether `node` refers to a `getitem` call_function node.
+    """
+    return node.op == "call_function" and node.target == operator.getitem
+
+def _is_dequant_stub(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
+    """
+    Return whether `node` refers to a `DeQuantStub` call_module node.
+    """
+    if node.op != "call_module" or str(node.target) not in named_modules:
+        return False
+    return isinstance(named_modules[str(node.target)], DeQuantStub)
+
+def _is_tuple_node(node: Node) -> bool:
+    """
+    Return whether `node` refers to a `tuple` call_function node.
+    """
+    return node.op == "call_function" and node.target == tuple
+
+def _insert_dequant_stub(
+    node: Node,
+    model: torch.nn.Module,
+    named_modules: Dict[str, torch.nn.Module],
+    graph: Graph,
+) -> Node:
+    """
+    Attach a `DeQuantStub` to the model and create a node that calls this
+    `DeQuantStub` on the output of `node`, similar to how observers are inserted.
+    """
+    prefix = "dequant_stub_"
+    get_new_dequant_stub_name = get_new_attr_name_with_prefix(prefix)
+    dequant_stub_name = get_new_dequant_stub_name(model)
+    dequant_stub = DeQuantStub()
+    setattr(model, dequant_stub_name, dequant_stub)
+    named_modules[dequant_stub_name] = dequant_stub
+    with graph.inserting_after(node):
+        return graph.call_module(dequant_stub_name, (node,))
+
+def _insert_dequant_stubs_for_custom_module_lstm_output(
+    node: Node,
+    model: torch.nn.Module,
+    named_modules: Dict[str, torch.nn.Module],
+    graph: Graph,
+) -> Node:
+    """
+    Insert DeQuantStubs after each internal output node of custom module LSTM.
+
+    Custom module LSTM outputs are nested tuples of the sturcture (output, (hidden0, hidden1)),
+    Since we cannot dequantize a tuple as a whole, we must first break down the tuple into its
+    components through `getitem`. This function transforms the graph as follows:
+
+      (1) Split the LSTM node into (output, (hidden0, hidden1))
+      (2) Insert a DeQuantStub after each internal node
+      (3) Recombine the DeQuantStubs into the same structure as before
+      (4) Reroute all consumers of the original LSTM node and its sub-nodes
+          (e.g. lstm[0])
+
+    Before:
+                   lstm_output
+                        |
+                        v
+                  original_user(s)
+    After:
+                   lstm_output
+                  /           \\
+                 /  (getitem)  \\
+                /               \\
+               v                 v
+             output            hidden
+               |               /   \\
+         (DeQuantStub)        (getitem)
+               |             /       \\
+               v            v         v
+           output_dq     hidden0    hidden1
+               |            |         |
+               |    (DeQuantStub) (DeQuantStub)
+               |            |         |
+               |            v         v
+               |      hidden0_dq  hidden1_dq
+               |            \\       /
+               |              (tuple)
+               |              \\   /
+               |               v  v
+               |             hidden_dq
+               \\               /
+                \\   (tuple)   /
+                 v            v
+                 lstm_output_dq
+                       |
+                       v
+                original_user(s)
+
+    For step (4), reroute all users of the original LSTM node(s) as follows:
+
+      lstm_output -> lstm_output_dq
+      lstm_output[0] -> output_dq
+      lstm_output[1] -> hidden_dq
+      lstm_output[1][0] -> hidden0_dq
+      lstm_output[1][1] -> hidden1_dq
+
+    Return the node `lstm_output_dq`.
+    """
+    # (0) Gather original users of the LSTM node, to be used in step (4)
+    # Note: We need to do this here before we add nodes to the graph, since these
+    # added nodes will become users of the LSTM node
+    original_lstm_users = list(node.users.keys())
+    original_getitem_0_users, original_getitem_0_node = [], None
+    original_getitem_1_users, original_getitem_1_node = [], None
+    original_getitem_1_0_users, original_getitem_1_0_node = [], None
+    original_getitem_1_1_users, original_getitem_1_1_node = [], None
+    for user in node.users:
+        if not _is_getitem_node(user):
+            continue
+        if user.args[1] == 0:
+            # Found lstm_output[0], to be replaced with `output_dq`
+            original_getitem_0_node = user
+            original_getitem_0_users = list(user.users.keys())
+        elif user.args[1] == 1:
+            # Found lstm_output[1], to be replaced with `hidden_dq`
+            original_getitem_1_node = user
+            for getitem_1_user in user.users:
+                if _is_getitem_node(getitem_1_user):
+                    if getitem_1_user.args[1] == 0:
+                        # Found lstm_output[1][0], to be replaced with `hidden0_dq`
+                        original_getitem_1_0_node = getitem_1_user
+                        original_getitem_1_0_users = list(getitem_1_user.users.keys())
+                    elif getitem_1_user.args[1] == 1:
+                        # Found lstm_output[1][1], to be replaced with `hidden1_dq`
+                        original_getitem_1_1_node = getitem_1_user
+                        original_getitem_1_1_users = list(getitem_1_user.users.keys())
+                else:
+                    # Not getitem, these nodes consume the whole tuple (hidden0, hidden1)
+                    original_getitem_1_users.append(getitem_1_user)
+
+    # (1) Split the LSTM node into (output, (hidden0, hidden1))
+    # (2) Insert a DeQuantStub after each internal node
+    original_lstm_users = list(node.users.keys())
+    with graph.inserting_after(node):
+        output = graph.call_function(operator.getitem, (node, 0))
+        output_dq = _insert_dequant_stub(output, model, named_modules, graph)
+    with graph.inserting_after(output_dq):
+        hidden = graph.call_function(operator.getitem, (node, 1))
+    with graph.inserting_after(hidden):
+        hidden0 = graph.call_function(operator.getitem, (hidden, 0))
+        hidden0_dq = _insert_dequant_stub(hidden0, model, named_modules, graph)
+    with graph.inserting_after(hidden0_dq):
+        hidden1 = graph.call_function(operator.getitem, (hidden, 1))
+        hidden1_dq = _insert_dequant_stub(hidden1, model, named_modules, graph)
+
+    # (3) Recombine the DeQuantStubs into the same structure as before
+    with graph.inserting_after(hidden1_dq):
+        hidden_dq = graph.call_function(tuple, ([hidden0_dq, hidden1_dq],))
+    with graph.inserting_after(hidden_dq):
+        lstm_output_dq = graph.call_function(tuple, ([output_dq, hidden_dq],))
+
+    # (4) Reroute all consumers of the original LSTM node
+    for user in original_lstm_users:
+        user.replace_input_with(node, lstm_output_dq)
+    for user in original_getitem_0_users:
+        user.replace_input_with(original_getitem_0_node, output_dq)
+    for user in original_getitem_1_users:
+        user.replace_input_with(original_getitem_1_node, hidden_dq)
+    for user in original_getitem_1_0_users:
+        user.replace_input_with(original_getitem_1_0_node, hidden0_dq)
+    for user in original_getitem_1_1_users:
+        user.replace_input_with(original_getitem_1_1_node, hidden1_dq)
+    return lstm_output_dq
+
+def _get_custom_module_lstm_from_node_arg(
+    arg: Node,
+    named_modules: Dict[str, torch.nn.Module],
+) -> Optional[Node]:
+    """
+    Given an argument of a node, if the argument refers to the path through which the node
+    is a consumer of custom module LSTM, return the custom module LSTM node, or None otherwise.
+
+    This is used to determine whether to insert input observers for a node. Conceptually,
+    custom module LSTM produces quantized outputs, so any consumer of this node should *not*
+    insert input observers to avoid unnecessarily quantizing the outputs again:
+
+      lstm -> consumer
+
+    In practice, however, custom module LSTM outputs a tuple (output, (hidden0, hidden1)) with
+    DeQuantStubs attached to each internal node (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
+    This tuple can be consumed in one of four ways:
+
+      lstm -> getitem -> DeQuantStub -> consumer                       # consume lstm[0]
+      lstm -> getitem -> getitem -> DeQuantStub -> tuple -> consumer   # consume lstm[1]
+      lstm -> getitem -> getitem -> DeQuantStub -> consumer            # consume lstm[1][0] or lstm[1][1]
+      lstm -> getitem -> DeQuantStub -> tuple -> consumer              # consume lstm
+
+    Thus, we must match against the above patterns instead of simply checking the parent node
+    to determine whether this node is a consumer of a custom module LSTM.
+    """
+    match_dq = lambda a: _is_dequant_stub(a, named_modules)  # noqa: E731
+    match_lstm = lambda a: _is_custom_module_lstm(a, named_modules)  # noqa: E731
+    match_getitem = _is_getitem_node
+    match_tuple = _is_tuple_node
+
+    def _match_pattern(match_pattern: List[Callable]) -> Optional[Node]:
+        """
+        Traverse up the graph and match the args one by one.
+        If there is a match, return the last matched node, or None otherwise.
+        """
+        a = arg
+        for i, match in enumerate(match_pattern):
+            if not match(a):
+                return None
+            # Match next arg, for tuple the arg is a tuple of a list, e.g. ([dq_1, other_node],)
+            if i < len(match_pattern) - 1:
+                if match == match_tuple:
+                    a = a.args[0][0]  # type: ignore[assignment,index]
+                else:
+                    a = a.args[0]  # type: ignore[assignment]
+        return a
+
+    all_match_patterns = [
+        [match_dq, match_getitem, match_lstm],
+        [match_tuple, match_dq, match_getitem, match_getitem, match_lstm],
+        [match_dq, match_getitem, match_getitem, match_lstm],
+        [match_tuple, match_dq, match_getitem, match_lstm],
+    ]
+
+    for p in all_match_patterns:
+        matched_node = _match_pattern(p)
+        if matched_node is not None:
+            return matched_node
+    return None

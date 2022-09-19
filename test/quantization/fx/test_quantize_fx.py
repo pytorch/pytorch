@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.ao.nn.quantized as nnq
-import torch.ao.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
@@ -4082,19 +4082,10 @@ class TestQuantizeFx(QuantizationTestCase):
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
 
-    def test_static_lstm(self):
+    def _test_static_lstm_helper(self, model, prepare_node_occurrence, convert_node_occurrence):
         """
-        Test FX static quantization for LSTM.
+        Helper method to validate the graph of a model with static LSTM.
         """
-        class MyModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.lstm = nn.LSTM(50, 50, 1)
-
-            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
-                return self.lstm(inputs, (h0, c0))
-
-        m = MyModel()
         qconfig_mapping = get_default_qconfig_mapping()
         prepare_custom_config = PrepareCustomConfig() \
             .set_float_to_observed_mapping(torch.nn.LSTM, torch.ao.nn.quantizable.LSTM)
@@ -4102,36 +4093,114 @@ class TestQuantizeFx(QuantizationTestCase):
             .set_observed_to_quantized_mapping(torch.ao.nn.quantizable.LSTM, torch.ao.nn.quantized.LSTM)
         example_inputs = (torch.rand(5, 3, 50), torch.rand(1, 3, 50), torch.randn(1, 3, 50))
 
-        # prepare
-        m = prepare_fx(m, qconfig_mapping, example_inputs, prepare_custom_config=prepare_custom_config)
-        node_occurrence = {
+        model = prepare_fx(model, qconfig_mapping, example_inputs, prepare_custom_config=prepare_custom_config)
+        self.checkGraphModuleNodes(model, expected_node_occurrence=prepare_node_occurrence)
+        model(*example_inputs)
+
+        model = convert_fx(model, convert_custom_config=convert_custom_config)
+        self.checkGraphModuleNodes(model, expected_node_occurrence=convert_node_occurrence)
+        model(*example_inputs)
+
+    def test_static_lstm(self):
+        """
+        Test static quantization for LSTM.
+        """
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+                self.linear1 = nn.Linear(50, 10)
+                self.linear2 = nn.Linear(50, 10)
+                self.linear3 = nn.Linear(50, 10)
+
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                (out, (h0_out, c0_out)) = self.lstm(inputs, (h0, c0))
+                out = self.linear1(out)
+                h0_out = self.linear2(h0_out)
+                c0_out = self.linear3(c0_out)
+                return (out, (h0_out, c0_out))
+
+        m = MyModel()
+        prepare_node_occurrence = {
             ns.call_module(torch.ao.nn.quantizable.LSTM): 1,
         }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-        m(*example_inputs)
-
-        # convert
-        m = convert_fx(m, convert_custom_config=convert_custom_config)
-        node_occurrence = {
+        convert_node_occurrence = {
             ns.call_module(torch.ao.nn.quantized.LSTM): 1,
             ns.call_function(torch.quantize_per_tensor): 3,
+            # lstm[0].dequantize()
+            # lstm[1][0].dequantize()
+            # lstm[1][1].dequantize()
             ns.call_method("dequantize"): 3,
-            # result = lstm_output[0]
-            # hidden = lstm_output[1]
-            # hidden0 = hidden[0]
-            # hidden1 = hidden[1]
+            # lstm[0], lstm[1], lstm[1][0], lstm[1][1]
             ns.call_function(operator.getitem): 4,
-            # hidden_dq = (hidden0_dq, hidden1_dq)
-            # lstm_output_dq = (result_dq, hidden_dq)
+            # No tuples are consumed
+            ns.call_function(tuple): 0,
+        }
+        self._test_static_lstm_helper(m, prepare_node_occurrence, convert_node_occurrence)
+
+    def test_static_lstm_consume_tuple(self):
+        """
+        Test statically quantized custom module LSTM followed by a module that consumes the
+        output tuple, either as a whole or part of it.
+        """
+        class ModuleAfterLSTM(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.identity = torch.nn.Identity()
+
+            def forward(self, x):
+                return self.identity(x)
+
+        class ConsumeWholeTuple(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+                self.module_after_lstm = ModuleAfterLSTM()
+
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                x = self.lstm(inputs, (h0, c0))
+                x = self.module_after_lstm(x)  # consume tuple (output, (hidden0, hidden1))
+                return x
+
+        class ConsumeHiddenTuple(ConsumeWholeTuple):
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                x = self.lstm(inputs, (h0, c0))
+                x = self.module_after_lstm(x[1])  # consume tuple (hidden0, hidden1)
+                return x
+
+        # Test consuming the whole tuple (output, (hidden0, hidden1))
+        m1 = ConsumeWholeTuple()
+        prepare_node_occurrence = {
+            ns.call_module(torch.ao.nn.quantizable.LSTM): 1,
+        }
+        convert_node_occurrence1 = {
+            ns.call_module(torch.ao.nn.quantized.LSTM): 1,
+            ns.call_function(torch.quantize_per_tensor): 3,
+            # lstm[0].dequantize()
+            # lstm[1][0].dequantize()
+            # lstm[1][1].dequantize()
+            ns.call_method("dequantize"): 3,
+            # lstm[0], lstm[1], lstm[1][0], lstm[1][1]
+            ns.call_function(operator.getitem): 4,
+            # tuple(output_dq, tuple(hidden0_dq, hidden1_dq))
             ns.call_function(tuple): 2,
         }
-        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-        (result, (hidden0, hidden1)) = m(*example_inputs)
+        self._test_static_lstm_helper(m1, prepare_node_occurrence, convert_node_occurrence1)
 
-        # output tensors should be dequantized
-        assert not result.is_quantized
-        assert not hidden0.is_quantized
-        assert not hidden1.is_quantized
+        # Test consuming just the hidden tuple (hidden0, hidden1)
+        m2 = ConsumeHiddenTuple()
+        convert_node_occurrence2 = {
+            ns.call_module(torch.ao.nn.quantized.LSTM): 1,
+            ns.call_function(torch.quantize_per_tensor): 3,
+            # lstm[1][0].dequantize()
+            # lstm[1][1].dequantize()
+            ns.call_method("dequantize"): 2,
+            # lstm[1], lstm[1][0], lstm[1][1]
+            ns.call_function(operator.getitem): 3,
+            # tuple(hidden0_dq, hidden1_dq)
+            ns.call_function(tuple): 1,
+        }
+        self._test_static_lstm_helper(m2, prepare_node_occurrence, convert_node_occurrence2)
 
     def test_relu_lowering(self):
         class M(torch.nn.Module):
