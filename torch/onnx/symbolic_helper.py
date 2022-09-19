@@ -662,6 +662,7 @@ def _select_helper(g, self, dim, index, apply_reshape=True):
     return g.op("Gather", self, index, axis_i=dim)
 
 
+@quantized_args(True)
 @_beartype.beartype
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if GLOBALS.export_onnx_opset_version <= 9:
