@@ -7,7 +7,7 @@
 
 #include <torch/csrc/utils/pybind.h>
 
-namespace at {
+namespace torch {
 namespace functorch {
 
 // CompileCache is the compilation cache used for AOTAutograd.

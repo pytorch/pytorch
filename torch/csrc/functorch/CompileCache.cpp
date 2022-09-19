@@ -10,7 +10,7 @@
 /// allowing different types of hashing functions, and is agnostic of the
 /// compiler.
 ///
-#include <functorch/csrc/CompileCache.h>
+#include <torch/csrc/functorch/CompileCache.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
@@ -258,7 +258,7 @@ static CompileCache *createCompileCache() { return new CompileCache(); }
 
 } // namespace
 
-namespace at {
+namespace torch {
 namespace functorch {
 
 void initCompileCacheBindings(PyObject *module) {
