@@ -160,6 +160,7 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_or",
     # This function returns nested_tensor shape as a tensor that is non-differentiable
     "_nested_tensor_size",
+    "_nested_tensor_strides",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -538,6 +539,7 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # Nested Tensors related functions
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
+    "_nested_tensor_strides",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -747,7 +749,8 @@ def gen_variable_type(
     fm.write(
         "VariableType.h",
         lambda: {
-            "generated_comment": "@" f"generated from {template_path}/VariableType.h"
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/VariableType.h"
         },
     )
 
@@ -801,7 +804,8 @@ def gen_variable_type(
         [fn for fn in fns_with_diff_infos if use_derived(fn)],
         key_fn=lambda fn: cpp.name(fn.func.func),
         base_env={
-            "generated_comment": "@" f"generated from {template_path}/VariableType.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/VariableType.cpp",
         },
         env_callable=gen_variable_type_func,
         num_shards=5,
