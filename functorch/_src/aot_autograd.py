@@ -13,11 +13,13 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._subclasses import FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
 from functorch._C import CompileCache
 from functorch.experimental import functionalize
+from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
 from .partitioners import default_partition
@@ -354,6 +356,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
+        # NB: tracing_mode is real, as it's assumed the calling context setup
+        # fake tensor mode / symbolic shapes if that is needed
         fx_g = make_fx(joint_forward_backward)(*joint_inputs)
 
         def fake_fn(primals, tangents):
@@ -366,6 +370,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # Eventually, functionalization should support primtorch view/inplace ops,
         # which will make it ok to run decompositions before functionalization.
         fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+        fx_g.graph.eliminate_dead_code()
+        fx_g.recompile()
     else:
         fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
 
@@ -445,6 +451,11 @@ def create_aot_dispatcher_function(
     The resulting compiled forward and backward graphs are then wrapped up in a
     ``torch.autograd.Function`` object.
     """
+
+    # This is the main entry point.
+    # TODO: Chillee argues that dynamo itself should pass in fake tensors to
+    # the list of arguments when compiling; at the moment we do not do this
+
     if aot_config.decompositions is None:
         aot_config.decompositions = {}
 
@@ -452,13 +463,21 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
-    fake_mode = FakeTensorMode if config.use_fake_tensor else nullcontext
+    # NB: don't bother setting allow_fallback_kernels; this should not actually
+    # be configurable in fake tensor, we should automatically do the right
+    # thing
+    fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext()
+    python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
+    shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
-    with preserve_rng_state(), fake_mode() as mode:
+    with preserve_rng_state(), fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
-            if mode:
-                return pytree.tree_map_only(Tensor, mode.from_tensor, flat_args)
+            if config.use_fake_tensor:
+                def convert(x):
+                    return fake_mode.from_tensor(x, shape_env=shape_env)
+
+                return pytree.tree_map_only(Tensor, convert, flat_args)
             else:
                 return flat_args
 

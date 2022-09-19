@@ -107,6 +107,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     size_bytes_ = size_bytes;
   }
 
+  void set_nbytes(c10::SymInt size_bytes) {
+    size_bytes_ = size_bytes;
+  }
+
   bool resizable() const {
     return resizable_;
   };

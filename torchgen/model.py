@@ -671,9 +671,11 @@ class NativeFunction:
             )
             # if a function is a structured delegate, deleting the dispatch
             # table is NOT semantics preserving
-            assert structured_delegate or dispatch.keys() != {
-                DispatchKey.CompositeImplicitAutograd
-            }, (
+            assert (
+                structured_delegate
+                or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+                or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
+            ), (
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
                 "name, then delete the dispatch table"
