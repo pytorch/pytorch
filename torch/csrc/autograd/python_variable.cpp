@@ -1053,7 +1053,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
   }
   THPUtils_assertRet(
       -1,
-      grad.sizes().equals(var.sizes()),
+      grad.sym_sizes().equals(var.sym_sizes()),
       "assigned grad has data of a different size");
 
   var.mutable_grad() = grad;
