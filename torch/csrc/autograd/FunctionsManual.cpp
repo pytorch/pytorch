@@ -894,6 +894,25 @@ std::vector<Tensor> cat_tensors_backward(
   return grad_inputs;
 }
 
+std::vector<Tensor> stack_tensors_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const std::vector<ScalarType>& dtypes) {
+  std::vector<Tensor> grad_inputs(dtypes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  bool grad_is_complex = grad.is_complex();
+  for (const auto i : c10::irange(dtypes.size())) {
+    auto gr = grad.select(dim, i);
+    if (grad_is_complex && !at::isComplexType(dtypes[i])) {
+      gr = at::real(gr);
+    }
+    grad_inputs[i] = gr;
+  }
+  return grad_inputs;
+}
+
 std::vector<Tensor> block_diag_backward(
     const Tensor& grad,
     const std::vector<std::vector<int64_t>>& sizes,
