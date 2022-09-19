@@ -4,6 +4,7 @@ from typing import Optional, Tuple, List, Union
 import torch
 from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
+from torch import layout as Layout
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
@@ -357,3 +358,24 @@ Specifying a positive offset::
             [0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0]])
 """)
+
+
+def _to_layout(input: Tensor, layout: Layout, blocksize: Optional[Tuple[int, int]]=None):
+    """Convert a tensor to a specified layout.
+    """
+    if input.layout == layout:
+        return input
+    elif layout == torch.strided:
+        return input.to_dense()
+    elif layout == torch.sparse_coo:
+        return input.to_sparse()
+    elif layout == torch.sparse_csr:
+        return input.to_sparse_csr()
+    elif layout == torch.sparse_csc:
+        return input.to_sparse_csc()
+    elif layout == torch.sparse_bsr:
+        return input.to_sparse_bsr(*blocksize)
+    elif layout == torch.sparse_bsc:
+        return input.to_sparse_bsc(*blocksize)
+    else:
+        raise NotImplementedError(f'_to_layout: support for {layout} is not implemented yet')
