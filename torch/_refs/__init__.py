@@ -4073,6 +4073,7 @@ def eye(
     n: int,
     m: Optional[int] = None,
     *,
+    k: int = 0,
     dtype: Optional[torch.dtype] = None,
     layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
@@ -4091,11 +4092,17 @@ def eye(
 
     check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
+    check(
+        k == 0 or -n < k < m,
+        lambda: f"k out of range, should be -{n} < k < {m} or 0, but got {k}",
+    )
 
-    range_n = torch.arange(n, dtype=torch.int64, device=device, requires_grad=False)
+    range_n = torch.arange(
+        n, dtype=torch.int64, device=device, requires_grad=False
+    ).unsqueeze(-1)
     range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
 
-    cond = range_n.unsqueeze(-1) == range_m
+    cond = range_m == range_n + k
     if dtype is torch.bool:
         return cond
     else:

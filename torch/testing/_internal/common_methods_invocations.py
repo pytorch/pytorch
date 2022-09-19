@@ -1429,18 +1429,22 @@ def sample_inputs_empty(op, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_eye(op, device, dtype, requires_grad, **kwargs):
     # only ints >= 0 are allowed for both arguments, unless m is omitted
-    sizes = (None, 0, 1, 2, 3, 4, 7, L, M, S)
+    sizes = (None, 0, 1, 2, 3, 4, M, S)
+    kws = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
 
-    for n, m in product(sizes, sizes):
+    for n, m, add_k in product(sizes, sizes, (True, False)):
         if n is None:
             continue
 
-        # TODO: no layout
-        _kwargs = {'device': device, 'dtype': dtype, 'requires_grad': requires_grad}
-        if m is None:
-            yield SampleInput(n, args=(), kwargs=_kwargs)
-        else:
-            yield SampleInput(n, args=(m,), kwargs=_kwargs)
+        args = (m,) if m is not None else ()
+        m_ = m if m is not None else n
+        k = 1 if m_ >= 2 else 0
+        _kwargs = {**kws, 'k': k} if add_k else kws
+        yield SampleInput(n, args=args, kwargs=_kwargs)
+        if add_k:
+            k = -1 if n >= 2 else 0
+            _kwargs = {**kws, 'k': k}
+            yield SampleInput(n, args=args, kwargs=_kwargs)
 
 def error_inputs_eye(op_info, device, **kwargs):
     # TODO: no layout
@@ -13996,8 +14000,7 @@ op_db: List[OpInfo] = [
                             'TestCommon', 'test_complex_half_reference_testing'),
            )),
     OpInfo('eye',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_eye,
            error_inputs_func=error_inputs_eye,
            supports_out=True,
