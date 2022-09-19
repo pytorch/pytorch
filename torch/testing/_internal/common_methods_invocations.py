@@ -3283,7 +3283,10 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
     input = torch.randn(size=(33, 16, 30), device=device, dtype=torch.float64)
     weight = torch.randn(size=(20, 16, 5), device=device, dtype=torch.float64)
     groups = 0
-    yield ErrorInput(SampleInput(input, kwargs={"weight": weight, "groups": groups}), error_regex="non-positive groups is not supported")
+    yield ErrorInput(
+        SampleInput(input, kwargs={"weight": weight, "groups": groups}),
+        error_regex="non-positive groups is not supported"
+    )
 
 
 def error_inputs_conv2d(opinfo, device, **kwargs):
@@ -3300,7 +3303,10 @@ def error_inputs_conv2d(opinfo, device, **kwargs):
     input = torch.randn(size=(1, 4, 5, 5), device=device, dtype=torch.float64)
     weight = torch.randn(size=(8, 4, 3, 3), device=device, dtype=torch.float64)
     groups = 0
-    yield ErrorInput(SampleInput(input, kwargs={"weight":weight, "groups": groups}), error_regex="non-positive groups is not supported")
+    yield ErrorInput(
+        SampleInput(input, kwargs={"weight": weight, "groups": groups}),
+        error_regex="non-positive groups is not supported"
+    )
 
 
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
