@@ -329,6 +329,7 @@ def _export(name: str):
 
     def wrapper(func):
         globals()[name] = func
+        __all__.append(name)
         return func
 
     return wrapper
@@ -3214,15 +3215,27 @@ def dropout(g, input, p, train):
     return r
 
 
-@_onnx_symbolic("aten::alpha_dropout_")  # See Note [Export inplace]
-@_onnx_symbolic("aten::feature_alpha_dropout_")
-@_onnx_symbolic("aten::feature_dropout_")
-@_onnx_symbolic("aten::dropout_")
-@_onnx_symbolic("aten::feature_alpha_dropout")
-@_onnx_symbolic("aten::alpha_dropout")
-@_onnx_symbolic("aten::feature_dropout")
+@_onnx_symbolic(
+    "aten::alpha_dropout_", decorate=[_apply_params("aten::alpha_dropout_")]
+)  # See Note [Export inplace]
+@_onnx_symbolic(
+    "aten::feature_alpha_dropout_",
+    decorate=[_apply_params("aten::feature_alpha_dropout_")],
+)
+@_onnx_symbolic(
+    "aten::feature_dropout_", decorate=[_apply_params("aten::feature_dropout_")]
+)
+@_onnx_symbolic("aten::dropout_", decorate=[_apply_params("aten::dropout_")])
+@_onnx_symbolic(
+    "aten::feature_alpha_dropout",
+    decorate=[_apply_params("aten::feature_alpha_dropout")],
+)
+@_onnx_symbolic("aten::alpha_dropout", decorate=[_apply_params("aten::alpha_dropout")])
+@_onnx_symbolic(
+    "aten::feature_dropout", decorate=[_apply_params("aten::feature_dropout")]
+)
 @_beartype.beartype
-def _unsupported_dropout(name):
+def _unsupported_dropout(name: str):
     @symbolic_helper.parse_args("v", "f", "i")
     @_beartype.beartype
     def feature_dropout(g, input, p, train):
