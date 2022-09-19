@@ -255,20 +255,21 @@ __all__ = [
     #
     # Tensor Creation
     #
+    "arange",
     "empty",
     "empty_like",
     "empty_strided",
     "eye",
     "full",
     "full_like",
+    "linspace",
+    "logspace",
     "ones",
     "ones_like",
+    "randn",
     "scalar_tensor",
     "zeros",
     "zeros_like",
-    "arange",
-    "linspace",
-    "logspace",
     #
     # Randomness References
     #
@@ -813,7 +814,7 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def trunc(a):
     return prims.trunc(a)
 
@@ -4219,6 +4220,35 @@ def full_like(
 
 ones_like = partial(full_like, fill_value=True)
 
+# TODO: add pin_memory support
+@register_decomposition(torch.ops.aten.randn)
+@out_wrapper()
+def randn(
+    *shape,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
+    requires_grad: bool = False,
+    pin_memory: Optional[bool] = None,
+) -> TensorLikeType:
+
+    check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
+
+    shape_ = utils.extract_shape_from_varargs(shape)
+
+    dtype = utils.dtype_or_default(dtype)
+    device = utils.device_or_default(device)
+    layout = utils.layout_or_default(layout)
+
+    return prims.normal(
+        shape_,
+        mean=0.0,
+        std=1.0,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
 
 # TODO: missing kwargs (e.g. layout)
 def scalar_tensor(
@@ -4233,6 +4263,10 @@ def scalar_tensor(
 
 
 zeros_like = partial(full_like, fill_value=False)
+
+#
+# Randomness References
+#
 
 
 @register_decomposition(torch.ops.aten.uniform)
