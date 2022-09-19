@@ -240,7 +240,7 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
   });
 }
 
-static void index_put_kernel_quantized_cuda(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
+void index_put_kernel_quantized_cuda(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
   TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "index_put", [&] {
     constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
