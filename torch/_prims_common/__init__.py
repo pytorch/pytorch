@@ -126,8 +126,10 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     if check_strides:
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
-            msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                a.stride(), b.stride(), idx
+            msg = (
+                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                    a.stride(), b.stride(), idx
+                )
             )
             raise RuntimeError(msg)
 
@@ -678,12 +680,16 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
             newsize *= d
         else:
             check(False, lambda: f"invalid shape dimension {d}")
-    check(numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
-          lambda: f"shape '{list(shape)}' is invalid for input of size {numel}")
+    check(
+        numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
+        lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+    )
     if dim is not None:
-        check(newsize != 0,
-              lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
-                      f"unspecified dimension size -1 can be any value and is ambiguous")
+        check(
+            newsize != 0,
+            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+            f"unspecified dimension size -1 can be any value and is ambiguous",
+        )
         shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
@@ -1081,6 +1087,7 @@ def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> T
         return float
     else:
         return type(x)
+
 
 # TODO: document type promotion kinds
 def elementwise_dtypes(
@@ -1513,3 +1520,15 @@ def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
         return mask.logical_and(t)
     else:
         return torch.where(mask, t, 0)
+
+
+def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
+    return dtype if dtype is not None else torch.get_default_dtype()
+
+
+def device_or_default(device: Optional[torch.device]) -> torch.device:
+    return device if device is not None else torch.device("cpu")
+
+
+def layout_or_default(layout: Optional[torch.layout]) -> torch.layout:
+    return layout if layout is not None else torch.strided
