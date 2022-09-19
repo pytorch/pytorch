@@ -677,6 +677,18 @@ Tensor prod_safe_zeros_backward(
   return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
+// checking the storage also encompasses FakeTensors, which report device and
+// dispatch keys as non-meta when not in an composite explicit kernel
+// invocation. because these backwards are implicit kernels fake tensors do not
+// appear as meta.
+bool is_meta_in_composite_kernels(const Tensor& t) {
+  if (t.is_meta()) {
+    return true;
+  }
+  return t.has_storage() &&
+      t.storage().data_ptr().device() == c10::DeviceType::Meta;
+}
+
 // note that the gradient for prod is equivalent to:
 // cumprod(exclusive, normal) * cumprod(exclusive, reverse), e.g.:
 // input:                        [    a,     b,     c]
@@ -691,7 +703,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta()) {
+  if (is_meta_in_composite_kernels(input)) {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -720,7 +732,7 @@ Tensor prod_backward(
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta()) {
+  if (is_meta_in_composite_kernels(input)) {
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
@@ -1245,8 +1257,10 @@ Tensor mm_mat1_sparse_backward(
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.is_sparse_csr()) {
-    return at::sparse_sampled_addmm(
-        at::zeros_like(mat1, mat1.options()), grad, mat2.mH(), 1.0, alpha);
+    // zero must to have mat1 sparsity pattern:
+    auto zero = mat1.clone();
+    zero.values().zero_();
+    return at::sparse_sampled_addmm(zero, grad, mat2.mH(), 1.0, alpha);
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.layout() == c10::kStrided) {
@@ -6374,6 +6388,40 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   std::tuple<Tensor, Tensor> result =
       std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;
+}
+
+Tensor scatter_reduce_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int dim,
+    const Tensor& index,
+    const Tensor& src_p,
+    const Tensor& src_t,
+    c10::string_view reduce,
+    bool include_self,
+    const Tensor& result) {
+  if (reduce == "sum" || reduce == "mean") {
+    // The function is linear
+    return at::scatter_reduce(self_t, dim, index, src_t, reduce, include_self);
+    //  auto mask = x == restore_reduced_dims(result, dim, keepdim);
+    //  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim,
+    //  keepdim);
+  } else if (reduce == "amin" || reduce == "amax") {
+    auto gather_result = at::gather(result, dim, index);
+    auto mask_self = self_p == result;
+    auto mask_src = src_p == gather_result;
+    auto masked_src_t = at::where(mask_src, src_t, 0.);
+    auto div =
+        mask_self.to(self_t.dtype())
+            .scatter_reduce(
+                dim, index, mask_src.to(self_t.dtype()), "sum", include_self);
+    return at::where(mask_self, self_t, 0.)
+        .scatter_reduce(dim, index, masked_src_t, "sum", include_self)
+        .div(div);
+  } else {
+    // Not implemented
+    return Tensor{};
+  }
 }
 
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
