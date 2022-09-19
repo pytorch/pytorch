@@ -327,5 +327,14 @@ class TestFuture(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected error"):
             torch.futures.wait_all([fut3, fut2])
 
+    def test_wait_none(self):
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.jit.wait(None)
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.futures.wait_all((None,))
+        fut1 = Future[int]()
+        with self.assertRaisesRegex(RuntimeError, "Future can't be None"):
+            torch.futures.collect_all((fut1, None,))
+
 if __name__ == '__main__':
     run_tests()
