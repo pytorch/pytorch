@@ -1797,14 +1797,12 @@ def remove_redundant_to_arguments(a: Tensor, to_kwargs: dict):
 
     for kw in options_to_check:
         if kw in to_kwargs:
-            if getattr(a, kw) == to_kwargs[kw]:
+            if (
+                (kw == "memory_format" and to_kwargs["memory_format"] is torch.preserve_format) or
+                (kw == "device" and to_kwargs["device"].type == a.device.type and (not to_kwargs["device"].index or to_kwargs["device"].index == a.device.index)) or
+                (getattr(a, kw, None) == to_kwargs[kw])
+            ):
                 to_kwargs.pop(kw)
-
-    if "memory_format" in to_kwargs and (
-        to_kwargs["memory_format"] is None
-        or to_kwargs["memory_format"] is torch.preserve_format
-    ):
-        to_kwargs.pop("memory_format")
 
 
 def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
