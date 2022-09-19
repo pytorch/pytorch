@@ -30,7 +30,7 @@ from torch.onnx._internal.torchscript import GraphContext
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in REAMDME.md
+# see Note [Edit Symbolic Files] in README.md
 
 __all__ = [
     "abs",
