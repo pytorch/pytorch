@@ -1309,6 +1309,7 @@ at::Tensor _convolution(
   int64_t dim = k - 2;
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
+  TORCH_CHECK(groups_ > 0, "non-positive groups is not supported");
 
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
