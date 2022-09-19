@@ -341,20 +341,12 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
 prims = torch.ops.prims
 
 
-def _unsqueeze(a, dim):
-    utils.check(
-        dim <= a.ndim and dim >= (-a.ndim - 1),
-        lambda: "unsqueeze: dimension out of range!",
-    )
-    return torch._prims.expand_dims(a, (dim,))
-
-
 # add dimensions in canonicalized, sorted order
 # so that the tensor has the appropriate rank.
 def _unsqueeze_dims(a, dims, rank):
-    dims = utils.canonicalize_dim(rank, dims)
+    dims = utils.canonicalize_dims(rank, dims)
     for dim in sorted(dims):
-        a = _unsqueeze(a, dim)
+        a = torch._refs.unsqueeze(a, dim)
     return a
 
 
@@ -383,7 +375,7 @@ def _expand(a, *shape):
 
 
 def _dim_size(a, dims):
-    dims = utils.canonicalize_dim(a.ndim, dims)
+    dims = utils.canonicalize_dims(a.ndim, dims)
     reduction_size = 1
     for idx, size in enumerate(a.size()):
         if idx in dims:
@@ -393,7 +385,7 @@ def _dim_size(a, dims):
 
 def _sum_vjp(grad, result, self, dims):
     grad = _unsqueeze_dims(grad, dims, self.ndim)
-    return _expand(grad, self.shape), None
+    return _expand(grad, self.shape), *(None,) * len(dims)
 
 
 def _mean_vjp(grad, self, dims):
@@ -403,20 +395,19 @@ def _mean_vjp(grad, self, dims):
     return expanded_grad * mean_local_grad
 
 
-def _var_vjp(grad, mean, self, dims, unbiased):
+def _var_vjp(grad, result, self, dims, correction):
     var_reduction_size = _dim_size(self, dims)
-    if unbiased:
-        var_reduction_size -= 1
+    var_reduction_size -= correction
     constant = 2.0 / var_reduction_size
 
     # expand grad and mean tensors to self tensor size
     unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
     expanded_grad = _expand(unsqueezed_grad, self.shape)
-    unsqueezed_mean = _unsqueeze_dims(mean, dims, self.ndim)
-    expanded_mean = _expand(unsqueezed_mean, self.shape)
+    expanded_mean = torch._refs.mean(self, dims, keepdim=True)
+    expanded_mean = torch._refs.broadcast_to(expanded_mean, self.shape)
 
-    var_local_grad = constant * torch.sub(self, expanded_mean)
-    return expanded_grad * var_local_grad
+    var_local_grad = constant * prims.sub(self, expanded_mean)
+    return expanded_grad * var_local_grad, *(None,) * (len(dims) + 1)
 
 
 _vjp_impls: Dict[str, Any] = {
@@ -515,6 +506,7 @@ _vjp_impls: Dict[str, Any] = {
     "sin": lambda grad, result, self: prims.mul(grad, prims.cos(self)),
     "sinh": lambda grad, result, self: prims.mul(grad, prims.cosh(self)),
     "sqrt": lambda grad, result, self: prims.mul(grad, prims.div(0.5, result)),
+    "squeeze": None,  # TODO
     "sub": lambda grad, result, self, other: (grad, prims.neg(grad)),
     "sum": _sum_vjp,
     "tan": lambda grad, result, self: prims.mul(
@@ -556,6 +548,7 @@ def _register_vjp(prim, vjp_impl):
             ctx.save_for_backward(*out_packed, *args_tensors)
 
             ctx.args = args
+            ctx.kwargs = kwargs
             # ctx.save_for_backward(*out_packed)
             return out
 
@@ -577,7 +570,7 @@ def _register_vjp(prim, vjp_impl):
             fw_out = ctx.saved_tensors[: ctx.nout]
 
             with NvfuserPrimsMode():
-                vjp_result = vjp_impl(*bw_args, *fw_out, *fw_args)
+                vjp_result = vjp_impl(*bw_args, *fw_out, *fw_args, **ctx.kwargs)
             vjp_result = (
                 (vjp_result,) if isinstance(vjp_result, torch.Tensor) else vjp_result
             )
@@ -585,14 +578,15 @@ def _register_vjp(prim, vjp_impl):
             print(f"vjp_result: {vjp_result}")
             print(f"fw_args: {fw_args}")
             # print len
+            flat_args_kwargs, _ = tree_flatten((ctx.args, ctx.kwargs))
             print(f"len(vjp_result): {len(vjp_result)}")
-            print(f"len(fw_args): {len(fw_args)}")
-            assert len(vjp_result) == len(fw_args)
+            print(f"len(flat_args_kwargs): {len(flat_args_kwargs)}")
+            assert len(vjp_result) == len(flat_args_kwargs)
 
             # Replace the output with None for each non-tensor argument
             vjp_result = tuple(
                 None if not isinstance(a, torch.Tensor) else t
-                for a, t in zip(fw_args, vjp_result)
+                for a, t in zip(flat_args_kwargs, vjp_result)
             )
             return None, *vjp_result
 
