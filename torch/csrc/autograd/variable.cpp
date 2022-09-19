@@ -694,7 +694,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         fn->self_geometry = at::TensorGeometry(view_info.base_);
         fn->size = self.sym_sizes().vec();
         fn->stride = self.sym_strides().vec();
-        fn->storage_offset = self.storage_offset();
+        fn->storage_offset = self.sym_storage_offset();
         fn->set_next_edges(
             torch::autograd::collect_next_edges(view_info.base_));
         fn->add_input_metadata(
