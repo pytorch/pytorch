@@ -180,6 +180,7 @@ TEST(TestScalar, TestFormatting) {
   ASSERT_EQ("false", format(Scalar(false)));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<double>(2.0, 3.1))));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
+  ASSERT_EQ("SymInt(4)", format(Scalar(Scalar(4).toSymInt())));
 }
 
 TEST(TestSymInt, Basic) {
@@ -203,6 +204,7 @@ TEST(TestSymInt, Basic) {
   foo2 = foo2;
   ASSERT_TRUE(foo2.isSymInt());
   ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
+
   ASSERT_EQ(a_impl.use_count(), 3);
 
   ASSERT_THROW(foo.to<double>(), c10::Error);

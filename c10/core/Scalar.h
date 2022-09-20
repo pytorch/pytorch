@@ -84,8 +84,7 @@ class C10_API Scalar {
     if (Tag::HAS_si == tag) {
       return v.si;
     } else {
-      TORCH_CHECK(Tag::HAS_i == tag);
-      return v.u.i;
+      return toLong();
     }
   }
 
@@ -97,7 +96,9 @@ class C10_API Scalar {
   template <typename T>
   T to() const = delete;
 
+  // audit uses of data_ptr
   const void* data_ptr() const {
+    // error on symint
     return static_cast<const void*>(&v);
   }
 
@@ -109,12 +110,11 @@ class C10_API Scalar {
   C10_DEPRECATED_MESSAGE(
       "isIntegral is deprecated. Please use the overload with 'includeBool' parameter instead.")
   bool isIntegral() const {
-    // add symint here ?
-    return Tag::HAS_i == tag;
+    return Tag::HAS_i == tag || Tag::HAS_si == tag;
   }
   bool isIntegral(bool includeBool) const {
-    // add symint here ?
-    return Tag::HAS_i == tag || (includeBool && isBoolean());
+    return Tag::HAS_i == tag || Tag::HAS_si == tag ||
+        (includeBool && isBoolean());
   }
 
   bool isComplex() const {
@@ -123,6 +123,7 @@ class C10_API Scalar {
   bool isBoolean() const {
     return Tag::HAS_b == tag;
   }
+  // nb: does not include normal ints
   bool isSymInt() const {
     return Tag::HAS_si == tag;
   }
@@ -138,6 +139,10 @@ class C10_API Scalar {
   }
 
   C10_ALWAYS_INLINE Scalar& operator=(const Scalar& other) {
+    if (&other == this) {
+      return *this;
+    }
+
     *this = Scalar(other);
     return *this;
   }
@@ -156,6 +161,8 @@ class C10_API Scalar {
     } else if (isFloatingPoint()) {
       return v.u.d == num;
     } else if (isIntegral(/*includeBool=*/false)) {
+      // test if symint or not
+      // guard on bool
       return v.u.i == num;
     } else {
       // boolean scalar does not equal to a non boolean value
@@ -172,6 +179,7 @@ class C10_API Scalar {
     } else if (isFloatingPoint()) {
       return (v.u.d == num.real()) && (num.imag() == T());
     } else if (isIntegral(/*includeBool=*/false)) {
+      // test symint here
       return (v.u.i == num.real()) && (num.imag() == T());
     } else {
       // boolean scalar does not equal to a non boolean value
@@ -208,6 +216,7 @@ class C10_API Scalar {
   Scalar(const Scalar& rhs) : Scalar(rhs.v, rhs.tag) {}
 
   Scalar(c10::SymInt si) : tag(Tag::HAS_si) {
+    // test if int and turn to int
     v.si = si;
   }
 
