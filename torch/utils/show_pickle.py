@@ -7,6 +7,7 @@ import zipfile
 import fnmatch
 from typing import Any, IO, BinaryIO, Union
 
+__all__ = ["FakeObject", "FakeClass", "DumpUnpickler"]
 
 class FakeObject(object):
     def __init__(self, module, name, args):
@@ -102,7 +103,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
         return value
 
 
-def main(argv, output_stream=None):
+def _main(argv, output_stream=None):
     if len(argv) != 2:
         # Don't spam stderr if not using stdout.
         if output_stream is not None:
@@ -146,4 +147,4 @@ if __name__ == "__main__":
     if True:
         pprint.PrettyPrinter._dispatch[FakeObject.__repr__] = FakeObject.pp_format  # type: ignore[attr-defined]
 
-    sys.exit(main(sys.argv))
+    sys.exit(_main(sys.argv))
