@@ -34,6 +34,15 @@ list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/UnpackRaw.cuh
 )
 
+if(USE_ROCM)
+list(APPEND NVFUSER_RUNTIME_FILES
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/array_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp_rocm.cu
+)
+endif()
+
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
 
 # "stringify" NVFUSER runtime sources
@@ -45,7 +54,7 @@ foreach(src ${NVFUSER_RUNTIME_FILES})
   add_custom_command(
     COMMENT "Stringify NVFUSER runtime source file"
     OUTPUT ${dst}
-    DEPENDS ${src}
+    DEPENDS ${src} "${NVFUSER_STRINGIFY_TOOL}"
     COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
   )
   add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})

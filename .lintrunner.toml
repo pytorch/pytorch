@@ -102,6 +102,7 @@ exclude_patterns = [
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
     'torch/distributed/fsdp/fully_sharded_data_parallel.py',
+    'torch/distributed/distributed_c10d.py',
     # TODO(suo): these exclusions were added just to get lint clean on master.
     # Follow up to do more target suppressions and remove them.
     'torch/distributed/fsdp/flatten_params_wrapper.py',
@@ -317,6 +318,7 @@ exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
+    'cmake/External/nccl.patch',
 ]
 command = [
     'python3',
@@ -346,6 +348,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.lintrunner.toml',
+    'cmake/External/nccl.patch',
 ]
 command = [
     'python3',
@@ -718,7 +721,10 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
+    'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
+    'functorch/functorch/_src/aot_autograd.py',
+    'functorch/functorch/_src/compilers.py',
 ]
 command = [
     'python3',

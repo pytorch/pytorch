@@ -156,6 +156,18 @@ std::vector<int> normalizeOld2New(
 // Reference is found through direct pointer comparison.
 Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
 
+//! Replace Vals in an index Val as specified by replacement_map while
+//! cloning the given index Val. The index val is assumed to represent
+//! a tensor index consisting of Ints  and arithmetic expressions.
+//!
+//! This is similar to replaceValInExpr but is different as Vals are
+//! cloned such that no other exprs using the same leaf Vals are not
+//! modified. TODO: Consider cleaning up the multiple replacement
+//! routines.
+Val* replaceValInIndexVal(
+    Val* index,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 // Makes rfactor generic with reduction ops and Welford
 TORCH_CUDA_CU_API TensorView* rfactorHelper(
     TensorView* red_tv,
@@ -282,12 +294,24 @@ TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
+// returns all tensor views in fusion that are used between outputs and inputs
+// except the specified set.
+TORCH_CUDA_CU_API std::vector<TensorView*> allTvsExcept(
+    Fusion* fusion,
+    const std::unordered_set<TensorView*>& except);
+
 TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
     Fusion* fusion,
     bool ignore_trivial = true);
 
 // Returns the initialization value of tv or nullptr if not initialized.
 TORCH_CUDA_CU_API Val* getReductionInitValOf(TensorView* tv);
+
+// Returns if Expr is a reduction op
+TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
+
+// Returns if Expr is a reduction op with TensorView or TensorIndex
+TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
 
 template <typename T>
 std::string toString(const T& nodes) {

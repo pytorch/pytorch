@@ -18,6 +18,7 @@ class Poisson(ExponentialFamily):
 
     Example::
 
+        >>> # xdoctest: +SKIP("poisson_cpu not implemented for 'Long'")
         >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
         tensor([ 3.])

@@ -35,8 +35,7 @@ namespace native {
 namespace {
 cuda::detail::LinalgDispatch disp = {_symeig_helper_cuda,
                                      _cholesky_solve_helper_cuda,
-                                     legacy_lstsq_cuda,
-                                     _linalg_inv_out_helper_cuda};
+                                     legacy_lstsq_cuda};
 
 at::DynamicLibrary& getTorchLinalgLibrary() {
   static at::DynamicLibrary lib("libtorch_cuda_linalg.so", nullptr, true);
@@ -92,11 +91,6 @@ void lazy_geqrf_kernel(const Tensor& input, const Tensor& tau) {
 void lazy_linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
   loadLazyTorchLinalgLibrary();
   linalg_eigh_stub(DeviceType::CUDA, eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
-}
-
-std::tuple<Tensor, Tensor> lazy_eig_kernel(const Tensor& self, bool& eigenvectors) {
-  loadLazyTorchLinalgLibrary();
-  return eig_stub(DeviceType::CUDA, self, eigenvectors);
 }
 
 void lazy_linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos, const Tensor& input, bool compute_eigenvectors) {
@@ -156,7 +150,6 @@ REGISTER_CUDA_DISPATCH(orgqr_stub, &lazy_orgqr_kernel);
 REGISTER_CUDA_DISPATCH(ormqr_stub, &lazy_ormqr_kernel);
 REGISTER_CUDA_DISPATCH(geqrf_stub, &lazy_geqrf_kernel);
 REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &lazy_linalg_eigh_kernel);
-REGISTER_CUDA_DISPATCH(eig_stub, &lazy_eig_kernel);
 REGISTER_CUDA_DISPATCH(linalg_eig_stub, &lazy_linalg_eig_kernel);
 REGISTER_CUDA_DISPATCH(svd_stub, &lazy_svd_kernel)
 REGISTER_CUDA_DISPATCH(lu_solve_stub, &lazy_lu_solve);
@@ -176,12 +169,6 @@ void registerLinalgDispatch(const LinalgDispatch& disp_) {
   disp = disp_;
 }
 }} //namespace cuda::detail
-
-Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
-    getTorchLinalgLibrary();
-    TORCH_CHECK(disp.inv_out_helper != _linalg_inv_out_helper_cuda, "Can't find _linalg_inv_out_helper_cuda");
-    return disp.inv_out_helper(result, infos_lu, infos_getri);
-}
 
 std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
     getTorchLinalgLibrary();
