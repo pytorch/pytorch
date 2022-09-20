@@ -42,9 +42,6 @@
 
 #include <c10/macros/Macros.h>
 
-#include <iostream>
-#include <stdio.h>
-
 namespace {
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
@@ -127,26 +124,11 @@ __global__ void indexing_backward_kernel(
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel_quantized(
   int64_t* sorted_indices, int64_t* indices, float* grad_output, scalar_t* grad_weight,
-  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim) {
-//numel is total number of flattened indices, not expanded to dimensions that are not indexed.
-//stride is the cumulative size of the not-indexed last dimensions
-//stride_before is the stride of the dimension immediately preceding first indexed dimension
-//if indexing starts from the 0th dimension, stride_before does not matter because blockIdx.z will be 0 in this case
-//outer_dim is number of elements in the first unindexed dimensions
+  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim,
+  float inv_scale, int zero_point, int64_t qmin, int64_t qmax) {
+
+  // This implementation is adopted from indexing_backward_kernel above.
   using opmath_t = at::opmath_type<float>;
-
-  // Each warp is responsible for an input into the LookupTable.
-  // If the preceding input has the same destination index as this input, then the warp
-  // exits immediately. The warp also processes subsequent inputs with the
-  // same value.
-  //
-  // Input Warp
-  // 1     <warp 1>
-  // 1     <warp 1> (<warp 2> exits without doing any work)
-  // 5     <warp 3>
-  // 8     <warp 4>
-
-  // Number of values processed by each thread (grain size)
   for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
     int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
     if (idx < numel
@@ -183,7 +165,10 @@ __global__ void indexing_backward_kernel_quantized(
           for (int ii = 0; ii < SZ; ii++) {
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
-                grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
+                // we do quantization here
+                int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(weight[ii]* inv_scale));
+                qvalue = min(max(qvalue, qmin), qmax);
+                grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(qvalue);
             }
           }
           start_feature += gridDim.y * blockDim.x * SZ;
@@ -467,6 +452,16 @@ void index_put_with_sort_kernel_quantized(Tensor & self, const c10::List<c10::op
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
       linearIndex.divide_(sliceSize, "trunc");
+
+      // cub on CUDA <= 11.2 have a bug that for small sizes
+      // cub's sort can be much slower than thrust's merge sort
+      // this bug is fixed in CUDA 11.3
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
+      if (num_indices < 50000) {
+        index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+      } else
+#endif
+      {
       // Sort the inputs into sorted with the corresponding indices
       auto range = at::arange(num_indices, linearIndex.options());
       // linearIndex can not be negative, and we take advantage of this
@@ -476,6 +471,7 @@ void index_put_with_sort_kernel_quantized(Tensor & self, const c10::List<c10::op
         linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
+      }
 
       TORCH_INTERNAL_ASSERT(
           linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
@@ -489,15 +485,12 @@ void index_put_with_sort_kernel_quantized(Tensor & self, const c10::List<c10::op
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(warp_size, indices_per_block);
 
-      //AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBool, kBFloat16,
-
-      std::cout<< "Made it to dispatch" <<std::endl;
-      std::cout << src <<std::endl;
-      std::cout << "value scalar type: " << expandedValue.scalar_type() <<std::endl;
-      std::cout << "src scalar type: " << src.scalar_type() <<std::endl;
-
       AT_DISPATCH_QINT_TYPES(
         src.scalar_type(), "indexing_backward_quantized", [&] {
+        constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
+        constexpr int64_t qmax = std::numeric_limits<typename scalar_t::underlying>::max();
+        float inv_scale = 1.0f / static_cast<float>(scale);
+
         indexing_backward_kernel_quantized<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
           orig_indices.data_ptr<int64_t>(),
@@ -506,7 +499,11 @@ void index_put_with_sort_kernel_quantized(Tensor & self, const c10::List<c10::op
           num_indices,
           sliceSize,
           strideBefore,
-          nElemBefore);
+          nElemBefore,
+          inv_scale, 
+          zero_point, 
+          qmin, 
+          qmax);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 

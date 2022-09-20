@@ -1,4 +1,3 @@
-#include <iostream>
 #include <ATen/ATen.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/DispatchStub.h>
@@ -194,7 +193,6 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::op
 
   // See Note [Enabling Deterministic Operations]
   if (self.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()) {
-      std::cout <<"Now using sort stub" << std::endl;
       index_put_with_sort_kernel_quantized_stub(self.device().type(), self, indices, value_, self.q_scale(), self.q_zero_point(), unsafe);
       return self;
   }
