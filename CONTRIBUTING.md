@@ -924,6 +924,7 @@ add-auto-load-safe-path /path/to/pytorch/.gdbinit
 
 ### C++ stacktraces
 Set `TORCH_SHOW_CPP_STACKTRACES=1` to get the C++ stacktrace when an error occurs in Python.
+Set `TORCH_SHOW_CPP_STACKTRACES_WITH_LINENO=1` to get the C++ stacktrace with file and line number.
 
 ## CUDA development tips
 
