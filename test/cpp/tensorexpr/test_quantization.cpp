@@ -103,7 +103,8 @@ TEST_F(Quantization, QuantDequantUInt8_NLC) {
   parseIR(graph_string, &*graph);
 
   auto x = 2 * at::rand({1, 2, 2}, TensorOptions(kCPU).dtype(at::kFloat));
-  x.unsafeGetTensorImpl()->set_sizes_and_strides({1, 2, 2}, {4, 1, 2});
+  x.unsafeGetTensorImpl()->set_sizes_and_strides(
+      std::initializer_list<int64_t>{1, 2, 2}, {4, 1, 2});
   auto q = at::quantize_per_tensor(x, 0.1f, 122, at::kQUInt8);
   auto y_expected = at::dequantize(q);
   TensorExprKernel k(graph);
