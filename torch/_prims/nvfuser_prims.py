@@ -383,16 +383,40 @@ def _dim_size(a, dims):
     return reduction_size
 
 
+def _restore_reduced_dims(a, dims, shape):
+    if a.size() == shape:
+        return a
+    unsqueezed_a = _unsqueeze_dims(a, dims, len(shape))
+    return _expand(unsqueezed_a, shape)
+
+
+# Reference: https://github.com/pytorch/pytorch/blob/master/tools/autograd/derivatives.yaml#L1109-L1115
+def _amax_amin_vjp(grad, result, self, dims, keepdim: Optional[bool] = None):
+    expanded_grad = _restore_reduced_dims(grad, dims, self.shape)
+    expanded_result = _restore_reduced_dims(result, dims, self.shape)
+    mask = torch.eq(expanded_result, self)
+
+    num_extra_none_results = len(dims)
+    if keepdim is not None:
+        num_extra_none_results += 1
+
+    if num_extra_none_results == 0:
+        return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask
+    else:
+        # Return None for each dim and for keepdim argument.
+        return (expanded_grad / torch.sum(mask, dims, keepdim=True)) * mask, *(
+            None,
+        ) * num_extra_none_results
+
+
 def _sum_vjp(grad, result, self, dims):
-    grad = _unsqueeze_dims(grad, dims, self.ndim)
-    return _expand(grad, self.shape), *(None,) * len(dims)
+    # Return None for each dim.
+    return _restore_reduced_dims(grad, dims, self.shape), *(None,) * len(dims)
 
 
 def _mean_vjp(grad, self, dims):
     mean_local_grad = 1.0 / _dim_size(self, dims)
-    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
-    expanded_grad = _expand(unsqueezed_grad, self.shape)
-    return expanded_grad * mean_local_grad
+    return _restore_reduced_dims(grad, dims, self.shape) * mean_local_grad
 
 
 def _var_vjp(grad, result, self, dims, correction):
@@ -401,12 +425,11 @@ def _var_vjp(grad, result, self, dims, correction):
     constant = 2.0 / var_reduction_size
 
     # expand grad and mean tensors to self tensor size
-    unsqueezed_grad = _unsqueeze_dims(grad, dims, self.ndim)
-    expanded_grad = _expand(unsqueezed_grad, self.shape)
-    expanded_mean = torch._refs.mean(self, dims, keepdim=True)
-    expanded_mean = torch._refs.broadcast_to(expanded_mean, self.shape)
-
+    expanded_grad = _restore_reduced_dims(grad, dims, self.shape)
+    mean = torch._refs.mean(self, dims, keepdim=True)
+    expanded_mean = torch._refs.broadcast_to(mean, self.shape)
     var_local_grad = constant * prims.sub(self, expanded_mean)
+    # Return None for each dim and for correction argument.
     return expanded_grad * var_local_grad, *(None,) * (len(dims) + 1)
 
 
@@ -431,8 +454,8 @@ _vjp_impls: Dict[str, Any] = {
         grad, prims.neg(prims.rsqrt(prims.sub(1, prims.pow(self, 2))))
     ),
     "add": lambda grad, result, self, other: (grad, grad),
-    "amax": None,  # TODO
-    "amin": None,  # TODO
+    "amax": _amax_amin_vjp,
+    "amin": _amax_amin_vjp,
     "asin": lambda grad, result, self: prims.mul(
         grad, prims.rsqrt(prims.sub(1, prims.pow(self, 2)))
     ),
