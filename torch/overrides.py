@@ -1874,12 +1874,12 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 # library code though, e.g., in handle_torch_function
 @contextlib.contextmanager
 def _no_torch_function_mode() -> Iterator[None]:
-    if _len_torch_function_stack() != 0:
+    if _len_torch_function_stack() > 0:
         _set_torch_function_mode(None)
     try:
         yield
     finally:
-        if _len_torch_function_stack() != 0:
+        if _len_torch_function_stack() > 0:
             _set_torch_function_mode(_TorchFunctionStackMode())
 
 

@@ -1175,7 +1175,7 @@ class TestTorchFunctionMode(TestCase):
             self.assertEqual(torch.mm(x, x), -1)
             self.assertEqual(bar(x), 1)
             self.assertRaisesRegex(
-                TypeError, r'SubTensor.+MyMode',
+                TypeError, r'SubTensor.+TorchFunctionStackMode',
                 lambda: self.assertEqual(torch.max(x, x)))
 
     def test_with_mode(self):
