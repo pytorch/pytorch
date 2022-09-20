@@ -303,10 +303,17 @@ def meta_conv(
                 )
         return ret_shape
 
-    def pick_memory_format():
-        if input_tensor.is_contiguous(memory_format=torch.channels_last):
-            return torch.channels_last
-        elif input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+    def is_channels_last(ten):
+        return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+
+    def pick_memory_format(device_hint):
+        if device_hint == "cuda":
+            if is_channels_last(input_tensor) or is_channels_last(weight):
+                return torch.channels_last
+        else:
+            if is_channels_last(input_tensor):
+                return torch.channels_last
+        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
             return torch.contiguous_format
         elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
             return torch.preserve_format
@@ -333,7 +340,15 @@ def meta_conv(
             dims, kernel_size, stride, padding, dilation
         )
     out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
-    mem_fmt = pick_memory_format()
+
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    if isinstance(input_tensor, FakeTensor):
+        device_hint = input_tensor.fake_device.type
+    else:
+        device_hint = "cuda"  # default to cuda
+
+    mem_fmt = pick_memory_format(device_hint)
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
