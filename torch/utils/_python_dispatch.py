@@ -1,12 +1,12 @@
 import contextlib
 
 import warnings
-from torch._C import _set_torch_dispatch_mode
-import torch
+from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
+    _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, _set_torch_dispatch_mode
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
-# - We need a better user-facing api for torch._C._DisableTorchDispatch that
+# - We need a better user-facing api for _DisableTorchDispatch that
 #   is able to selectively disable __torch_dispatch__ of a particular class.
 # - It doesn't work with the tensor constructors (torch.tensor, torch.Tensor)
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
@@ -57,24 +57,24 @@ class TorchDispatchMode:
         instance = cls(*args, **kwargs)
         return instance
 
-def get_current_dispatch_mode():
-    stack_len = torch._C._len_torch_dispatch_stack()
-    return torch._C._get_dispatch_stack_at(stack_len - 1) if stack_len > 0 else None
+def _get_current_dispatch_mode():
+    stack_len = _len_torch_dispatch_stack()
+    return _get_dispatch_stack_at(stack_len - 1) if stack_len > 0 else None
 
 
-def get_current_dispatch_mode_stack():
-    stack_len = torch._C._len_torch_dispatch_stack()
-    return [torch._C._get_dispatch_stack_at(i) for i in range(stack_len)]
+def _get_current_dispatch_mode_stack():
+    stack_len = _len_torch_dispatch_stack()
+    return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode):
-    if torch._C._len_torch_dispatch_stack() == 0:
+    if _len_torch_dispatch_stack() == 0:
         _set_torch_dispatch_mode(_TorchDispatchStackMode())
-    torch._C._push_on_torch_dispatch_stack(mode)
+    _push_on_torch_dispatch_stack(mode)
 
 
 def _pop_mode():
-    old = torch._C._pop_torch_dispatch_stack()
-    if torch._C._len_torch_dispatch_stack() == 0:
+    old = _pop_torch_dispatch_stack()
+    if _len_torch_dispatch_stack() == 0:
         _set_torch_dispatch_mode(None)
     return old
 
@@ -92,7 +92,7 @@ def _pop_mode_temporarily():
 class _TorchDispatchStackMode:
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with _pop_mode_temporarily() as old:
-            if torch._C._len_torch_dispatch_stack() > 0:
+            if _len_torch_dispatch_stack() > 0:
                 _set_torch_dispatch_mode(self)
             # we can't check the type of __torch_dispatch__ here but this is sufficient for checking it's a classmethod
             if old.__torch_dispatch__.__self__ is type(old):

@@ -1819,12 +1819,12 @@ class TorchFunctionMode:
         return instance
 
 
-def get_current_function_mode():
+def _get_current_function_mode():
     stack_len = _len_torch_function_stack()
     return _get_function_stack_at(stack_len - 1) if stack_len > 0 else None
 
 
-def get_current_function_mode_stack():
+def _get_current_function_mode_stack():
     stack_len = _len_torch_function_stack()
     return [_get_function_stack_at(i) for i in range(stack_len)]
 

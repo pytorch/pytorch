@@ -17,8 +17,8 @@ from torch.overrides import (
     get_testing_overrides,
     is_tensor_method_or_property,
     TorchFunctionMode,
-    get_current_function_mode,
-    get_current_function_mode_stack,
+    _get_current_function_mode,
+    _get_current_function_mode_stack,
 )
 from torch.utils._mode_utils import all_same_mode
 from torch.utils._pytree import tree_map
@@ -1269,11 +1269,11 @@ class TestTorchFunctionMode(TestCase):
                 pass
 
         with A() as mode1:
-            self.assertEqual(get_current_function_mode(), mode1)
+            self.assertEqual(_get_current_function_mode(), mode1)
 
         with mode1:
             with A() as mode2:
-                self.assertEqual(get_current_function_mode(), mode2)
+                self.assertEqual(_get_current_function_mode(), mode2)
 
 
     def test_get_mode_stack(self):
@@ -1281,14 +1281,14 @@ class TestTorchFunctionMode(TestCase):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 pass
 
-        self.assertEqual(get_current_function_mode_stack(), [])
+        self.assertEqual(_get_current_function_mode_stack(), [])
 
         with A() as mode1:
-            self.assertEqual(get_current_function_mode_stack(), [mode1])
+            self.assertEqual(_get_current_function_mode_stack(), [mode1])
 
         with mode1:
             with A() as mode2:
-                self.assertEqual(get_current_function_mode_stack(), [mode1, mode2])
+                self.assertEqual(_get_current_function_mode_stack(), [mode1, mode2])
 
     def test_all_same_mode(self):
         class A(TorchFunctionMode):
