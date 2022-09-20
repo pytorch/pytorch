@@ -102,8 +102,9 @@ class TestFSDPMisc(FSDPTest):
                 return (a, b)
 
         def _check_resharded(fsdp_module):
-            for param in fsdp_module.params:
-                if param._is_sharded:
+            for handle in fsdp_module._handles:
+                param = handle.flat_param
+                if handle.uses_sharded_strategy:
                     full_param = param._full_param_padded
                     self.assertEqual(full_param.storage().size(), 0)
 
