@@ -1063,7 +1063,7 @@ class TestMkldnn(TestCase):
     def test_transpose_invalid_dime(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
-            x.transpose(0, 12)
+            torch._mkldnn_transpose(x, 0, 12)
 
     def test_linear_non_contiguous_weight(self):
         in_features = torch.randint(3, 10, (1,)).item()
