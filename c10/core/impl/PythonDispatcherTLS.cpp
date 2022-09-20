@@ -6,9 +6,9 @@
 namespace c10 {
 namespace impl {
 
-thread_local SafePyHandle pythonDispatcherState;
+thread_local PyInterpreter* pythonDispatcherState;
 
-void PythonDispatcherTLS::set_state(SafePyHandle state) {
+void PythonDispatcherTLS::set_state(PyInterpreter* state) {
   if (state) {
     c10::impl::tls_set_dispatch_key_included(
         DispatchKey::PythonDispatcher, true);
@@ -18,12 +18,12 @@ void PythonDispatcherTLS::set_state(SafePyHandle state) {
   pythonDispatcherState = state;
 }
 
-SafePyHandle PythonDispatcherTLS::get_state() {
+PyInterpreter* PythonDispatcherTLS::get_state() {
   return pythonDispatcherState;
 }
 
 void PythonDispatcherTLS::reset_state() {
-  pythonDispatcherState.reset();
+  pythonDispatcherState = nullptr;
   c10::impl::tls_set_dispatch_key_included(
       DispatchKey::PythonDispatcher, false);
 }
