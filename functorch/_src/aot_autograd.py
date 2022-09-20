@@ -480,8 +480,11 @@ def create_aot_dispatcher_function(
     with preserve_rng_state(), fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
-            if fake_mode:
-                return pytree.tree_map_only(Tensor, fake_mode.from_tensor, flat_args)
+            if config.use_fake_tensor:
+                def convert(x):
+                    return fake_mode.from_tensor(x, shape_env=shape_env)
+
+                return pytree.tree_map_only(Tensor, convert, flat_args)
             else:
                 return flat_args
 
