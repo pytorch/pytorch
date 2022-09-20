@@ -156,6 +156,11 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return getPyObj().attr("__bool__")().is(py::handle(Py_True));
   }
 
+  virtual int64_t guard_int(const char* file, int64_t line) override {
+    py::gil_scoped_acquire acquire;
+    return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
+  }
+
   virtual int64_t int_() override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("__int__")().cast<int64_t>();
@@ -862,6 +867,9 @@ void initJITBindings(PyObject* module) {
 #if (!defined(FBCODE_CAFFE2) && defined(BUILD_ONEDNN_GRAPH))
       .def("_jit_set_llga_enabled", &RegisterLlgaFuseGraph::setEnabled)
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
+#else
+      .def("_jit_set_llga_enabled", [](bool flag) { return false; })
+      .def("_jit_llga_enabled", []() { return false; })
 #endif
       .def(
           "_jit_set_tracer_state_warn",
@@ -1384,6 +1392,11 @@ void initJITBindings(PyObject* module) {
               })
           .def("__bool__", [](c10::SymIntNode a) { return a->bool_(); })
           .def("__int__", [](c10::SymIntNode a) { return a->int_(); })
+          // Intentionally don't set file line, as the Python backtrace matters
+          // more here
+          .def(
+              "guard_int",
+              [](c10::SymIntNode a) { return a->guard_int(nullptr, 0); })
           .def(
               "__sym_float__",
               [](c10::SymIntNode a) {
@@ -1710,13 +1723,11 @@ void initJITBindings(PyObject* module) {
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true);
                   });
-              auto func_dk =
-                  py::cpp_function([op, symbol, allow_numbers_as_tensors](
-                                       const std::string& str_dk,
-                                       py::args args,
-                                       py::kwargs kwargs) {
+              auto func_dk = py::cpp_function(
+                  [op, symbol, allow_numbers_as_tensors](
+                      c10::DispatchKey dk_, py::args args, py::kwargs kwargs) {
                     c10::optional<c10::DispatchKey> dk =
-                        c10::make_optional(c10::parseDispatchKey(str_dk));
+                        c10::make_optional(dk_);
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, /*is_overload*/ true, dk);
@@ -2116,6 +2127,7 @@ void initJITBindings(PyObject* module) {
   });
 
   m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
+    TORCH_CHECK(fut, "Future can't be None");
     return fut->wait();
   });
 
@@ -2123,12 +2135,14 @@ void initJITBindings(PyObject* module) {
       "_collect_all",
       [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
           -> std::shared_ptr<jit::PythonFutureWrapper> {
-        auto typePtr =
-            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        auto typePtr = futures.empty() || futures[0] == nullptr
+            ? AnyType::get()
+            : futures[0]->fut->elementType();
         c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
             c10::FutureType::create(typePtr));
         asList.reserve(futures.size());
         for (const auto& f : futures) {
+          TORCH_CHECK(f, "Future can't be None");
           asList.push_back(f->fut);
         }
         return std::make_shared<jit::PythonFutureWrapper>(
