@@ -9094,7 +9094,6 @@ op_db: List[OpInfo] = [
            skips=(
                # cumprod does not handle correctly out= dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-            #    DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
            ),
            # gradgradcheck fails in fast_mode=True: #56275
            sample_inputs_func=sample_inputs_cumprod,
