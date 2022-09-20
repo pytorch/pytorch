@@ -16322,6 +16322,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
+        skips=(
+            # backward uses digamma which is not implemented for nvFuser
+            DecorateInfo(unittest.expectedFailure, 'TestNvPrims', 'test_nvprims_grad_trace_backward'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log",
@@ -16368,6 +16372,10 @@ python_ref_db = [
         "_refs.real",
         torch_opinfo_name="real",
         supports_nvfuser=False,
+        skips=(
+            # AssertionError: False is not true : nvprims ops not found
+            DecorateInfo(unittest.expectedFailure, 'TestNvPrims', 'test_nvprims_grad_trace_backward'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",
