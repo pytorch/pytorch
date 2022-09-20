@@ -15549,9 +15549,12 @@ class TestNNDeviceType(NNTestCase):
             yy.backward(yy)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
             rtol, atol = torch.testing._comparison.get_tolerances(dtype)
+            if dtype == torch.half:
+                atol = 1e-3
             self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
             # x is half
             rtol, atol = torch.testing._comparison.get_tolerances(torch.half)
+            atol = 1e-3
             self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=atol))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
