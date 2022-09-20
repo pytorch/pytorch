@@ -930,6 +930,9 @@ if TEST_WITH_TORCHDYNAMO:
     # Do not spend time on helper functions that are called with different inputs
     torchdynamo.config.cache_size_limit = 8
 
+if TEST_WITH_TORCHINDUCTOR:
+    import torchinductor.config
+    torchinductor.config.triton.autotune = False  # too slow
 
 def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
     def decorator(fn):
