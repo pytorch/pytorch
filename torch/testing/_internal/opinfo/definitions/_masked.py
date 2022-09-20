@@ -461,14 +461,6 @@ op_db: List[OpInfo] = [
             torch.bool, torch.float16, torch.bfloat16
         ),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestCompositeCompliance", "test_forward_ad"
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestNormalizeOperators",
@@ -974,6 +966,7 @@ op_db: List[OpInfo] = [
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
@@ -1001,6 +994,7 @@ op_db: List[OpInfo] = [
         ],
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
@@ -1021,6 +1015,7 @@ op_db: List[OpInfo] = [
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
