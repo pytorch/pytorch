@@ -143,6 +143,45 @@ def close_to_int(x, eps=0.1):
     return (y < eps) | (y > (1 - eps))
 
 
+def sample_inputs_slice(op_info, device, dtype, requires_grad, **kwargs):
+    for i in [
+        SampleInput(
+            input=torch.ones(3, device=device, dtype=dtype, requires_grad=requires_grad),
+            args=(0,),
+        ),
+        SampleInput(
+            input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
+            args=(),
+            kwargs={
+                'dim': 1,
+                'start': 1,
+                'end': -2,
+            }
+        ),
+        SampleInput(
+            input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
+            args=(),
+            kwargs={
+                'dim': 1,
+                'start': 1,
+                'end': -2,
+                'step': 3,
+            }
+        ),
+        SampleInput(
+            input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
+            args=(),
+            kwargs={
+                'dim': 0,
+                'start': -10,
+                'end': -2,
+                'step': 2,
+            }
+        ),
+    ]:
+        yield i
+
+
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype,
                          low=None, high=None, requires_grad=requires_grad)
@@ -12771,6 +12810,14 @@ op_db: List[OpInfo] = [
     OpInfo('select_scatter',
            dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_select_scatter,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_out=False),
+    OpInfo('slice',
+           op=torch.ops.aten.slice.Tensor,
+           dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
+           sample_inputs_func=sample_inputs_slice,
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
