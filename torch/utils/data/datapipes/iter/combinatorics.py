@@ -142,10 +142,11 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def reset(self) -> None:
         self._buffer = []
-        if self._enabled and self._seed is None:
-            self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
-        self._rng.seed(self._seed)
-        self._seed = None
+        if self._enabled:
+            if self._seed is None:
+                self._seed = int(torch.empty((), dtype=torch.int64).random_().item())
+            self._rng.seed(self._seed)
+            self._seed = None
 
     def __getstate__(self):
         if IterDataPipe.getstate_hook is not None:
