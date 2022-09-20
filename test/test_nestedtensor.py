@@ -268,7 +268,7 @@ class TestNestedTensor(TestCase):
 
     def test_nested_namespace(self):
         nt = torch.nested_tensor([torch.randn(2, 3), torch.randn(4, 5)])
-        result = torch.nested.to_padded_tensor(nt, 4)
+        result = nt.to_padded_tensor(4)
         nested_namespace_result = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(result, nested_namespace_result)
 
