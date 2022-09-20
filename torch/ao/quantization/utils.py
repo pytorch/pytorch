@@ -183,21 +183,13 @@ def weight_dtype(qconfig):
     weight = qconfig.weight()
     return weight.dtype
 
-# Note: the type is Optional[bool] to match backend_config_dict
-def is_dynamic(qconfig) -> Optional[bool]:
-    assert qconfig is not None
-    activation = qconfig.activation()
-    if hasattr(activation, 'compute_dtype'):
-        return True
-    return None
-
 def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized or not, this includes quantizing to quint8, qint8 and float16
     """
     return (
         activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
-        and is_dynamic(qconfig) is None
+        and (not activation_is_dynamically_quantized(qconfig))
     )
 
 def activation_is_dynamically_quantized(qconfig):
