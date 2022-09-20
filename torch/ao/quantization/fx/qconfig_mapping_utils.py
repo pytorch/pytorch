@@ -245,9 +245,11 @@ def is_qconfig_supported_by_dtype_configs(qconfig: QConfig, dtype_configs: List[
         qconfig_activation_dtype, qconfig_weight_dtype, qconfig_compute_dtype = \
             get_qconfig_dtypes(qconfig)
         qconfig_bias_dtype = torch.float16 \
-            if qconfig_activation_dtype == torch.float16 and \
-            qconfig_weight_dtype == torch.float16 \
-            else torch.float
+            if (
+                qconfig_activation_dtype == torch.float16
+                and qconfig_weight_dtype == torch.float16
+                and not is_dynamic
+            ) else torch.float
 
         if is_dynamic:
             is_match = input_dtype == qconfig_compute_dtype and \
