@@ -1388,8 +1388,6 @@ class TestTEFuser(JitTestCase):
                 F.hardswish,
                 F.softplus,
                 F.silu,
-                F.mish,
-                F.elu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,

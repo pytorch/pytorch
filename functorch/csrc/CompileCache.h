@@ -7,15 +7,13 @@
 
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
+namespace at {
 namespace functorch {
 
-// CompileCache is the compilation cache used by the AOTAutograd frontend.
-// We're planning on deleting this in favor of torchdynamo's caching mechanism
-// (CompilerCache predates torchdynamo).
+// CompileCache is the compilation cache used for AOTAutograd.
 
 /// Initialize python bindings for kernel compilation cache.
-TORCH_API void initCompileCacheBindings(PyObject* module);
+void initCompileCacheBindings(PyObject *module);
 
 } // namespace functorch
-} // namespace torch
+} // namespace at

@@ -238,7 +238,7 @@ class TestFSDPWrap(FSDPTest):
         self,
         cpu_offload: CPUOffload,
         backward_prefetch: BackwardPrefetch,
-        forward_pretch: bool,
+        forward_prefetch: bool,
         cuda_init_mode: CUDAInitMode,
     ):
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER and cpu_offload.offload_params:
@@ -275,6 +275,7 @@ class TestFSDPWrap(FSDPTest):
             ),
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
+            forward_prefetch=forward_prefetch,
         )
         if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
             wrapped_model = wrapped_model.cuda()

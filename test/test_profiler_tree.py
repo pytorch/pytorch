@@ -143,15 +143,14 @@ class ProfilerTree:
         if IS_WINDOWS:
             name = name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
 
-        match = re.match(r"^(.*)\.py\(([0-9]+)\): (.*)$", name)
+        match = re.match(r"(.*)\.py\(([0-9]+)\): (.*)$", name)
         if match:
             filename, _, fn = match.groups()
 
-            # This test can appear as `test/profiler/test_profiler_tree.py`
-            # depending on where it is run from.
-            test_file = os.path.splitext(os.path.split(__file__)[1])[0]
-            if filename.endswith(test_file):
-                filename = test_file
+            # This test can appear as `test/test_profiler_tree.py` depending on
+            # where it is run from.
+            if filename.endswith(os.path.splitext(__file__)[0]):
+                filename = os.path.split(os.path.splitext(__file__)[0])[1]
 
             # We test against a string literal, so all paths have to look like POSIX paths.
             filename = filename.replace(os.sep, "/")
@@ -464,7 +463,6 @@ class TestProfilerTree(TestCase):
               torch/_tensor.py(...): backward
                 <built-in function _has_torch_function_unary>
                 torch/autograd/__init__.py(...): backward
-                  <built-in method _are_functorch_transforms_active of PyCapsule object at 0xXXXXXXXXXXXX>
                   <built-in function isinstance>
                   <built-in function isinstance>
                   <built-in function len>

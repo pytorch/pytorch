@@ -59,9 +59,7 @@ from ._optim_utils import (
     _broadcast_processed_optim_state_dict,
     _flatten_optim_state_dict,
     _get_param_id_to_param,
-    _get_param_id_to_param_from_optim_input,
     _get_param_to_param_id,
-    _get_param_to_param_id_from_optim_input,
     _optim_state_dict,
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
@@ -72,7 +70,6 @@ from ._utils import (
     _apply_to_tensors,
     _contains_batchnorm,
     _free_storage,
-    _is_fsdp_flattened,
     _override_batchnorm_mixed_precision,
     p_assert,
 )
@@ -166,7 +163,7 @@ class ShardingStrategy(Enum):
 class MixedPrecision:
     """
     A config to enable mixed precision training with FullyShardedDataParallel.
-    This class can be constructed with several flags:
+    This class can be constructed with three flags:
         ``param_dtype`` controls the precision of model parameters, inputs, and
         therefore the precision under which computation happens. After forward
         and backward passes, FSDP parameters point to full precision shards
@@ -182,11 +179,6 @@ class MixedPrecision:
         are checkpointed in their full precision (and then restored back to
         to their reduced precision) as expected. Note that this checkpoint
         support is currently limited to ``StateDictType.FULL_STATE_DICT``.
-        ``keep_casted_gradients``: Whether to upcast gradients back to the
-        full parameter precision after backwards or not. This can be disabled
-        to keep the gradients in the lower precision, which can potentially
-        save memory if custom Optimizers are able to perform parameter updates
-        effectively with lower precision grads.
 
     .. note:: In ``summon_full_params``, parameters are summoned in full
         precision but buffers are not.
@@ -214,12 +206,6 @@ class MixedPrecision:
     # TODO: buffer + param are usually of the same type, if user specifies
     # param but not buffer, should we automatically make buffer be the same?
     buffer_dtype: Optional[torch.dtype] = None
-    # Whether to upcast gradients back to the full parameter precision after
-    # backwards or not. This can be disabled to keep the gradients in the
-    # lower precision, which can potentially save memory if custom Optimizers
-    # are able to perform parameter updates effectively with lower precision
-    # grads.
-    keep_casted_gradients: Optional[bool] = False
 
 
 @dataclass
@@ -1065,7 +1051,6 @@ class FullyShardedDataParallel(nn.Module):
             self.cpu_offload.offload_params,
             self.mixed_precision.param_dtype,
             self.mixed_precision.reduce_dtype,
-            self.mixed_precision.keep_casted_gradients,
         )
         self._fsdp_wrapped_module = FlattenParamsWrapper(
             module,
@@ -1193,7 +1178,7 @@ class FullyShardedDataParallel(nn.Module):
             p
             for m in ignored_modules
             for p in m.parameters()
-            if not _is_fsdp_flattened(p)
+            if not isinstance(p, FlatParameter)
         )
         # Conservatively include all shared parameters' names
         param_to_unflat_param_names = _get_param_to_unflat_param_names(
@@ -1498,7 +1483,7 @@ class FullyShardedDataParallel(nn.Module):
         try:
             while True:
                 param = next(param_gen)
-                if param not in ignored_params and not _is_fsdp_flattened(param):
+                if param not in ignored_params and not isinstance(param, FlatParameter):
                     yield param
         except StopIteration:
             pass
@@ -1510,7 +1495,7 @@ class FullyShardedDataParallel(nn.Module):
         check after flattening the wrapped module's parameters.
         """
         for param_name, param in self.named_parameters():
-            if param not in ignored_params and not _is_fsdp_flattened(param):
+            if param not in ignored_params and not isinstance(param, FlatParameter):
                 raise RuntimeError(
                     f"Found an unflattened parameter: {param_name}; "
                     f"{param.size()} {param.__class__}"
@@ -1684,12 +1669,6 @@ class FullyShardedDataParallel(nn.Module):
         gradient reduction or not.
         """
         return self.mixed_precision.reduce_dtype is not None
-
-    def _mixed_precision_keep_low_precision_grads(self) -> bool:
-        return (
-            self.mixed_precision is not None
-            and self.mixed_precision.keep_casted_gradients
-        )
 
     def _low_precision_hook_enabled(self) -> bool:
         """
@@ -3292,13 +3271,7 @@ class FullyShardedDataParallel(nn.Module):
                     if self.sharding_strategy == ShardingStrategy.NO_SHARD:
                         self._communication_hook(self._communication_hook_state, param.grad)
 
-                    # For NO_SHARD keeping grads in the reduced precision, we
-                    # can simply omit the cast as needed, we can't do this for
-                    # other sharding strategies because grad field is assigned
-                    # in _finalize_params. TODO (rvarm1) this divergence in
-                    # logic is not ideal.
-                    if not self._mixed_precision_keep_low_precision_grads():
-                        self._cast_grad_to_param_dtype(param.grad, param)
+                    self._cast_grad_to_param_dtype(param.grad, param)
 
                 # Regardless of sharding or not, offload the grad to CPU if we are
                 # offloading params. This is so param and grad reside on same device
@@ -3465,10 +3438,6 @@ class FullyShardedDataParallel(nn.Module):
                         # lands. If it was not called, there is no new gradient to accumulate
                         if p._post_backward_called:
                             p.grad = p._saved_grad_shard
-                            if fsdp_module._mixed_precision_keep_low_precision_grads():
-                                p.grad.data = p.grad.to(
-                                    fsdp_module.mixed_precision.param_dtype
-                                )
                     else:
                         p_assert(
                             not handle.uses_sharded_strategy or not p._post_backward_called,
@@ -3647,25 +3616,6 @@ class FullyShardedDataParallel(nn.Module):
                 p.grad.detach().mul_(clip_coef.to(p.grad.device))
 
     @staticmethod
-    def _warn_optim_input(optim_input):
-        if optim_input is not None:
-            warnings.warn(
-                "The `optim_input` argument is deprecated. You may remove it "
-                "from your code without changing its functionality."
-            )
-
-    @staticmethod
-    def _is_using_optim_input(optim_input, optim) -> bool:
-        if optim_input is None and optim is None:
-            # Use the default behavior of `optim_input``
-            return True
-        if optim_input is not None:
-            # Use the `optim_input` code path
-            return True
-        # Use the `optim` code path
-        return False
-
-    @staticmethod
     def full_optim_state_dict(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
@@ -3690,6 +3640,10 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: Unlike ``torch.optim.Optimizer.state_dict()``, this method
             uses full parameter names as keys instead of parameter IDs.
 
+        .. warning:: If you do not pass ``model.parameters()`` as the first
+            argument to the optimizer, then you should pass that same value to
+            this method as ``optim_input``.
+
         .. note:: Like in :meth:`torch.optim.Optimizer.state_dict`, the tensors
             contained in the optimizer state dict are not cloned, so there may
             be aliasing surprises. For best practices, consider saving the
@@ -3706,8 +3660,7 @@ class FullyShardedDataParallel(nn.Module):
                 Input passed into the optimizer ``optim`` representing either a
                 :class:`list` of parameter groups or an iterable of parameters;
                 if ``None``, then this method assumes the input was
-                ``model.parameters()``. This argument is deprecated, and there
-                is no need to pass it in anymore. (Default: ``None``)
+                ``model.parameters()``. (Default: ``None``)
             rank0_only (bool): If ``True``, saves the populated :class:`dict`
                 only on rank 0; if ``False``, saves it on all ranks. (Default:
                 ``True``)
@@ -3721,10 +3674,6 @@ class FullyShardedDataParallel(nn.Module):
             :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=True``,
             then nonzero ranks return an empty :class:`dict`.
         """
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input, optim,
-        )
         return _optim_state_dict(
             model=model,
             optim=optim,
@@ -3732,7 +3681,6 @@ class FullyShardedDataParallel(nn.Module):
             rank0_only=rank0_only,
             shard_state=False,
             group=group,
-            using_optim_input=using_optim_input,
         )
 
     @staticmethod
@@ -3757,10 +3705,7 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: The returned state dict contains ``ShardedTensor`` and
             cannot be directly used by the regular ``optim.load_state_dict``.
         """
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input, optim,
-        )
+
         # TODO: The ultimate goal of the optimizer state APIs should be the same
         # as state_dict/load_state_dict -- using one API to get optimizer states
         # and one API to load optimizer states. ``state_dict_type`` will be used
@@ -3776,19 +3721,15 @@ class FullyShardedDataParallel(nn.Module):
             rank0_only=False,
             shard_state=True,
             group=group,
-            using_optim_input=using_optim_input,
         )
 
     @staticmethod
     def shard_full_optim_state_dict(
         full_optim_state_dict: Dict[str, Any],
         model: torch.nn.Module,
-        optim_input: Optional[
-            Union[
-                List[Dict[str, Any]], Iterable[torch.nn.Parameter],
-            ]
-        ] = None,
-        optim: Optional[torch.optim.Optimizer] = None,
+        optim_input: Optional[Union[
+            List[Dict[str, Any]], Iterable[torch.nn.Parameter],
+        ]] = None,
     ) -> Dict[str, Any]:
         """
         Shards the full optimizer state dict ``full_optim_state_dict`` by
@@ -3809,6 +3750,10 @@ class FullyShardedDataParallel(nn.Module):
             >>> full_osd = torch.load(PATH)
             >>> sharded_osd = FSDP.shard_full_optim_state_dict(full_osd, new_model)
             >>> new_optim.load_state_dict(sharded_osd)
+
+        .. warning:: If you do not pass ``model.parameters()`` as the first
+            argument to the optimizer, then you should pass that same value to
+            this method as ``optim_input``.
 
         .. note:: Both :meth:`shard_full_optim_state_dict` and
             :meth:`scatter_full_optim_state_dict` may be used to get the
@@ -3833,27 +3778,17 @@ class FullyShardedDataParallel(nn.Module):
                 Input passed into the optimizer representing either a
                 :class:`list` of parameter groups or an iterable of parameters;
                 if ``None``, then this method assumes the input was
-                ``model.parameters()``. This argument is deprecated, and there
-                is no need to pass it in anymore. (Default: ``None``)
-            optim (Optional[torch.optim.Optimizer]): Optimizer that will load
-                the state dict returned by this method. This is the preferred
-                argument to use over ``optim_input``. (Default: ``None``)
+                ``model.parameters()``. (Default: ``None``)
 
         Returns:
             Dict[str, Any]: The full optimizer state dict now remapped to
             flattened parameters instead of unflattened parameters and
             restricted to only include this rank's part of the optimizer state.
         """
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input, optim,
-        )
         sharded_osd = _flatten_optim_state_dict(
             full_optim_state_dict, model, True,
         )
-        return _rekey_sharded_optim_state_dict(
-            sharded_osd, model, optim, optim_input, using_optim_input,
-        )
+        return _rekey_sharded_optim_state_dict(sharded_osd, model, optim_input)
 
     @staticmethod
     def flatten_sharded_optim_state_dict(
@@ -3864,7 +3799,6 @@ class FullyShardedDataParallel(nn.Module):
                 List[Dict[str, Any]], Iterable[torch.nn.Parameter],
             ]
         ] = None,
-        optim: Optional[torch.optim.Optimizer] = None,
     ) -> Dict[str, Any]:
         """
         The API is similar to :meth:`shard_full_optim_state_dict`. The only
@@ -3878,14 +3812,13 @@ class FullyShardedDataParallel(nn.Module):
                 sharded optimizer state.
             model (torch.nn.Module):
                 Refer to :meth:``shard_full_optim_state_dict``.
+            optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
+                Refer to :meth:``shard_full_optim_state_dict``.
 
         Returns:
             Refer to :meth:`shard_full_optim_state_dict`.
         """
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input, optim,
-        )
+
         # TODO: The implementation is the same as ``shard_full_optim_state_dict``.
         # See the TODO in ``shard_full_optim_state_dict`` for the future
         # unification plan.
@@ -3894,9 +3827,7 @@ class FullyShardedDataParallel(nn.Module):
             model=model,
             shard_state=True,
         )
-        return _rekey_sharded_optim_state_dict(
-            flattened_osd, model, optim, optim_input, using_optim_input,
-        )
+        return _rekey_sharded_optim_state_dict(flattened_osd, model, optim_input)
 
     @staticmethod
     def scatter_full_optim_state_dict(
@@ -3905,7 +3836,6 @@ class FullyShardedDataParallel(nn.Module):
         optim_input: Optional[Union[
             List[Dict[str, Any]], Iterable[torch.nn.Parameter],
         ]] = None,
-        optim: Optional[torch.optim.Optimizer] = None,
         group: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
@@ -3950,11 +3880,7 @@ class FullyShardedDataParallel(nn.Module):
                 Input passed into the optimizer representing either a
                 :class:`list` of parameter groups or an iterable of parameters;
                 if ``None``, then this method assumes the input was
-                ``model.parameters()``. This argument is deprecated, and there
-                is no need to pass it in anymore. (Default: ``None``)
-            optim (Optional[torch.optim.Optimizer]): Optimizer that will load
-                the state dict returned by this method. This is the preferred
-                argument to use over ``optim_input``. (Default: ``None``)
+                ``model.parameters()``. (Default: ``None``)
             group (dist.ProcessGroup): Model's process group or ``None`` if
                 using the default process group. (Default: ``None``)
 
@@ -3963,10 +3889,6 @@ class FullyShardedDataParallel(nn.Module):
             flattened parameters instead of unflattened parameters and
             restricted to only include this rank's part of the optimizer state.
         """
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input, optim,
-        )
         # Try to use the passed-in process group, the model's process group,
         # or the default process group (i.e. `None`) in that priority order
         if group is None and hasattr(model, "process_group"):
@@ -4003,10 +3925,8 @@ class FullyShardedDataParallel(nn.Module):
             group, broadcast_device,
         )
         # Rekey the optimizer state dict to use parameter IDs according to this
-        # rank's `optim`
-        sharded_osd = _rekey_sharded_optim_state_dict(
-            sharded_osd, model, optim, optim_input, using_optim_input,
-        )
+        # rank's `optim_input`
+        sharded_osd = _rekey_sharded_optim_state_dict(sharded_osd, model, optim_input)
         return sharded_osd
 
     @staticmethod
@@ -4017,7 +3937,6 @@ class FullyShardedDataParallel(nn.Module):
         optim_input: Optional[Union[
             List[Dict[str, Any]], Iterable[torch.nn.Parameter],
         ]] = None,
-        optim: Optional[torch.optim.Optimizer] = None,
     ) -> Dict[str, Any]:
         """
         Re-keys the optimizer state dict ``optim_state_dict`` to use the key
@@ -4051,13 +3970,8 @@ class FullyShardedDataParallel(nn.Module):
             Dict[str, Any]: The optimizer state dict re-keyed using the
             parameter keys specified by ``optim_state_key_type``.
         """
-        FullyShardedDataParallel._warn_optim_input(optim_input)
-        using_optim_input = FullyShardedDataParallel._is_using_optim_input(
-            optim_input, optim,
-        )
-        assert optim_state_key_type in (
-            OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID,
-        )
+        assert optim_state_key_type in \
+            (OptimStateKeyType.PARAM_NAME, OptimStateKeyType.PARAM_ID)
         osd = optim_state_dict  # alias
         # Validate that the existing parameter keys are uniformly typed
         uses_param_name_mask = [
@@ -4066,10 +3980,8 @@ class FullyShardedDataParallel(nn.Module):
         uses_param_id_mask = [
             type(param_key) is int for param_key in osd["state"]
         ]
-        if (
-            (any(uses_param_name_mask) and not all(uses_param_name_mask))
-            or (any(uses_param_id_mask) and not all(uses_param_id_mask))
-        ):
+        if (any(uses_param_name_mask) and not all(uses_param_name_mask)) or \
+                (any(uses_param_id_mask) and not all(uses_param_id_mask)):
             error_msg = f"Invalid parameter keys: {osd['state'].keys()}"
             raise ValueError(error_msg)
         # Return directly if the existing key type matches the target key type
@@ -4081,11 +3993,7 @@ class FullyShardedDataParallel(nn.Module):
         # Otherwise, actually perform the re-keying
         new_osd = {}
         if optim_state_key_type == OptimStateKeyType.PARAM_NAME:  # ID -> name
-            param_id_to_param = (
-                _get_param_id_to_param_from_optim_input(model, optim_input)
-                if using_optim_input
-                else _get_param_id_to_param(optim)
-            )
+            param_id_to_param = _get_param_id_to_param(model, optim_input)
             param_to_param_name = _get_param_to_param_name(model)
             param_id_to_param_name: List[str] = [
                 param_to_param_name[param] for param in param_id_to_param
@@ -4103,11 +4011,7 @@ class FullyShardedDataParallel(nn.Module):
             return new_osd
         elif optim_state_key_type == OptimStateKeyType.PARAM_ID:  # name -> ID
             param_name_to_param = _get_param_name_to_param(model)
-            param_to_param_id = (
-                _get_param_to_param_id_from_optim_input(model, optim_input)
-                if using_optim_input
-                else _get_param_to_param_id(optim)
-            )
+            param_to_param_id = _get_param_to_param_id(model, optim_input)
             # Because not all model parameters may be passed as the optimizer
             # input, we may need to drop some parameters from this mapping
             param_name_to_param_id = {
@@ -4335,7 +4239,7 @@ def _get_param_to_unflat_param_names(
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
                 module_prefixed_param_names = (
-                    param._prefixed_param_names if type(param) is FlatParameter
+                    param._prefixed_param_names if isinstance(param, FlatParameter)
                     else [param_name]
                 )  # prefixed from `module`
                 fully_prefixed_param_names = [

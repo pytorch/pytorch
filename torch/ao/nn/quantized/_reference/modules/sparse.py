@@ -4,8 +4,6 @@ from torch import Tensor
 from .utils import ReferenceQuantizedModule
 from typing import Optional, Dict, Any
 
-__all__ = ['Embedding', 'EmbeddingBag']
-
 class Embedding(nn.Embedding, ReferenceQuantizedModule):
     """ A reference quantized Embedding module that fits into the
     FX Graph Mode Quantization workflow, activation will be floating point Tensor,
