@@ -22,11 +22,11 @@ void PythonTorchFunctionTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode)
   pythonTorchFunctionState.stack_.push_back(std::move(mode));
 }
 
-const std::shared_ptr<SafePyObject>& PythonTorchFunctionTLS::pop_stack() {
+const std::shared_ptr<SafePyObject> PythonTorchFunctionTLS::pop_stack() {
   TORCH_CHECK(pythonTorchFunctionState.stack_.size() > 0, "trying to pop from empty mode stack");
   const auto out = pythonTorchFunctionState.stack_.back();
   pythonTorchFunctionState.stack_.pop_back();
-  return std::move(out);
+  return out;
 }
 
 const std::shared_ptr<SafePyObject>& PythonTorchFunctionTLS::get_stack_at(int64_t idx) {

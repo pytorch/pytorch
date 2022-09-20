@@ -15,7 +15,7 @@ struct C10_API TorchDispatchModeTLS {
   static void swap_mode(std::shared_ptr<SafePyObject>& mode);
 
   static void push_onto_stack(std::shared_ptr<SafePyObject> mode);
-  static const std::shared_ptr<SafePyObject>& pop_stack();
+  static const std::shared_ptr<SafePyObject> pop_stack();
   static const std::shared_ptr<SafePyObject>& get_stack_at(int64_t idx);
   static int64_t stack_len();
 

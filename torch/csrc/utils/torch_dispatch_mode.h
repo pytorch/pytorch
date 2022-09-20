@@ -16,7 +16,7 @@ struct StashTorchDispatchModeGuard {
   }
 
  private:
-  std::shared_ptr<c10::SafePyObject> saved_mode_;
+  std::shared_ptr<at::SafePyObject> saved_mode_;
 };
 
 } // namespace torch_dispatch_mode

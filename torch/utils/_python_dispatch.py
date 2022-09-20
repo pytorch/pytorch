@@ -11,19 +11,6 @@ import torch
 # - It doesn't work with the tensor constructors (torch.tensor, torch.Tensor)
 # - Better name (see https://github.com/pytorch/pytorch/pull/63496#discussion_r694091694)
 
-
-# Implementation note, since this is based on TorchFunctionMode, this had the
-# same dilemma: I had a choice about how much of mode stacks
-# to implement in Python versus in C++.  At time of writing, I did not care
-# too much about implementation efficiency; however, I do care about making it
-# hard for users to implement modes in the wrong way.  In the end, it turned
-# out to be possible to implement mode stacks entirely from userland, with the
-# C++ API providing only _get_torch_dispatch_mode() and
-# _set_torch_dispatch_mode(), so I opted to provide some unsafe C++ bindings and
-# have the bulk of the logic for managing the stack in Python, which helped
-# simplify the C++ API surface.  It would also have been valid to build in the
-# notion of mode stack directly into C++ but in this design it's substantially
-# more difficult to interact with it.
 class TorchDispatchMode:
     """
     A ``TorchDispatchMode`` allows you to override the meaning of all

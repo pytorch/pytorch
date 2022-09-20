@@ -242,10 +242,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             tree_map(check, rs)
             return rs
 
-    with CompositeCompliantTensorMode() as mode:
-        pass
-
-    return CompositeCompliantTensor, mode
+    return CompositeCompliantTensor, CompositeCompliantTensorMode()
 
 def is_tensorlist(lst):
     if not isinstance(lst, list) and not isinstance(lst, tuple):
