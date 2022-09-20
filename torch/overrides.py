@@ -1874,12 +1874,13 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 # library code though, e.g., in handle_torch_function
 @contextlib.contextmanager
 def _no_torch_function_mode() -> Iterator[None]:
-    old = _get_current_function_mode()
-    _set_torch_function_mode(None)
+    if _len_torch_function_stack() != 0:
+        _set_torch_function_mode(None)
     try:
         yield
     finally:
-        _set_torch_function_mode(old)
+        if _len_torch_function_stack() != 0:
+            _set_torch_function_mode(_TorchFunctionStackMode())
 
 
 class enable_reentrant_dispatch():
