@@ -624,7 +624,7 @@ class _BaseDataLoaderIter(object):
         if isinstance(self._dataset, IterDataPipe):
             shared_rng = torch.Generator()
             shared_rng.manual_seed(self._shared_seed)
-            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
+            self._dataset = torch.utils.data.graph_settings.apply_random_seed(self._dataset, shared_rng)
         self._dataset_kind = loader._dataset_kind
         self._IterableDataset_len_called = loader._IterableDataset_len_called
         self._auto_collation = loader._auto_collation
@@ -665,7 +665,7 @@ class _BaseDataLoaderIter(object):
         if isinstance(self._dataset, IterDataPipe):
             shared_rng = torch.Generator()
             shared_rng.manual_seed(self._shared_seed)
-            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
+            self._dataset = torch.utils.data.graph_settings.apply_random_seed(self._dataset, shared_rng)
 
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration

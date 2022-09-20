@@ -96,9 +96,17 @@ def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
     return E, Z
 
 
-# This function was deprecated and removed
+# These functions were deprecated and removed
 # This nice error message can be removed in version 1.13+
 def solve(input: Tensor, A: Tensor, *, out=None) -> Tuple[Tensor, Tensor]:
     raise RuntimeError(
         "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.solve` function instead.",
+    )
+
+
+def eig(
+    self: Tensor, eigenvectors: bool = False, *, e=None, v=None
+) -> Tuple[Tensor, Tensor]:
+    raise RuntimeError(
+        "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.eig` function instead.",
     )

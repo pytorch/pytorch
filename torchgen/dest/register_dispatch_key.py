@@ -751,8 +751,11 @@ resize_out(out, sizes, strides, options);
         )
 
         # Signature of the wrapper function we'll register to the dispatcher
+        kern = self.backend_index.get_kernel(f)
         sig = NativeSignature(
-            f.func, prefix="wrapper_", symint=self.backend_index.symint
+            f.func,
+            prefix="wrapper_",
+            symint=kern is not None and kern.supports_symint(),
         )
 
         if self.target is Target.NAMESPACED_DECLARATION:
