@@ -427,7 +427,7 @@ _vjp_impls: Dict[str, Any] = {
     "acos": lambda grad, result, self: prims.mul(
         grad, prims.neg(prims.rsqrt(prims.sub(1, prims.pow(self, 2))))
     ),
-    "add": lambda grad, result, self, other: (grad, grad),
+    "add": lambda grad, result, self, other: (prims.view_of(grad), prims.view_of(grad)),
     "amax": _amax_amin_vjp,
     "amin": _amax_amin_vjp,
     "asin": lambda grad, result, self: prims.mul(
