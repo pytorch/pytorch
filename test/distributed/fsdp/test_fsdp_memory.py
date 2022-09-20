@@ -34,6 +34,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 def get_cur_mem(rank, result, prefix):
     """Collect memory allocated values in a result dict in MB"""
+    torch._C._cuda_clearCublasWorkspaces()
     result[prefix] = round(torch.cuda.memory_allocated() / 1024 / 1024)
 
 
@@ -180,45 +181,43 @@ class TestFSDPMemory(FSDPTest):
         expected = {}
 
         for iteration in range(iterations):
-            # another 4 MiB per thread/stream/cuBLAS handle expected
-            # after initial cuBLAS workspace allocation change #83461
             if iteration == 0:
                 # sharded model size + 1MB temp memory
                 expected[f"iter {iteration}: start"] = sharded_model_size_mb + 1
                 # it is hard to calculate this memory size, get it from printed memory usage
                 if ckpt == "ckpt":
-                    expected[f"iter {iteration}: after fwd"] = 51 + 4
-                    expected[f"iter {iteration}: after loss"] = 51 + 4
+                    expected[f"iter {iteration}: after fwd"] = 51
+                    expected[f"iter {iteration}: after loss"] = 51
                 else:
-                    expected[f"iter {iteration}: after fwd"] = 340 + 4
-                    expected[f"iter {iteration}: after loss"] = 340 + 4
+                    expected[f"iter {iteration}: after fwd"] = 340
+                    expected[f"iter {iteration}: after loss"] = 340
                 # sharded model size + sharded grad size + 1M temp memory
-                expected[f"iter {iteration}: after bwd"] = 2 * sharded_model_size_mb + 1 + 4 + 4
+                expected[f"iter {iteration}: after bwd"] = 2 * sharded_model_size_mb + 1
             else:
                 # after optimizer step in the first iteraiton, memory usage increased by
                 # sharded_model_size_mb becasue of increased optimizer states memory usage
-                expected[f"iter {iteration}: start"] = 2 * sharded_model_size_mb + 1 + 4 + 4
+                expected[f"iter {iteration}: start"] = 2 * sharded_model_size_mb + 1
                 if ckpt == "ckpt":
                     expected[f"iter {iteration}: after fwd"] = (
-                        51 + sharded_model_size_mb + 4 + 4
+                        51 + sharded_model_size_mb
                     )
                     expected[f"iter {iteration}: after loss"] = (
-                        51 + sharded_model_size_mb + 4 + 4
+                        51 + sharded_model_size_mb
                     )
                 else:
                     expected[f"iter {iteration}: after fwd"] = (
-                        340 + sharded_model_size_mb + 4 + 4
+                        340 + sharded_model_size_mb
                     )
                     expected[f"iter {iteration}: after loss"] = (
-                        340 + sharded_model_size_mb + 4 + 4
+                        340 + sharded_model_size_mb
                     )
-                expected[f"iter {iteration}: after bwd"] = 3 * sharded_model_size_mb + 1 + 4 + 4
+                expected[f"iter {iteration}: after bwd"] = 3 * sharded_model_size_mb + 1
 
             # sharded model size + sharded grad size + optimizer states + 1M temp memory
-            expected[f"iter {iteration}: after step"] = 3 * sharded_model_size_mb + 1 + 4 + 4
+            expected[f"iter {iteration}: after step"] = 3 * sharded_model_size_mb + 1
             # grad memory is claimed after setting grad = None
             # sharded model size + optimizer states + 1M temp memory
-            expected[f"iter {iteration}: done"] = 2 * sharded_model_size_mb + 1 + 4 + 4
+            expected[f"iter {iteration}: done"] = 2 * sharded_model_size_mb + 1
 
         # Get the fsdp and checkpoint flags.
         with_ckpt = ckpt == "ckpt"
