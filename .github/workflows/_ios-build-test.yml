@@ -42,6 +42,7 @@ env:
   BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
   IOS_PLATFORM: ${{ inputs.ios-platform }}
   IOS_ARCH: ${{ inputs.ios-arch }}
+  GIT_CURL_VERBOSE: true
 
 jobs:
   build:
