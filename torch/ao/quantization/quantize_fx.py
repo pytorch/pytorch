@@ -236,13 +236,9 @@ def fuse_fx(
 
     Args:
 
-        * `model`: a torch.nn.Module model
-        * `fuse_custom_config`: custom configurations for fuse_fx.
-            See :class:`~torch.ao.quantization.fx.custom_config.FuseCustomConfig` for more detail::
-
-                from torch.ao.quantization.fx.custom_config import FuseCustomConfig
-                fuse_custom_config = FuseCustomConfig().set_preserved_attributes(["preserved_attr"])
-
+        * `model` (torch.nn.Module): a torch.nn.Module model
+        * `fuse_custom_config` (FuseCustomConfig): custom configurations for fuse_fx.
+            See :class:`~torch.ao.quantization.fx.custom_config.FuseCustomConfig` for more details
     Example::
 
         from torch.ao.quantization import fuse_fx
@@ -280,52 +276,24 @@ def prepare_fx(
     r""" Prepare a model for post training static quantization
 
     Args:
-      * `model` (required): torch.nn.Module model, must be in eval mode
+      * `model` (torch.nn.Module): torch.nn.Module model
 
-      * `qconfig_mapping` (required): mapping from model ops to qconfigs::
+      * `qconfig_mapping` (QConfigMapping): QConfigMapping object to configure how a model is
+         quantized, see :class:`~torch.ao.quantization.qconfig_mapping.QConfigMapping`
+         for more details
 
-          from torch.quantization import QConfigMapping
+      * `example_inputs` (Tuple[Any, ...]): Example inputs for forward function of the model,
+         Tuple of positional args (keyword args can be passed as positional args as well)
 
-          qconfig_mapping = QConfigMapping() \
-              .set_global(global_qconfig) \
-              .set_object_type(torch.nn.Linear, qconfig1) \
-              .set_object_type(torch.nn.functional.linear, qconfig1) \
-              .set_module_name_regex("foo.*bar.*conv[0-9]+", qconfig1) \
-              .set_module_name_regex("foo.*bar.*", qconfig2) \
-              .set_module_name_regex("foo.*", qconfig3) \
-              .set_module_name("module1", qconfig1) \
-              .set_module_name("module2", qconfig2) \
-              .set_module_name_object_type_order("module3", torch.nn.functional.linear, 0, qconfig3)
-
-
-          The precedence of different settings:
-          set_global < set_object_type < set_module_name_regex < set_module_name < set_module_name_object_type_order
-      * `example_inputs`: (required) Example inputs for forward function of the model
-
-      * `prepare_custom_config`: customization configuration for quantization tool.
-          See :class:`~torch.ao.quantization.fx.custom_config.PrepareCustomConfig` for more detail::
-
-              from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
-
-              prepare_custom_config = PrepareCustomConfig() \
-                  .set_standalone_module_name("module1", qconfig_mapping, example_inputs, \
-                      child_prepare_custom_config, backend_config) \
-                  .set_standalone_module_class(MyStandaloneModule, qconfig_mapping, example_inputs, \
-                      child_prepare_custom_config, backend_config) \
-                  .set_float_to_observed_mapping(FloatCustomModule, ObservedCustomModule) \
-                  .set_non_traceable_module_names(["module2", "module3"]) \
-                  .set_non_traceable_module_classes([NonTraceableModule1, NonTraceableModule2]) \
-                  .set_input_quantized_indexes([0]) \
-                  .set_output_quantized_indexes([0]) \
-                  .set_preserved_attributes(["attr1", "attr2"])
+      * `prepare_custom_config` (PrepareCustomConfig): customization configuration for quantization tool.
+          See :class:`~torch.ao.quantization.fx.custom_config.PrepareCustomConfig` for more details
 
       * `_equalization_config`: config for specifying how to perform equalization on the model
 
-      * `backend_config`: config that specifies how operators are quantized
+      * `backend_config` (BackendConfig): config that specifies how operators are quantized
          in a backend, this includes how the operaetors are observed,
          supported fusion patterns, how quantize/dequantize ops are
-         inserted, supported dtypes etc. The structure of the dictionary is still WIP
-         and will change in the future, please don't use right now.
+         inserted, supported dtypes etc. See :class:`~torch.ao.quantization.backend_config.BackendConfig` for more details
 
     Return:
       A GraphModule with observer (configured by qconfig_mapping), ready for calibration
@@ -458,14 +426,14 @@ def prepare_qat_fx(
     r""" Prepare a model for quantization aware training
 
     Args:
-      * `model`: torch.nn.Module model, must be in train mode
-      * `qconfig_mapping`: see :func:`~torch.ao.quantization.prepare_fx`
-      * `example_inputs`: see :func:`~torch.ao.quantization.prepare_fx`
-      * `prepare_custom_config`: see :func:`~torch.ao.quantization.prepare_fx`
-      * `backend_config`: see :func:`~torch.ao.quantization.prepare_fx`
+      * `model` (torch.nn.Module): torch.nn.Module model
+      * `qconfig_mapping` (QConfigMapping): see :func:`~torch.ao.quantization.prepare_fx`
+      * `example_inputs` (Tuple[Any, ...]): see :func:`~torch.ao.quantization.prepare_fx`
+      * `prepare_custom_config` (PrepareCustomConfig): see :func:`~torch.ao.quantization.prepare_fx`
+      * `backend_config` (BackendConfig): see :func:`~torch.ao.quantization.prepare_fx`
 
     Return:
-      A GraphModule with fake quant modules (configured by qconfig_mapping), ready for
+      A GraphModule with fake quant modules (configured by qconfig_mapping and backend_config), ready for
       quantization aware training
 
     Example::
@@ -602,23 +570,14 @@ def convert_fx(
     r""" Convert a calibrated or trained model to a quantized model
 
     Args:
-        * `graph_module`: A prepared and calibrated/trained model (GraphModule)
-        * `is_reference`: flag for whether to produce a reference quantized model,
-          which will be a common interface between pytorch quantization with
-          other backends like accelerators
+        * `graph_module` (torch.fx.GraphModule): A prepared and calibrated/trained model (GraphModule)
 
-        * `convert_custom_config`: custom configurations for convert function.
-            See :class:`~torch.ao.quantization.fx.custom_config.ConvertCustomConfig` for more detail::
+        * `convert_custom_config` (ConvertCustomConfig): custom configurations for convert function.
+            See :class:`~torch.ao.quantization.fx.custom_config.ConvertCustomConfig` for more details
 
-                from torch.ao.quantization.fx.custom_config import ConvertCustomConfig
+        * `_remove_qconfig` (bool): Option to remove the qconfig attributes in the model after convert.
 
-                convert_custom_config = ConvertCustomConfig() \
-                    .set_observed_to_quantized_mapping(ObservedCustomModule, QuantizedCustomModule) \
-                    .set_preserved_attributes(["attr1", "attr2"])
-
-        * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
-
-        * `qconfig_mapping`: config for specifying how to convert a model for quantization.
+        * `qconfig_mapping` (QConfigMapping): config for specifying how to convert a model for quantization.
 
            The keys must include the ones in the qconfig_mapping passed to `prepare_fx` or `prepare_qat_fx`,
            with the same values or `None`. Additional keys can be specified with values set to `None`.
@@ -631,14 +590,14 @@ def convert_fx(
                 .set_object_type(torch.nn.functional.linear, qconfig_from_prepare)
                 .set_module_name("foo.bar", None)  # skip quantizing module "foo.bar"
 
-         * `backend_config`: A configuration for the backend which describes how
+         * `backend_config` (BackendConfig): A configuration for the backend which describes how
             operators should be quantized in the backend, this includes quantization
             mode support (static/dynamic/weight_only), dtype support (quint8/qint8 etc.),
-            observer placement for each operators and fused operators. Detailed
-            documentation can be found in torch/ao/quantization/backend_config/README.md
+            observer placement for each operators and fused operators.
+            See :class:`~torch.ao.quantization.backend_config.BackendConfig` for more details
 
     Return:
-        A quantized model (GraphModule)
+        A quantized model (torch.nn.Module)
 
     Example::
 
@@ -682,19 +641,19 @@ def convert_to_reference_fx(
     hardware, like accelerators
 
     Args:
-        * `graph_module`: A prepared and calibrated/trained model (GraphModule)
+        * `graph_module` (GraphModule): A prepared and calibrated/trained model (GraphModule)
 
-        * `convert_custom_config`: custom configurations for convert function.
-            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+        * `convert_custom_config` (ConvertCustomConfig): custom configurations for convert function.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more details.
 
-        * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
+        * `_remove_qconfig` (bool): Option to remove the qconfig attributes in the model after convert.
 
-        * `qconfig_mapping`: config for specifying how to convert a model for quantization.
-            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+        * `qconfig_mapping` (QConfigMapping): config for specifying how to convert a model for quantization.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more details.
 
-         * `backend_config`: A configuration for the backend which describes how
+         * `backend_config` (BackendConfig): A configuration for the backend which describes how
             operators should be quantized in the backend. See
-            :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+            :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more details.
 
     Return:
         A reference quantized model (GraphModule)

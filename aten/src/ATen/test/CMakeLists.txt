@@ -27,7 +27,9 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_overlapping_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/mobile_memory_cleanup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/native_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/operator_name_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/operators_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/packedtensoraccessor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
@@ -38,13 +40,18 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/test_parallel.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/thread_init_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/type_ptr_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/type_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/undefined_tensor_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/verify_api_visibility.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vmap_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/weakref_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/wrapdim_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/wrapdim_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/xla_tensor_test.cpp
+  # Fix this.
+  # ${CMAKE_CURRENT_SOURCE_DIR}/xnnpack_test.cpp
+  )
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_apply_test.cpp
@@ -101,6 +108,7 @@ list(APPEND ATen_VEC_TEST_SRCS
 # Caffe2 specific tests
 if(BUILD_CAFFE2)
   list(APPEND ATen_CPU_TEST_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/ExclusivelyOwned_test.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/tensor_interop_test.cpp)
   list(APPEND ATen_CUDA_TEST_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp)
