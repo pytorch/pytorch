@@ -5,6 +5,8 @@ from .utils import expand_tuples
 from .variadic import Variadic, isvariadic
 import itertools as itl
 
+__all__ = ["MDNotImplementedError", "ambiguity_warn", "halt_ordering", "restart_ordering", "variadic_signature_matches_iter",
+           "variadic_signature_matches", "Dispatcher", "source", "MethodDispatcher", "str_signature", "warning_text"]
 
 class MDNotImplementedError(NotImplementedError):
     """ A NotImplementedError for multiple dispatch """
