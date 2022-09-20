@@ -103,6 +103,7 @@ FUNCTORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 // Here is an example of an in-place operator:
 // add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
 bool isInplaceOp(const c10::FunctionSchema& schema);
+std::map<int64_t, int64_t> findAliasedInputs(const FunctionSchema& schema);
 
 Tensor unwrapIfDead(const Tensor& tensor);
 

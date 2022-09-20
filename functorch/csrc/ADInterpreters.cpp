@@ -14,7 +14,7 @@ static void checkForInvalidMutationOnCaptures(
   auto args = torch::jit::last(stack, op.schema().arguments().size());
   auto mutated_arg = unwrapIfDead(args[0].toTensor());
   auto* wrapper = maybeGetTensorWrapper(mutated_arg);
-  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level) {
+  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !wrapper->generated()) {
     return;
   }
   TORCH_CHECK(false,
@@ -31,14 +31,14 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   }
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
-    return makeTensorWrapper(tensor, current_level);
+    return makeTensorWrapper(tensor, current_level, /*generated=*/true);
   }
   TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
   if (wrapper->level().value() == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }
-  return makeTensorWrapper(tensor, current_level);
+  return makeTensorWrapper(tensor, current_level, /*generated=*/true);
 }
 
 static void autogradBasedTransformProcess(
@@ -118,6 +118,23 @@ static void autogradBasedTransformSendToNext(
   for (const auto arg_idx : c10::irange(0, args_size)) {
     stack->push_back((*stack)[front + arg_idx]);
   }
+
+  std::vector<int64_t> unwrapped_inputs;  // all unwrapped inputs, sorted
+  for (auto idx = stack->size() - args_size; idx < stack->size(); idx++) {
+    const auto ivalue = (*stack)[idx];
+    if (!ivalue.isTensor()) {
+      continue; // only input that can be aliased is a tensor, not a tensor list (expect in ops without returns)
+    }
+    const auto tensor = ivalue.toTensor();
+    auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
+    if (!maybe_tensor_wrapper || maybe_tensor_wrapper->generated()) {
+      // if the input is unwrapped, we note its relative position in schema, noting that
+      // args are in reverse order on stack, so the last arg is at the top of the stack
+      const auto relative_pos = idx - (stack->size() - args_size);
+      unwrapped_inputs.push_back(relative_pos);
+    }
+  }
+
   // Step 2
   foreachTensorInplace(*stack, stack->size() - args_size, stack->size(), unwrap);
 
@@ -140,8 +157,20 @@ static void autogradBasedTransformSendToNext(
 
   // Step 4, 5, 6
   auto ret_size = op.schema().returns().size();
+
+  auto aliased_input_outputs = findAliasedInputs(op.schema());
+  std::vector<int64_t> unwrapped_outputs; // indexes of outputs that should remain unwrapped
+  if (op.schema().name() != "aten::lift_fresh") {  // it's must be freshly allocated and should be wrapped. User shouldn't have access to input version
+    for (auto idx : unwrapped_inputs) {
+      const auto aliased_output = aliased_input_outputs.find(idx);
+      if (aliased_output != aliased_input_outputs.end()) {
+        unwrapped_outputs.push_back(aliased_input_outputs[idx]);
+      }
+    }
+  }
+
   // Step 4
-  foreachTensorInplace(*stack, stack->size() - ret_size, stack->size(), wrap);
+  foreachTensorInplaceSkips(*stack, stack->size() - ret_size, stack->size(), unwrapped_outputs, wrap);
 
   // Step 5
   auto args_front = stack->size() - args_size - ret_size;

@@ -295,10 +295,22 @@ Tensor unwrapIfDead(const Tensor& tensor) {
 
 void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func) {
+   foreachTensorInplaceSkips(args, begin, end, std::vector<int64_t>(), func);
+}
+
+void foreachTensorInplaceSkips(std::vector<IValue>& args, int64_t begin, int64_t end, std::vector<int64_t> relative_skips,
+    std::function<Tensor(const Tensor&)> func){
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);
   TORCH_INTERNAL_ASSERT(begin <= end);
+  int64_t relative_skips_idx = 0;
   for (int64_t idx = begin; idx < end; idx++) {
+    // until we're at the end of relative_skips, check if the current idx is in relative skips (offset by begin)
+    // and if it is, we skip this element and look at the next element in relative_skips. relative_skips must be sorted
+    if (relative_skips_idx < static_cast<int64_t>(relative_skips.size()) && idx == begin + relative_skips[relative_skips_idx]) {
+      relative_skips_idx++;
+      continue;
+    }
     auto ivalue = args[idx];
     // Tensor?[] translates to a c10::List<IValue> so we need to peek inside List
     if (ivalue.isList()) {
@@ -372,6 +384,21 @@ bool isInplaceOp(const FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
+std::map<int64_t, int64_t> findAliasedInputs(const FunctionSchema& schema) {
+  // NOTE: This returns (res index) -> (input index) for each aliasing relationship
+  const auto inputs = schema.arguments();
+  const auto returns = schema.returns();
+  std::map<int64_t, int64_t> alias_map;
+  for (size_t res = 0; res != returns.size(); ++res) {
+    for (size_t inp = 0; inp != inputs.size(); ++inp) {
+      if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, inp), SchemaArgument(SchemaArgType::output, res))) {
+        alias_map[inp] = res;  // for everything currently in native_functions, each inputs aliases at most one output
+        break; // each output can alias at most one input
+      }
+    }
+  }
+  return alias_map;
+}
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
 static void dump_local_tls() {

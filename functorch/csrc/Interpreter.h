@@ -174,6 +174,17 @@ struct Interpreter {
 void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func);
 
+// Applies the following for-loop:
+// for i in range(begin, end):
+//   if i in relative_skips:
+//     continue
+//   args[i] = func(args[i], i - begin)
+// NOTE: relative_skips must be sorted
+void foreachTensorInplaceSkips(std::vector<IValue>& args, int64_t begin, int64_t end, std::vector<int64_t> relative_skips,
+    std::function<Tensor(const Tensor&)> func);
+
+std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begin, int64_t end);
+
 DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(TransformType key);
 
 void setup_dispatch_key_tls(DispatchKeySet exclude, DispatchKeySet include);

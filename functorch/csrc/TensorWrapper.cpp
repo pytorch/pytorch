@@ -70,7 +70,7 @@ c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int
   }
 }
 
-Tensor makeTensorWrapper(const Tensor& tensor, int64_t level) {
+Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool generated) {
   auto wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     TORCH_INTERNAL_ASSERT(wrapped->level() < level);
@@ -81,7 +81,7 @@ Tensor makeTensorWrapper(const Tensor& tensor, int64_t level) {
   auto key_set = getKeysToPropagateToWrapper(tensor, keys_to_propagate);
   key_set = key_set.add(DispatchKey::FuncTorchGradWrapper);
   auto life_handle = getLifeHandleForLevel(level);
-  auto result = at::detail::make_tensor<TensorWrapper>(key_set, tensor, level, std::move(life_handle));
+  auto result = at::detail::make_tensor<TensorWrapper>(key_set, tensor, level, std::move(life_handle), generated);
   TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::FuncTorchGradWrapper));
   return result;
 }
@@ -121,10 +121,12 @@ TensorWrapper::TensorWrapper(
     Tensor value,
     int64_t level,
     std::shared_ptr<bool> is_alive,
+    bool generated,
     bool use_value_sizes_strides)
   : TensorImpl(key_set, value.dtype(), value.device())
   , value_(std::move(value))
   , level_(level)
+  , generated_(generated)
   , is_alive_(std::move(is_alive))
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
