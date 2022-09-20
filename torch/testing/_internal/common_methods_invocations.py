@@ -4048,33 +4048,29 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
         devices = [torch.device('cpu'), torch.device('cuda:0')] if torch.cuda.is_available() else devices
     memory_formats = [torch.preserve_format, torch.channels_last]
 
+    # TODO: can't switch `to.device` overload to use positional arguments
+    # https://github.com/pytorch/pytorch/issues/84265
     # to.device overload
     for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
         kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
             "memory_format": mem_f,
         }
-        yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64, nb, cp), kwargs=kwargs)
 
     # to.dtype overload
     for nb, cp, mem_f in product([True, False], [True, False], memory_formats):
         kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
             "memory_format": mem_f,
         }
-        yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64, nb, cp), kwargs=kwargs)
 
     # to.other overload
     for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
         kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
             "memory_format": mem_f,
         }
         other = make_arg((S, S, S, S), dtype=torch.float64, device=device)
-        yield SampleInput(make_arg((S, S, S, S)), args=(other,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(other, nb, cp), kwargs=kwargs)
 
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
@@ -16310,12 +16306,11 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
         supports_nvfuser=False,
     ),
-    # TODO: https://github.com/pytorch/pytorch/issues/84264
-    # PythonRefInfo(
-    #     "_refs.to",
-    #     torch_opinfo_name="to",
-    #     supports_nvfuser=False,
-    # ),
+    PythonRefInfo(
+        "_refs.to",
+        torch_opinfo_name="to",
+        supports_nvfuser=False,
+    ),
     PythonRefInfo(
         "_refs.triu",
         torch_opinfo_name="triu",
