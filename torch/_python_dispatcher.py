@@ -46,7 +46,7 @@ Usage:
   # print(dispatcher.rawRegistrations())
   # print(dispatcher.rawDispatchTable())
 PythonDispatcher calls C++ dispatcher under the hood for to precompute dispatch table.
-This file only provides the simplified API for developers, revelant test code is located in
+This file only provides the simplified API for developers, relevant test code is located in
 test/test_dispatch.py
 """
 
