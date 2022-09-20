@@ -6,7 +6,7 @@ import warnings
 
 from collections.abc import Iterable
 from enum import Enum
-from functools import partial, reduce, wraps
+from functools import partial, reduce, singledispatch, wraps
 from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
@@ -1690,49 +1690,167 @@ def item(a: TensorLikeType) -> NumberType:
     return number_type(prims.item(a))
 
 
-# TODO: extend to device and layout similar to
-# aten/src/ATen/native/TensorConversions.cpp:to_will_alias
+# fast path when `to` returns an alias to input. This mimics the same function in aten
 def _to_will_alias(
     a: TensorLikeType,
-    dtype: torch.dtype,
-    copy: bool,
-    memory_format: torch.memory_format,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+    copy: Optional[bool] = None,
+    layout: Optional[torch.layout] = None,
+    memory_format: Optional[torch.memory_format] = None,
+    pin_memory: Optional[bool] = False,
+    non_blocking: bool = False,  # not using non_blocking
 ) -> bool:
     return (
         not copy
-        and a.dtype == dtype
+        and (device is None or a.device == device)
+        and (dtype is None or a.dtype == dtype)
+        and (layout is None or a.layout == layout)
+        # is_pinned issue #84925
+        # and (pin_memory is None or pin_memory == a.is_pinned())
         and (
-            memory_format == torch.preserve_format
-            or a.is_contiguous(memory_format=memory_format)
+            memory_format is None
+            or memory_format == torch.preserve_format
+            or utils.is_contiguous_for_memory_format(a, memory_format=memory_format)
         )
     )
 
 
-# TODO: there are multiple overloads of to, but we only support one here
-# aten/src/ATen/native/native_functions.yaml lists all overloads
-# Missing overloads:
-# to.dtype_layout
-# to.device
-# to.other
-# https://github.com/pytorch/pytorch/issues/84264
-def to(
-    a: TensorLikeType,
+@singledispatch
+def _to_dispatch(*args, **kwargs):
+    raise NotImplementedError
+
+
+@_to_dispatch.register
+def _to_device(
+    device: torch.device,
     dtype: torch.dtype,
     non_blocking: bool = False,
     copy: bool = False,
-    memory_format: torch.memory_format = torch.preserve_format,
-) -> TensorLikeType:
-    if _to_will_alias(a, dtype, copy, memory_format):
+    memory_format: Optional[torch.memory_format] = None,
+):
+    kwargs = {
+        "device": device,
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+@_to_dispatch.register
+def _to_device_str(
+    device: str,
+    dtype: torch.dtype,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    kwargs = {
+        "device": torch.device(device),
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+@_to_dispatch.register
+def _to_dtype(
+    dtype: torch.dtype,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    kwargs = {
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+@_to_dispatch.register
+def _to_other(
+    other: Tensor,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    device = other.device
+    dtype = other.dtype
+    layout = other.layout
+    # is_pinned issue #84925
+    # pin_memory = other.is_pinned()
+    kwargs = {
+        "device": device,
+        "dtype": dtype,
+        "layout": layout,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+# remove to_kwargs that is already present in `a`
+def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
+    options_to_check = ["dtype", "device", "layout", "memory_format"]
+    # "device" option could be passed a str instead torch.device
+    if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
+        to_kwargs["device"] = torch.device(to_kwargs["device"])
+
+    for kw in options_to_check:
+        if kw in to_kwargs:
+            if (
+                (kw == "memory_format" and to_kwargs[kw] is torch.preserve_format)
+                or (
+                    kw == "device"
+                    and to_kwargs[kw].type == a.device.type
+                    and (
+                        not to_kwargs[kw].index or to_kwargs[kw].index == a.device.index
+                    )
+                )
+                or (
+                    getattr(a, kw, None) == to_kwargs[kw]
+                )  # this also handles {"memory_format": None}
+            ):
+                to_kwargs.pop(kw)
+
+
+def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
+    # handled dispatch via positional arguments
+    if len(args) != 0:
+        kwargs = _to_dispatch(*args, **kwargs)
+
+    # TODO: is_pinned is not currently supported in refs or fake_tensor
+    # https://github.com/pytorch/pytorch/issues/84925
+    assert "pin_memory" not in kwargs
+    canonicalize_to_arguments(a, kwargs)
+
+    if _to_will_alias(a, **kwargs):
         return a
+
+    copy = kwargs.pop("copy") if "copy" in kwargs else False
+    non_blocking = kwargs.pop("non_blocking") if "non_blocking" in kwargs else False
+
+    # short-circuit to `prims.convert_element_type` when `to` is just a dtype change
     if (
-        (copy is True or dtype != a.dtype)
-        and memory_format == torch.preserve_format
-        and non_blocking is False
+        (copy or (kwargs.get("dtype", a.dtype) != a.dtype))
+        and (not non_blocking)
+        and ("memory_format" not in kwargs)
+        and ("device" not in kwargs)
+        and ("layout" not in kwargs)
+        # is_pinned issue #84925
+        # and ("pin_memory" not in kwargs)
     ):
-        return prims.convert_element_type(a, dtype)
-    result = torch.empty_like(
-        a, dtype=dtype, requires_grad=a.requires_grad, memory_format=memory_format
-    )
+        return prims.convert_element_type(a, kwargs.get("dtype", a.dtype))
+
+    result = torch.empty_like(a, **kwargs)
+    # TODO: non_blocking should be handled by `copy_to`
     copy_to(result, a)
     return result
 
