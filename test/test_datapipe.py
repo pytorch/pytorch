@@ -632,13 +632,6 @@ def _mod_3_test(x):
     return x % 3 == 1
 
 
-def _worker_init_fn(worker_id):
-    info = torch.utils.data.get_worker_info()
-    num_workers = info.num_workers
-    datapipe = info.dataset
-    torch.utils.data.graph_settings.apply_sharding(datapipe, num_workers, worker_id)
-
-
 lambda_fn1 = lambda x: x  # noqa: E731
 lambda_fn2 = lambda x: x % 2  # noqa: E731
 lambda_fn3 = lambda x: x >= 5  # noqa: E731
@@ -1218,6 +1211,24 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
+        def fn_n1_kwargs(d0, d1, **kwargs):
+            return d0 + d1
+
+        def fn_n1_pos(d0, d1, *args):
+            return d0 + d1
+
+        def fn_n1_sep_pos(d0, *args, d1):
+            return d0 + d1
+
+        def fn_cmplx(d0, d1=1, *args, d2, **kwargs):
+            return d0 + d1
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+        p_fn_cmplx = partial(fn_cmplx, d2=2)
+
         def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
@@ -1231,6 +1242,12 @@ class TestFunctionalIterDataPipe(TestCase):
                     self.assertEqual(list(res_dp), list(ref_dp))
                     # Reset
                     self.assertEqual(list(res_dp), list(ref_dp))
+        _helper(lambda data: data, fn_n1_def, 0, 1)
+        _helper(lambda data: (data[0], data[1], data[0] + data[1]), fn_n1_def, [0, 1], 2)
+        _helper(lambda data: data, p_fn_n1, 0, 1)
+        _helper(lambda data: data, p_fn_cmplx, 0, 1)
+        _helper(lambda data: (data[0], data[1], data[0] + data[1]), p_fn_cmplx, [0, 1], 2)
+        _helper(lambda data: (data[0] + data[1], ), fn_n1_pos, [0, 1, 2])
 
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
@@ -1238,7 +1255,20 @@ class TestFunctionalIterDataPipe(TestCase):
         # The index of input column is out of range
         _helper(None, fn_1n, 3, error=IndexError)
         # Unmatched input columns with fn arguments
-        _helper(None, fn_n1, 1, error=TypeError)
+        _helper(None, fn_n1, 1, error=ValueError)
+        _helper(None, fn_n1, [0, 1, 2], error=ValueError)
+        _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
+        _helper(None, lambda d0, d1: d0 + d1, [0, 1, 2], error=ValueError)
+        _helper(None, fn_cmplx, 0, 1, ValueError)
+        _helper(None, fn_n1_pos, 1, error=ValueError)
+        _helper(None, fn_n1_def, [0, 1, 2], 1, error=ValueError)
+        _helper(None, p_fn_n1, [0, 1], error=ValueError)
+        _helper(None, fn_1n, [1, 2], error=ValueError)
+        # _helper(None, p_fn_cmplx, [0, 1, 2], error=ValueError)
+        _helper(None, fn_n1_sep_pos, [0, 1, 2], error=ValueError)
+        # Fn has keyword-only arguments
+        _helper(None, fn_n1_kwargs, 1, error=ValueError)
+        _helper(None, fn_cmplx, [0, 1], 2, ValueError)
 
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
@@ -1264,6 +1294,10 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (*data, data[0] + data[2]), fn_n1, [0, 2], -1)
         _helper(lambda data: (*data, (-data[1], -data[2], data[1] + data[2])), fn_nn, [1, 2], -1)
 
+        # Handling built-in functions (e.g. `dict`, `iter`, `int`, `str`) whose signatures cannot be inspected
+        _helper(lambda data: (str(data[0]), data[1], data[2]), str, 0)
+        _helper(lambda data: (data[0], data[1], int(data[2])), int, 2)
+
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_dict_with_col_iterdatapipe(self):
         def fn_11(d):
@@ -1277,6 +1311,28 @@ class TestFunctionalIterDataPipe(TestCase):
 
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
+
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+
+        def fn_n1_pos(d0, d1, *args):
+            return d0 + d1
+
+        def fn_n1_kwargs(d0, d1, **kwargs):
+            return d0 + d1
+
+        def fn_kwonly(*, d0, d1):
+            return d0 + d1
+
+        def fn_has_nondefault_kwonly(d0, *, d1):
+            return d0 + d1
+
+        def fn_cmplx(d0, d1=1, *args, d2, **kwargs):
+            return d0 + d1
+
+        p_fn_cmplx = partial(fn_cmplx, d2=2)
 
         # Prevent modification in-place to support resetting
         def _dict_update(data, newdata, remove_idx=None):
@@ -1304,13 +1360,33 @@ class TestFunctionalIterDataPipe(TestCase):
                 # Reset
                 self.assertEqual(list(res_dp), list(ref_dp))
 
+        _helper(lambda data: data, fn_n1_def, 'x', 'y')
+        _helper(lambda data: data, p_fn_n1, 'x', 'y')
+        _helper(lambda data: data, p_fn_cmplx, 'x', 'y')
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}),
+                p_fn_cmplx, ["x", "y", "z"], "z")
+
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}), fn_n1_def, ['x', 'y'], 'z')
+
+        _helper(None, fn_n1_pos, 'x', error=ValueError)
+        _helper(None, fn_n1_kwargs, 'x', error=ValueError)
+        # non-default kw-only args
+        _helper(None, fn_kwonly, ['x', 'y'], error=ValueError)
+        _helper(None, fn_has_nondefault_kwonly, ['x', 'y'], error=ValueError)
+        _helper(None, fn_cmplx, ['x', 'y'], error=ValueError)
+
+
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
         # The key of input column is not in dict
         _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
-        _helper(None, fn_n1, "y", error=TypeError)
+        _helper(None, fn_n1, "y", error=ValueError)
+        _helper(None, fn_1n, ["x", "y"], error=ValueError)
+        _helper(None, fn_n1_def, ["x", "y", "z"], error=ValueError)
+        _helper(None, p_fn_n1, ["x", "y"], error=ValueError)
+        _helper(None, fn_n1_kwargs, ["x", "y", "z"], error=ValueError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
@@ -1508,6 +1584,32 @@ class TestFunctionalIterDataPipe(TestCase):
         input_col_2_dp = tuple_input_ds.filter(_mul_filter_fn, input_col=[0, 2])
         self.assertEqual(list(input_col_2_dp), [(d - 1, d, d + 1) for d in range(5)])
 
+        # invalid input col
+        with self.assertRaises(ValueError):
+            tuple_input_ds.filter(_mul_filter_fn, input_col=0)
+
+        p_mul_filter_fn = partial(_mul_filter_fn, b=1)
+        out = tuple_input_ds.filter(p_mul_filter_fn, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
+
+        def _mul_filter_fn_with_defaults(a, b=1):
+            return a + b < 10
+
+        out = tuple_input_ds.filter(_mul_filter_fn_with_defaults, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
+
+        def _mul_filter_fn_with_kw_only(*, a, b):
+            return a + b < 10
+
+        with self.assertRaises(ValueError):
+            tuple_input_ds.filter(_mul_filter_fn_with_kw_only, input_col=0)
+
+        def _mul_filter_fn_with_kw_only_1_default(*, a, b=1):
+            return a + b < 10
+
+        with self.assertRaises(ValueError):
+            tuple_input_ds.filter(_mul_filter_fn_with_kw_only_1_default, input_col=0)
+
         # __len__ Test: DataPipe has no valid len
         with self.assertRaisesRegex(TypeError, r"has no len"):
             len(filter_dp)
@@ -1554,68 +1656,65 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(TypeError):
             len(dp1)
 
-    def test_shuffle_iterdatapipe(self):
-        exp = list(range(100))
-        input_ds = dp.iter.IterableWrapper(exp)
+    def test_shuffler_iterdatapipe(self):
+        input_dp = dp.iter.IterableWrapper(list(range(10)))
 
         with self.assertRaises(AssertionError):
-            shuffle_dp = input_ds.shuffle(buffer_size=0)
+            shuffle_dp = input_dp.shuffle(buffer_size=0)
 
-        def _create_dp(buffer_size):
-            input_ds = dp.iter.IterableWrapper(list(range(100)))
-            return input_ds.shuffle(buffer_size=bs).sharding_filter()
+        # Functional Test: No seed
+        shuffler_dp = input_dp.shuffle()
+        self.assertEqual(set(range(10)), set(shuffler_dp))
 
-        for bs in (5, 20, 33):
-            shuffle_dp = _create_dp(bs)
-            self.assertEqual(len(shuffle_dp), len(exp))
+        # Functional Test: With global seed
+        torch.manual_seed(123)
+        shuffler_dp = input_dp.shuffle()
+        res = list(shuffler_dp)
+        torch.manual_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
 
-            torch.manual_seed(123)
-            res = list(shuffle_dp)
-            self.assertEqual(sorted(res), exp)
+        # Functional Test: Set seed
+        shuffler_dp = input_dp.shuffle().set_seed(123)
+        res = list(shuffler_dp)
+        shuffler_dp.set_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
 
-            # Test Deterministic
-            for num_workers, pw in itertools.product((0, 1, 2), (True, False)):
-                if num_workers == 0 and pw:
-                    continue
+        # Functional Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_dp.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_dp))
 
-                mp_ctx = "spawn" if num_workers > 0 else None
-                dl = DataLoader(
-                    shuffle_dp,
-                    num_workers=num_workers,
-                    shuffle=True,
-                    multiprocessing_context=mp_ctx,
-                    worker_init_fn=_worker_init_fn,
-                    persistent_workers=pw
-                )
+        # Reset Test:
+        shuffler_dp = input_dp.shuffle()
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
+        self.assertEqual(5, len(res_before_reset))
+        for x in res_before_reset:
+            self.assertTrue(x in set(range(10)))
+        self.assertEqual(set(range(10)), set(res_after_reset))
 
-                # No seed
-                dl_res_ns = list(dl)
-                self.assertEqual(len(dl_res_ns), len(exp))
-                self.assertEqual(sorted(dl_res_ns), sorted(exp))
+        # __len__ Test: returns the length of the input DataPipe
+        shuffler_dp = input_dp.shuffle()
+        self.assertEqual(10, len(shuffler_dp))
+        exp = list(range(100))
 
-                # Same seeds
-                dl_res = []
-                for epoch in range(2):
-                    torch.manual_seed(123)
-                    dl_res.append(list(dl))
-                self.assertEqual(dl_res[0], dl_res[1])
+        # Serialization Test
+        from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 
-                # Different seeds
-                torch.manual_seed(321)
-                dl_res.append(list(dl))
+        def _serialization_helper(bs):
+            shuffler_dp = input_dp.shuffle(buffer_size=bs)
+            it = iter(shuffler_dp)
+            for _ in range(2):
+                next(it)
+            shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
+            _simple_graph_snapshot_restoration(shuffler_dp_copy.datapipe, shuffler_dp.datapipe._number_of_samples_yielded)
 
-                self.assertEqual(len(dl_res[0]), len(dl_res[2]))
-                self.assertNotEqual(dl_res[0], dl_res[2])
-                self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
+            exp = list(it)
+            shuffler_dp_copy._snapshot_state = _SnapshotState.Restored
+            self.assertEqual(exp, list(shuffler_dp_copy))
 
-
-        shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
-        with self.assertRaisesRegex(TypeError, r"instance doesn't have valid length$"):
-            len(shuffle_dp_nl)
-
-        # Test: deactivate shuffling via set_shuffle
-        unshuffled_dp = input_ds.shuffle().set_shuffle(False)
-        self.assertEqual(list(unshuffled_dp), list(input_ds))
+        buffer_sizes = [2, 5, 15]
+        for bs in buffer_sizes:
+            _serialization_helper(bs)
 
     def test_zip_iterdatapipe(self):
 
@@ -1670,7 +1769,7 @@ class TestFunctionalMapDataPipe(TestCase):
         _ = next(it)
         self._serialization_test_helper(dp, use_dill)
         # 3. Testing for serialization after DataPipe is fully read
-        _ = list(it)
+        _ = list(dp)
         self._serialization_test_helper(dp, use_dill)
 
     def test_serializable(self):
@@ -1793,15 +1892,15 @@ class TestFunctionalMapDataPipe(TestCase):
         with self.assertRaisesRegex(IndexError, r"out of range"):
             input_dp1.zip(input_dp2, input_dp3)[5]
 
-        # Functional Test: Ensure `zip` can combine `Shuffler` with others
+        # Functional Test: Ensure `zip` can combine `Batcher` with others
         dp1 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp1 = dp1.shuffle()
+        shuffle_dp1 = dp1.batch(2)
         dp2 = dp.map.SequenceWrapper(range(10))
-        shuffle_dp2 = dp2.shuffle()
-        zip_dp = shuffle_dp1.zip(shuffle_dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        shuffle_dp2 = dp2.batch(3)
+        zip_dp1 = shuffle_dp1.zip(shuffle_dp2)
+        self.assertEqual(4, len(list(zip_dp1)))
         zip_dp2 = shuffle_dp1.zip(dp2)
-        self.assertEqual(10, len(list(zip_dp)))
+        self.assertEqual(5, len(list(zip_dp2)))
 
         # __len__ Test: returns the length of the shortest DataPipe
         zip_dp = input_dp1.zip(input_dp2, input_dp3)
@@ -1816,10 +1915,27 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual(set(range(10)), set(shuffler_dp))
 
         # Functional Test: Custom indices are working
-        shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
+        shuffler_dp = input_dp2.shuffle(indices=['a', 'b', 'c', 'd', 'e'])
         self.assertEqual(set(range(1, 6)), set(shuffler_dp))
 
-        # # Reset Test:
+        # Functional Test: With global seed
+        torch.manual_seed(123)
+        shuffler_dp = input_dp1.shuffle()
+        res = list(shuffler_dp)
+        torch.manual_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
+
+        # Functional Test: Set seed
+        shuffler_dp = input_dp1.shuffle().set_seed(123)
+        res = list(shuffler_dp)
+        shuffler_dp.set_seed(123)
+        self.assertEqual(list(shuffler_dp), res)
+
+        # Functional Test: deactivate shuffling via set_shuffle
+        unshuffled_dp = input_dp1.shuffle().set_shuffle(False)
+        self.assertEqual(list(unshuffled_dp), list(input_dp1))
+
+        # Reset Test:
         shuffler_dp = input_dp1.shuffle()
         n_elements_before_reset = 5
         res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
@@ -1831,6 +1947,19 @@ class TestFunctionalMapDataPipe(TestCase):
         # __len__ Test: returns the length of the input DataPipe
         shuffler_dp = input_dp1.shuffle()
         self.assertEqual(10, len(shuffler_dp))
+
+        # Serialization Test
+        from torch.utils.data.datapipes._hook_iterator import _SnapshotState
+
+        shuffler_dp = input_dp1.shuffle()
+        it = iter(shuffler_dp)
+        for _ in range(2):
+            next(it)
+        shuffler_dp_copy = pickle.loads(pickle.dumps(shuffler_dp))
+
+        exp = list(it)
+        shuffler_dp_copy._snapshot_state = _SnapshotState.Restored
+        self.assertEqual(exp, list(shuffler_dp_copy))
 
     def test_map_mapdatapipe(self):
         arr = range(10)
@@ -3037,7 +3166,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng = rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
 
         # Test Case: fast forward works with list
         rng.manual_seed(0)
@@ -3070,7 +3199,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._fast_forward_graph_test_helper(graph3, _simple_graph_snapshot_restoration,
                                              expected_res=res3)
@@ -3090,7 +3219,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         cdp1, cdp2 = graph5.fork(2)
         graph6 = cdp1.zip(cdp2)
         rng = rng.manual_seed(100)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph6, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph6, rng)
         res6 = [(x, x) for x in res5]
         self._fast_forward_graph_test_helper(graph6, _simple_graph_snapshot_restoration,
                                              expected_res=res6)
@@ -3121,7 +3250,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         if rng is None:
             rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        torch.utils.data.graph_settings.apply_random_seed(datapipe, rng)
         it = iter(datapipe)
         for _ in range(n_iter):
             next(it)
@@ -3148,7 +3277,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         rng = torch.Generator()
         graph3 = graph2.shuffle()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph3, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph3, rng)
         res3 = list(graph3)
         self._snapshot_test_helper(graph3, expected_res=res3)
 
@@ -3178,13 +3307,13 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         rng = torch.Generator()
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
 
         # Get expected result
         expected_res = list(graph)
 
         rng.manual_seed(0)
-        torch.utils.data.graph_settings.apply_shuffle_seed(graph, rng)
+        torch.utils.data.graph_settings.apply_random_seed(graph, rng)
         it = iter(graph)
         n_iter = 3
         for _ in range(n_iter):

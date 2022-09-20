@@ -30,6 +30,7 @@ F2 = TypeVar(
     NativeFunctionsGroup,
     Optional[NativeFunction],
     bool,
+    str,
 )
 
 

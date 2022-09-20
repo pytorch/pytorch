@@ -49,6 +49,9 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Instead, it's sufficient to remove the `Dense` dispatch key,
   // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
   key_set_ = key_set_.remove(c10::DispatchKey::Dense);
+  // We override a bunch of _custom(), so make sure they get called
+  // TODO: metadata copying may not actually be necessary then
+  set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -296,7 +299,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
     bool allow_tensor_metadata_change) const {
   if (key_set_.has(DispatchKey::Python) &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
+    auto r = (*pyobj_interpreter_.load(std::memory_order_acquire))->detach(this);
     if (r) {
       r->set_version_counter(std::forward<VariableVersion>(version_counter));
       r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
@@ -343,11 +346,11 @@ int64_t FunctionalTensorWrapper::numel_custom() const {
 bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
   return value_.unsafeGetTensorImpl()->is_contiguous();
 }
-c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes() const {
-  return value_.unsafeGetTensorImpl()->sym_sizes();
-}
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
+}
+c10::SymIntArrayRef FunctionalTensorWrapper::sym_strides_custom() const {
+  return value_.unsafeGetTensorImpl()->sym_strides();
 }
 
 namespace functionalization {

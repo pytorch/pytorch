@@ -1,5 +1,9 @@
 #include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 
+#ifdef FLATBUFFERS_VERSION_MAJOR
+#error "flatbuffer_serializer_jit.h must not include any flatbuffers headers"
+#endif // FLATBUFFERS_VERSION_MAJOR
+
 #include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
@@ -16,21 +20,17 @@ Module parse_and_initialize_jit_module(
     size_t size,
     ExtraFilesMap& extra_files,
     c10::optional<at::Device> device) {
-#if ENABLE_UPGRADERS
   populate_upgraders_graph_map();
-#endif
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
-  FlatbufferLoader loader;
-  mobile::Module mobilem = loader.parseModule(flatbuffer_module);
-  parseExtraFiles(flatbuffer_module, extra_files);
-  ExtraFilesMap files;
-  std::vector<IValue> constants;
-  loader.extractJitSourceAndConstants(&files, &constants);
+  ExtraFilesMap jit_files;
+  std::vector<IValue> jit_constants;
+  mobile::Module mobilem = parse_and_initialize_mobile_module_for_jit(
+      data.get(), size, jit_files, jit_constants, device, &extra_files);
+
   Module m = jitModuleFromSourceAndConstants(
       mobilem._ivalue(),
-      files,
-      constants,
-      flatbuffer_module->bytecode_version());
+      jit_files,
+      jit_constants,
+      static_cast<int32_t>(mobilem.bytecode_version()));
   m.set_delete_memory(data);
   return m;
 }
@@ -59,11 +59,12 @@ void save_jit_module(
     const ExtraFilesMap& extra_files) {
   auto buffer = save_jit_module_to_bytes(module, extra_files);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
-  ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size()); // NOLINT
+  ofile.write(
+      reinterpret_cast<char*>(buffer->data()), buffer->size()); // NOLINT
   ofile.close();
 }
 
-flatbuffers::DetachedBuffer save_jit_module_to_bytes(
+DetachedBuffer::UniqueDetachedBuffer save_jit_module_to_bytes(
     const Module& module,
     const ExtraFilesMap& extra_files) {
   ExtraFilesMap jitfiles;
@@ -81,7 +82,7 @@ static void save_jit_module_to_write_func(
     const std::function<size_t(const void*, size_t)>& writer_func) {
   (void)save_mobile_debug_info;
   auto buffer = save_jit_module_to_bytes(module, extra_files);
-  writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
+  writer_func(reinterpret_cast<void*>(buffer->data()), buffer->size());
 }
 
 bool register_flatbuffer_all() {

@@ -8,14 +8,14 @@ namespace native {
 
 namespace {
 
-inline int start_index(int a, int b, int c) {
+inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::floor((float)(a * c) / b);
+  return (a / b) * c + ((a % b) * c) / b;
 }
 
-inline int end_index(int a, int b, int c) {
+inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  return (int)std::ceil((float)((a + 1) * c) / b);
+  return 1 + ((a + 1) * c - 1) / b;
 }
 
 template <typename scalar_t>
@@ -306,7 +306,7 @@ Tensor adaptive_avg_pool3d(Tensor const& input, IntArrayRef output_size) {
         "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], ",", output_size[2], "}");
 
-  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1) {
+  if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1 && !input.is_xpu()) {
     // in this case, adaptive pooling is just computing mean over hw
     // dimensions, which can be done more efficiently
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);

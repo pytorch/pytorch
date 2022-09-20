@@ -1,5 +1,6 @@
 import torch
 import operator
+import warnings
 from typing import Callable, Dict, Iterable
 
 from torch.fx._symbolic_trace import _assert_is_none
@@ -167,6 +168,7 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     return constraints, counter
 
+
 @register_inference_rule(torch.nn.functional.gelu)
 @register_inference_rule(torch.nn.functional.dropout)
 @register_inference_rule(torch.nn.functional.softmax)
@@ -175,16 +177,34 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 @register_inference_rule("int")
 @register_inference_rule("long")
 @register_inference_rule("contiguous")
+@register_inference_rule(torch.ones)
+@register_inference_rule(torch.zeros)
 def equality_inference_rule(n: Node, symbols, constraints, counter):
     """
     We generate the constraint: input = output
     """
-    assert isinstance(n.args[0], Node)
     output, counter = gen_tvar(counter)
     symbols[n] = output
-    input = symbols[n.args[0]]
-    assert isinstance(input, TVar)
-    return [BinConstraintT(input, output, op_eq)], counter
+
+    if isinstance(n.args[0], Node):
+        input = symbols[n.args[0]]
+        if isinstance(input, TVar):
+            return [BinConstraintT(input, output, op_eq)], counter
+
+        # then we have dimension variables
+        else:
+            for arg in n.args:
+                assert isinstance(symbols[arg], DVar)
+        my_size = [symbols[arg] for arg in n.args]
+        return [BinConstraintT(output, TensorType(my_size), op_eq)], counter
+
+    elif isinstance(n.args[0], tuple):
+        # then the tuple is the size
+        assert len(n.args[0]) <= 4
+        my_size = [symbols[arg] for arg in n.args[0]]
+        return [BinConstraintT(output, TensorType(my_size), op_eq)], counter
+    else:
+        raise NotImplementedError('Method not yet implemented')
 
 
 @register_inference_rule("transpose")
@@ -485,15 +505,19 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
         symbols[n] = get_item_output
 
         # retreive arg variables
-        get_item_arg = symbols[n.args[0]]
-        assert isinstance(get_item_arg, TVar)
+        if n.args[0] in symbols:
+            get_item_arg = symbols[n.args[0]]
+            assert isinstance(get_item_arg, TVar)
 
-        input_dyn = BinConstraintT(get_item_arg, Dyn, op_eq)
-        output_dyn = BinConstraintT(get_item_output, Dyn, op_eq)  # type: ignore[assignment]
-        c1 = Conj([input_dyn, output_dyn])
+            input_dyn = BinConstraintT(get_item_arg, Dyn, op_eq)
+            output_dyn = BinConstraintT(get_item_output, Dyn, op_eq)  # type: ignore[assignment]
+            c1 = Conj([input_dyn, output_dyn])
 
-
-        c2 = [GetItemTensor(i + 1, n.args[1], get_item_output, get_item_arg) for i in range(MAX_TENSOR_RANK)]  # type: ignore[misc]
+            c2 = [GetItemTensor(i + 1, n.args[1], get_item_output, get_item_arg)  # type: ignore[misc]
+                  for i in range(MAX_TENSOR_RANK)]
+        else:
+            # TODO: we should figure out why there is a key-error here.
+            return [], counter
 
         return [Disj([c1, *c2])], counter
 
@@ -537,6 +561,22 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
             my_gt, counter = gen_bvar(counter)
             equality_constraint = BinConstraintD(my_gt, gt_constraint, op_eq)
             return [equality_constraint], counter
+
+        elif isinstance(e1, TVar) and isinstance(e2, int):
+            # then we made the wrong assumption about the argument being a tensor
+            # so we should fix the assumption
+            warnings.warn(f'Made the wrong assumption for node {n}. Correctness not guaranteed.')
+
+            new_e1, counter = gen_dvar(counter)
+            symbols[n.args[0]] = new_e1
+            symbols[n.args[0]]
+
+            gt_constraint = BinConstraintD(new_e1, e2, op_gt)
+
+            my_gt, counter = gen_bvar(counter)
+            equality_constraint = BinConstraintD(my_gt, gt_constraint, op_eq)
+            return [equality_constraint], counter
+
         else:
             raise NotImplementedError('Method not yet implemented')
 
@@ -544,6 +584,43 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
         raise NotImplementedError('Method not yet implemented')
 
 
+@register_inference_rule(operator.eq)
+def eq_inference_rule(n: Node, symbols, constraints, counter):
+    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
+    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
+
+    e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
+    e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
+
+    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
+        if isinstance(e1, TVar) and isinstance(e2, TVar):
+            eq_tensor, counter = gen_tvar(counter)
+            symbols[n] = eq_tensor
+            return gen_broadcasting_constraints(e1, e2, symbols, counter, eq_tensor)
+
+        elif isinstance(e1, DVar) and isinstance(e2, DVar):
+            # This is meant to be used for flow analysis only
+            eq_constraint = BinConstraintD(e1, e2, op_eq)
+
+            my_eq, counter = gen_bvar(counter)
+            equality_constraint = BinConstraintD(my_eq, eq_constraint, op_eq)
+            return [equality_constraint], counter
+
+        else:
+            raise RuntimeError('Sort Mismatch')
+
+    elif isinstance(n.args[0], Node) and not isinstance(n.args[1], Node):
+        if isinstance(e1, DVar):
+            # This is meant to be used for flow analysis only
+            eq_constraint = BinConstraintD(e1, e2, op_eq)
+
+            my_eq, counter = gen_bvar(counter)
+            equality_constraint = BinConstraintD(my_eq, eq_constraint, op_eq)
+            return [equality_constraint], counter
+        else:
+            raise NotImplementedError('Method not yet implemented')
+    else:
+        raise NotImplementedError('Method not yet implemented')
 
 @register_inference_rule(operator.ne)
 def neq_inference_rule(n: Node, symbols, constraints, counter):
@@ -694,7 +771,8 @@ def full_inference_rule(n: Node, symbols, constraints, counter):
 
     assert isinstance(n.args[0], Iterable)
     for arg in n.args[0]:
-        res.append(symbols[arg])
+        dim = arg if isinstance(arg, int) else symbols[arg]
+        res.append(dim)
     c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
     return [c], counter
 
@@ -906,12 +984,34 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     return linear_constraints(n, module_instance.in_features, module_instance.out_features, symbols, counter)
 
 
+@register_inference_rule("dim")  # type: ignore[attr-defined]
+def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
+    assert isinstance(n.args[0], Node)
+    my_dim, counter = gen_dvar(counter)
+    symbols[n] = my_dim
+    input = symbols[n.args[0]]
+
+    input_dyn = BinConstraintT(input, Dyn, op_eq)
+    output_dyn = BinConstraintD(my_dim, Dyn, op_eq)
+
+    c1 = []
+
+    for i in range(1, MAX_TENSOR_RANK + 1):
+        new_dims_rhs_1, counter = gen_tensor_dims(i, counter)
+
+        c_tensor_i = Conj([BinConstraintT(input, TensorType(new_dims_rhs_1), op_eq),
+                           BinConstraintD(my_dim, i, op_eq)])
+        c1.append(c_tensor_i)
+
+    return [Disj([Conj([input_dyn, output_dyn]), Disj(c1)])], counter
+
+
 @register_inference_rule(torch._C._nn.linear)  # type: ignore[attr-defined]
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)
-    equality_constraint = BinConstraintT(n.args[1], TensorType(weight_dims), op_eq)
-    constraints, counter = linear_constraints(n, weight_dims[0], weight_dims[1], symbols, counter)
+    equality_constraint = BinConstraintT(symbols[n.args[1]], TensorType(weight_dims), op_eq)
+    constraints, counter = linear_constraints(n, weight_dims[1], weight_dims[0], symbols, counter)
     return [equality_constraint] + constraints, counter
 
 
@@ -1100,11 +1200,6 @@ class ConstraintGenerator:
 
         all_constraints = []
 
-        # Annotate with Dyn if no type exists
-        for n in graph.nodes:
-            if n.type is None:
-                n.type = Dyn
-
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints
@@ -1124,16 +1219,17 @@ class ConstraintGenerator:
             x, counter = gen_tvar(counter)
             self.symbol_dict[n] = x
 
-            if n.type != Dyn and (not isinstance(n.type, TensorType)):
+            my_type = n.type
 
+            if n.type != Dyn and (not isinstance(n.type, TensorType)):
                 if n.type == torch.nn.parameter.Parameter:
                     # since we have a parameter, the shape must be static
                     assert 'example_value' in n.meta
-                    n.type = TensorType(n.meta['example_value'].size())
+                    my_type = TensorType(n.meta['example_value'].size())
                 else:
-                    n.type = Dyn
+                    my_type = Dyn
 
-            c1 = BinConstraintT(n.type, x, op_precision)
+            c1 = BinConstraintT(my_type, x, op_precision)
             c2 = BinConstraintT(x, MAX_TENSOR_RANK, op_leq)
             return [c1, c2], counter
 

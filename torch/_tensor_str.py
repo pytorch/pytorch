@@ -46,12 +46,20 @@ def set_printoptions(
 
     Example::
 
+        >>> # Limit the precision of elements
         >>> torch.set_printoptions(precision=2)
         >>> torch.tensor([1.12345])
         tensor([1.12])
+        >>> # Limit the number of elements shown
         >>> torch.set_printoptions(threshold=5)
         >>> torch.arange(10)
         tensor([0, 1, 2, ..., 7, 8, 9])
+        >>> # Restore defaults
+        >>> torch.set_printoptions(profile='default')
+        >>> torch.tensor([1.12345])
+        tensor([1.1235])
+        >>> torch.arange(10)
+        tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
 
     """
     if profile is not None:
@@ -206,7 +214,7 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
     elements_per_line = max(
         1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
     )
-    char_per_line = element_length * elements_per_line
+    # char_per_line = element_length * elements_per_line  # unused
 
     def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
         if formatter2 is not None:

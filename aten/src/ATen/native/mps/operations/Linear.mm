@@ -46,6 +46,10 @@ Tensor _mps_linear(
 
   TORCH_CHECK(output.is_mps());
 
+  if(output.numel() == 0) {
+    return output;
+  }
+
   MPSStream *stream = getCurrentMPSStream();
 
   struct CachedGraph : public MPSCachedGraph
@@ -65,7 +69,6 @@ Tensor _mps_linear(
 
     MPSShape* wt_shape = getMPSShape(weight);
     string wt_key = string([[[wt_shape valueForKey:@"description"] componentsJoinedByString:@","] UTF8String]);
-    MPSShape* bias_shape = nil;
     string bias_key = "nobias";
     if(is_bias_defined) {
       bias_key = "bias";
@@ -358,10 +361,10 @@ std::tuple<Tensor, Tensor, Tensor> mps_linear_backward(
     const Tensor& weight, std::array<bool,3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::_mps_linear_backward_input(input.sizes(), grad_output, weight);
+    grad_input = _mps_linear_backward_input(input.sizes(), grad_output, weight);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::_mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
+    std::tie(grad_weight, grad_bias) = _mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
