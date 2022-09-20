@@ -333,17 +333,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def remove_dupe_args(args):
         if not dropped_args:
             return args
-        r = []
-        for t, keep in zip(args, keep_arg_mask):
-            if keep:
-                r.append(t)
-        return r
+        return [t for t, keep in zip(args, keep_arg_mask) if keep]
 
     def add_dupe_args(args):
-        r = []
-        for i in range(duped_arg_len):
-            r.append(args[add_dupe_map[i]])
-        return r
+        if not dropped_args:
+            return args
+        return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
