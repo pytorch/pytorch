@@ -203,9 +203,48 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   return result;
 }
 
-Tensor& set_(Tensor& result, const Tensor& storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  c10::SymDimVector contiguous_strides;
+  if (stride.data() == nullptr) {
+    // TODO: dedupe this with empty() symbolic logic
+    int64_t dim = size.size();
+    contiguous_strides.resize(dim);
+    if (dim > 0) {
+      const auto last_idx = dim - 1;
+      contiguous_strides.at(last_idx) = 1;
+      for (auto i = last_idx - 1; i >= 0; --i) {
+        // TODO: max with 1
+        contiguous_strides.at(i) = contiguous_strides.at(i+1) * size.at(i+1);
+      }
+    }
+    stride = contiguous_strides;
+  }
+
+  // Run this before storage setting so we can access numel
+  result.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride, storage_offset);
+
+  // Matches maybe_resize_storage_cpu no-numel behavior
+  if (result.sym_numel() != 0) {
+    // maybe_resize_storage_cpu can handle no storage exists at all but
+    // that should never be the case here
+    TORCH_INTERNAL_ASSERT(storage);
+    TORCH_CHECK(storage.resizable(), "Trying to resize storage that is not resizable");
+    // All meta data pointers are the same, so we don't have to "re" allocate
+    // it.  TODO: Actually this might not quite be correct if we use special
+    // pointers to track whether or not fake cuda tensors are pinned or not
+    const auto itemsize = result.dtype().itemsize();
+    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
+        size, stride, itemsize, storage_offset);
+    storage.set_nbytes(size_bytes);
+  }
+  return result;
+}
+
+Tensor& set__symint(Tensor& result, const Tensor& storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
   TORCH_CHECK(storage.is_contiguous(), "passed in tensor to be used as storage must be contiguous");
-  return result.set_(storage.storage(), storage_offset + storage.storage_offset(), size, stride);
+  return result.set__symint(storage.storage(), storage_offset + storage.sym_storage_offset(), size, stride);
 }
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {

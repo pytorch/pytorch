@@ -920,13 +920,13 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+
 if TEST_WITH_TORCHDYNAMO:
     import torchdynamo
     import logging
     torchdynamo.config.log_level = logging.ERROR
-    # TODO - Collect errors with fake tensors
-    torchdynamo.config.fake_tensor_propagation = True
     # Do not spend time on helper functions that are called with different inputs
     torchdynamo.config.cache_size_limit = 8
 
@@ -951,6 +951,27 @@ def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
 
 
     return decorator
+
+def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_TORCHINDUCTOR:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
+        if TEST_WITH_TORCHINDUCTOR:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+    return decorator
+
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -1444,6 +1465,7 @@ class CudaMemoryLeakCheck():
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
+                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.empty_cache()
                 break
 
@@ -1465,6 +1487,8 @@ class CudaMemoryLeakCheck():
         discrepancy_detected = False
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
+            # avoid counting cuBLAS workspace allocations
+            torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
@@ -1970,10 +1994,12 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-
         if TEST_WITH_TORCHDYNAMO:
             # TorchDynamo optimize annotation
-            super_run = torchdynamo.optimize("eager")(super().run)
+            if TEST_WITH_TORCHINDUCTOR:
+                super_run = torchdynamo.optimize("inductor")(super().run)
+            else:
+                super_run = torchdynamo.optimize("eager")(super().run)
             super_run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.

@@ -912,6 +912,10 @@ bool _compute_contiguous(const ExtraMeta& extra_meta) {
   return _compute_contiguous(extra_meta, order);
 }
 
+// NB: this doesn't check that the sizes/strides/offset are in bound for the
+// storage, and furthermore, it CANNOT do so as in some cases we temporarily
+// violate invariants by first setting sizes/strides, and then updating the
+// storage
 void TensorImpl::set_sizes_and_strides(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
@@ -931,8 +935,9 @@ void TensorImpl::set_sizes_and_strides(
   refresh_sizes_strides_policy();
   if (!extra_meta_) {
     extra_meta_ = std::make_unique<ExtraMeta>();
-    if (!storage_offset.has_value())
+    if (!storage_offset.has_value()) {
       extra_meta_->storage_offset_ = storage_offset_;
+    }
   }
   extra_meta_->sizes_ = sizes;
   extra_meta_->strides_ = strides;
