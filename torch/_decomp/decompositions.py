@@ -1250,6 +1250,9 @@ def _to_copy(
     non_blocking: bool = False,
     memory_format: Optional[torch.memory_format] = None,
 ):
+    """
+    Related to question 2- why am I getting here? shouldn't I be getting to a meta kernel?
+    """
     assert not layout or layout == torch.strided, "TODO"
     assert not pin_memory, "TODO"
     assert device is not None or dtype is not None or memory_format is not None

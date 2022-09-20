@@ -333,8 +333,31 @@ def to_copy(fake_mode, func, *args, **kwargs):
 
     input_device = new_kwargs.pop("device", None)
     out_device = input_device if input_device else new_kwargs["input"].device
+    import pdb; pdb.set_trace()
+    """
+    Assumption: the reason for this no_dispatch is that we already recorded to_copy in our proxy graph,
+    and now we're doing the dirty work of actually running the real to_copy on our fake tensors to get
+    new 'real' (fake) outputs on the new dtype.  Hence, no_dispatch ensures no more tracing.
+        - note: it's superfluous in this case, as we are already in an equivalent no_dispatch region
+                inside proxy tensor and there are no modes active now
+
+        - other note: no_dispatch _shouldn't_ (afaiu) result in disabling meta key, which is kind of what
+          i'm suspecting is happening
+    """
     with no_dispatch():
-        input = new_kwargs.pop("input").to("meta")
+
+        """
+        Question 1- why is this .to("meta") here? shouldn't our input already be a faketensor?
+         (but of course, deleting this .to("meta") breaks other tests)
+        """
+        # input = new_kwargs.pop("input").to("meta")
+        input = new_kwargs.pop("input")
+
+        """
+        Question 2- this _to_copy serves to convert dtype to bool in my case, but i would expect
+        since input is fake, _to_copy  meta is hit.  Why am I hitting what looks like a real decomp/prim?
+            - is no_dispatch removing meta key?
+        """
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
