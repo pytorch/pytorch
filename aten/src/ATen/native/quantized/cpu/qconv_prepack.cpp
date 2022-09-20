@@ -524,7 +524,7 @@ class QConvPackWeightInt8 final {
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
-    bool prefer_onednn = onednn_utils::preferred(
+    bool prefer_onednn = onednn_utils::prefer_onednn(
           weight, transpose, groups, output_padding);
     if (prefer_onednn) {
       return PackedConvWeightsOnednn<kSpatialDim>::prepack(
