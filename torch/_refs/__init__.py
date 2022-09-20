@@ -80,6 +80,7 @@ __all__ = [
     "isfinite",
     "isinf",
     "isnan",
+    "isreal",
     "i0",
     "lgamma",
     "log",
@@ -596,6 +597,11 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
 def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+def isreal(a: TensorLikeType) -> TensorLikeType:
+    if utils.is_complex_dtype(a.dtype):
+        return prims.imag(a) == 0
+    return ones_like(a, dtype=torch.bool)
 
 # TODO: if this is special maybe it should be defined there and imported here?
 @_make_elementwise_unary_reference(
