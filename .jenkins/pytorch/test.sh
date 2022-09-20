@@ -231,7 +231,7 @@ test_dynamo_shard() {
         test_package \
         test_vmap \
         distributions/test_distributions \
-        nn/test_droput \
+        nn/test_dropout \
       --shard "$1" "$NUM_TEST_SHARDS" \
       --continue-through-error \
       --verbose
