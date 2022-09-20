@@ -150,14 +150,22 @@ void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
       !has_symbolic_sizes_strides_,
       "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
   set_layout(src.layout());
+  Tensor compressed_indices;
+  Tensor plain_indices;
+  std::tie(compressed_indices, plain_indices) =
+      sparse_csr::getCompressedPlainIndices(src);
+
+  // compressed indices are always crow_indices_ on the impl
   crow_indices_ = at::empty_like(
-      src.crow_indices(),
-      src.crow_indices().options(),
-      src.crow_indices().suggest_memory_format());
+      compressed_indices,
+      compressed_indices.options(),
+      compressed_indices.suggest_memory_format());
+  // plain indices are always col_indices_ on the impl
   col_indices_ = at::empty_like(
-      src.col_indices(),
-      src.col_indices().options(),
-      src.col_indices().suggest_memory_format());
+      plain_indices,
+      plain_indices.options(),
+      plain_indices.suggest_memory_format());
+  // Values are values regardless of layout
   values_ = at::empty_like(
       src.values(),
       src.values().options(),

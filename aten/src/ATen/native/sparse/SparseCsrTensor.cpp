@@ -642,14 +642,22 @@ bool _is_same_size_as_sparse_csr(
 const SparseCsrTensor& resize_as_sparse_csr_(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
+  auto src_layout = src.layout();
+  auto self_layout = self.layout();
   TORCH_CHECK(
-      src.is_sparse_csr() && self.is_sparse_csr(),
-      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got ",
-      self.layout(),
+      ((src_layout == kSparseCsr || src_layout == kSparseCsc ||
+        src_layout == kSparseBsr || src_layout == kSparseBsc) &&
+       (self_layout == kSparseCsr || self_layout == kSparseCsc ||
+        self_layout == kSparseBsr || self_layout == kSparseBsc)),
+      "resize_as_sparse_csr_: layout for self and src must be sparse compressed, but got ",
+      self_layout,
       " for self, and ",
-      src.layout(),
+      src_layout,
       " for src");
-  if (!_is_same_size_as_sparse_csr(self, src)) {
+  // resize_as_sparse_csr_tensor will resize AND set the layout, if the sizes
+  // are correct and the layout is wrong at least some of the member tensors
+  // need to be resized
+  if (!_is_same_size_as_sparse_csr(self, src) || (self_layout != src_layout)) {
     get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
   }
   return self;
