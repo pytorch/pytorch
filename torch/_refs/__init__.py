@@ -1651,6 +1651,7 @@ def where(
 #
 # Data Movement References
 #
+@register_decomposition(torch.ops.aten.clone.default)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
