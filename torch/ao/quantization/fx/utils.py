@@ -655,7 +655,7 @@ def get_skipped_module_name_and_classes(
 def _validate_qconfig_against_dtype_config(
         qconfig: QConfig,
         dtype_config: DTypeConfig,
-        pattern: Pattern) -> QConfig:
+        pattern: Pattern):
     """
     Validate whether the QConfig satisfies all of the following constraints from the backend:
         1. QConfig specified a quantization range that falls within the backend's, if any
@@ -664,8 +664,8 @@ def _validate_qconfig_against_dtype_config(
     def validate_activation_post_process(
             activation_post_process_ctr: Union[_PartialWrapper, Type[ObserverBase]],
             dtype_with_constraints: DTypeWithConstraints,
-            debug_string: str) -> Union[_PartialWrapper, Type[ObserverBase]]:
-        activation_post_process = activation_post_process_ctr()
+            debug_string: str):
+        activation_post_process = activation_post_process_ctr()  # type: ignore[call-arg]
         qconfig_qmin = getattr(activation_post_process, "quant_min", None)
         qconfig_qmax = getattr(activation_post_process, "quant_max", None)
         qconfig_eps = getattr(activation_post_process, "eps", None)
