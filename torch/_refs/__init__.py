@@ -610,6 +610,10 @@ def lgamma(a):
     return prims.lgamma(a)
 
 
+# alias
+mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def log(a):
     return prims.log(a)
@@ -3698,37 +3702,6 @@ def empty_like(
     )
 
 
-@overload
-def arange(
-    end: NumberType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    layout: torch.layout = torch.strided,
-    pin_memory: bool = False,
-    requires_grad: bool = False,
-) -> TensorLikeType:
-    pass
-
-
-@overload
-def arange(
-    start: NumberType,
-    end: NumberType,
-    step: NumberType = 1,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    layout: torch.layout = torch.strided,
-    pin_memory: bool = False,
-    requires_grad: bool = False,
-) -> TensorLikeType:
-    pass
-
-
-# See https://github.com/pytorch/pytorch/issues/82364
-# @register_decomposition(torch.ops.aten.arange)
-# @out_wrapper()
 @register_decomposition(
     [
         torch.ops.aten.arange.default,
@@ -3736,9 +3709,10 @@ def arange(
         torch.ops.aten.arange.start_step,
     ]
 )
+@out_wrapper()
 def arange(
-    a: Optional[NumberType] = None,
-    b: Optional[NumberType] = None,
+    start: NumberType = 0,
+    end: Optional[NumberType] = None,
     step: NumberType = 1,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -3747,31 +3721,22 @@ def arange(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    assert (a is not None and b is not None) or (a is not None and b is None)
-    if a is not None and b is not None:
-        return prims.arange(
-            a,
-            b,
-            step,
-            dtype=dtype,
-            device=device,
-            # layout=layout,
-            # pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-    elif a is not None and b is None:
-        return prims.arange(
-            0,
-            a,
-            step,
-            dtype=dtype,
-            device=device,
-            # layout=layout,
-            # pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-    else:
-        raise AssertionError()
+    assert not pin_memory
+    assert layout == torch.strided
+    # Case: torch.arange(5)
+    if end is None:
+        end = start
+        start = 0
+    return prims.arange(
+        start,
+        end,
+        step,
+        dtype=dtype,
+        device=device,
+        # layout=layout,
+        # pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
 
 
 @register_decomposition(torch.ops.aten.linspace)

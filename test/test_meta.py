@@ -423,7 +423,6 @@ meta_function_expected_failures = {
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
-    torch.mvlgamma : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.nn.functional.ctc_loss : {f64, f32},
     torch.nn.functional.gaussian_nll_loss : {f64, bf16, f32},
     torch.nn.functional.max_pool3d : {f64, f32},
@@ -542,7 +541,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
-    torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
     torch.nn.functional.max_pool3d_with_indices: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -686,8 +684,6 @@ meta_dispatch_expected_failures = {
     aten.multilabel_margin_loss_forward.default : {f32, f64},
     aten.multinomial.default : {bf16, f32, f64},
     aten.multinomial.out : {bf16, f32, f64},
-    aten.mvlgamma.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.mvlgamma.out : {i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.nll_loss2d_forward.default : {bf16, f32, f64},
     aten.polar.default : {f32, f64},
     aten.rrelu_with_noise.default : {bf16, f32, f64},
@@ -744,8 +740,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.multilabel_margin_loss_forward.default: {bf16, f16},  # aten::multilabel_margin_loss_forward
     aten.multinomial.default: {f16},  # aten::multinomial
     aten.multinomial.out: {f16},  # aten::multinomial.out
-    aten.mvlgamma.default: {f16},  # aten::_local_scalar_dense
-    aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
     aten.native_group_norm.default: {bf16, f16},
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
