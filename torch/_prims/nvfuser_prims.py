@@ -448,6 +448,13 @@ def _squeeze_vjp(grad, result, self, dims):
     return _unsqueeze_dims(grad, dims, self.ndim), *(None,) * len(dims)
 
 
+def _var_mean_vjp(grad_var, grad_mean, var, mean, self, dims, correction):
+    grad = _var_vjp(grad_var, var, self, dims, correction)[0] + _mean_vjp(
+        grad_mean, self, dims
+    )
+    return grad, *(None,) * (len(dims) + 1)
+
+
 _vjp_impls: Dict[str, Any] = {
     "abs": lambda grad, result, self: prims.mul(grad, prims.sign(self)),
     "acos": lambda grad, result, self: prims.mul(
@@ -556,10 +563,7 @@ _vjp_impls: Dict[str, Any] = {
     ),
     "trunc": lambda grad, result, self: prims.mul(grad, 0),
     "var": _var_vjp,
-    "var_mean": lambda grad_var, grad_mean, var, mean, self, dims, unbiased: _var_vjp(
-        grad_var, mean, self, dims, unbiased
-    )
-    + _mean_vjp(grad_mean, self, dims),
+    "var_mean": _var_mean_vjp,
     "view_of": lambda grad, result, self: prims.view_of(grad),
     "where": lambda grad, result, condition, self, other: (
         None,
@@ -722,7 +726,7 @@ def register_var_mean():
             return _var_mean_ref(a, dim, unbiased, keepdim, correction=correction)
 
     nvprim_implicit_impl.impl("var_mean.all_args", _var_mean_ref_nvprims_mode)
-    nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
+    nvprim_autograd_impl.impl(name, _register_vjp(prim, _vjp_impls["var_mean"]))
 
     for p in (prim_packet, prim):
         p.__doc__ = "Computes the variance and mean of x over the list of dimensions specified in the dim argument"

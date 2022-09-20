@@ -24,7 +24,8 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 ref_nvprims_ops = tuple(
     filter(
-        lambda op: op.torch_opinfo_name in nvprim_names,
+        lambda op: op.torch_opinfo_name in nvprim_names
+        or op.name == "ops.nvprims.var_mean",
         python_ref_db,
     )
 )
