@@ -901,7 +901,6 @@ def forward(self, a_1):
             return a * b
 
         fx_g = _trace(f, (5, 5), (5, 5))
-        breakpoint()
         self._assert_no_guards(fx_g, 2)
 
         fx_g = _trace(f, (5, 5, 5), (5, 5, 5))
