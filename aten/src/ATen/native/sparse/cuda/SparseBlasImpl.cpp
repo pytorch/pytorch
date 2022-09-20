@@ -836,6 +836,12 @@ void addmm_out_sparse_csr(
       !((mat1.layout() == kStrided) && (mat2.layout() == kStrided) &&
         (result.layout() == kStrided)),
       "Expected at least one sparse input");
+
+  // Layout checks are nested mat1, mat2, result
+  // Conditions are ordered strided, csr, csc, bsr, bsc.
+  // Valid combinations terminate in a return
+  // Invalid combinations are omitted and will fall though to the TORCH check
+  // generating an informative error message
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
@@ -868,19 +874,24 @@ void addmm_out_sparse_csr(
       }
     } else if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        // CSR @ CSC kernel would be very fast due to format alignment
         return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
       }
     }
   } else if (mat1.layout() == kSparseCsc) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
         return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
       }
     } else if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr)
+        // TODO: Add native CSC support via cuSPARSE if supported.
         return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
     } else if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
         return spgemm(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
       }
