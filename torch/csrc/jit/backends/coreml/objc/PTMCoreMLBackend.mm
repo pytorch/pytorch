@@ -167,7 +167,7 @@ static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
 
 struct PTMCoreMLContext : public ContextInterface {
   void setModelCacheDirectory(std::string dir) override {
-    [PTMCoreMLCompiler setCacheDirectory:dir];
+    [PTMCoreMLCompiler setModelCacheDirectory:dir];
   }
 };
 

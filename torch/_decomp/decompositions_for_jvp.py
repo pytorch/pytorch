@@ -10,7 +10,7 @@ decomposition_table_for_jvp: Dict[torch._ops.OpOverload, Callable] = {}
 register_decomposition = torch._decomp.register_decomposition
 aten = torch.ops.aten
 
-# NOTE: [forward-mode AD decompositions mechanism]
+# NOTE: [forward-mode AD decompositions hack]
 #
 # The mechanism is in VariableType,
 #   IF any inputs have forward grad

@@ -78,7 +78,6 @@ class DispatchKey(Enum):
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
 
-    Python = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -671,11 +670,9 @@ class NativeFunction:
             )
             # if a function is a structured delegate, deleting the dispatch
             # table is NOT semantics preserving
-            assert (
-                structured_delegate
-                or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
-                or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
-            ), (
+            assert structured_delegate or dispatch.keys() != {
+                DispatchKey.CompositeImplicitAutograd
+            }, (
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
                 "name, then delete the dispatch table"
@@ -711,14 +708,9 @@ class NativeFunction:
 
         assert len(composites_in_dispatch) <= 1 or (
             len(composites_in_dispatch) == 2
-            and (
-                DispatchKey.CompositeExplicitAutogradNonFunctional
-                not in composites_in_dispatch
-            )
-            and (
-                DispatchKey.CompositeImplicitAutogradNestedTensor
-                in composites_in_dispatch
-            )
+            and DispatchKey.CompositeImplicitAutograd in composites_in_dispatch
+            and DispatchKey.CompositeImplicitAutogradNestedTensor
+            in composites_in_dispatch
         ), (
             "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
             "or CompositeImplicitAutograd on a single kernel; each "

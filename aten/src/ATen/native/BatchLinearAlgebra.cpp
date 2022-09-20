@@ -2568,10 +2568,6 @@ Tensor& ormqr_out(const Tensor& input, const Tensor& tau, const Tensor& other, b
       "] must be equal to input.shape[-2]");
 
   TORCH_CHECK(
-      tau.size(-1) <= input.size(-1),
-      "torch.ormqr: tau.shape[-1] must be less than or equal to input.shape[-1]");
-
-  TORCH_CHECK(
       input.dim() - tau.dim() == 1,
       "torch.ormqr: ",
       "Expected tau to have one dimension less than input, but got tau.ndim equal to ",
@@ -3516,16 +3512,14 @@ static void linalg_lstsq_out_info(
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
   }
-  auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
-  // manually restride original
-  solution.set_(solution.storage(), solution_view.storage_offset(), solution_view.sizes(), solution_view.strides());
+  solution = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
   if (m == 0) {
     solution.zero_();
   }
 
   // for 1-dimensional 'other', we need to squeeze the solution after "apply_lstsq"
   if (vector_case) {
-    solution.squeeze_(-1);
+    solution = solution.squeeze_(-1);
   }
 }
 

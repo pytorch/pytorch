@@ -193,7 +193,7 @@ class FakeTensorConverter(object):
         weakref.finalize(t, del_ten)
         self.tensor_memo[th] = v
 
-    def from_real_tensor(self, fake_mode, t, make_constant=False, shape_env=None):
+    def from_real_tensor(self, fake_mode, t, make_constant=False):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -202,7 +202,7 @@ class FakeTensorConverter(object):
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         with no_dispatch():
-            meta_t = self.meta_converter(t, shape_env=shape_env)
+            meta_t = self.meta_converter(t)
             if meta_t.device.type != "meta":
                 raise UnsupportedFakeTensorException("meta converter nyi")
             out = FakeTensor(
@@ -242,13 +242,9 @@ class FakeTensorConverter(object):
     # However, you're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors
-    def __call__(
-        self, fake_mode, t, device=None, *, make_constant=False, shape_env=None
-    ):
+    def __call__(self, fake_mode, t, device=None, *, make_constant=False):
         if device is None:
-            return self.from_real_tensor(
-                fake_mode, t, make_constant, shape_env=shape_env
-            )
+            return self.from_real_tensor(fake_mode, t, make_constant)
         else:
             assert make_constant is False
             assert t.device.type == "meta"
@@ -329,7 +325,7 @@ def to_copy(fake_mode, func, *args, **kwargs):
 
     input_device = new_kwargs.pop("device", None)
     out_device = input_device if input_device else new_kwargs["input"].device
-    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
+    with no_dispatch():
         input = new_kwargs.pop("input").to("meta")
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
@@ -488,7 +484,9 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def from_tensor(t, fake_mode):
-        return fake_mode.from_tensor(t)
+        existing_device = t.device
+        # TODO: this should use meta converter
+        return FakeTensor(fake_mode, t.to(device="meta"), existing_device)
 
     # TODO: resolve error in default __repr__
     def __repr__(self):
@@ -723,24 +721,15 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
 
-        functions_with_cpp_meta_impl_that_support_symint = [
-            aten.empty_strided.default,
-            aten.as_strided.default,
-            aten.zeros.default,
-            aten.clone.default,
-            aten.detach.default,
-        ]
-        # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
-        if (
-            has_symbolic_sizes
-            and func not in functions_with_cpp_meta_impl_that_support_symint
-        ):
+        if has_symbolic_sizes:
             # TODO: Find better approach for this
             # Avoid circular import
             from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
 
             with no_dispatch():
+                if symbolic_shapes.is_symbolic_op(func):
+                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
                     sys.stderr.write(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
@@ -775,7 +764,8 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            if func not in functions_with_cpp_meta_impl_that_support_symint:
+            constructors = [aten.empty.memory_format]
+            if func not in constructors:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
@@ -902,8 +892,8 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor, shape_env=None):
-        return self.fake_tensor_converter(self, tensor, shape_env=shape_env)
+    def from_tensor(self, tensor):
+        return self.fake_tensor_converter(self, tensor)
 
 
 # NB: returns fake tensors
