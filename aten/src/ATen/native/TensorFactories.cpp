@@ -415,8 +415,40 @@ Tensor new_empty_strided_symint(
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The signature of this function should be (see torch._refs.eye)
+// Tensor eye(int64_t n, c10::optional<int64_t> m, int64_t k,
+//     c10::optional<ScalarType> dtype,
+//     c10::optional<Layout> layout,
+//     c10::optional<Device> device,
+//     c10::optional<bool> pin_memory) {
+// We are keeping all the other signatures both for BC issues and tobe able to call
+// at::eye(3, input.options();
 
-Tensor eye(int64_t n, c10::optional<int64_t> m, int64_t k,
+Tensor eye(int64_t n,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::eye(n, n, 0, dtype, layout, device, pin_memory);
+}
+
+Tensor eye(int64_t n, int64_t m,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::eye(n, m, 0, dtype, layout, device, pin_memory);
+}
+
+Tensor eye(int64_t n, c10::optional<int64_t> k,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  return at::eye(n, n, k.value_or(0), dtype, layout, device, pin_memory);
+}
+
+Tensor eye(int64_t n, int64_t m, int64_t k,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -425,12 +457,23 @@ Tensor eye(int64_t n, c10::optional<int64_t> m, int64_t k,
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   auto tensor = at::empty({0}, options); // to be resized
-  at::eye_out(tensor, n, m, k);
+  at::eye_outf(n, m, k, tensor);
   return tensor;
 }
 
-Tensor& eye_out(int64_t n, c10::optional<int64_t> m_opt, int64_t k, Tensor& result) {
-  int64_t m = m_opt.value_or(n);
+Tensor& eye_out(int64_t n, Tensor& result) {
+  return at::eye_outf(n, n, 0, result);
+}
+
+Tensor& eye_out(int64_t n, int64_t m, Tensor& result) {
+  return at::eye_outf(n, m, 0, result);
+}
+
+Tensor& eye_out(int64_t n, c10::optional<int64_t> k, Tensor& result) {
+  return at::eye_outf(n, n, k.value_or(0), result);
+}
+
+Tensor& eye_out(int64_t n, int64_t m, int64_t k, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
   TORCH_CHECK((k == 0) || (k > -n && k < m),
@@ -439,7 +482,6 @@ Tensor& eye_out(int64_t n, c10::optional<int64_t> m_opt, int64_t k, Tensor& resu
   result.resize_({n, m});
 
   if (result.is_meta()) return result;
-
 
   result.zero_();
   result.diagonal(k).fill_(1);

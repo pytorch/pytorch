@@ -2290,11 +2290,40 @@
   device_check: NoCheck
   device_guard: False
 
-- func: eye.m(int n, int? m=None, *, int k=0, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+# The signature for eye should be just one:
+# eye(int n, int? m=None, *, int k=0, ...)
+# We keep the three signatures for BC, and to be able to call in C++
+# at::eye(n, input.options());
+
+- func: eye(int n, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: eye
 
-- func: eye.m_out(int n, int? m=None, *, int k=0, Tensor(a!) out) -> Tensor(a!)
+- func: eye.m(int n, int m, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
+
+- func: eye.nk(int n, *, int? k, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
+
+- func: eye.mk(int n, int m, *, int k, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CompositeExplicitAutograd: eye
+
+- func: eye.out(int n, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: eye_out
+
+- func: eye.m_out(int n, int m, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: eye_out
+
+- func: eye.nk_out(int n, *, int? k, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CompositeExplicitAutograd: eye_out
+
+- func: eye.mk_out(int n, int m, *, int k, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: eye_out
 
