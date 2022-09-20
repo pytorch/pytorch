@@ -77,7 +77,7 @@ def get_current_dispatch_mode():
 
 def get_current_dispatch_mode_stack():
     stack_len = torch._C._len_torch_dispatch_stack()
-    return [torch._C._get_dispatch_fstack_at(i) for i in range(stack_len)]
+    return [torch._C._get_dispatch_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode):
     if torch._C._len_torch_dispatch_stack() == 0:

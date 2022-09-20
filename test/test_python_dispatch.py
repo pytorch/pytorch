@@ -11,7 +11,7 @@ from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
-from torch.utils._python_dispatch import TorchDispatchMode, get_current_dispatch_mode
+from torch.utils._python_dispatch import TorchDispatchMode, get_current_dispatch_mode, get_current_dispatch_mode_stack
 
 import logging
 
@@ -1052,6 +1052,20 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         with mode1:
             with A() as mode2:
                 self.assertEqual(get_current_dispatch_mode(), mode2)
+
+    def test_get_mode_stack(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                pass
+
+        self.assertEqual(get_current_dispatch_mode_stack(), [])
+
+        with A() as mode1:
+            self.assertEqual(get_current_dispatch_mode_stack(), [mode1])
+
+        with mode1:
+            with A() as mode2:
+                self.assertEqual(get_current_dispatch_mode_stack(), [mode1, mode2])
 
     def test_all_same_mode(self):
         x = LoggingTensorMode()

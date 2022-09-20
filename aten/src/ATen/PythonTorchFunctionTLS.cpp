@@ -38,10 +38,6 @@ int64_t PythonTorchFunctionTLS::stack_len() {
   return pythonTorchFunctionState.stack_.size();
 }
 
-void PythonTorchFunctionTLS::set_stack(std::vector<std::shared_ptr<c10::SafePyObject>> stack) {
-  pythonTorchFunctionState.stack_ = std::move(stack);
-}
-
 void PythonTorchFunctionTLS::set_disabled(bool disabled) {
   pythonTorchFunctionState.disabled_ = disabled;
 }

@@ -33,7 +33,8 @@ import torch
 from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr,
-    _push_on_torch_function_stack, _pop_torch_function_stack, _get_function_stack_at, _len_torch_function_stack, _set_torch_function_mode)
+    _push_on_torch_function_stack, _pop_torch_function_stack, _get_function_stack_at, _len_torch_function_stack,
+    _set_torch_function_mode)
 
 __all__ = [
     "get_ignored_functions",

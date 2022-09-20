@@ -592,13 +592,15 @@ static PyObject* set_torch_function_mode(PyObject* _unused, PyObject* arg) {
   } else {
     Py_INCREF(arg);
     at::impl::PythonTorchFunctionTLS::set_mode(
-      std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* push_on_torch_function_stack(PyObject* _unused, PyObject* arg) {
+static PyObject* push_on_torch_function_stack(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg != Py_None) {
     Py_INCREF(arg);
@@ -654,13 +656,15 @@ static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   } else {
     Py_INCREF(arg);
     c10::impl::TorchDispatchModeTLS::set_mode(
-      std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* push_on_torch_dispatch_stack(PyObject* _unused, PyObject* arg) {
+static PyObject* push_on_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg != Py_None) {
     Py_INCREF(arg);
@@ -754,21 +758,39 @@ static PyMethodDef methods[] = { // NOLINT
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
-    {"_push_on_torch_function_stack", push_on_torch_function_stack, METH_O, nullptr},
-    {"_pop_torch_function_stack", pop_torch_function_stack, METH_NOARGS, nullptr},
+    {"_push_on_torch_function_stack",
+     push_on_torch_function_stack,
+     METH_O,
+     nullptr},
+    {"_pop_torch_function_stack",
+     pop_torch_function_stack,
+     METH_NOARGS,
+     nullptr},
     {"_get_function_stack_at",
      castPyCFunctionWithKeywords(get_function_stack_at),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_len_torch_function_stack", len_torch_function_stack, METH_NOARGS, nullptr},
+    {"_len_torch_function_stack",
+     len_torch_function_stack,
+     METH_NOARGS,
+     nullptr},
     {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
-    {"_push_on_torch_dispatch_stack", push_on_torch_dispatch_stack, METH_O, nullptr},
-    {"_pop_torch_dispatch_stack", pop_torch_dispatch_stack, METH_NOARGS, nullptr},
+    {"_push_on_torch_dispatch_stack",
+     push_on_torch_dispatch_stack,
+     METH_O,
+     nullptr},
+    {"_pop_torch_dispatch_stack",
+     pop_torch_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
     {"_get_dispatch_stack_at",
      castPyCFunctionWithKeywords(get_dispatch_stack_at),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_len_torch_dispatch_stack", len_torch_dispatch_stack, METH_NOARGS, nullptr},
+    {"_len_torch_dispatch_stack",
+     len_torch_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

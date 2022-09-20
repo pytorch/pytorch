@@ -41,24 +41,24 @@ void TorchDispatchModeTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
 }
 
 const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::pop_stack() {
-  TORCH_CHECK(torchDispatchModeState.stack_.size() > 0, "trying to pop from empty mode stack");
+  TORCH_CHECK(
+      torchDispatchModeState.stack_.size() > 0,
+      "trying to pop from empty mode stack");
   const auto out = torchDispatchModeState.stack_.back();
   torchDispatchModeState.stack_.pop_back();
   return std::move(out);
 }
 
-const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(int64_t idx) {
-  TORCH_CHECK(idx < static_cast<int64_t>(torchDispatchModeState.stack_.size()),
-              "Tried to get stack at idx that's too big");
+const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(
+    int64_t idx) {
+  TORCH_CHECK(
+      idx < static_cast<int64_t>(torchDispatchModeState.stack_.size()),
+      "Tried to get stack at idx that's too big");
   return torchDispatchModeState.stack_[idx];
 }
 
 int64_t TorchDispatchModeTLS::stack_len() {
   return torchDispatchModeState.stack_.size();
-}
-
-void TorchDispatchModeTLS::set_stack(std::vector<std::shared_ptr<SafePyObject>> stack) {
-  torchDispatchModeState.stack_ = std::move(stack);
 }
 
 // STATE
