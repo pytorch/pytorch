@@ -354,8 +354,7 @@ DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
 
 
 def discover_functorch_tests():
-    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
-    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
+    functorch_test_dir = os.path.join(REPO_ROOT, 'functorch', 'test')
     result = discover_tests(pathlib.Path(functorch_test_dir))
     result = [os.path.join(functorch_test_dir, r) for r in result]
 
@@ -772,6 +771,7 @@ CUSTOM_HANDLERS = {
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
+    f"{REPO_ROOT}/functorch/test/test_ops": run_test_ops,
 }
 
 
@@ -991,7 +991,6 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 def must_serial(file: str) -> bool:
     return (
         "distributed" in os.getenv("TEST_CONFIG", "") or
-        "functorch" in os.getenv("TEST_CONFIG", "") or
         "dynamo" in os.getenv("TEST_CONFIG", "") or
         "distributed" in file or
         file in CUSTOM_HANDLERS or
@@ -1146,7 +1145,10 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 def main():
     options = parse_args()
 
-    test_directory = str(REPO_ROOT / "test")
+    if options.functorch:
+        test_directory = str(REPO_ROOT / "functorch" / "test")
+    else:
+        test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
     if options.verbose:
