@@ -3516,14 +3516,16 @@ static void linalg_lstsq_out_info(
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
   }
-  solution = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
+  auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
+  // manually restride original
+  solution.set_(solution.storage(), solution_view.storage_offset(), solution_view.sizes(), solution_view.strides());
   if (m == 0) {
     solution.zero_();
   }
 
   // for 1-dimensional 'other', we need to squeeze the solution after "apply_lstsq"
   if (vector_case) {
-    solution = solution.squeeze_(-1);
+    solution.squeeze_(-1);
   }
 }
 
