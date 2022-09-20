@@ -6,6 +6,13 @@
 #include <regex>
 
 namespace at { namespace cuda {
+
+static std::map<std::tuple<void *, void *>, at::DataPtr> handle_stream_to_workspace;
+
+void clearCublasWorkspaces() {
+  handle_stream_to_workspace.clear();
+}
+
 namespace {
 
 void createCublasHandle(cublasHandle_t *handle) {
@@ -28,8 +35,6 @@ void destroyCublasHandle(cublasHandle_t handle) {
 using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle, destroyCublasHandle>;
 
 } // namespace
-
-static std::map<std::tuple<void *, void *>, at::DataPtr> handle_stream_to_workspace;
 
 size_t parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
