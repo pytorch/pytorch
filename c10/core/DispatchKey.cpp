@@ -267,6 +267,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"ZeroTensor", c10::DispatchKey::ZeroTensor},
       {"FuncTorchDynamicLayerBackMode",
        c10::DispatchKey::FuncTorchDynamicLayerBackMode},
+      {"Functionalize", c10::DispatchKey::Functionalize},
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
       {"AutogradOther", c10::DispatchKey::AutogradOther},
       {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
