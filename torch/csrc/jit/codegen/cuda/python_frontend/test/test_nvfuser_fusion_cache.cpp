@@ -29,7 +29,7 @@ TEST_F(NVFuserTest, PyFusionCache_CUDA) {
   // You should never get a nullptr
   ASSERT_FALSE(fc == nullptr);
   ASSERT_TRUE(fc->numFusions() == 0);
-  
+
   // Check that cache methods all assert when presented with a null record.
   {
     std::unique_ptr<RecordFunctor> null_record(nullptr);
