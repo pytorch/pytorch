@@ -8,11 +8,13 @@
 from typing import Any, Dict, Optional
 
 import torch
+from torch._prims import TensorMeta
 
 from torch._prims_common import (
     DimsSequenceType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
+    make_contiguous_strides_for,
     ShapeType,
     TensorLikeType,
 )
@@ -309,7 +311,8 @@ def register_rand_like():
     name = "rand_like"
 
     nvprim.define(
-        "rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"
+        "rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, "
+        + "Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"
     )
 
     def _meta_rand_like(
@@ -321,15 +324,12 @@ def register_rand_like():
         pin_memory=None,
         memory_format=None,
     ):
-        strides = utils.make_contiguous_strides_for(self.shape)
+        strides = make_contiguous_strides_for(self.shape)
         return TensorMeta(
             shape=self.shape,
             strides=strides,
             dtype=dtype,
-            layout=layout,
             device=device,
-            pin_memory=pin_memory,
-            memory_format=memory_format,
         )
 
     def _prim_impl(
