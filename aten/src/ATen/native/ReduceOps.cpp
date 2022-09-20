@@ -657,7 +657,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       if (are_inputs_tensors_sublcass) {
         grad_inputs.push_back(grad_slice);
       } else {
-        grad_input.select(dim, k).copy_(grad_slice);  
+        grad_input.select(dim, k).copy_(grad_slice);
       }
     }
 
