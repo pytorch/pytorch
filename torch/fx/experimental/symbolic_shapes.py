@@ -148,22 +148,23 @@ class PySymFloat:
     def __str__(self):
         return f"{self.expr}"
 
-class FloorDiv(sympy.Function):
-    """
-    We maintain this so that:
-    1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
-    2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
-    """
-    nargs = (2,)
+if HAS_SYMPY:
+    class FloorDiv(sympy.Function):
+        """
+        We maintain this so that:
+        1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
+        2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
+        """
+        nargs = (2,)
 
-    @classmethod
-    def eval(cls, base, divisor):
-        if base == 0:
-            return sympy.Integer(0)
-        if divisor == 1:
-            return base
-        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-            return base // divisor
+        @classmethod
+        def eval(cls, base, divisor):
+            if base == 0:
+                return sympy.Integer(0)
+            if divisor == 1:
+                return base
+            if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+                return base // divisor
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
