@@ -6146,6 +6146,14 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
+
+def error_inputs_sum_to_size(op_info, device, **kwargs):
+    shape = (M, S, M)
+    err_msg = f"is not expandable to size"
+    si = SampleInput(make_tensor(shape, device=device, dtype=torch.float32), args=(M, M))
+    yield ErrorInput(si, error_regex=err_msg)
+
+
 def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
     cases = (((S, S, S), (S * S, S)),
@@ -8826,6 +8834,7 @@ op_db: List[OpInfo] = [
            op=lambda x, *args, **kwargs: x.sum_to_size(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sum_to_size,
+           error_inputs_func=error_inputs_sum_to_size,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
