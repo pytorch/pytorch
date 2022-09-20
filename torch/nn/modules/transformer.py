@@ -275,7 +275,7 @@ class TransformerEncoder(Module):
             output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
-            output = torch.nested.to_padded_tensor(output, 0.)
+            output = output.to_padded_tensor(0.)
 
         if self.norm is not None:
             output = self.norm(output)

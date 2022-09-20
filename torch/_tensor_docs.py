@@ -6498,3 +6498,11 @@ Example::
 
 """,
 )
+
+add_docstr_all(
+    "to_padded_tensor",
+    r"""
+to_padded_tensor(padding, output_size=None) -> Tensor
+See :func:`torch.nested.to_padded_tensor`
+""",
+)
