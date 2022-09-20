@@ -189,6 +189,7 @@ __all__ = [
     "std_mean",
     "var_mean",
     "sum",
+    "sum_to_size",
     "prod",
     "var",
     #
@@ -1876,6 +1877,39 @@ def sum(
         out=out,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
+
+
+def _is_expandable_to(shape, desired):
+    # Python implementation of
+    # aten/src/ATen/ExpandUtils.h:is_expandable_to
+    if len(shape) > len(desired):
+        return False
+    for i in range(len(shape)):
+        if shape[i] != desired[i] and shape[i] != 1:
+            return False
+    return True
+
+
+def sum_to_size(
+    a: Tensor,
+    *shape: ShapeType,
+) -> Tensor:
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    utils.check(
+        _is_expandable_to(shape, a.shape),
+        lambda: f'sum_to_size: size "{shape}" is not expandable to size "{a.shape}"',
+    )
+    # In ATen scalar tensors are sent through sum and the result is returned as
+    # type promoted
+    if shape == a.shape and len(shape) > 0:
+        return prims.view_of(a)
+    leading_dims = a.ndim - len(shape)
+    reduce_dims = tuple(range(leading_dims)) + tuple(
+        i
+        for i in range(leading_dims, len(shape))
+        if shape[i - leading_dims] == 1 and a.shape[i] != 1
+    )
+    return torch.sum(a, dim=reduce_dims, keepdim=True, dtype=None)
 
 
 @register_decomposition(torch.ops.aten.prod)
