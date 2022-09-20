@@ -242,7 +242,7 @@ class ShapeEnv(object):
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
-        # Keys are Mod(x, y), values are 0 (for ease of substitution)
+        # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
 
     def _get_key(self):
