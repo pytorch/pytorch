@@ -1389,15 +1389,16 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
   Tensor self_values = self.values();
   Tensor self_crow_indices = self.crow_indices();
   Tensor self_col_indices = self.col_indices();
+  Tensor self_values_cpu = self_values.cpu();
   Tensor cpu_result = _csr_to_block_csr_cpu(
       _sparse_csr_tensor_unsafe(
           self_crow_indices.cpu(),
           self_col_indices.cpu(),
-          self_values.cpu(),
+          self_values_cpu,
           self.sizes(),
           self_values.scalar_type(),
           self.layout(),
-          self_values.device()),
+          self_values_cpu.device()),
       blocksize);
   Tensor result_values = cpu_result.values().to(self_values.options());
   Tensor result_crow_indices =
