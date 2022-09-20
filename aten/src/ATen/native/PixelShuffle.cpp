@@ -53,6 +53,11 @@ Tensor pixel_shuffle_cpu(const Tensor& self, int64_t upscale_factor) {
   auto output = at::empty({0}, self.options());
   auto memory_format = self.suggest_memory_format();
   output.resize_(output_sizes, memory_format);
+
+  if (output.numel() == 0) {
+    return output;
+  }
+
   auto input = self.contiguous(memory_format);
 
   pixel_shuffle_kernel(kCPU, output, input, upscale_factor);
