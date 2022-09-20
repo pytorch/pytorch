@@ -19,7 +19,8 @@ FusionCache* FusionCache::get(size_t max_fusions) {
   if (singleton_ == nullptr) {
     singleton_ = new FusionCache(max_fusions);
   }
-  TORCH_CHECK(max_fusions >= singleton_->fusions_.size(),
+  TORCH_CHECK(
+      max_fusions >= singleton_->fusions_.size(),
       "The max fusions is set less than the number of fusions in the cache.");
   singleton_->max_fusions_ = max_fusions;
   return singleton_;
