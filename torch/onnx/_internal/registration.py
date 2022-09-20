@@ -14,7 +14,7 @@ from typing import (
 )
 
 from torch.onnx import _constants, errors
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, torchscript
 
 OpsetVersion = int
 
@@ -145,6 +145,18 @@ class _SymbolicFunctionGroup:
             raise KeyError(key)
         return result
 
+    def __call__(self, context: torchscript.GraphContext, *args, **kwargs):
+        """Calls the symbolic function."""
+        opset = context.opset
+        function = self.get(opset)
+        if function is None:
+            raise errors.UnsupportedOperatorError(
+                self._name,
+                opset,
+                self.get_min_supported(),
+            )
+        return function(*args, **kwargs)
+
     # TODO(justinchuby): Add @functools.lru_cache(maxsize=None) if lookup time becomes
     # a problem.
     def get(self, opset: OpsetVersion) -> Optional[Callable]:
@@ -193,8 +205,10 @@ class _SymbolicFunctionGroup:
             return
         self._functions.remove_override(opset)
 
-    def get_min_supported(self) -> OpsetVersion:
+    def get_min_supported(self) -> Optional[OpsetVersion]:
         """Returns the lowest built-in opset version supported by the function."""
+        if not self._functions:
+            return None
         return min(self._functions)
 
 
