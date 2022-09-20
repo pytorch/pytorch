@@ -514,10 +514,10 @@ matrix_rank_atol_rtol_float_batch_rule(
 // Define string constants with the function names. These will be used as template parameters
 // C++ doesn't let us use string literals as template parameters, so we have to declare them as consts first
 #define LINALG_STRING_CONST(fn, op_name) \
-  const char func_string_##fn[] = #op_name;\
+  constexpr const char func_string_##fn[] = #op_name;\
 
 #define LINALG_STRING_CONST2(fn, overload, op_name) \
-  const char func_string_##fn_##overload[] = #op_name;\
+  constexpr const char func_string_##fn_##overload[] = #op_name;\
 
 #define LINALG_CHECK_MATRIX_UNARY_ONE_OUT(fn, op_name) \
   LINALG_STRING_CONST(fn, op_name);\
