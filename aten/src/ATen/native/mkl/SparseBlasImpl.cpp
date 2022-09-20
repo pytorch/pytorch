@@ -374,7 +374,8 @@ void addmm_out_sparse_csr(
             alpha,
             result.transpose(0, 1));
       }
-    } else if (mat2.layout() == kSparseCsc) {
+    }
+    if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
         return addmm_dense_result(
             mat2.transpose(-2, -1),
@@ -384,7 +385,18 @@ void addmm_out_sparse_csr(
             result.transpose(-2, -1));
       }
     }
-  } else if (mat1.layout() == kSparseCsr) {
+    if (mat2.layout() == kSparseBsc) {
+      if (result.layout() == kStrided) {
+        return addmm_dense_result(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
+  }
+  if (mat1.layout() == kSparseCsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         return addmm_dense_result(mat1, mat2, beta, alpha, result);
@@ -410,27 +422,31 @@ void addmm_out_sparse_csr(
             mat1, mat2.to_sparse_csr(), beta, alpha, result);
       }
     }
-  } else if (mat1.layout() == kSparseCsc) {
+  }
+  if (mat1.layout() == kSparseCsc) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         // TODO: avoid csc->csr conversion with native csc support
         return addmm_dense_result(
             mat1.to_sparse_csr(), mat2, beta, alpha, result);
       }
-    } else if (mat2.layout() == kSparseCsr) {
+    }
+    if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr) {
         // TODO: avoid csc->csr conversion with native csc support
         return addmm_sparse_result(
             mat1.to_sparse_csr(), mat2, beta, alpha, result);
       }
-    } else if (mat2.layout() == kSparseCsc) {
+    }
+    if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO avoid csc->csr
         return addmm_sparse_result(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
       }
     }
-  } else if (mat1.layout() == kSparseBsr) {
+  }
+  if (mat1.layout() == kSparseBsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         return addmm_dense_result(mat1, mat2, beta, alpha, result);
