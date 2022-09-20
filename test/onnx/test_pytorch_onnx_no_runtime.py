@@ -1172,22 +1172,22 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         blocks = model_im2col(original_image_inputs)
 
         model = torch.nn.Fold(
-            output_size=output_size, kernel_size=kernel_size, dilation=dilation,
-            padding=padding, stride=stride
+            output_size=output_size,
+            kernel_size=kernel_size,
+            dilation=dilation,
+            padding=padding,
+            stride=stride,
         )
         f = io.BytesIO()
-        torch.onnx.export(model,
-                          (blocks,),
-                          f,
-                          opset_version=18)
+        torch.onnx.export(model, (blocks,), f, opset_version=18)
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertTrue(onnx_model.graph.node[-1].op_type == "Col2Im")
-        self.assertTrue(onnx_model.graph.node[-1].domain == "")
-        self.assertTrue(len(onnx_model.graph.node[-1].input) == 3)
-        self.assertTrue(onnx_model.graph.node[-1].attribute[0].name == "dilations")
-        self.assertTrue(onnx_model.graph.node[-1].attribute[1].name == "padding")
-        self.assertTrue(onnx_model.graph.node[-1].attribute[2].name == "strides")
+        self.assertEqual(onnx_model.graph.node[-1].op_type, "Col2Im")
+        self.assertEqual(onnx_model.graph.node[-1].domain, "")
+        self.assertEqual(len(onnx_model.graph.node[-1].input), 3)
+        self.assertEqual(onnx_model.graph.node[-1].attribute[0].name, "dilations")
+        self.assertEqual(onnx_model.graph.node[-1].attribute[1].name, "padding")
+        self.assertEqual(onnx_model.graph.node[-1].attribute[2].name, "strides")
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):
     def _test_lower_graph_impl(self, model, data):
