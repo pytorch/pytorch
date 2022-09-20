@@ -28,7 +28,7 @@ jobs:
       - uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
         name: Build and upload nightly docker
         with:
-          timeout_minutes: 10
+          timeout_minutes: 30
           max_attempts: 3
           command: |
             set -ex
