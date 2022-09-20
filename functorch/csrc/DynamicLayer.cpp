@@ -75,6 +75,8 @@ RandomnessType DynamicLayer::randomness() const {
   return VmapInterpreterPtr(&interpreter_).randomness();
 }
 
+// Maps level to life handle, see NOTE: [Life handles and lexically scoped transforms]
+// for details
 using DynmetaData = std::unordered_map<int64_t, std::shared_ptr<bool>>;
 DynmetaData kDynMetaDataSingleton;
 
@@ -82,6 +84,13 @@ static DynmetaData& getGlobalDynmetaData() {
   return kDynMetaDataSingleton;
 }
 
+// functorch stores some TLS. Inside the TLS is the stack of transforms.
+// Unfortunately, since functorch isn't a part of libtorch, we have
+// a level of indirection. FuncTorchTLSBase is the interface that lives in libtorch,
+// while FuncTorchTLS implements all the methods and stores data.
+//
+// TODO: after functorch C++ code is moved into PyTorch, we can get rid of
+// this layer of indirection.
 class FuncTorchTLS : public FuncTorchTLSBase {
  public:
   FuncTorchTLS() {}
@@ -262,17 +271,11 @@ DynamicLayer popDynamicLayerAndDeleteMetadata() {
   auto level = result.layerId();
 
   // TODO: is this lock safe? No one else should be writing to the same bucket
-  // if (c10::show_dispatch_trace_enabled()) {
-  //   std::cout << "deleting metadata" << std::endl;
-  // }
   auto& data = getGlobalDynmetaData();
   auto it = data.find(level);
   if (it == data.end()) {
     return result;
   }
-  // if (c10::show_dispatch_trace_enabled()) {
-  //   std::cout << "deleted metadata for level " << level << std::endl;
-  // }
   // invalidate the thing
   *(it->second) = false;
   data.erase(level);
@@ -388,6 +391,31 @@ WithoutTop::WithoutTop(): layer_(popDynamicLayer()) {}
 WithoutTop::~WithoutTop() {
   pushDynamicLayer(std::move(layer_));
 }
+
+// NOTE: [functorch front and back key fallbacks]
+//
+// Please read NOTE: [functorch interpreter stack] first for some context.
+// The following doc also provides some visuals:
+// https://docs.google.com/document/d/14qyaa3xIjmVxYiMLlIlQErunYgR_uR1WupsKMZlnGY4/edit
+//
+// functorch's "stack of transforms" is implemented as the following:
+// - each transform is associated with one or more dispatch keys in the PyTorch
+//   dispatcher. For example, vmap -> {FuncTorchBatched, FuncTorchVmapMode},
+//   Autograd -> {Autograd{Backend}, ADInplaceOrView}
+// - Whenever a functorch transform is active, the FuncTorchDynamicLayer{Front, Back}Mode
+//   keys are added to the dispatcher's local dispatch key set.
+//
+// DynamicLayerFrontMode is responsible for:
+// 1. selecting the transform that is at the top of the stack and grabbing its
+//    interpreter
+// 2. Calling interpreter.process(), which does the following:
+// 2a. enables/disables a bunch of dispatch keys, so that the only dispatch
+//     keys that are enabled are the ones that belong to the transform.
+// 2b. redispatching
+//
+// Eventually, DynamicLayerBackMode captures the redispatch from the transforms.
+// DynamicLayerBackMode is responsible for:
+// - redirecting back to DynamicLayerFrontMode
 
 static void dynamicLayerFrontFallback(
     const c10::OperatorHandle& op,
