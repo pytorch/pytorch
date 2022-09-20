@@ -9,6 +9,20 @@ namespace at {
 namespace native {
 namespace {
 
+void lerp_scalar_start_end_kernel(at::TensorIteratorBase& iter, const Scalar& start_, const Scalar& end_) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kHalf, kBFloat16, iter.common_dtype(), "lerp_scalar_start_end_cuda", [&] {
+    const auto start = start_.to<scalar_t>();
+    const auto end = end_.to<scalar_t>();
+
+    gpu_kernel(
+        iter,
+        [=] GPU_LAMBDA (scalar_t weight) {
+          return lerp(start, end, weight);
+        });
+  });
+}
+
 void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -42,6 +56,7 @@ void lerp_scalar_kernel(at::TensorIteratorBase& iter, const c10::Scalar& weight)
 
 REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_tensor_kernel);
 REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_scalar_kernel);
+REGISTER_DISPATCH(lerp_kernel_scalar_start_end_stub, &lerp_scalar_start_end_kernel);
 
 } // namespace native
 } // namespace at

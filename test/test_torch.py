@@ -5224,6 +5224,17 @@ else:
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
+    @onlyNativeDeviceTypes
+    @dtypes(*torch.testing.floating_and_complex_types())
+    def test_lerp_scalar(self, device, dtype):
+        low, high = 5, 30
+        low_t = torch.scalar_tensor(low, device=device, dtype=dtype)
+        high_t = torch.scalar_tensor(high, device=device, dtype=dtype)
+        weight = torch.rand((10, 10), device=device, dtype=dtype)
+
+        expect = torch.lerp(low_t, high_t, weight)
+        actual = torch._lerp_scalar(low, high, weight)
+        self.assertEqual(expect, actual)
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):

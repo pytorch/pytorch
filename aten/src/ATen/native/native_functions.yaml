@@ -7474,6 +7474,23 @@
   variants: method
   structured_delegate: lerp.Tensor_out
 
+# NOTE _lerp_scalar: This function is used in make_tensor and so is
+# very important to the performance of the test suite. It avoids an
+# extra cuda sychronization to move start and end onto CUDA devices,
+# which for small tensors is a significant cost to performance.
+- func: _lerp_scalar.out(Scalar start, Scalar end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA: _lerp_scalar
+
+- func: _lerp_scalar(Scalar start, Scalar end, Tensor weight) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  variants: function
+  structured_delegate: _lerp_scalar.out
+
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
