@@ -44,11 +44,12 @@ const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::pop_stack() {
   TORCH_CHECK(torchDispatchModeState.stack_.size() > 0, "trying to pop from empty mode stack");
   const auto out = torchDispatchModeState.stack_.back();
   torchDispatchModeState.stack_.pop_back();
-  return out;
+  return std::move(out);
 }
 
 const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(int64_t idx) {
-  TORCH_CHECK(idx < torchDispatchModeState.stack_.size(), "Tried to get stack at idx that's too big");
+  TORCH_CHECK(idx < static_cast<int64_t>(torchDispatchModeState.stack_.size()),
+              "Tried to get stack at idx that's too big");
   return torchDispatchModeState.stack_[idx];
 }
 
