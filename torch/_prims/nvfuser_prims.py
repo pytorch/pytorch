@@ -421,6 +421,10 @@ def _broadcast_in_dim_vjp(grad, result, self, shape, broadcast_dimensions):
     return grad, *(None,) * (len(shape) + len(broadcast_dimensions))
 
 
+def _squeeze_vjp(grad, result, self, dims):
+    return _unsqueeze_dims(grad, dims, self.ndim), *(None,) * len(dims)
+
+
 _vjp_impls: Dict[str, Any] = {
     "abs": lambda grad, result, self: prims.mul(grad, prims.sign(self)),
     "acos": lambda grad, result, self: prims.mul(
@@ -517,7 +521,7 @@ _vjp_impls: Dict[str, Any] = {
     "sin": lambda grad, result, self: prims.mul(grad, prims.cos(self)),
     "sinh": lambda grad, result, self: prims.mul(grad, prims.cosh(self)),
     "sqrt": lambda grad, result, self: prims.mul(grad, prims.div(0.5, result)),
-    "squeeze": None,  # TODO
+    "squeeze": _squeeze_vjp,
     "sub": lambda grad, result, self, other: (grad, prims.neg(grad)),
     "sum": _sum_vjp,
     "tan": lambda grad, result, self: prims.mul(
@@ -532,6 +536,7 @@ _vjp_impls: Dict[str, Any] = {
         grad_var, mean, self, dims, unbiased
     )
     + _mean_vjp(grad_mean, self, dims),
+    "view_of": lambda grad, result, self: prims.view_of(grad),
     "where": lambda grad, result, condition, self, other: (
         None,
         prims.where(condition, grad, 0),
