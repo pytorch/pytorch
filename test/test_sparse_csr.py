@@ -1347,7 +1347,8 @@ class TestSparseCSR(TestCase):
             out_t = torch.empty_like(out.transpose(-2, -1))
             addmv_addmm(c_t, b_t, a_t, alpha=alpha, beta=beta, out=out_t)
 
-            expected_t = alpha * (b.cpu().resolve_conj().numpy().transpose() * a_bsr.transpose()) + beta * c.cpu().numpy().transpose()
+            expected_t = alpha * (b.cpu().resolve_conj().numpy().transpose() *
+                                  a_bsr.transpose()) + beta * c.cpu().numpy().transpose()
             self.assertEqual(actual_t, out_t)
             self.assertEqual(actual_t, expected_t)
 
