@@ -2325,6 +2325,7 @@
 
 - func: eye.mk_out(int n, int m, *, int k, Tensor(a!) out) -> Tensor(a!)
   dispatch:
+    MPS: eye_out_mps
     CompositeExplicitAutograd: eye_out
 
 - func: flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)
