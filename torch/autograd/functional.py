@@ -3,6 +3,8 @@ from typing import Tuple, List
 from . import forward_ad as fwAD
 from torch._vmap_internals import _vmap
 
+__all__ = ["vjp", "jvp", "jacobian", "hessian", "hvp", "vhp"]
+
 # Utility functions
 
 def _as_tuple_nocheck(x):

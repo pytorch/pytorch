@@ -1,6 +1,7 @@
 import torch
 from typing import Callable, Any
 
+__all__ = ["saved_tensors_hooks", "save_on_cpu"]
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
