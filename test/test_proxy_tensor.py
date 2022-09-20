@@ -769,6 +769,14 @@ def _get_node(fx_g, cond):
             return n
     raise AssertionError
 
+def _get_free_symbols(shape_env):
+    vars = tuple(shape_env.var_to_val.keys())
+    return len([var for var in vars if var not in shape_env.replacements])
+
+def _trace(f, *args):
+    inps = [torch.randn(arg) for arg in args]
+    return make_fx(f, tracing_mode="symbolic")(*inps)
+
 # TODO: Need to test the guards themselves specifically as well
 @skipIfNoSympy
 class TestSymbolicTracing(TestCase):
@@ -838,9 +846,7 @@ def forward(self, a_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0)
-    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size)
-    lt = sym_size < 0
-    eq = sym_size == sym_size;  sym_size = None
+    sym_float = torch.fx.experimental.symbolic_shapes.sym_float(sym_size);  sym_size = None
     div = torch.ops.prims.div.default(a_1, sym_float);  a_1 = sym_float = None
     return div""")
 
@@ -866,7 +872,6 @@ def forward(self, a_1):
 
         self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
 
-
     def test_expand(self):
         def f(a):
             b = torch.mul(a, a)
@@ -886,6 +891,70 @@ def forward(self, a_1):
         meta_c = _get_node(fx_g, lambda x: x.target == aten.new_empty.default)
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
         self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
+
+    def _assert_no_guards(self, fx_g, free_symbols):
+        self.assertEqual(_get_free_symbols(fx_g.shape_env), free_symbols)
+        self.assertEqual(len(fx_g.shape_env.get_nontrivial_guards()), 0)
+
+    def test_guards_equal(self):
+        def f(a, b):
+            return a * b
+
+        fx_g = _trace(f, (5, 5), (5, 5))
+        self._assert_no_guards(fx_g, 2)
+
+        fx_g = _trace(f, (5, 5, 5), (5, 5, 5))
+        self._assert_no_guards(fx_g, 3)
+
+        fx_g = _trace(f, (5, 1), (1, 5))
+        self._assert_no_guards(fx_g, 2)
+
+        def f(a, b, c, d):
+            a = a + b
+            cat = torch.cat([c, d])
+            return a + cat
+
+        fx_g = _trace(f, 7, 7, 4, 3)
+        self._assert_no_guards(fx_g, 2)
+
+        def f(a, b, c, d, e):
+            vals = [a, b, c, d, e]
+            x = a
+            for idx in range(len(vals) - 1):
+                x = torch.cat([x, vals[idx]]) + vals[idx + 1]
+            return x
+
+        fx_g = _trace(f, 2, 4, 8, 16, 32)
+        self._assert_no_guards(fx_g, 1)
+
+        def f(a, b):
+            a = a.view(b.shape[0])
+            return a + b.sum()
+
+        fx_g = _trace(f, (4, 2), 8)
+        self._assert_no_guards(fx_g, 2)
+
+        fx_g = _trace(f, (4, 2), (8, 4))
+        self._assert_no_guards(fx_g, 3)
+
+        fx_g = _trace(f, (2, 3, 4), 24)
+        self._assert_no_guards(fx_g, 3)
+
+    def test_nonidentity_transitive_guards(self):
+        def f(a, b, c, d, e):
+            vals = [a, b, c, d, e]
+            cat_vals = []
+            for idx in range(len(vals) - 1):
+                cat_vals.append(torch.cat([vals[idx], vals[idx]]))
+            final_vals = []
+            for a, b in reversed(list(zip(cat_vals, vals[1:]))):
+                final_vals.append(a + b)
+            return final_vals
+
+        fx_g = _trace(f, 2, 4, 8, 16, 32)
+        self._assert_no_guards(fx_g, 1)
+
+
 
 
 make_fx_failures = {
@@ -942,6 +1011,7 @@ symbolic_tensor_failures = {
     xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
+    skip('_masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
@@ -1210,8 +1280,6 @@ symbolic_tensor_failures = {
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('select', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
     xfail('select_scatter', ''),  # aten.select_scatter.default - couldn't find symbolic meta function/decomposition
-    xfail('sgn', ''),  # aten.sgn.default - couldn't find symbolic meta function/decomposition
-    xfail('sinc', ''),  # aten.sinc.default - couldn't find symbolic meta function/decomposition
     xfail('slice_scatter', ''),  # aten.slice_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('sort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
@@ -1264,7 +1332,6 @@ symbolic_tensor_failures = {
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
-    skip('_masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
 }
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
