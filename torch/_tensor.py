@@ -1025,7 +1025,7 @@ class Tensor(torch._C._TensorBase):
             torch.int64: "<i8",
         }[self.dtype]
 
-        itemsize = self.element_size()
+        itemsize = self.storage().element_size()
 
         shape = tuple(self.shape)
         if self.is_contiguous():
@@ -1314,10 +1314,9 @@ class Tensor(torch._C._TensorBase):
             if self.device.type == "cuda":
                 stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
-                sync_stream = torch.cuda.current_stream()
-                if stream != sync_stream:
+                if stream != torch.cuda.current_stream:
                     event = torch.cuda.Event()
-                    event.record(sync_stream)
+                    event.record(torch.cuda.current_stream())
                     stream.wait_event(event)
         return torch.to_dlpack(self)
 

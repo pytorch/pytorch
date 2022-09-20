@@ -338,10 +338,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
                 return x
 
             if not utils.same_shape(x.shape, common_shape):
-                common_rank = len(common_shape) + 1
-                start = common_rank - (len(x.shape) + 1)
-                dims = tuple(range(start, len(x.shape) + start))
-                return prims.broadcast_in_dim(x, common_shape, dims)
+                return x.expand(common_shape)
 
             return x
         else:

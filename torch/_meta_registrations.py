@@ -193,6 +193,16 @@ def meta_dot(self, tensor):
     return self.new_empty(())
 
 
+@register_meta([aten.mm.default], register_dispatcher=False)
+def meta_mm(a, b):
+    check(a.dim() == 2, lambda: "a must be 2D")
+    check(b.dim() == 2, lambda: "b must be 2D")
+    N, M1 = a.shape
+    M2, P = b.shape
+    check(M1 == M2, lambda: "a and b must have same reduction dim")
+    return a.new_empty(N, P)
+
+
 def _compute_reduction_shape(self, dims, keepdim):
     if keepdim:
         return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))

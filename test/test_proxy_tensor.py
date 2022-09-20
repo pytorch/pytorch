@@ -1014,7 +1014,7 @@ symbolic_tensor_failures = {
     xfail('linalg.eigvals'),
     skip('_masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
+    # xfail('__rmatmul__', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.amin', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.argmax', ''),  # aten.argmax.default - couldn't find symbolic meta function/decomposition
@@ -1166,7 +1166,7 @@ symbolic_tensor_failures = {
     xfail('masked_fill', ''),  # expected predicate to be bool, got torch.float32
     xfail('masked_scatter', ''),  # aten.masked_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
-    xfail('matmul', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
+    # xfail('matmul', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
     xfail('max', 'reduction_with_dim'),  # aten.max.dim - couldn't find symbolic meta function/decomposition
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...
