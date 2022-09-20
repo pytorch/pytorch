@@ -562,6 +562,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
+            # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
+            DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                        dtypes=(torch.bfloat16,), device_type='cpu'),
         ),
         # Can reuse the same inputs; dim is required in both
         sample_inputs_func=sample_inputs_masked_cumops,
