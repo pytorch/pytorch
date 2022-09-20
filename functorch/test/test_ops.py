@@ -825,10 +825,10 @@ class TestOperators(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('nn.functional.huber_loss'),
         xfail('lu'),
-        skip('linalg.det', 'singular'),  # https://github.com/pytorch/functorch/issues/961
+        xfail('linalg.det'),
+        xfail('linalg.det', 'singular'),
         xfail('cumprod'),
         xfail('lu_solve'),
-        xfail('linalg.det'),
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('linalg.solve'),
@@ -861,6 +861,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.embedding', ''),
+        xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
+        xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
+        xfail('scatter_reduce', "amin"),  # aten::scatter_reduce.two hit the vmap fallback
+        xfail('scatter_reduce', "amax"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
@@ -915,7 +919,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr'),
         xfail('index_copy'),
         xfail('index_fill'),
-        xfail('linalg.det'),
         xfail('linalg.eig'),
         xfail('linalg.householder_product'),
         xfail('lu'),
@@ -927,7 +930,10 @@ class TestOperators(TestCase):
         xfail('nanquantile'),
         xfail('prod'),
         xfail('put'),
-        skip('linalg.det'),  # https://github.com/pytorch/functorch/issues/961
+        xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
+        xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
+        xfail('scatter_reduce', "amin"),  # aten::scatter_reduce.two hit the vmap fallback
+        xfail('scatter_reduce', "amax"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('quantile'),
         xfail('renorm'),
         xfail('take'),
@@ -964,14 +970,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.pdist', ''),
         xfail('nn.functional.smooth_l1_loss', ''),
         xfail('scatter_reduce', 'prod'),
-        xfail('scatter_reduce', 'amax'),
         xfail('nn.functional.max_unpool1d', ''),
         xfail('nn.functional.max_unpool3d', ''),
-        xfail('scatter_reduce', 'sum'),
-        xfail('scatter_reduce', 'mean'),
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.soft_margin_loss', ''),
-        xfail('scatter_reduce', 'amin'),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('linalg.lu', ''),
@@ -1136,14 +1138,9 @@ class TestOperators(TestCase):
         xfail('symeig', ''),  # NYI: forward AD for symeig
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
-        xfail('scatter_reduce', 'amax'),  # NYI: forward-AD for scatter_reduce
-        xfail('scatter_reduce', 'amin'),  # NYI: forward-AD for scatter_reduce
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
-        xfail('scatter_reduce', 'sum'),  # NYI: forward-AD for scatter_reduce
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
-        xfail('scatter_reduce', 'mean'),  # NYI: forward-AD for scatter_reduce
-        xfail('scatter_reduce', 'prod'),  # NYI: forward-AD for scatter_reduce
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
         skip('as_strided_scatter', ''),  # seems flaky
@@ -1282,11 +1279,7 @@ class TestOperators(TestCase):
         xfail('prod'),  # Dynamic shape due to aten::nonzero call
         xfail('quantile'),  # Batching rule not implemented for aten::equal
         xfail('renorm'),  # Forward AD not implemented and no decomposition
-        xfail('scatter_reduce', 'amax'),  # Forward AD not implemented and no decomposition
-        xfail('scatter_reduce', 'amin'),  # Forward AD not implemented and no decomposition
-        xfail('scatter_reduce', 'mean'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition
-        xfail('scatter_reduce', 'sum'),  # Forward AD not implemented and no decomposition
         xfail('segment_reduce', 'lengths'),  # Forward AD not implemented and no decomposition
         xfail('segment_reduce', 'offsets'),  # Forward AD not implemented and no decomposition
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
