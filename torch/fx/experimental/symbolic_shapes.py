@@ -309,7 +309,7 @@ class ShapeEnv(object):
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = atom.args[0] // atom.args[1]
         new_expr = new_expr.xreplace(floor_div_replace)
-        new_expr = new_expr.simplify()
+        new_expr = sympy.expand(new_expr)
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
