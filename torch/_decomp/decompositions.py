@@ -1579,7 +1579,7 @@ def index_add_(
             utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
-        tensor = torch._prims.mul(tensor, alpha)
+        tensor = tensor * alpha
     idx = (slice(None),) * dim + (index,)
     torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
     return x
