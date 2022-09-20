@@ -144,42 +144,47 @@ def close_to_int(x, eps=0.1):
 
 
 def sample_inputs_slice(op_info, device, dtype, requires_grad, **kwargs):
-    for i in [
-        SampleInput(
-            input=torch.ones(3, device=device, dtype=dtype, requires_grad=requires_grad),
-            args=(0,),
-        ),
-        SampleInput(
-            input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
-            args=(),
-            kwargs={
-                'dim': 1,
-                'start': 1,
-                'end': -2,
-            }
-        ),
-        SampleInput(
-            input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
-            args=(),
-            kwargs={
-                'dim': 1,
-                'start': 1,
-                'end': -2,
-                'step': 3,
-            }
-        ),
-        SampleInput(
-            input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
-            args=(),
-            kwargs={
-                'dim': 0,
-                'start': -10,
-                'end': -2,
-                'step': 2,
-            }
-        ),
-    ]:
-        yield i
+
+    make_input = partial(make_tensor, device=device, dtype=dtype,
+                         low=None, high=None, requires_grad=requires_grad)
+
+    yield SampleInput(
+        input=make_input(3),
+        args=(0,),
+    )
+
+    yield SampleInput(
+        input=make_input(20, 30, 40),
+        args=(),
+        kwargs={
+            'dim': 1,
+            'start': 1,
+            'end': -2,
+        }
+    )
+
+    yield SampleInput(
+        input=make_input(20, 30, 40),
+        args=(),
+        kwargs={
+            'dim': 1,
+            'start': 1,
+            'end': -2,
+            'step': 3,
+        }
+    )
+
+    yield SampleInput(
+        input=make_input(20, 30, 40),
+        args=(),
+        kwargs={
+            'dim': 0,
+            'start': -10,
+            'end': -2,
+            'step': 2,
+        }
+    )
+
 
 
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
