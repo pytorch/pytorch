@@ -17415,6 +17415,11 @@ python_ref_db = [
         torch_opinfo_name="sum",
         supports_out=True,
     ),
+    PythonRefInfo(
+        "_refs.sum_to_size",
+        torch_opinfo_name="sum_to_size",
+        validate_view_consistency=False,
+    ),
     ReductionPythonRefInfo(
         "_refs.prod",
         torch_opinfo_name="prod",
