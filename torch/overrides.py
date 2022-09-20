@@ -1510,7 +1510,7 @@ def handle_torch_function(
     types = tuple(map(type, overloaded_args))
 
     # Check for __torch_function__ mode.
-    mode = get_current_function_mode()
+    mode = _get_current_function_mode()
     if mode is not None:
         # NB: unlike on tensors, modes are instances
         with _no_torch_function_mode():
@@ -1874,7 +1874,7 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 # library code though, e.g., in handle_torch_function
 @contextlib.contextmanager
 def _no_torch_function_mode() -> Iterator[None]:
-    old = get_current_function_mode()
+    old = _get_current_function_mode()
     _set_torch_function_mode(None)
     try:
         yield
