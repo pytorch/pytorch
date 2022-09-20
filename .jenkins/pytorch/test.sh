@@ -209,7 +209,7 @@ test_dynamo_shard() {
   time python test/run_test.py \
     --exclude-jit-executor \
     --exclude-distributed-tests \
-    --exclude "${SKIP_LIST}" \
+    --exclude "$SKIP_LIST" \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --continue-through-error \
     --verbose
