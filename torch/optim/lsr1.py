@@ -7,6 +7,13 @@ Original file is located at
     https://colab.research.google.com/drive/1d8sF52nLrkNV4iXqvKYSEZlvwzTzTWbX
 """
 
+!pip3 install torchvision
+!pip3 install scipy
+!pip3 install functools
+!pip3 install numpy as np
+!pip3 install tqdm
+!pip3 install torchvision
+
 import torch
 import scipy.optimize as sp
 from functools import reduce
@@ -226,18 +233,18 @@ class LSR1(torch.optim.Optimizer):
 
     def __init__(self,
                  params,
-                 lr=0.2,
+                 lr=0.1,
                  max_iter=20,
                  max_eval=None,
                  tolerance_grad=1e-15,
                  tolerance_change=1e-9,
-                 tr_rho = 0.8,
+                 tr_rho = 0.7,
                  history_size=7,
                  gamma=1,
                  c_1 = 2,
                  c_2 = 0,
                  c_3 = 0.5,
-                 trust_CG_tol=1e-2,
+                 trust_CG_tol=0.001,
                  mu_momentum = 0.5,
                  nu_momentum = 0.5,
                  alpha_S = 0.5,
@@ -331,7 +338,9 @@ class LSR1(torch.optim.Optimizer):
 
     def solve_trust_sub(self,flat_grad, hess_1, hess_2, tr_rho, trust_method, trust_CG_tol, trust_CG_iter):
       """
-      .. The function solve a trust region subproblem.
+      .. The function solve a trust region subproblem. There are two options: 
+          "CG" which solve the problem with the cg-Steighaug method or "cauchy"
+          which solve the problem with a cauchy point calculation.
 
       Args: 
           flat_grad (torch.Tensor): gradient vector
@@ -354,7 +363,7 @@ class LSR1(torch.optim.Optimizer):
       #performs CG Steighaug method for trust problem
       if trust_method == "CG":
         func = lambda a: torch.matmul(flat_grad, a)+torch.matmul(torch.matmul(a, hess_1),torch.matmul(hess_2, a))
-        z = torch.ones(flat_grad.shape[0]).to(device)
+        z = torch.zeros(flat_grad.shape[0]).to(device)
         rr = flat_grad
         dd = -rr
         tol = trust_CG_tol
@@ -449,15 +458,9 @@ class LSR1(torch.optim.Optimizer):
       del U
 
       #create hess matrix, but dont calculate hess
-      # save only the matrices hess_1 and hess_2 which hess = hess_1 @ hess_2
-      P_1 = gamma+lamb.float()*P
-      ones_column = torch.ones(P.shape[0]).reshape(-1,1).to(device)
-      ones_row = torch.ones(P.shape[0]).reshape(1,-1).to(device)
-      hess_1 = torch.cat((P_1, gamma*ones_column), 1).to(device)
-      hess_2 = torch.cat((torch.transpose(P,0,1), ones_row),0).to(device)
-      hess_2[-1, range(lamb.shape[0])]
-      del P
-      return True, hess_1, hess_2
+      # save only the matrices hess_1 and hess_2 which hess = P_lamb @ P
+      P_lamb = gamma+lamb.float()*P
+      return True, P_lamb, torch.transpose(P, 0,1)
 
     def update_SY(self, s, y, old_s, old_y, cond_rest):
       """
@@ -570,7 +573,7 @@ class LSR1(torch.optim.Optimizer):
 
         #check s is defined
         if s == None:
-          s = torch.zeros(dim_hess)
+          s = torch.zeros(dim_hess).to(device)
 
         #check initial radius
         if tr_radius != None:
@@ -597,11 +600,13 @@ class LSR1(torch.optim.Optimizer):
                 d = flat_grad.neg()
                 old_s = []
                 old_y = []
-                hess_1 = gamma*torch.eye(dim_hess).to(device)
-                hess_2 = torch.eye(dim_hess).to(device)
+                hess_1 = gamma*torch.ones(1).to(device)
+                hess_2 = torch.ones(1).to(device)
                 tr_rho = tr_rho
                 v = torch.zeros(dim_hess).to(device)
             else:
+                if torch.linalg.norm(flat_grad) < tolerance_grad:
+                    return orig_loss
                 # stack the list to a tensor 
                 S = torch.transpose(torch.stack(old_s), 0, 1)
                 Y = torch.transpose(torch.stack(old_y), 0, 1)
@@ -615,13 +620,19 @@ class LSR1(torch.optim.Optimizer):
                 #solve trust region subproblem
                 d = self.solve_trust_sub(flat_grad, hess_1, hess_2, tr_rho, trust_method, trust_CG_tol, trust_CG_iter)
                 # do some other options: momentum etc.
-                v = mu_momentum*v - nu_momentum*alpha_S*flat_grad+(1-nu_momentum)*s
-                v = min(1, tr_rho/torch.linalg.norm(v))*v
-                d = (1-nu_momentum)*d + mu_momentum*v
-                d = min(1, tr_rho/torch.linalg.norm(d))*d
-                d = d.to(device)
-            dH = torch.matmul(d, hess_1)
-            Hd = torch.matmul(hess_2, d)
+            v = mu_momentum*v - nu_momentum*alpha_S*flat_grad+(1-nu_momentum)*s
+            v = min(1, tr_rho/torch.linalg.norm(v))*v
+            d = (1-nu_momentum)*d + mu_momentum*v
+            d = min(1, tr_rho/torch.linalg.norm(d))*d
+            d = d.to(device)
+            gd = abs(torch.matmul(flat_grad, d))
+            norm_g = torch.linalg.norm(flat_grad)
+            if state['n_iter']==1:
+              dH = hess_1*d
+              Hd = hess_2*d
+            else:
+              dH = torch.matmul(d, hess_1)
+              Hd = torch.matmul(hess_2, d)
             dHd = torch.matmul(dH, Hd)
 
             #############################################################
@@ -638,8 +649,12 @@ class LSR1(torch.optim.Optimizer):
             #set s/alpha and a part of update condition/alpha
             # then we can delete hess
             s = d
-            sH = torch.matmul(s, hess_1)
-            Hs = torch.matmul(hess_2, s)
+            if state['n_iter']==1:
+              sH = hess_1*s
+              Hs = hess_2*s
+            else:
+              sH = torch.matmul(s, hess_1)
+              Hs = torch.matmul(hess_2, s)
             cond_rest = torch.matmul(sH, Hs)
             del hess_1
             del hess_2
@@ -751,3 +766,235 @@ class LSR1(torch.optim.Optimizer):
 
 
         return orig_loss
+
+"""**Evaluate LSR1 on the rosenbrock function:**"""
+
+import numpy as np
+from tqdm import tqdm
+def rosenbrock(xy):
+    """Evaluate Rosenbrock function.
+    Parameters
+    ----------
+    xy : tuple
+        Two element tuple of floats representing the x resp. y coordinates.
+    Returns
+    -------
+    float
+        The Rosenbrock function evaluated at the point `xy`.
+    """
+    x, y = xy
+
+    return (1 - x) ** 2 + 100 * (y - x ** 2) ** 2
+
+def run_optimization(xy_init, n_iter, **optimizer_kwargs):
+    """Run optimization finding the minimum of the Rosenbrock function.
+    Parameters
+    ----------
+    xy_init : tuple
+        Two floats representing the x resp. y coordinates.
+    optimizer_class : object
+        Optimizer class.
+    n_iter : int
+        Number of iterations to run the optimization for.
+    optimizer_kwargs : dict
+        Additional parameters to be passed into the optimizer.
+    Returns
+    -------
+    path : np.ndarray
+        2D array of shape `(n_iter + 1, 2)`. Where the rows represent the
+        iteration and the columns represent the x resp. y coordinates.
+    """
+    xy_t = torch.tensor(xy_init, requires_grad=True).to(device)
+
+    #Hier kann man Parameter einstellen
+    optimizer = LSR1([xy_t], history_size=2, trust_method="CG", trust_CG_iter=100)
+
+    path = np.empty((n_iter + 1, 2))
+    path[0, :] = xy_init.cpu().detach().numpy()
+
+    for i in tqdm(range(1, n_iter + 1)):
+        optimizer.zero_grad()
+        loss = rosenbrock(xy_t)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(xy_t, 1.0)
+        def closure():
+          if torch.is_grad_enabled():
+            optimizer.zero_grad()
+          loss = rosenbrock(xy_t)
+          if loss.requires_grad:
+            loss.backward()
+          return loss
+        optimizer.step(closure)
+
+        path[i, :] = xy_t.cpu().detach().numpy()
+
+    return path
+
+n_iter = 100
+xy_init = torch.zeros(2).to(device)
+path = run_optimization(xy_init, n_iter)
+path[-1]
+
+"""**Now evaluate on a neuronalnetwork:** \\
+First load data MNist and create network CNN: It contains one input layer, one hidden layer and linear layer at the end. 
+"""
+
+from torchvision import datasets as dts
+from torchvision.transforms import ToTensor
+traindt = dts.MNIST(
+    root = 'data',
+    train = True,                         
+    transform = ToTensor(), 
+    download = True,            
+)
+testdt = dts.MNIST(
+    root = 'data', 
+    train = False, 
+    transform = ToTensor()
+)
+import torch.nn as nn
+class CNN(nn.Module):
+    def __init__(self):
+        super(CNN, self).__init__()        
+        self.conv1 = nn.Sequential(         
+            nn.Conv2d(
+                in_channels=1,              
+                out_channels=6,            
+                kernel_size=5,              
+                stride=1,                   
+                padding=2,                  
+            ),                              
+            nn.ReLU(),                      
+            nn.MaxPool2d(kernel_size=2),    
+        )
+        self.conv2 = nn.Sequential(         
+            nn.Conv2d(6, 4, 5, 1, 2),     
+            nn.ReLU(),                      
+            nn.MaxPool2d(2),                
+        )        # fully connected layer, output 10 classes
+        self.out = nn.Linear(4 * 7 * 7, 10)    
+        
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.conv2(x)        # flatten the output of conv2 to (batch_size, 32 * 7 * 7)
+        x = x.view(x.size(0), -1)       
+        output = self.out(x)
+        return output, x    # return x for visualization
+
+"""define train function"""
+
+from torch.autograd import Variable
+
+loss_func = nn.CrossEntropyLoss()  
+#optimizer = LSR1(CNN_1.parameters(), lr = 0.01, line_search_fn="strong_wolfe") 
+ 
+train_losses, test_losses = [], []
+steps = 0
+running_loss = 0
+print_every = 10
+
+loaders = {
+    'train' : torch.utils.data.DataLoader(traindt, 
+                                          batch_size=128, 
+                                          shuffle=True, 
+                                          num_workers=1),
+    
+    'test'  : torch.utils.data.DataLoader(testdt, 
+                                          batch_size=128, 
+                                          shuffle=True, 
+                                          num_workers=1),
+}
+
+n = len(loaders['train'])
+m = len(loaders['test'])
+
+def train(num_epochs, cnn, loaders, optimizer):
+    running_loss = 0
+    cnn.train()
+        
+    # Train the model
+    total_step = len(loaders['train'])
+        
+    for epoch in range(num_epochs):
+        for i, (images, labels) in enumerate(loaders['train']):
+            
+            images, labels = images.to(device), labels.to(device)
+
+            # gives batch data, normalize x when iterate train_loader
+            b_x = Variable(images)   # batch x
+            b_y = Variable(labels)   # batch y
+            output = cnn(b_x)[0]    
+            
+           
+            loss = loss_func(output, b_y)
+            
+            # clear gradients for this training step   
+            optimizer.zero_grad()           
+            
+            # backpropagation, compute gradients 
+            loss.backward(retain_graph=True)   
+            def closure():
+                if torch.is_grad_enabled():
+                  optimizer.zero_grad()
+                output = cnn(b_x)[0]
+                loss = loss_func(output, b_y)
+                if loss.requires_grad:
+                  loss.backward()
+                return loss
+                      
+            optimizer.step(closure = closure)  
+            running_loss += loss.item()
+            optimizer.zero_grad()              
+            
+            if (i+1) % 100 == 0:
+                test_loss = 0
+                accuracy = 0
+                cnn.eval()
+
+
+                with torch.no_grad():
+                    for inputs, labelss in loaders['test']:
+
+                        inputs, labelss = inputs.to(device),  labelss.to(device)
+                        b_xx = Variable(inputs)   # batch x
+                        b_yy = Variable(labelss)   # batch y
+                        logps = cnn(b_xx)[0]
+                        batch_loss = loss_func(logps, b_yy)
+                        test_loss += batch_loss.item()
+                    
+                        ps = torch.exp(logps)
+                        top_p, top_class = ps.topk(1, dim=1)
+                        equals =  top_class == labelss.view(*top_class.shape)
+                        accuracy +=   torch.mean(equals.type(torch.FloatTensor)).item()
+                train_losses.append(running_loss/n)
+                test_losses.append(test_loss/m)                    
+                print(f"Epoch {epoch+1}/{num_epochs}.. "
+                      f"Train loss: {running_loss/print_every:.3f}.. "
+                      f"Test loss: {test_loss/m:.3f}.. "
+                      f"Test accuracy: {accuracy/m:.3f}")
+                running_loss = 0
+
+"""And now test with LBFGS, LSR1, SGD, Adam
+
+"""
+
+num_epochs = 10
+CNN_1 = CNN().to(device)
+print("LSR1:")
+#hs = 5, mu = 0.5, tr_rho=0.5
+optimizer_LSR1 = LSR1(CNN_1.parameters(),lr=1, line_search_fn="strong_wolfe", history_size=5, mu_momentum=0.5, tr_rho=0.5) 
+train(num_epochs, CNN_1, loaders, optimizer_LSR1)
+CNN_2 = CNN().to(device)
+print("LBFGS:")
+optimizer_LBFGS = torch.optim.LBFGS(CNN_2.parameters(), line_search_fn="strong_wolfe") 
+train(num_epochs, CNN_2, loaders, optimizer_LBFGS)
+
+CNN_3 = CNN().to(device)
+print("SGD:")
+optimizer_SGD = torch.optim.SGD(CNN_3.parameters(), lr = 0.01) 
+train(num_epochs, CNN_3, loaders, optimizer_SGD)
+CNN_4 = CNN().to(device)
+print("ADAM:")
+optimizer_ADAM = torch.optim.Adam(CNN_4.parameters(), lr = 0.01) 
+train(num_epochs, CNN_4, loaders, optimizer_ADAM)
+
