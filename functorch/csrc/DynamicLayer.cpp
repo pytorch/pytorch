@@ -385,15 +385,14 @@ bool isInplaceOp(const FunctionSchema& schema) {
 }
 
 std::map<int64_t, int64_t> findAliasedInputs(const FunctionSchema& schema) {
-  // NOTE: This returns (res index) -> (input index) for each aliasing relationship
   const auto inputs = schema.arguments();
   const auto returns = schema.returns();
   std::map<int64_t, int64_t> alias_map;
   for (size_t res = 0; res != returns.size(); ++res) {
     for (size_t inp = 0; inp != inputs.size(); ++inp) {
       if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, inp), SchemaArgument(SchemaArgType::output, res))) {
-        alias_map[inp] = res;  // for everything currently in native_functions, each inputs aliases at most one output
-        break; // each output can alias at most one input
+        alias_map[inp] = res;
+        break;  // for everything currently in native_functions, each inputs aliases at most one output
       }
     }
   }

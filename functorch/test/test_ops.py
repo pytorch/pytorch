@@ -1638,7 +1638,6 @@ class TestOperators(TestCase):
         loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
         self.assertEqual(loop_out, batched_out)
 
-    # TODO(samdow): generalize to test with all view ops
     @ops(filter(lambda op: op.name in aliasing_ops, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @parametrize("grad_op", ["jvp", "vjp"])
     def test_view_then_inplace(self, device, dtype, op, grad_op):
@@ -1656,7 +1655,6 @@ class TestOperators(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
                     vjp(f, torch.randn_like(without_grad))
 
-    # TODO(samdow): generalize to test with all view ops
     @ops(filter(lambda op: op.name in aliasing_ops_list_return, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @parametrize("grad_op", ["jvp", "vjp"])
     def test_view_then_inplace_list_return(self, device, dtype, op, grad_op):
