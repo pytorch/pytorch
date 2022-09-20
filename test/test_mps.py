@@ -5998,6 +5998,19 @@ class TestConvolutionMPS(TestCase):
 
         self.assertEqual(tcpu, tgpu.cpu(), rtol=2.6e-05, atol=2e-04)
 
+    def test_conv_backward_1d_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/84511
+        conv_cpu = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=3)
+        conv_mps = copy.deepcopy(conv_cpu).to(device='mps')
+
+        data = torch.rand(1, 176, 1, dtype=torch.float32)
+        x_cpu = data.permute(0, 2, 1).contiguous()
+        x_mps = data.permute(0, 2, 1).contiguous().to("mps")
+        res_cpu = conv_cpu(x_cpu).sum().backward()
+        res_mps = conv_mps(x_mps).sum().backward()
+
+        self.assertEqual(res_cpu, res_mps)
+
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
         a_cpu = torch.ones(128, 1, 176)
