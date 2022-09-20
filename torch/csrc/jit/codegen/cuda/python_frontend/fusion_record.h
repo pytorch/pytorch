@@ -27,6 +27,7 @@ enum class RecordType {
   Start,
   VarianceOp,
   VarianceMeanOp,
+  PermuteOp,
 };
 
 //! RecordFunctor is the base class record for operations recorded by
@@ -276,17 +277,53 @@ struct OpRecord : RecordFunctor {
 
 struct PermuteOpRecord : RecordFunctor {
   PermuteOpRecord(
-      std::vector<size_t> _args,
-      std::vector<size_t> _outputs,
+      std::vector<State> _args,
+      std::vector<State> _outputs,
       std::vector<int64_t>& permutation)
-      : RecordFunctor(std::move(_args), std::move(_outputs)),
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            "permute",
+            RecordType::PermuteOp),
         permutation_(std::move(permutation)) {}
   virtual ~PermuteOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new PermuteOpRecord(*this);
+  }
+
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    size_t permutation_hash = 0;
+    for (auto p : permutation_) {
+      permutation_hash ^= static_cast<size_t>(p);
+    }
+    return result | (permutation_hash & 0xffff);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const PermuteOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      if (result) {
+        result = (permutation_.size() == child_ptr->permutation_.size());
+        if (result) {
+          for (size_t i = 0; i < permutation_.size(); ++i) {
+            if (permutation_[i] != child_ptr->permutation_[i]) {
+              result = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+    auto arg =
+        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
     auto output = torch::jit::fuser::cuda::permute(arg, permutation_);
-    fd.setFusionState(outputs.at(0), output);
+    fd.setFusionState(outputs_.at(0).index, output);
   }
 
  private:
