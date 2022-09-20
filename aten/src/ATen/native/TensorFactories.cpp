@@ -483,8 +483,16 @@ Tensor& eye_out(int64_t n, int64_t m, int64_t k, Tensor& result) {
 
   if (result.is_meta()) return result;
 
+
   result.zero_();
-  result.diagonal(k).fill_(1);
+  if (result.is_lazy()) {
+    // LTC does not play well with diagonal as it uses as_strided
+    // Compute length of the diagonal
+    auto l = std::min(m, n) - std::abs(k);
+    result.copy_(at::diagonal_scatter(result, at::ones({l}, result.options()), k));
+  } else {
+    result.diagonal(k).fill_(1);
+  }
   return result;
 }
 

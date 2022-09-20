@@ -749,6 +749,17 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(2)
     yield SampleInput(1, args=(3, 1))
 
+def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
+
+    shapes = (
+        (M,),
+        (S, S)
+    )
+
+    for shape in shapes:
+        yield SampleInput(input=shape, kwargs=dict(dtype=dtype, device=device, requires_grad=requires_grad))
+
 
 def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
 
@@ -2235,11 +2246,19 @@ def error_inputs_renorm(op_info, device, **kwargs):
 
 
 def error_inputs_ormqr(op_info, device, **kwargs):
-    # this is only implemented on cpu
-    if (torch.device(device).type == 'cpu'):
-        zero_d = torch.randn((), device=device)
-        yield ErrorInput(SampleInput(zero_d, args=(zero_d, zero_d)), error_type=RuntimeError,
-                         error_regex="input must have at least 2 dimensions")
+    zero_d = torch.randn((), device=device)
+    yield ErrorInput(SampleInput(zero_d, args=(zero_d, zero_d)), error_type=RuntimeError,
+                     error_regex="input must have at least 2 dimensions")
+
+    # https://github.com/pytorch/pytorch/issues/85218
+    tensor_0 = torch.full((5, 0,), 1, device=device)
+    tensor_1 = torch.full((5,), 1, device=device)
+    tensor_2 = torch.full((5, 5,), 1, device=device)
+    bool_3 = True
+    bool_4 = True
+    yield ErrorInput(SampleInput(tensor_0, args=(tensor_1, tensor_2, bool_3, bool_4)), error_type=RuntimeError,
+                     error_regex=r"tau.shape\[-1\] must be less than or equal to input.shape\[-1\]")
+
 
 def error_inputs_diag(op_info, device, **kwargs):
     zero_d = torch.randn((), device=device)
@@ -3290,17 +3309,34 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
         ), kwargs=kwargs)
 
 
+def error_inputs_conv1d(opinfo, device, **kwargs):
+    input = torch.randn(size=(33, 16, 30), device=device, dtype=torch.float64)
+    weight = torch.randn(size=(20, 16, 5), device=device, dtype=torch.float64)
+    groups = 0
+    yield ErrorInput(
+        SampleInput(input, kwargs={"weight": weight, "groups": groups}),
+        error_regex="non-positive groups is not supported"
+    )
+
+
 def error_inputs_conv2d(opinfo, device, **kwargs):
-    msg = "should be the same"
     weight = torch.randint(high=10, size=(3, 2, 3, 3), device=device)
     input = torch.randint(high=10, size=(2, 4, 4), device=device)
     bias = torch.rand((3,), dtype=torch.float32, device=device)
-    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex="should be the same")
 
     weight = torch.rand(size=(3, 2, 3, 3), device=device, dtype=torch.float64)
     input = torch.rand(size=(2, 4, 4), device=device, dtype=torch.float64)
     bias = torch.rand((3,), dtype=torch.complex128, device=device)
-    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex=msg)
+    yield ErrorInput(SampleInput(input, args=(weight, bias)), error_regex="should be the same")
+
+    input = torch.randn(size=(1, 4, 5, 5), device=device, dtype=torch.float64)
+    weight = torch.randn(size=(8, 4, 3, 3), device=device, dtype=torch.float64)
+    groups = 0
+    yield ErrorInput(
+        SampleInput(input, kwargs={"weight": weight, "groups": groups}),
+        error_regex="non-positive groups is not supported"
+    )
 
 
 def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=False, **kwargs):
@@ -4385,7 +4421,7 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 
-def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
     shapes_and_args = (
         ((S, S, S), (1, 2, 2)),
         ((S, S, S), (-1, 2, 2)),
@@ -4398,8 +4434,17 @@ def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
         tensor = make_tensor(shape, dtype=dtype, device=device, low=None, high=None,
                              requires_grad=requires_grad)
         yield SampleInput(tensor, args=args)
-        # narrow accepts `start` argument to be a Tensor.
-        yield SampleInput(tensor, args=(args[0], torch.tensor(args[1]), args[2]))
+
+
+def sample_inputs_narrow(op_info, device, dtype, requires_grad, **kwargs):
+    '''
+    sample_inputs_narrow accepts the same inputs as narrow_copy, in addition
+    narrow also accepts `start` argument to be a Tensor.
+    '''
+    for sample in sample_inputs_narrow_copy(op_info, device, dtype, requires_grad, **kwargs):
+        yield sample
+        yield SampleInput(sample.input, args=(sample.args[0], torch.tensor(sample.args[1]), sample.args[2]))
+
 
 def sample_trapezoid(op_info, device, dtype, requires_grad, **kwargs):
     y_shape_x_shape_and_kwargs = [
@@ -10698,6 +10743,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
            sample_inputs_func=sample_inputs_conv1d,
+           error_inputs_func=error_inputs_conv1d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -12139,6 +12185,22 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
            )),
+    OpInfo('narrow_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           supports_out=True,
+           supports_forward_ad=False,
+           supports_fwgrad_bwgrad=False,
+           supports_autograd=False,
+           sample_inputs_func=sample_inputs_narrow_copy,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/84577
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # couldn't find symbolic meta function/decomposition
+               DecorateInfo(unittest.expectedFailure, 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_meta', device_type='cuda'),
+               DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta', device_type='cuda'),
+           )),
     UnaryUfuncInfo('neg',
                    aliases=('negative', ),
                    ref=np.negative,
@@ -13168,6 +13230,8 @@ op_db: List[OpInfo] = [
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
            skips=(
+               # need to add pin_memory support to primTorch
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -13192,6 +13256,8 @@ op_db: List[OpInfo] = [
                                     'TestCommon', 'test_noncontiguous_samples',
                                     device_type='cuda')],
            skips=(
+               # need to add pin_memory support to primTorch
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -13822,8 +13888,36 @@ op_db: List[OpInfo] = [
            supports_autograd=False,
            skips=(
            )),
+    OpInfo('randn',
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.complex32),
+           op=lambda *args, **kwargs: wrapper_set_seed(torch.randn, *args, **kwargs),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_randn,
+           supports_autograd=False,
+           skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               # Reference doesn't support the pin_memory parameter
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive'),
+               # CPU randn generates different values based on the strides of out tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
+               # randn fails to warn when resizing its out tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # FX failed to normalize op - add the op to the op_skip list.
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # Tests that assume input tensor has a meaningful effect on output tensor
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
+           )),
     OpInfo('randn_like',
-           dtypes=floating_types_and(torch.half, torch.bfloat16, torch.complex32, torch.complex64, torch.complex128),
+           dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16, torch.complex32),
            op=lambda inp, *args, **kwargs:
                wrapper_set_seed(torch.randn_like, inp, *args, **kwargs),
            supports_out=False,
@@ -14317,7 +14411,15 @@ op_db: List[OpInfo] = [
     OpInfo('renorm',
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_renorm,
-           error_inputs_func=error_inputs_renorm),
+           error_inputs_func=error_inputs_renorm,
+           skips=(
+               # RuntimeError: Difference from float64 is larger with decomposition
+               # linalg_vector_norm.default than original on output 0.
+               # Original max diff: 2.560596747969157e-07,
+               # Decomp max diff: 1.8187482915266173e-06
+               DecorateInfo(unittest.skip("Inconsistent accuracy"), 'TestDecomp', 'test_comprehensive',
+                            device_type='cpu', dtypes=(torch.float16,)),
+           )),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
@@ -17433,6 +17535,23 @@ python_ref_db = [
                          'test_neg_view'),
             # FIXME: should not compare results of empty_like
             DecorateInfo(unittest.skip("Can't check result for empty_like"), 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.randn",
+        torch_opinfo_name="randn",
+        op=lambda *args, **kwargs: wrapper_set_seed(refs.randn, *args, **kwargs),
+        supports_nvfuser=False,
+        skips=(
+            # see https://github.com/pytorch/pytorch/issues/85121
+            DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"),
+                         'TestCommon',
+                         'test_python_ref_executor'),
+            # These tests expect the input to be a tensor or a sequence of tensors
+            DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
+            DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.skip("Test expects tensor input"), 'TestMathBits', 'test_neg_conj_view'),
         ),
     ),
     PythonRefInfo(
