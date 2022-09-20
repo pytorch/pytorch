@@ -202,7 +202,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
 at::Tensor runTorchArange_opset11(
     const Node* node,
     const std::vector<at::Tensor>& inputTensorValues) {
-  AT_ASSERT(inputTensorValues.size() == 3);
+  TORCH_INTERNAL_ASSERT(inputTensorValues.size() == 3);
   auto dtype = inputTensorValues[0].scalar_type();
   at::Tensor updated_val;
   switch (dtype) {
@@ -575,7 +575,7 @@ std::vector<at::Tensor> getValues(
           "getValues: Unsupported kind of constant node found.");
     }
   }
-  AT_ASSERT(inputTensorValues.size() == numInputs);
+  TORCH_INTERNAL_ASSERT(inputTensorValues.size() == numInputs);
   return inputTensorValues;
 }
 
@@ -618,7 +618,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
         "Constant folding not applied.");
     return;
   }
-  AT_ASSERT(b->param_node());
+  TORCH_INTERNAL_ASSERT(b->param_node());
   auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
   // Only the root block is constant-folded. Folding nested blocks is
   // not supported for now.
