@@ -657,6 +657,13 @@ Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
     int64_t dim) {
+  if (inp.numel() == 0) {
+    // When input has a zero sized dimension (empty tensor),
+    // we don't need to actually compute the grads.
+    // So we just reshape `grad` as `input`.
+    return grad.expand_as(inp);
+  }
+
   if (inp.size(dim) == 1) {
     return grad;
   }
@@ -691,7 +698,8 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta()) {
+  if (input.is_meta() || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -716,11 +724,14 @@ Tensor prod_backward(
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  if (!keepdim && input.dim() != 1) {
+  if (!keepdim) {
+    // `prod` reduces the dimension at `dim`,
+    // so, unsqueeze `grad` and `result` at dim.
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta()) {
+  if (input.is_meta() || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
@@ -878,6 +889,25 @@ std::vector<Tensor> cat_tensors_backward(
     auto size = shape[dim];
     accumulate += size;
     grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
+  }
+  return grad_inputs;
+}
+
+std::vector<Tensor> stack_tensors_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const std::vector<ScalarType>& dtypes) {
+  std::vector<Tensor> grad_inputs(dtypes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  bool grad_is_complex = grad.is_complex();
+  for (const auto i : c10::irange(dtypes.size())) {
+    auto gr = grad.select(dim, i);
+    if (grad_is_complex && !at::isComplexType(dtypes[i])) {
+      gr = at::real(gr);
+    }
+    grad_inputs[i] = gr;
   }
   return grad_inputs;
 }
