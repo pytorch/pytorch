@@ -11,9 +11,9 @@ import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dispatch.python import enable_python_dispatcher
-from torch._decomp import pre_autograd_decomposition_table
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+import functorch._src.config as config
 from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
@@ -589,7 +589,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        if tracing_mode == "symbolic" or pre_autograd_decomposition_table:
+        if tracing_mode == "symbolic" or config.use_pre_autograd_decomposition:
             python_dispatcher_mode = enable_python_dispatcher()
 
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)

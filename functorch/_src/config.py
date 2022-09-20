@@ -13,6 +13,8 @@ use_functionalize = True
 
 use_fake_tensor = True
 
+use_pre_autograd_decomposition = True
+
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
 # Prints out forward + backwards FX graphs
 debug_graphs = os.environ.get('AOT_FX_GRAPHS', False)
