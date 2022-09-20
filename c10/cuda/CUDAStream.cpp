@@ -169,9 +169,9 @@ static void initDeviceStreamState(DeviceIndex device_index) {
 
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
     if (C10_UNLIKELY(interp)) {
-      interp->trace_gpu_stream_creation(
+      (*interp)->trace_gpu_stream_creation(
           reinterpret_cast<uintptr_t>(lowpri_stream));
-      interp->trace_gpu_stream_creation(
+      (*interp)->trace_gpu_stream_creation(
           reinterpret_cast<uintptr_t>(hipri_stream));
     }
   }

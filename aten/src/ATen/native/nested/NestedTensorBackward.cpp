@@ -8,7 +8,7 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
-#include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -64,23 +64,6 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
     grad_bias = reshaped_grad.sum(0);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
-}
-
-Tensor _reshape_nested_backward(const Tensor& self, const Tensor& grad) {
-  auto self_ptr = get_nested_tensor_impl(self);
-  // TODO: this is to reproduce self_ptr->opt_sizes_
-  //       if an accessor is provided in the future, can replace this
-  std::vector<int64_t> sizes;
-  for (int64_t i = 0; i < self_ptr->dim(); i++) {
-    c10::optional<int64_t> opt_size = self_ptr->opt_size(i);
-    if (opt_size.has_value()) {
-      sizes.push_back(*opt_size);
-    }
-    else {
-      sizes.push_back(-1);
-    }
-  }
-  return grad.reshape(sizes);
 }
 
 Tensor nested_softmax_backward(
@@ -168,6 +151,23 @@ Tensor _nested_sum_backward_cpu(
 
   return wrap_buffer(self_grad_buffer, self_sizes);
 
+}
+
+
+Tensor _nested_select_backward(
+  const Tensor& grad,
+  const Tensor& nested_self,
+  int64_t dim,
+  int64_t index) {
+  auto nt_self = get_nested_tensor_impl(nested_self);
+  const Tensor& self_buffer = nt_self->get_buffer();
+  const auto self_sizes = nt_self->get_nested_size_tensor();
+  const Tensor& self_grad_buffer = self_buffer.new_zeros(self_buffer.sizes());
+
+  auto nt_grad = wrap_buffer(self_grad_buffer, self_sizes);
+  nt_grad.select(dim, index).copy_(grad);
+
+  return nt_grad;
 }
 
 } // namespace native
