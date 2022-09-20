@@ -657,6 +657,13 @@ Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
     int64_t dim) {
+  if (inp.numel() == 0) {
+    // When input has a zero sized dimension (empty tensor),
+    // we don't need to actually compute the grads.
+    // So we just reshape `grad` as `input`.
+    return grad.expand_as(inp);
+  }
+
   if (inp.size(dim) == 1) {
     return grad;
   }
@@ -677,6 +684,18 @@ Tensor prod_safe_zeros_backward(
   return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
+// checking the storage also encompasses FakeTensors, which report device and
+// dispatch keys as non-meta when not in an composite explicit kernel
+// invocation. because these backwards are implicit kernels fake tensors do not
+// appear as meta.
+bool is_meta_in_composite_kernels(const Tensor& t) {
+  if (t.is_meta()) {
+    return true;
+  }
+  return t.has_storage() &&
+      t.storage().data_ptr().device() == c10::DeviceType::Meta;
+}
+
 // note that the gradient for prod is equivalent to:
 // cumprod(exclusive, normal) * cumprod(exclusive, reverse), e.g.:
 // input:                        [    a,     b,     c]
@@ -691,7 +710,8 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta()) {
+  if (is_meta_in_composite_kernels(input) || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -716,11 +736,15 @@ Tensor prod_backward(
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  if (!keepdim && input.dim() != 1) {
+  if (!keepdim) {
+    // `prod` reduces the dimension at `dim`,
+    // so, unsqueeze `grad` and `result` at dim.
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta()) {
+
+  if (is_meta_in_composite_kernels(input) || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
@@ -878,6 +902,25 @@ std::vector<Tensor> cat_tensors_backward(
     auto size = shape[dim];
     accumulate += size;
     grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
+  }
+  return grad_inputs;
+}
+
+std::vector<Tensor> stack_tensors_backward(
+    const Tensor& grad,
+    int64_t dim,
+    const std::vector<ScalarType>& dtypes) {
+  std::vector<Tensor> grad_inputs(dtypes.size());
+  if (!grad.defined()) {
+    return grad_inputs;
+  }
+  bool grad_is_complex = grad.is_complex();
+  for (const auto i : c10::irange(dtypes.size())) {
+    auto gr = grad.select(dim, i);
+    if (grad_is_complex && !at::isComplexType(dtypes[i])) {
+      gr = at::real(gr);
+    }
+    grad_inputs[i] = gr;
   }
   return grad_inputs;
 }
@@ -6376,6 +6419,40 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   std::tuple<Tensor, Tensor> result =
       std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;
+}
+
+Tensor scatter_reduce_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int dim,
+    const Tensor& index,
+    const Tensor& src_p,
+    const Tensor& src_t,
+    c10::string_view reduce,
+    bool include_self,
+    const Tensor& result) {
+  if (reduce == "sum" || reduce == "mean") {
+    // The function is linear
+    return at::scatter_reduce(self_t, dim, index, src_t, reduce, include_self);
+    //  auto mask = x == restore_reduced_dims(result, dim, keepdim);
+    //  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim,
+    //  keepdim);
+  } else if (reduce == "amin" || reduce == "amax") {
+    auto gather_result = at::gather(result, dim, index);
+    auto mask_self = self_p == result;
+    auto mask_src = src_p == gather_result;
+    auto masked_src_t = at::where(mask_src, src_t, 0.);
+    auto div =
+        mask_self.to(self_t.dtype())
+            .scatter_reduce(
+                dim, index, mask_src.to(self_t.dtype()), "sum", include_self);
+    return at::where(mask_self, self_t, 0.)
+        .scatter_reduce(dim, index, masked_src_t, "sum", include_self)
+        .div(div);
+  } else {
+    // Not implemented
+    return Tensor{};
+  }
 }
 
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
