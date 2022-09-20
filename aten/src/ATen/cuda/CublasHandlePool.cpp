@@ -7,10 +7,10 @@
 
 namespace at { namespace cuda {
 
-static std::map<std::tuple<void *, void *>, at::DataPtr> handle_stream_to_workspace;
+static std::map<std::tuple<void *, void *>, at::DataPtr> cublas_handle_stream_to_workspace;
 
 void clearCublasWorkspaces() {
-  handle_stream_to_workspace.clear();
+  cublas_handle_stream_to_workspace.clear();
 }
 
 namespace {
@@ -96,11 +96,11 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   // cublasSetWorkspace not available on CUDA 10.2
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  if (handle_stream_to_workspace.find(key) == handle_stream_to_workspace.end()) {
+  if (cublas_handle_stream_to_workspace.find(key) == cublas_handle_stream_to_workspace.end()) {
       auto workspace_ptr = getNewWorkspace();
-      handle_stream_to_workspace[key] = std::move(workspace_ptr);
+      cublas_handle_stream_to_workspace[key] = std::move(workspace_ptr);
   }
-  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, handle_stream_to_workspace[key].get(), getChosenWorkspaceSize()));
+  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, cublas_handle_stream_to_workspace[key].get(), getChosenWorkspaceSize()));
 #endif
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
