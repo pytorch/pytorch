@@ -213,7 +213,7 @@ static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "storage_offset");
   }
   auto& self = THPVariable_Unpack(self_);
-  return py::cast(self.sym_storage_offset()).release().ptr();
+  return wrap(self.storage_offset());
   END_HANDLE_TH_ERRORS
 }
 

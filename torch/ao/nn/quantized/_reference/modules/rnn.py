@@ -7,12 +7,10 @@ from typing import Optional, Dict, Any, Tuple
 from torch import _VF
 from torch.nn.utils.rnn import PackedSequence
 
-__all__ = ['RNNCellBase', 'RNNCell', 'LSTMCell', 'GRUCell', 'RNNBase', 'LSTM', 'get_quantized_weight']
-
-def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
-def _get_weight_and_quantization_params(module, wn):
+def get_weight_and_quantization_params(module, wn):
     weight = getattr(module, wn)
     params = [weight]
     for param_name in [wn + n for n in ["_qscheme", "_dtype", "_scale", "_zero_point", "_axis"]]:
@@ -26,14 +24,14 @@ def _get_weight_and_quantization_params(module, wn):
 def get_quantized_weight(module, wn):
     if not hasattr(module, wn):
         return None
-    params = _get_weight_and_quantization_params(module, wn)
+    params = get_weight_and_quantization_params(module, wn)
     weight = _quantize_weight(*params)
     return weight
 
-def _get_quantize_and_dequantized_weight(module, wn):
+def get_quantize_and_dequantized_weight(module, wn):
     if not hasattr(module, wn):
         return None
-    params = _get_weight_and_quantization_params(module, wn)
+    params = get_weight_and_quantization_params(module, wn)
     weight = _quantize_and_dequantize_weight(*params)
     return weight
 
@@ -97,10 +95,10 @@ class RNNCellBase(nn.RNNCellBase):
         return get_quantized_weight(self, "weight_hh")
 
     def get_weight_ih(self):
-        return _get_quantize_and_dequantized_weight(self, "weight_ih")
+        return get_quantize_and_dequantized_weight(self, "weight_ih")
 
     def get_weight_hh(self):
-        return _get_quantize_and_dequantized_weight(self, "weight_hh")
+        return get_quantize_and_dequantized_weight(self, "weight_hh")
 
 class RNNCell(RNNCellBase):
     """
@@ -336,7 +334,7 @@ class LSTM(RNNBase):
                        ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
-        return _apply_permutation(hx[0], permutation), _apply_permutation(hx[1], permutation)
+        return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
 
     def get_expected_cell_size(self, input: Tensor, batch_sizes: Optional[Tensor]) -> Tuple[int, int, int]:
         if batch_sizes is not None:
@@ -388,7 +386,7 @@ class LSTM(RNNBase):
             if hasattr(self, wn):
                 weight = getattr(self, wn)
                 if wn.startswith("weight"):
-                    params = _get_weight_and_quantization_params(self, wn)
+                    params = get_weight_and_quantization_params(self, wn)
                     weight = _quantize_and_dequantize_weight(*params)
             else:
                 weight = None

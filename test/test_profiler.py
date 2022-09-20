@@ -1990,15 +1990,10 @@ aten::mm""")
         try:
             with open("./torchtidy_report.json") as f:
                 report = json.load(f)
-
-            # It is platform dependent whether the path will include "profiler/"
-            keys = [k for k in report.keys() if k.endswith("test_profiler.py")]
-            self.assertEqual(len(keys), 1, f"{keys}")
-            entry = report[keys[0]]
-
-            self.assertTrue(len(entry) > 0)
+            self.assertTrue("test_profiler.py" in report)
+            self.assertTrue(len(report["test_profiler.py"]) > 0)
             expected_fields = sorted(["line_number", "name", "url", "message"])
-            for event in entry:
+            for event in report["test_profiler.py"]:
                 actual_fields = sorted(event.keys())
                 self.assertEqual(expected_fields, actual_fields)
         finally:
