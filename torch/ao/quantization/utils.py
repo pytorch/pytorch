@@ -183,11 +183,22 @@ def weight_dtype(qconfig):
     weight = qconfig.weight()
     return weight.dtype
 
+# Note: the type is Optional[bool] to match backend_config_dict
+def is_dynamic(qconfig) -> Optional[bool]:
+    assert qconfig is not None
+    activation = qconfig.activation()
+    if hasattr(activation, 'compute_dtype'):
+        return True
+    return None
+
 def activation_is_statically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
     quantized or not, this includes quantizing to quint8, qint8 and float16
     """
-    return activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+    return (
+        activation_dtype(qconfig) in [torch.quint8, torch.qint8, torch.float16]
+        and is_dynamic(qconfig) is None
+    )
 
 def activation_is_dynamically_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
@@ -196,8 +207,7 @@ def activation_is_dynamically_quantized(qconfig):
     """
     activation_dtype, _, activation_compute_dtype = \
         get_qconfig_dtypes(qconfig)
-    return activation_dtype == torch.float and \
-        activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
+    return activation_compute_dtype in [torch.quint8, torch.qint8, torch.float16]
 
 def activation_is_int8_quantized(qconfig):
     """ Given a qconfig, decide if the activation needs to be
@@ -230,10 +240,11 @@ def op_is_int8_dynamically_quantized(qconfig) -> bool:
     activation_dtype, weight_dtype, activation_compute_dtype = \
         get_qconfig_dtypes(qconfig)
     return (
-        activation_dtype is torch.float and
+        activation_dtype is torch.quint8 and
         # for now, the lines below assume fbgemm or qnnpack
         weight_dtype is torch.qint8 and
         activation_compute_dtype is torch.quint8
+        # TODO(future PR): add is_dynamic
     )
 
 def get_qconfig_dtypes(qconfig):
@@ -252,15 +263,15 @@ def get_quant_type(qconfig):
     weight = qconfig.weight()
     static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2]
     if weight.dtype in static_dtypes:
-        if activation.dtype in static_dtypes:
-            return QuantType.STATIC
-        elif hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
+        if hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
             return QuantType.DYNAMIC
+        elif activation.dtype in static_dtypes:
+            return QuantType.STATIC
         else:
             return QuantType.WEIGHT_ONLY
 
     if weight.dtype == torch.float16:
-        if activation.dtype == torch.float:
+        if hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
             return QuantType.DYNAMIC
         elif activation.dtype == torch.float16:
             return QuantType.STATIC
