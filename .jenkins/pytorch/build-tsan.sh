@@ -18,7 +18,7 @@ if [ -n "$(which conda)" ]; then
   export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
-CC="clang" CXX="clang++" LDSHARED="clang --shared" \
+CC="clang" CXX="clang++" LDSHARED="clang --shared -ltsan" \
   CFLAGS="-fsanitize=thread" \
   USE_TSAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py bdist_wheel
