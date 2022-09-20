@@ -189,8 +189,8 @@ NestedTensor and any constraints they have.
    :widths: 30, 55
    :delim: ;
 
-   :func:`torch.matmul`;  "Supports matrix multiplication between two (>= 3d) nested tensors where 
-   the last two dimensions are matrix dimensions and the leading (batch) dimensions have the same size 
+   :func:`torch.matmul`;  "Supports matrix multiplication between two (>= 3d) nested tensors where
+   the last two dimensions are matrix dimensions and the leading (batch) dimensions have the same size
    (i.e. no broadcasting support for batch dimensions yet)."
    :func:`torch.bmm`; "Supports batch matrix multiplication of two 3-d nested tensors."
    :func:`torch.nn.Linear`;  "Supports 3-d nested input and a dense 2-d weight matrix."
@@ -198,9 +198,9 @@ NestedTensor and any constraints they have.
    :func:`torch.nn.Dropout`; "Behavior is the same as on regular tensors."
    :func:`torch.relu`; "Behavior is the same as on regular tensors."
    :func:`torch.gelu`; "Behavior is the same as on regular tensors."
-   :func:`torch.add`; "Supports elementwise addition of two nested tensors. 
+   :func:`torch.add`; "Supports elementwise addition of two nested tensors.
    Supports addition of a scalar to a nested tensor."
-   :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors. 
+   :func:`torch.mul`; "Supports elementwise multiplication of two nested tensors.
    Supports multipication of a nested tensor by a scalar."
    :func:`torch.select`; "Supports selecting along `dim=0` only (analogously `nt[i]`)."
    :func:`torch.clone`; "Behavior is the same as on regular tensors."
