@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, Optional, Sequence
 
 import torch
 
+from torch._prims.context import NvfuserPrimsMode
 import torch._prims_common as utils
 from torch._prims_common import (
     DimsSequenceType,
@@ -302,40 +303,6 @@ _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
-
-
-class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
-    """
-    Switches the interpretation of torch.ops.prims.* functions to
-    use nvFuser's prims in torch.ops.nvprims.*
-
-    >>> # xdoctest: +SKIP("undefined vars")
-    >>> with NvfuserPrimsMode():
-    ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
-
-    By default, this context manager will fall back on the torch.ops.prims* if the
-    nvprim does not exist.
-    """
-
-    def __torch_function__(
-        self,
-        orig_func: Callable,
-        types: Sequence,
-        args: Sequence[Any] = (),
-        kwargs: Dict = None,
-    ):
-        if kwargs is None:
-            kwargs = {}
-        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
-            orig_func, torch._ops.OpOverloadPacket
-        ):
-            namespace = str(orig_func).split(".")[0]
-            name = str(orig_func).split(".")[1]
-            if namespace == "prims":
-                nvfunc = getattr(torch.ops.nvprims, name, None)
-                if nvfunc is not None:
-                    return nvfunc(*args, **kwargs)
-        return orig_func(*args, **kwargs)
 
 
 prims = torch.ops.prims

@@ -9,13 +9,10 @@ import torch._prims
 
 import torch._refs
 import torch._refs.nn
-import torch._refs.nn.functional
-import torch._refs.special
 import torch.overrides
 from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
 
 from torch._prims_common import torch_function_passthrough
-from torch._prims.nvfuser_prims import NvfuserPrimsMode
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 from torch.utils._mode_utils import autodispatch_below_autograd
 
@@ -93,6 +90,40 @@ def all_prims():
     Set of all prim functions, e.g., torch._prims.add in all_prims()
     """
     return {torch._prims.__dict__.get(s) for s in torch._prims.__all__}
+
+
+class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
+    """
+    Switches the interpretation of torch.ops.prims.* functions to
+    use nvFuser's prims in torch.ops.nvprims.*
+
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode():
+    ...     torch.ops.prims.add(x, y)  # calls torch.ops.nvprims.add(x, y)
+
+    By default, this context manager will fall back on the torch.ops.prims* if the
+    nvprim does not exist.
+    """
+
+    def __torch_function__(
+        self,
+        orig_func: Callable,
+        types: Sequence,
+        args: Sequence[Any] = (),
+        kwargs: Dict = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
+            orig_func, torch._ops.OpOverloadPacket
+        ):
+            namespace = str(orig_func).split(".")[0]
+            name = str(orig_func).split(".")[1]
+            if namespace == "prims":
+                nvfunc = getattr(torch.ops.nvprims, name, None)
+                if nvfunc is not None:
+                    return nvfunc(*args, **kwargs)
+        return orig_func(*args, **kwargs)
 
 
 class TorchRefsMode(torch.overrides.TorchFunctionMode):
