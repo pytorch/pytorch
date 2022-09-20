@@ -516,8 +516,8 @@ def get_arg_target_is_dynamic_as_input_to_node(
     is_bias = node_arg_is_bias(node, arg, backend_config)
     is_activation = not is_weight and not is_bias
     if is_activation and \
-       "input_activation" in node_name_to_target_dtype[node.name]:
-        return node_name_to_target_dtype[node.name]["input_activation"][1]
+       "input_activation_dtype" in node_name_to_target_dtype[node.name]:
+        return node_name_to_target_dtype[node.name]["input_activation_dtype"][1]
     else:
         return False
 
@@ -577,25 +577,29 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         arg_as_input_target_is_dynamic = \
             get_arg_target_is_dynamic_as_input_to_node(
                 arg, node, modules, node_name_to_target_dtype, backend_config)  # type: ignore[arg-type]
-        needs_obs = (
-            # if the dtypes are different, we need an observer
-            (arg_as_output_target_dtype != arg_as_input_target_dtype) and
-            # except if the second dtype is float, a dequant will be inserted
-            # without an observer in convert
-            # TODO(future PR): change this so a placeholder is inserted for
-            # future dequants, to make the logic easier to understand
-            (arg_as_input_target_dtype != torch.float) and
-            # if arg output dtype is in DO_NOT_OBS_DTYPE_LIST do not insert observer
-            (arg_as_output_target_dtype not in DO_NOT_OBS_DTYPE_LIST) and
-            # if qconfig is reuse_input qconfig, we won't insert extra observer for input
-            not is_reuse_input_qconfig_ or
-            # need to add input observer for dynamic quantization
-            # only add observer for first input for now, we may need to extend
-            # qconfig_dict and backend_config to support more general configurations
-            # of dynamic quantization, e.g. dynamically quantizing second input, third
-            # input etc.
-            (arg_as_input_target_is_dynamic) and arg is node.args[0]
-        )
+        needs_obs = \
+            (
+                # the following code block is for static quantization
+                (not arg_as_input_target_is_dynamic) and
+                # if the dtypes are different, we need an observer
+                (arg_as_output_target_dtype != arg_as_input_target_dtype) and
+                # except if the second dtype is float, a dequant will be inserted
+                # without an observer in convert
+                # TODO(future PR): change this so a placeholder is inserted for
+                # future dequants, to make the logic easier to understand
+                (arg_as_input_target_dtype != torch.float) and
+                # if arg output dtype is in DO_NOT_OBS_DTYPE_LIST do not insert observer
+                (arg_as_output_target_dtype not in DO_NOT_OBS_DTYPE_LIST) and
+                # if qconfig is reuse_input qconfig, we won't insert extra observer for input
+                not is_reuse_input_qconfig_
+            ) or (
+                # need to add input observer for dynamic quantization
+                # only add observer for first input for now, we may need to extend
+                # qconfig_dict and backend_config to support more general configurations
+                # of dynamic quantization, e.g. dynamically quantizing second input, third
+                # input etc.
+                arg_as_input_target_is_dynamic and arg is node.args[0]
+            )
 
     else:
         # custom flow for standalone modules
