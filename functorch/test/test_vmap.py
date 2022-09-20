@@ -3196,6 +3196,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
+        xfail('unique', ''),  # dynamic op
+        xfail('unique_consecutive', ''),  # dynamic op
         xfail('allclose'),  # returns a boolean
         xfail('uniform'),  # randomness is tested separately
         xfail('rand_like'),  # randomness is tested separately
