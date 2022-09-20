@@ -271,11 +271,6 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
-@register_op_impl(aten._efficientzerotensor.default)
-def efficient_zero(fake_mode, func, *args, **kwargs):
-    return constructors(fake_mode, aten.zeros.default, *args, **kwargs)
-
-
 @register_op_impl(
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
@@ -334,7 +329,7 @@ def to_copy(fake_mode, func, *args, **kwargs):
 
     input_device = new_kwargs.pop("device", None)
     out_device = input_device if input_device else new_kwargs["input"].device
-    with no_dispatch():
+    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
         input = new_kwargs.pop("input").to("meta")
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
