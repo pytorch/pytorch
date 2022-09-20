@@ -286,6 +286,123 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
 
 
 def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+    joint_forward_backward = create_joint_forward_backward(flat_fn)
+
+    out = flat_fn(*flat_args)
+    out = pytree.tree_map(
+        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
+        out,
+    )
+
+    if isinstance(out, (list, tuple)):
+        _num_outs = len(out)
+    else:
+        _num_outs = 1
+
+    joint_inputs = (flat_args, out)
+
+    if config.use_functionalize:
+        # Trace once without decompositions, into a graph of ATen ops.
+        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+
+        def fake_fn(primals, tangents):
+            with torch.fx.traceback.override_stack_trace():
+                return torch.fx.Interpreter(fx_g).run(primals, tangents)
+
+        # Trace a second time, running functionalization, and THEN running decompositions.
+        # functionalization only acts on ATen today, and doesn't currently handle
+        # view and inplace ops that come from primtorch.
+        # Eventually, functionalization should support primtorch view/inplace ops,
+        # which will make it ok to run decompositions before functionalization.
+        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+    else:
+        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
+
+    if config.debug_joint:
+        print("====== Joint graph ======")
+        fx_g.print_readable()
+
+    with torch.no_grad():
+        with track_graph_compiling("joint"):
+            fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
+
+        if config.debug_graphs:
+            print("====== Forward graph ======")
+            fw_module.print_readable()
+            print("====== Backward graph ======")
+            bw_module.print_readable()
+
+        with track_graph_compiling("forward"):
+            compiled_fw_func = aot_config.fw_compiler(fw_module, flat_args)
+
+        if config.debug_partitioner:
+            fw_outs = call_func_with_args(compiled_fw_func, flat_args)
+            activation_sizes = 0
+            for out in fw_outs[_num_outs:]:
+                if isinstance(out, torch.Tensor):
+                    activation_sizes += out.storage().nbytes()
+            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
+
+    class CompiledFunction(torch.autograd.Function):
+        compiled_fw = compiled_fw_func
+        compiled_bw = None
+        num_outs = _num_outs
+
+        @staticmethod
+        @disable_torchdynamo
+        def forward(ctx, *flat_tensor_args):
+            fw_outs = call_func_with_args(
+                CompiledFunction.compiled_fw, flat_tensor_args
+            )
+            num_outs = CompiledFunction.num_outs
+            ctx.save_for_backward(*fw_outs[num_outs:])
+            return tuple(fw_outs[0:num_outs])
+
+        @staticmethod
+        @disable_torchdynamo
+        def backward(ctx, *flat_args):
+            contiguous_args = [t.contiguous() for t in flat_args]
+            all_args = list(ctx.saved_tensors) + list(contiguous_args)
+            if CompiledFunction.compiled_bw is None:
+                with track_graph_compiling("backward", True):
+                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                        bw_module, all_args
+                    )
+            ctx.maybe_clear_saved_tensors()
+            out = call_func_with_args(
+                CompiledFunction.compiled_bw, all_args, steal_args=True
+            )
+
+            return tuple(out)
+
+    return CompiledFunction.apply
+
+
+@dynamo_timed
+def create_aot_dispatcher_function(
+    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
+):
+    """
+    Traces the forward and backward graphs of the attr:`flat_fn` to generate a
+    joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
+    the tracing mechanism to understand the graph capturing details.
+
+    The joint graph is then passed through attr:`partition_fn` to isolate the
+    forward and backward portions, which are then respectively compiled via the
+    provided attr:`fw_compiler` and attr:`bw_compiler`.
+
+    The resulting compiled forward and backward graphs are then wrapped up in a
+    ``torch.autograd.Function`` object.
+    """
+    if aot_config.decompositions is None:
+        aot_config.decompositions = {}
+
+    aot_config.decompositions = {
+        **aot_autograd_decompositions,
+        **aot_config.decompositions,
+    }
+    fake_mode = FakeTensorMode if config.use_fake_tensor else nullcontext
+
     # Deduplicate inputs.  Suppose you have:
     #
     #   [a, b, a, c]
@@ -324,6 +441,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         deduped_flat_args.append(t)
 
     def remove_dupe_args(args):
+        if not drop_args:
+            return args
         r = []
         for i, t in enumerate(args):
             if i in drop_args:
@@ -332,137 +451,29 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         return r
 
     def add_dupe_args(args):
+        if not drop_args:
+            return args
         r = []
         for i in range(duped_arg_len):
             r.append(args[add_dupe_map[i]])
         return r
 
-    joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
+    @wraps(flat_fn)
+    def deduped_flat_fn(*deduped_flat_args):
+        return flat_fn(*add_dupe_args(deduped_flat_args))
 
-    out = flat_fn(*flat_args)
-    out = pytree.tree_map(
-        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        out,
-    )
-
-    if isinstance(out, (list, tuple)):
-        _num_outs = len(out)
-    else:
-        _num_outs = 1
-
-    joint_inputs = (deduped_flat_args, out)
-
-    if config.use_functionalize:
-        # Trace once without decompositions, into a graph of ATen ops.
-        fx_g = make_fx(joint_forward_backward)(*joint_inputs)
-
-        def fake_fn(primals, tangents):
-            with torch.fx.traceback.override_stack_trace():
-                return torch.fx.Interpreter(fx_g).run(primals, tangents)
-
-        # Trace a second time, running functionalization, and THEN running decompositions.
-        # functionalization only acts on ATen today, and doesn't currently handle
-        # view and inplace ops that come from primtorch.
-        # Eventually, functionalization should support primtorch view/inplace ops,
-        # which will make it ok to run decompositions before functionalization.
-        fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
-    else:
-        fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
-
-    if config.debug_joint:
-        print("====== Joint graph ======")
-        fx_g.print_readable()
-
-    with torch.no_grad():
-        with track_graph_compiling("joint"):
-            fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
-
-        if config.debug_graphs:
-            print("====== Forward graph ======")
-            fw_module.print_readable()
-            print("====== Backward graph ======")
-            bw_module.print_readable()
-
-        with track_graph_compiling("forward"):
-            compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args)
-
-        if config.debug_partitioner:
-            fw_outs = call_func_with_args(compiled_fw_func, deduped_flat_args)
-            activation_sizes = 0
-            for out in fw_outs[_num_outs:]:
-                if isinstance(out, torch.Tensor):
-                    activation_sizes += out.storage().nbytes()
-            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
-
-    class CompiledFunction(torch.autograd.Function):
-        compiled_fw = compiled_fw_func
-        compiled_bw = None
-        num_outs = _num_outs
-
-        @staticmethod
-        @disable_torchdynamo
-        def forward(ctx, *deduped_flat_tensor_args):
-            fw_outs = call_func_with_args(
-                CompiledFunction.compiled_fw, deduped_flat_tensor_args
-            )
-            num_outs = CompiledFunction.num_outs
-            ctx.save_for_backward(*fw_outs[num_outs:])
-            return tuple(fw_outs[0:num_outs])
-
-        @staticmethod
-        @disable_torchdynamo
-        def backward(ctx, *flat_args):
-            contiguous_args = [t.contiguous() for t in flat_args]
-            all_args = list(ctx.saved_tensors) + list(contiguous_args)
-            if CompiledFunction.compiled_bw is None:
-                with track_graph_compiling("backward", True):
-                    CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                        bw_module, all_args
-                    )
-            ctx.maybe_clear_saved_tensors()
-            out = call_func_with_args(
-                CompiledFunction.compiled_bw, all_args, steal_args=True
-            )
-
-            return tuple(out)
-
-    return lambda *args: CompiledFunction.apply(*remove_dupe_args(args))
-
-
-@dynamo_timed
-def create_aot_dispatcher_function(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig
-):
-    """
-    Traces the forward and backward graphs of the attr:`flat_fn` to generate a
-    joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
-    the tracing mechanism to understand the graph capturing details.
-
-    The joint graph is then passed through attr:`partition_fn` to isolate the
-    forward and backward portions, which are then respectively compiled via the
-    provided attr:`fw_compiler` and attr:`bw_compiler`.
-
-    The resulting compiled forward and backward graphs are then wrapped up in a
-    ``torch.autograd.Function`` object.
-    """
-    if aot_config.decompositions is None:
-        aot_config.decompositions = {}
-
-    aot_config.decompositions = {
-        **aot_autograd_decompositions,
-        **aot_config.decompositions,
-    }
-    fake_mode = FakeTensorMode if config.use_fake_tensor else nullcontext
+    def dedupe_wrapper(f):
+        # NB: this is the boxed calling convention
+        @wraps(f)
+        def inner(args):
+            return f(remove_dupe_args(args))
+        return inner
 
     with preserve_rng_state(), fake_mode() as mode:
-
-        def process_inputs(flat_args):
-            if mode:
-                return pytree.tree_map_only(Tensor, mode.from_tensor, flat_args)
-            else:
-                return flat_args
-
-        fake_flat_tensor_args = process_inputs(flat_args)
+        if mode:
+            fake_flat_tensor_args = [mode.from_tensor(a) for a in deduped_flat_args]
+        else:
+            fake_flat_tensor_args = deduped_flat_args
 
         needs_autograd = (
             any(
@@ -477,11 +488,11 @@ def create_aot_dispatcher_function(
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
-            return make_boxed_func(
-                aot_dispatch_autograd(flat_fn, fake_flat_tensor_args, aot_config)
-            )
+            return dedupe_wrapper(make_boxed_func(
+                aot_dispatch_autograd(deduped_flat_fn, fake_flat_tensor_args, aot_config)
+            ))
         else:
-            return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
+            return dedupe_wrapper(aot_dispatch_base(deduped_flat_fn, fake_flat_tensor_args, aot_config))
 
 
 class _CompileCache(CompileCache):
