@@ -5197,6 +5197,9 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((3, 3, 3)), args=(1,))
     yield SampleInput(make_arg((3, 3, 3)), args=(1,), kwargs={'keepdim': True})
 
+    yield SampleInput(make_arg((3, 0)), args=(1,))
+    yield SampleInput(make_arg((3, 0)), args=(1,), kwargs={'keepdim': True})
+
     # test zero scalar tensor
     zero = make_arg(())
     zero.zero_()
@@ -15706,10 +15709,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_prod,
         ref=reference_reduction_numpy(np.prod),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
             # FIXME: prod does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: prod reduces all dimensions when dim=[]
