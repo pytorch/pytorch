@@ -1980,7 +1980,7 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-# @register_decomposition(aten.dot, disable_meta=True)
+@register_decomposition(aten.dot, disable_meta=True)
 @pw_cast_for_opmath
 def dot(self, other):
     if self.is_complex():
@@ -2062,7 +2062,7 @@ def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
         return False
 
 
-# @torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 def matmul(tensor1, tensor2):
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
