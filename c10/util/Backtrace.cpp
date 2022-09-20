@@ -127,9 +127,7 @@ std::string rstrip(const std::string& s) {
 
 bool use_addr2line() {
   static bool _use_addr2line = []() {
-    return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES_WITH_LINENO") ==
-        true &&
-        !system("which addr2line > /dev/null 2>&1");
+    return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES_WITH_LINENO") == true;
   }();
   return _use_addr2line;
 }
