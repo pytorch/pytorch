@@ -10,9 +10,9 @@ from functools import wraps
 from typing import Any, Callable, Dict, Optional, Sequence
 
 import torch
-
-from torch._prims.context import NvfuserPrimsMode
 import torch._prims_common as utils
+
+from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
 from torch._prims_common import (
     DimsSequenceType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -580,7 +580,7 @@ def _register_vjp(prim, vjp_impl):
             ]
             fw_out = ctx.saved_tensors[: ctx.nout]
 
-            with NvfuserPrimsMode():
+            with NvfuserPrimsMode(), TorchRefsMode():
                 vjp_result = vjp_impl(*bw_args, *fw_out, *fw_args, **ctx.kwargs)
             vjp_result = (
                 (vjp_result,) if isinstance(vjp_result, torch.Tensor) else vjp_result
