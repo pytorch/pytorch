@@ -26,16 +26,14 @@ import collections
 import functools
 import types
 import warnings
-import threading
 from typing import Dict, Set, List, Any, Callable, Iterable, Type, Iterator, Tuple
 import contextlib
 
 import torch
 from torch._C import (
     _has_torch_function, _has_torch_function_unary,
-    _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
-
-from torch.utils._mode_utils import _ModeInfo
+    _has_torch_function_variadic, _add_docstr,
+    _push_on_torch_function_stack, _pop_torch_function_stack, _get_function_stack_at, _len_torch_function_stack, _set_torch_function_mode)
 
 __all__ = [
     "get_ignored_functions",
@@ -1510,7 +1508,7 @@ def handle_torch_function(
     types = tuple(map(type, overloaded_args))
 
     # Check for __torch_function__ mode.
-    mode = _get_torch_function_mode()
+    mode = get_current_function_mode()
     if mode is not None:
         # NB: unlike on tensors, modes are instances
         with _no_torch_function_mode():
@@ -1831,25 +1829,24 @@ class TorchFunctionMode():
         return instance
 
 
-# WARNING: If you access this list to see all the active modes in order, do not update the list in place
-# since it alters the actual mode stack
-_cur_mode_stack = []
+def get_current_function_mode():
+    stack_len = _len_torch_function_stack()
+    return _get_function_stack_at(stack_len - 1) if stack_len > 0 else None
 
 
-def _get_current_function_mode():
-    return _cur_mode_stack[-1] if len(_cur_mode_stack) > 0 else None
-
+def get_current_function_mode_stack():
+    stack_len = _len_torch_function_stack()
+    return [_get_function_stack_at(i) for i in range(stack_len)]
 
 def _push_mode(mode):
-    if len(_cur_mode_stack) == 0:
+    if _len_torch_function_stack() == 0:
         _set_torch_function_mode(_TorchFunctionStackMode())
-    _cur_mode_stack.append(mode)
+    _push_on_torch_function_stack(mode)
 
 
 def _pop_mode():
-    assert len(_cur_mode_stack) > 0
-    old = _cur_mode_stack.pop()
-    if len(_cur_mode_stack) == 0:
+    old = _pop_torch_function_stack()
+    if _len_torch_function_stack() == 0:
         _set_torch_function_mode(None)
     return old
 
@@ -1867,7 +1864,7 @@ def _pop_mode_temporarily():
 class _TorchFunctionStackMode:
     def __torch_function__(self, func, types, args=(), kwargs=None):
         with _pop_mode_temporarily() as old:
-            if len(_cur_mode_stack) > 0:
+            if _len_torch_function_stack() > 0:
                 _set_torch_function_mode(self)
             # we can't check the type of __torch_function__ here but this is sufficient for checking it's a classmethod
             if old.__torch_function__.__self__ is type(old):
@@ -1887,23 +1884,13 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 # library code though, e.g., in handle_torch_function
 @contextlib.contextmanager
 def _no_torch_function_mode() -> Iterator[None]:
-    old = _get_torch_function_mode()
+    old = get_current_function_mode()
     _set_torch_function_mode(None)
     try:
         yield
     finally:
         _set_torch_function_mode(old)
 
-
-class _TorchFunctionModeInfo(_ModeInfo):
-    def __init__(self):
-        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode)
-
-    def get_mode(self):
-        return _get_torch_function_mode()
-
-    def set_mode(self, mode):
-        return _set_torch_function_mode(mode)
 
 class enable_reentrant_dispatch():
     def __enter__(self):

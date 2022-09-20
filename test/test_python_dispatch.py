@@ -1016,7 +1016,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             with PoliteMode():
                 a.abs()
 
-    def test_error_with_same_mode(self):
+    def test_nesting_same_mode(self):
         # If the pushed mode is the same instance as the current mode, we allow pushing an already active mode.
 
         with capture_logs(is_mode=True) as logs:
