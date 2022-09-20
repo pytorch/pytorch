@@ -357,6 +357,12 @@ void addmm_out_sparse_csr(
       !((mat1.layout() == kStrided) && (mat2.layout() == kStrided) &&
         (result.layout() == kStrided)),
       "Expected at least one sparse input");
+
+  // Layout checks are nested mat1, mat2, result
+  // Conditions are ordered strided, csr, csc, bsr, bsc.
+  // Valid combinations terminate in a return
+  // Invalid combinations are omitted and will fall though to the TORCH check
+  // generating an informative error message
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
@@ -403,10 +409,12 @@ void addmm_out_sparse_csr(
     }
     if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
+        // TODO: CSR @ CSC kernel would be very fast due to format alignment
         return addmm_sparse_input_dense_result(
             mat1, mat2.to_sparse_csr(), beta, alpha, result);
       }
       if (result.layout() == kSparseCsr) {
+        // TODO: CSR @ CSC kernel would be very fast due to format alignment
         return addmm_sparse_result(
             mat1, mat2.to_sparse_csr(), beta, alpha, result);
       }
@@ -414,16 +422,19 @@ void addmm_out_sparse_csr(
   } else if (mat1.layout() == kSparseCsc) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
+        // TODO: avoid csc->csr conversion with native csc support
         return addmm_dense_result(
             mat1.to_sparse_csr(), mat2, beta, alpha, result);
       }
     } else if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr) {
+        // TODO: avoid csc->csr conversion with native csc support
         return addmm_sparse_result(
             mat1.to_sparse_csr(), mat2, beta, alpha, result);
       }
     } else if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
+        // TODO avoid csc->csr
         return addmm_sparse_result(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
       }

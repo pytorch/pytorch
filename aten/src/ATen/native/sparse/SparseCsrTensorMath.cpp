@@ -520,20 +520,77 @@ Tensor& addmm_out_sparse_compressed_cpu(
   }
 
 #if !AT_USE_MKL_SPARSE()
+  // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
+  // strided -> strided
+  // TORCH_CHECK(
+  //     (mat1.is_sparse_csr() ||
+  //      (mat2.is_sparse_csr() && result.is_sparse_csr())),
+  //     "Calling addmm on sparse CPU tensors requires Linux platform. ",
+  //     "Please use PyTorch built with MKL on Linux.");
+  // TORCH_CHECK(
+  //     result.layout() == kStrided,
+  //     "Calling addmm on CPU with sparse output requires MKL.");
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat2.transpose(-2, -1).to_sparse_csr(),
+                  mat1.transpose(-2, -1),
+                  result.transpose(-2, -1),
+                  alpha,
+                  beta);
+            });
+        return result;
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat2.transpose(-2, -1),
+                  mat1.transpose(-2, -1),
+                  result.transpose(-2, -1),
+                  alpha,
+                  beta);
+            });
+        return result;
+      }
+    }
+  } else if (mat1.layout() == kSparseCsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat1, mat2, result, alpha, beta);
+            });
+        return result;
+      }
+    }
+  } else if (mat1.layout() == kSparseCsc) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+            result.scalar_type(), "addmm_sparse_dense", [&] {
+              addmm_out_sparse_csr_native_cpu<scalar_t>(
+                  mat1.to_sparse_csr(), mat2, result, alpha, beta);
+            });
+        return result;
+      }
+    }
+  }
   TORCH_CHECK(
-      (mat1.is_sparse_csr() ||
-       (mat2.is_sparse_csr() && result.is_sparse_csr())),
       false,
-      "Calling addmm on sparse CPU tensors requires Linux platform. ",
-      "Please use PyTorch built with MKL on Linux.");
-  TORCH_CHECK(
-      result.layout() == kStrided,
-      "Calling addmm on CPU with sparse output requires MKL.");
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      result.scalar_type(), "addmm_sparse_dense", [&] {
-        addmm_out_sparse_csr_native_cpu<scalar_t>(
-            mat1, mat2, result, alpha, beta);
-      });
+      "addmm: computation on CPU is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout(),
+      " without MKL. PyTorch built with MKL has better support for addmm with sparse CPU tensors.");
 #else
   sparse::impl::mkl::addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
 #endif
