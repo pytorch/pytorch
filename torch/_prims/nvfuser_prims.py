@@ -643,37 +643,34 @@ def register_var_mean():
     name = "var_mean.main"
 
     # This overload must be default for correct dispatching of var_mean(Tensor, bool)
+    # It's registered as CompositeImplicit function.
     nvprim.define("var_mean(Tensor inp, bool unbiased) -> (Tensor, Tensor)")
 
     # This signature tries to combine several overloads of the torch.var_mean function into one overload.
+    # It's registered as CompositeImplicit function.
     nvprim.define(
-        f"{name}(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, int? correction=None)"
+        "var_mean.all_args(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, int? correction=None)"
         + " -> (Tensor, Tensor)"
     )
 
+    # This signature is the primitive recorded on the trace for nvFuser.
+    nvprim.define(
+        f"{name}(Tensor inp, int[] dims, *, int correction) -> (Tensor, Tensor)"
+    )
+
     # This function is used for device="meta" Tensors.
-    def _meta_var_mean(inp, dim=None, unbiased=None, keepdim=False, *, correction=None):
+    def _meta_var_mean(inp, dims, *, correction):
         if torch._prims_common.is_complex_dtype(inp.dtype):
             output_dtype = torch._prims_common.corresponding_real_dtype(inp.dtype)
         else:
             output_dtype = inp.dtype
-        var = torch._prims._reduction_meta(inp, dim, output_dtype=output_dtype)
-        mean = torch._prims._reduction_meta(inp, dim, output_dtype=inp.dtype)
-        if keepdim:
-            output_shape = [
-                inp.shape[i] if i not in dim else 1 for i in range(inp.ndim)
-            ]
-            broadcast_dims = [i for i in range(inp.ndim) if i not in dim]
-            var = torch.ops.nvprims.broadcast_in_dim(var, output_shape, broadcast_dims)
-            mean = torch.ops.nvprims.broadcast_in_dim(
-                mean, output_shape, broadcast_dims
-            )
+        var = torch._prims._reduction_meta(inp, dims, output_dtype=output_dtype)
+        mean = torch._prims._reduction_meta(inp, dims, output_dtype=inp.dtype)
         return (var, mean)
 
     # This function is used under _AutoDispatchBelowAutograd context
-    def _prim_impl(inp, dim=None, unbiased=None, keepdim=False, *, correction=None):
-        correction = torch._prims_common.set_correction(unbiased, correction)
-        return torch.var_mean(inp, dim, correction=correction, keepdim=keepdim)
+    def _prim_impl(inp, dims, *, correction):
+        return torch.var_mean(inp, dims, correction=correction)
 
     nvprim_impl.impl(name, _prim_impl)
     nvprim_meta_impl.impl(name, _meta_var_mean)
@@ -682,7 +679,7 @@ def register_var_mean():
     prim = prim_packet.main
 
     def _unbiased_overload_impl(inp, unbiased):
-        return prim(inp, dim=None, unbiased=unbiased)
+        return prim_packet.all_args(inp, dim=None, unbiased=unbiased)
 
     nvprim_implicit_impl.impl("var_mean", _unbiased_overload_impl)
 
@@ -716,19 +713,16 @@ def register_var_mean():
             var_mean = (var, mean)
         return var_mean
 
-    def _var_mean_autograd(
+    def _var_mean_ref_nvprims_mode(
         a, dim=None, unbiased=None, keepdim=False, *, correction=None
     ):
         # This wrapper is needed to convert prims calls inside
         # elementwise_type_promotion_wrapper to nvprims calls
-        from torch._prims.context import NvfuserPrimsMode
-
         with NvfuserPrimsMode():
-            return backwards_not_supported(_var_mean_ref)(
-                a, dim, unbiased, keepdim, correction=correction
-            )
+            return _var_mean_ref(a, dim, unbiased, keepdim, correction=correction)
 
-    nvprim_autograd_impl.impl(name, _var_mean_autograd)
+    nvprim_implicit_impl.impl("var_mean.all_args", _var_mean_ref_nvprims_mode)
+    nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
 
     for p in (prim_packet, prim):
         p.__doc__ = "Computes the variance and mean of x over the list of dimensions specified in the dim argument"
