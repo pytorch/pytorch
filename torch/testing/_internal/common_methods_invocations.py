@@ -2960,7 +2960,7 @@ class _TestParamsMaxPoolBase(object):
             'ceil_mode': [True, False],
             'padding': [0, 1],
             'dilation': [1],
-            'return_indices': [True]
+            'return_indices': [True, False]
         }
 
         self.shapes = [
