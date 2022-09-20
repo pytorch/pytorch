@@ -49,9 +49,8 @@ def CompileSpec(inputs,
                 outputs,
                 backend=CoreMLComputeUnit.CPU,
                 allow_low_precision=True,
-                quantization_mode=CoreMLQuantizationMode.NONE,
-                mlmodel_export_path=None):
-    return (inputs, outputs, backend, allow_low_precision, quantization_mode, mlmodel_export_path)
+                quantization_mode=CoreMLQuantizationMode.NONE):
+    return (inputs, outputs, backend, allow_low_precision, quantization_mode)
 
 
 def _check_enumerated_shape(shape):
@@ -72,7 +71,7 @@ def _convert_to_mil_type(shape, dtype, name: str):
 
 def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tuple]):
     spec = compile_spec["forward"]
-    input_specs, output_specs, backend, allow_low_precision, quantization_mode, mlmodel_export_path = spec
+    input_specs, output_specs, backend, allow_low_precision, quantization_mode = spec
     mil_inputs = []
     inputs = []
     for index, input in enumerate(input_specs):
@@ -97,11 +96,6 @@ def preprocess(script_module: torch._C.ScriptObject, compile_spec: Dict[str, Tup
         outputs.append([name, str(dtype), str(shape)])
     mlmodel = ct.models.model.MLModel(spec)
     print(mlmodel)
-
-    if mlmodel_export_path is not None:
-        print(f"Saving CoreML .mlmodel file to {mlmodel_export_path}")
-        mlmodel.save(mlmodel_export_path)
-
     config = {
         "spec_ver": str(spec.specificationVersion),  # type: ignore[attr-defined]
         "backend": backend,

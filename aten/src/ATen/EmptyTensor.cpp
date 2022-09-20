@@ -112,27 +112,19 @@ SymInt computeStorageNbytes(
     SymIntArrayRef sizes,
     SymIntArrayRef strides,
     SymInt itemsize_bytes,
-    SymInt storage_offset
+    size_t storage_offset
   ) {
-  TORCH_CHECK(
-    sizes.size() == strides.size(),
-    "dimensionality of sizes (",
-    sizes.size(),
-    ") must match dimensionality of strides (",
-    strides.size(),
-    ")");
-
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
-  SymInt size = 1;
+  SymInt size = storage_offset + 1;
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] == 0) {
-      return 0;
-    }
-
-    size += strides[i] * (sizes[i] - 1);
+    // Note: the non-symint version of this code includes overflow checks.
+    // The code that eventually materialized the SymInt will need to be
+    // in charge of handling overflow.
+    size = size + (strides[i] * (sizes[i].operator-(1)));
   }
-  return itemsize_bytes * (storage_offset + size);
+  size = size * itemsize_bytes;
+  return size;
 }
 
 TensorBase empty_generic(
