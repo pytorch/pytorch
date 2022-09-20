@@ -9169,7 +9169,7 @@ add_docstr(
 randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 pin_memory=False) -> Tensor
 """
-+ r"""
+    + r"""
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
