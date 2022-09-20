@@ -9,7 +9,6 @@ from torch._C._onnx import (
     TensorProtoDataType,
     TrainingMode,
 )
-from torch.onnx._internal import registration as _registration
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
@@ -26,6 +25,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset14,
     symbolic_opset15,
     symbolic_opset16,
+    symbolic_registry,
     utils,
 )
 from ._exporter_states import ExportTypes, SymbolicContext
@@ -46,6 +46,7 @@ from .utils import (
 __all__ = [
     # Modules
     "symbolic_helper",
+    "symbolic_registry",
     "utils",
     "errors",
     # All opsets
@@ -133,6 +134,3 @@ def log(*args) -> None:
             character appended to the end, and flushed to output stream.
     """
     _C._jit_onnx_log(*args)
-
-
-_registration.discover_and_register_all_symbolic_opsets()

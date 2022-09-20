@@ -3196,8 +3196,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
-        xfail('unique', ''),  # dynamic op
-        xfail('unique_consecutive', ''),  # dynamic op
         xfail('allclose'),  # returns a boolean
         xfail('uniform'),  # randomness is tested separately
         xfail('rand_like'),  # randomness is tested separately
@@ -3279,9 +3277,7 @@ class TestVmapOperatorsOpInfo(TestCase):
              {torch.float32: tol(atol=1e-04, rtol=1e-02)}, device_type='cuda'),
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
-    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
-        xfail('cat'),
-    }))
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = (
@@ -3297,27 +3293,22 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('cat'),
         xfail('complex'),
         xfail('copysign'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
         xfail('nanmean'),
-        xfail('scatter_reduce', 'sum'),
-        xfail('scatter_reduce', 'mean'),
-        xfail('scatter_reduce', 'amax'),
-        xfail('scatter_reduce', 'amin'),
         # `index_put` OpInfo in pytorch/pytorch has
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
+        xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
-        xfail('narrow_copy'),  # hit the vmap fallback which is currently disabled
         xfail('ormqr'),
         xfail('put'),
         xfail('quantile'),
@@ -3421,7 +3412,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
         xfail('linalg.vander', ''),
         xfail('segment_reduce', 'lengths'),
-        xfail('lu_solve', ''),
+        xfail('linalg.lu_solve', ''),
         xfail('special.bessel_y1'),
         xfail('special.hermite_polynomial_he'),
         xfail('special.scaled_modified_bessel_k0'),

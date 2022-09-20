@@ -252,10 +252,8 @@ Tensor fromDLPack(const DLManagedTensor* src) {
   Device device = getATenDevice(src->dl_tensor.device);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
-    if (src->deleter) {
-      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-      src->deleter(const_cast<DLManagedTensor*>(src));
-    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    src->deleter(const_cast<DLManagedTensor*>(src));
   };
   if (!src->dl_tensor.strides) {
     return at::from_blob(src->dl_tensor.data,

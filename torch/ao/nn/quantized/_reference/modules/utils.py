@@ -1,5 +1,5 @@
 import torch
-import typing
+from typing import Dict, Any
 
 class ReferenceQuantizedModule(torch.nn.Module):
     def _init_weight_qparams(self, weight_qparams, device):
@@ -148,7 +148,7 @@ def _save_weight_qparams(destination, prefix, weight_qscheme, weight_dtype, weig
             destination[prefix + "weight_axis"] = weight_axis
 
 def _get_weight_qparam_keys(
-        state_dict: typing.Dict[str, typing.Any],
+        state_dict: Dict[str, Any],
         prefix: str):
     keys = ["weight_qscheme", "weight_dtype"]
     weight_qscheme = state_dict[prefix + "weight_qscheme"]

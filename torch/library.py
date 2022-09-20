@@ -2,7 +2,6 @@ from ._ops import OpOverload
 from typing import Set
 import traceback
 import torch
-import os
 
 __all__ = ['Library', 'impl', 'define']
 
@@ -30,9 +29,6 @@ class Library:
         dispatch_key: PyTorch dispatch key (default: "")
     """
     def __init__(self, ns, kind, dispatch_key=""):
-        if os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "1":
-            raise RuntimeError("Trying to use torch.library in an environment where it is disabled")
-
         if kind != "IMPL" and kind != "DEF":
             raise ValueError("Unsupported kind: ", kind)
 
