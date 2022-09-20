@@ -3279,7 +3279,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
         xfail('cat'),
-        xfail('conv3d'),
+        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3298,7 +3298,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('cat'),
         xfail('complex'),
-        xfail('conv3d'),
         xfail('copysign'),
         xfail('histogram'),
         xfail('index_fill'),
@@ -3332,6 +3331,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('any'),
         xfail('count_nonzero'),
         xfail('nanmean'),
+        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('resize_'),
         xfail('view_as_complex'),
