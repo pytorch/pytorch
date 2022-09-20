@@ -17,7 +17,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "PySymInt", "ShapeEnv",
-    "SymDispatchMode", "PySymFloat", "sym_float"
+    "SymDispatchMode", "PySymFloat", "sym_float", "FloorDiv"
 ]
 
 SYM_FUNCTION_MODE = None
