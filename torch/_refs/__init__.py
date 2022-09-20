@@ -70,6 +70,13 @@ __all__ = [
     "fill",
     "floor",
     "frac",
+    "index_add",
+    "index_add_",
+    "index_copy",
+    "index_copy_",
+    "index_select",
+    "index_fill",
+    "index_fill_",
     "isfinite",
     "isinf",
     "isnan",
@@ -247,20 +254,21 @@ __all__ = [
     #
     # Tensor Creation
     #
+    "arange",
     "empty",
     "empty_like",
     "empty_strided",
     "eye",
     "full",
     "full_like",
+    "linspace",
+    "logspace",
     "ones",
     "ones_like",
+    "randn",
     "scalar_tensor",
     "zeros",
     "zeros_like",
-    "arange",
-    "linspace",
-    "logspace",
     #
     # Randomness References
     #
@@ -2968,6 +2976,114 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     )
 
 
+@register_decomposition(torch.ops.aten.index_copy)
+@out_wrapper()
+def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return x.clone().index_copy_(dim, index, tensor)
+
+
+@register_decomposition(torch.ops.aten.index_copy_)
+def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    # Treat scalars as elements of \R^1
+    y = x.unsqueeze(0) if x.ndim == 0 else x
+    idx = (slice(None),) * dim + (index,)
+    y[idx] = tensor
+    return x
+
+
+@register_decomposition(torch.ops.aten.index_fill)
+def index_fill(
+    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
+):
+    return x.clone().index_fill_(dim, index, value)  # type: ignore[arg-type]
+
+
+@register_decomposition(torch.ops.aten.index_fill_)
+def index_fill_(
+    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
+):
+    if isinstance(value, TensorLike):
+        utils.check(
+            value.ndim == 0,
+            lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
+            f"Got a tensor with {value.ndim} dimensions.",
+        )  # type: ignore[arg-type]
+        return x.clone().index_copy_(dim, index, value)
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    idx = (slice(None),) * dim + (index,)
+    # Treat scalars as elements of \R^1
+    y = x.unsqueeze(0) if x.ndim == 0 else x
+    y[idx] = value  # type: ignore[assignment]
+    return x
+
+
+@register_decomposition(torch.ops.aten.index_add)
+@out_wrapper()
+def index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
+
+
+# The decomposition of this function dispatches to aten.index_put_ for efficiency
+# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
+# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
+def index_add_(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    if alpha != 1:
+        python_type = utils.dtype_to_type(x.dtype)
+        utils.check(
+            utils.is_weakly_lesser_type(type(alpha), python_type),
+            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        )
+        tensor = prims.mul(tensor, alpha)
+    # Treat scalars as elements of \R^1
+    y = x.unsqueeze(0) if x.ndim == 0 else x
+    idx = (slice(None),) * dim + (index,)
+    y[idx] += tensor
+    return x
+
+
+@register_decomposition(torch.ops.aten.index_select, disable_meta=True)
+@out_wrapper()
+def index_select(x: TensorLike, dim: int, index: TensorLike):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    # Treat scalars as elements of \R^1
+    if x.ndim == 0:
+        return x.unsqueeze(0)[index].squeeze(0).clone()
+    idx = (slice(None),) * dim + (index,)
+    return x[idx]
+
+
 # Note: although squeeze is documented as having the out= kwarg it doesn't
 @register_decomposition(torch.ops.aten.squeeze, disable_meta=True)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
@@ -4034,6 +4150,35 @@ def full_like(
 
 ones_like = partial(full_like, fill_value=True)
 
+# TODO: add pin_memory support
+@register_decomposition(torch.ops.aten.randn)
+@out_wrapper()
+def randn(
+    *shape,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
+    requires_grad: bool = False,
+    pin_memory: Optional[bool] = None,
+) -> TensorLikeType:
+
+    check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
+
+    shape_ = utils.extract_shape_from_varargs(shape)
+
+    dtype = utils.dtype_or_default(dtype)
+    device = utils.device_or_default(device)
+    layout = utils.layout_or_default(layout)
+
+    return prims.normal(
+        shape_,
+        mean=0.0,
+        std=1.0,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
 
 # TODO: missing kwargs (e.g. layout)
 def scalar_tensor(
@@ -4048,6 +4193,10 @@ def scalar_tensor(
 
 
 zeros_like = partial(full_like, fill_value=False)
+
+#
+# Randomness References
+#
 
 
 @register_decomposition(torch.ops.aten.uniform)
