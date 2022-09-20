@@ -747,6 +747,196 @@ def meta_alias(self):
     return self.view(self.shape)
 
 
+def div_rtn(x, y):
+    q = x // y
+    r = x % y
+    # WARNING: explicit bool conversion here is necessary;
+    # would be fixed by SymBool
+    if r != 0 and (bool(r < 0) != bool(y < 0)):
+        q -= 1
+    return q
+
+
+def pooling_output_shape_pad_lr(
+    inputSize, kernelSize, pad_l, pad_r, stride, dilation, ceil_mode
+):
+    outputSize = (
+        div_rtn(
+            inputSize
+            + pad_l
+            + pad_r
+            - dilation * (kernelSize - 1)
+            - 1
+            + (stride - 1 if ceil_mode else 0),
+            stride,
+        )
+        + 1
+    )
+    if ceil_mode:
+        if (outputSize - 1) * stride >= inputSize + pad_l:
+            outputSize -= 1
+    return outputSize
+
+
+def pooling_output_shape(inputSize, kernelSize, pad, stride, dilation, ceil_mode):
+    check(stride != 0, lambda: "stride should not be zero")
+    check(pad >= 0, lambda: f"pad must be non-negative, but got pad: {pad}")
+    check(
+        pad <= kernelSize // 2,
+        lambda: f"pad should be at most half of kernel size, but got pad={pad} and kernel_size={kernelSize}",
+    )
+    return pooling_output_shape_pad_lr(
+        inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode
+    )
+
+
+def pool2d_shape_check(
+    input,
+    kH,
+    kW,
+    dH,
+    dW,
+    padH,
+    padW,
+    dilationH,
+    dilationW,
+    nInputPlane,
+    inputHeight,
+    inputWidth,
+    outputHeight,
+    outputWidth,
+    memory_format,
+):
+    ndim = input.dim()
+    nOutputPlane = nInputPlane
+
+    check(
+        kW > 0 and kH > 0,
+        lambda: "kernel size should be greater than zero, but got kH: {kH}, kW: {kW}",
+    )
+    check(
+        dW > 0 and dH > 0,
+        lambda: "stride should be greater than zero, but got dH: {dH}, dW: {dW}",
+    )
+    check(
+        dilationH > 0 and dilationW > 0,
+        lambda: "dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
+    )
+
+    valid_dims = input.size(1) != 0 and input.size(2) != 0
+
+    if memory_format == torch.channels_last:
+        check(
+            ndim == 4 and valid_dims and input.size(3) != 0,
+            lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
+            " with optional 0 dim batch size for input, but got: {input.size()}",
+        )
+    else:
+        check(
+            (ndim == 3 and input.size(0) != 0 and valid_dims)
+            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
+        )
+
+    check(
+        kW // 2 >= padW and kH // 2 >= padH,
+        lambda: "pad should be smaller than or equal to half of kernel size, but got "
+        f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
+    )
+
+    check(
+        outputWidth >= 1 and outputHeight >= 1,
+        lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
+        f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
+        "Output size is too small",
+    )
+
+
+@register_meta(aten.max_pool2d_with_indices.default, register_dispatcher=False)
+def meta_max_pool2d_with_indices(
+    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+):
+    # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
+    def unpack(name, val):
+        check(
+            len(val) in [1, 2],
+            lambda: f"max_pool2d: {name} must either be a single int, or a tuple of two ints",
+        )
+        H = val[0]
+        W = H if len(val) == 1 else val[1]
+        return H, W
+
+    kH, kW = unpack("kernel_size", kernel_size)
+
+    check(
+        len(stride) in [0, 1, 2],
+        lambda: "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
+    )
+    if len(stride) == 0:
+        dH, dW = kH, kW
+    else:
+        dH, dW = unpack("stride", stride)
+
+    padH, padW = unpack("padding", padding)
+    dilationH, dilationW = unpack("dilation", dilation)
+
+    memory_format = utils.suggest_memory_format(input)
+    if memory_format == torch.channels_last:
+        check(
+            input.dim() == 4,
+            lambda: "non-empty 4D (batch mode) tensor expected for input with channels_last layout",
+        )
+    elif memory_format == torch.contiguous_format:
+        check(
+            input.dim() in [3, 4],
+            lambda: "non-empty 3D or 4D (batch mode) tensor expected for input",
+        )
+    else:
+        check(
+            False,
+            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
+        )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
+
+    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
+    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
+
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        dilationH,
+        dilationW,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        memory_format,
+    )
+
+    if input.dim() == 3:
+        size = [nInputPlane, outputHeight, outputWidth]
+    else:
+        size = [nbatch, nInputPlane, outputHeight, outputWidth]
+    return (
+        torch.empty(
+            size, dtype=input.dtype, device=input.device, memory_format=memory_format
+        ),
+        torch.empty(
+            size, dtype=torch.int64, device=input.device, memory_format=memory_format
+        ),
+    )
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs

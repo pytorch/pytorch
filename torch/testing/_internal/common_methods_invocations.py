@@ -2976,7 +2976,10 @@ class _TestParamsMaxPoolBase(object):
             yield dict(zip(keys, values))
 
     def gen_input_params(self):
-        yield from product(self._gen_shape(), self._gen_kwargs())
+        sample_shape = next(self._gen_shape())
+        sample_kwarg = next(self._gen_kwargs())
+        yield from product(self._gen_shape(), (sample_kwarg,))
+        yield from product((sample_shape,), self._gen_kwargs())
 
 class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
