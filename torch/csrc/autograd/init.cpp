@@ -53,17 +53,14 @@ struct EnableTorchFunction {
   bool old_;
 };
 
-PyObject* globalPythonDispatcher = nullptr;
-
 struct EnablePythonDispatcher {
   EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
-    c10::impl::PythonDispatcherTLS::set_state(
-        {globalPythonDispatcher, getPyInterpreter()});
+    c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
   }
   ~EnablePythonDispatcher() {
     c10::impl::PythonDispatcherTLS::set_state(old_);
   }
-  c10::SafePyHandle old_;
+  c10::impl::PyInterpreter* old_;
 };
 
 } // namespace
@@ -347,13 +344,6 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<c10::impl::DisablePythonDispatcher>(
       _C_m, "_DisablePythonDispatcher")
       .def(py::init<>());
-  _C_m.def("_set_python_dispatcher", [](py::object dispatcher) {
-    TORCH_CHECK(
-        !globalPythonDispatcher,
-        "overwriting the global python dispatcher is not supported; if you need this file an issue");
-    // NB: intentionally leak
-    globalPythonDispatcher = dispatcher.release().ptr();
-  });
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")

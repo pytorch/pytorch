@@ -230,6 +230,9 @@ struct C10_API ExtraMeta {
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
   SymInt storage_offset_ = 0;
+  bool is_contiguous_ = true;
+  bool is_channels_last_contiguous_ = false;
+  bool is_channels_last_3d_contiguous_ = false;
   // TODO:
   // SymBool is_contiguous_;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
@@ -241,11 +244,17 @@ struct C10_API ExtraMeta {
       SymDimVector strides,
       SymInt numel,
       SymInt storage_offset,
+      bool is_contiguous,
+      bool is_channels_last_contiguous,
+      bool is_channels_last_3d_contiguous,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
       : sizes_(std::move(sizes)),
         strides_(std::move(strides)),
         numel_(std::move(numel)),
         storage_offset_(std::move(storage_offset)),
+        is_contiguous_(is_contiguous),
+        is_channels_last_contiguous_(is_channels_last_contiguous),
+        is_channels_last_3d_contiguous_(is_channels_last_3d_contiguous),
         named_tensor_meta_(std::move(named_tensor_meta)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
@@ -254,6 +263,9 @@ struct C10_API ExtraMeta {
         strides_,
         numel_,
         storage_offset_,
+        is_contiguous_,
+        is_channels_last_contiguous_,
+        is_channels_last_3d_contiguous_,
         named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr);
   }
 };
@@ -768,7 +780,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // These are factored into separate functions in case subclasses
   // want to use them
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
-    // TODO: handle symbolic shapes correctly
+    if (has_symbolic_sizes_strides_) {
+      if (memory_format == at::MemoryFormat::ChannelsLast) {
+        return extra_meta_->is_channels_last_contiguous_;
+      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+        return extra_meta_->is_channels_last_3d_contiguous_;
+      }
+      return extra_meta_->is_contiguous_;
+    }
+
     if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
     } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
