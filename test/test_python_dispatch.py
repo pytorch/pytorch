@@ -1833,5 +1833,19 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
+class TestPythonDispatcher(TestCase):
+    def test_basic(self):
+        x = torch.randn(2, requires_grad=True)
+        r = torch._C._EnablePythonDispatcher()
+        torch.add(x, x)
+
+    def test_lstsq(self):
+        a = torch.randn(4, 3)
+        b = torch.rand(4, 3)
+        expected_shape = torch.linalg.lstsq(a, b).solution.shape
+        r = torch._C._EnablePythonDispatcher()
+        python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
+        self.assertEqual(expected_shape, python_disp_shape)
+
 if __name__ == '__main__':
     run_tests()
