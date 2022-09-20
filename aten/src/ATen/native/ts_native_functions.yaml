@@ -206,8 +206,6 @@ symint:
   - narrow_copy
   - view
   - view_copy
-  - empty_strided
-  - new_empty_strided
 autograd:
   - max_pool3d
   - native_group_norm

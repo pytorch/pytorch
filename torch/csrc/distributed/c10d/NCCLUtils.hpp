@@ -15,49 +15,30 @@
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
-std::string getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string> processGroupFailureReason = c10::nullopt) {
+const inline char* getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string> processGroupFailureReason = c10::nullopt) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
   if (processGroupFailureReason != c10::nullopt) {
     return (*processGroupFailureReason).c_str();
   }
-  std::string interpret;
-  std::string err;
-#ifdef ENABLE_NCCL_GET_LAST_ERROR
-  err = "\nLast error:\n" + std::string(ncclGetLastError(NULL));
-#endif
   switch (error) {
     case ncclUnhandledCudaError:
-      interpret = "ncclUnhandledCudaError: Call to CUDA function failed.";
-      break;
+      return "ncclUnhandledCudaError: Call to CUDA function failed.";
     case ncclSystemError:
-      interpret = "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
-        "It can be also caused by unexpected exit of a remote peer.";
-      break;
+      return "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. "
+        "It can be also caused by unexpected exit of a remote peer, you can check NCCL warnings for failure reason and see if there is connection closure by a peer.";
     case ncclInternalError:
-      interpret = "ncclInternalError: Internal check failed.";
-      break;
+      return "ncclInternalError: Internal check failed. This is either a bug in NCCL or due to memory corruption";
     case ncclInvalidArgument:
-      interpret = "ncclInvalidArgument: Invalid value for an argument.";
-      break;
+      return "ncclInvalidArgument: Invalid value for an argument (such as invalid pointer, device count, ip:host pair, etc).";
     case ncclInvalidUsage:
-      interpret = "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
-      break;
+      return "ncclInvalidUsage: This usually reflects invalid usage of NCCL library (such as too many async ops, too many collectives at once, mixing streams in a group, etc).";
     default:
-      interpret = "Unknown NCCL error!";
+      break;
   }
-  return interpret + err;
+  return "Unknown NCCL error";
 }
 } // namespace
-
-// ncclGetLastError() is enabled only for NCCL versions 2.13+
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 13)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#endif
-
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \

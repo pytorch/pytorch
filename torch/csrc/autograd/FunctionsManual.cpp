@@ -657,13 +657,6 @@ Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
     int64_t dim) {
-  if (inp.numel() == 0) {
-    // When input has a zero sized dimension (empty tensor),
-    // we don't need to actually compute the grads.
-    // So we just reshape `grad` as `input`.
-    return grad.expand_as(inp);
-  }
-
   if (inp.size(dim) == 1) {
     return grad;
   }
@@ -698,8 +691,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
-    // For Composite Compliance, always take the safer (and slower) path
+  if (input.is_meta()) {
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -724,14 +716,11 @@ Tensor prod_backward(
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  if (!keepdim) {
-    // `prod` reduces the dimension at `dim`,
-    // so, unsqueeze `grad` and `result` at dim.
+  if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
-    // For Composite Compliance, always take the safer (and slower) path
+  if (input.is_meta()) {
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
@@ -889,25 +878,6 @@ std::vector<Tensor> cat_tensors_backward(
     auto size = shape[dim];
     accumulate += size;
     grad_inputs[i] = grad_val.narrow(dim, accumulate - size, size);
-  }
-  return grad_inputs;
-}
-
-std::vector<Tensor> stack_tensors_backward(
-    const Tensor& grad,
-    int64_t dim,
-    const std::vector<ScalarType>& dtypes) {
-  std::vector<Tensor> grad_inputs(dtypes.size());
-  if (!grad.defined()) {
-    return grad_inputs;
-  }
-  bool grad_is_complex = grad.is_complex();
-  for (const auto i : c10::irange(dtypes.size())) {
-    auto gr = grad.select(dim, i);
-    if (grad_is_complex && !at::isComplexType(dtypes[i])) {
-      gr = at::real(gr);
-    }
-    grad_inputs[i] = gr;
   }
   return grad_inputs;
 }
@@ -1275,10 +1245,8 @@ Tensor mm_mat1_sparse_backward(
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.is_sparse_csr()) {
-    // zero must to have mat1 sparsity pattern:
-    auto zero = mat1.clone();
-    zero.values().zero_();
-    return at::sparse_sampled_addmm(zero, grad, mat2.mH(), 1.0, alpha);
+    return at::sparse_sampled_addmm(
+        at::zeros_like(mat1, mat1.options()), grad, mat2.mH(), 1.0, alpha);
   } else if (
       grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
       mat1.layout() == c10::kStrided) {
@@ -3008,10 +2976,7 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
     }
 
     Tensor ggO;
-    // areAnyTensorSubclassLike check necessary for composite compiance:
-    // e.g. it's possible that grad_out/gO is a BatchedTensor wrapping
-    // some Tensor that does require grad
-    if (areAnyTensorSubclassLike({grad_out}) || gO.requires_grad()) {
+    if (gO.requires_grad()) {
       // expand weight as input as in ggW/ggI above
       auto weight_expanded = weight;
       for (const auto i : c10::irange(dims_to_unsqueeze)) {
@@ -6406,40 +6371,6 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   std::tuple<Tensor, Tensor> result =
       std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;
-}
-
-Tensor scatter_reduce_jvp(
-    const Tensor& self_p,
-    const Tensor& self_t,
-    int dim,
-    const Tensor& index,
-    const Tensor& src_p,
-    const Tensor& src_t,
-    c10::string_view reduce,
-    bool include_self,
-    const Tensor& result) {
-  if (reduce == "sum" || reduce == "mean") {
-    // The function is linear
-    return at::scatter_reduce(self_t, dim, index, src_t, reduce, include_self);
-    //  auto mask = x == restore_reduced_dims(result, dim, keepdim);
-    //  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim,
-    //  keepdim);
-  } else if (reduce == "amin" || reduce == "amax") {
-    auto gather_result = at::gather(result, dim, index);
-    auto mask_self = self_p == result;
-    auto mask_src = src_p == gather_result;
-    auto masked_src_t = at::where(mask_src, src_t, 0.);
-    auto div =
-        mask_self.to(self_t.dtype())
-            .scatter_reduce(
-                dim, index, mask_src.to(self_t.dtype()), "sum", include_self);
-    return at::where(mask_self, self_t, 0.)
-        .scatter_reduce(dim, index, masked_src_t, "sum", include_self)
-        .div(div);
-  } else {
-    // Not implemented
-    return Tensor{};
-  }
 }
 
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
