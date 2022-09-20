@@ -1466,7 +1466,7 @@ class CudaMemoryLeakCheck():
         discrepancy_detected = False
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
-            # avoid counting cublasWorkspace allocations
+            # avoid counting cuBLAS workspace allocations
             torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
