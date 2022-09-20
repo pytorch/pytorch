@@ -222,7 +222,21 @@ def _rebuild_sparse_csr_tensor(layout, data):
     raise NotImplementedError("rebuilding sparse tensor for layout %s" % (layout))
 
 
+class _Mapper:
+    map_location = None
+
+    @staticmethod
+    def get_location(device):
+        if _Mapper.map_location is not None:
+            if isinstance(_Mapper.map_location, dict):
+                return _Mapper.map_location.get(device, device)
+            else:
+                return _Mapper.map_location
+        return device
+
+
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
+    device = _Mapper.get_location(device)
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
     tensor.requires_grad = requires_grad
     return tensor

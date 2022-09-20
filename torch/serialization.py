@@ -1097,6 +1097,7 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', **pickl
 
     unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
+    torch._utils._Mapper.map_location = map_location
     result = unpickler.load()
 
     torch._utils._validate_loaded_sparse_tensors()
