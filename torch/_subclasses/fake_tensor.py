@@ -267,6 +267,11 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+@register_op_impl(aten._efficientzerotensor.default)
+def efficient_zero(fake_mode, func, *args, **kwargs):
+    return constructors(fake_mode, aten.zeros.default, *args, **kwargs)
+
+
 @register_op_impl(
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
@@ -739,8 +744,6 @@ class FakeTensorMode(TorchDispatchMode):
             from torch._meta_registrations import meta_table
 
             with no_dispatch():
-                if symbolic_shapes.is_symbolic_op(func):
-                    return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
                 if func == aten.size.default:
                     sys.stderr.write(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
