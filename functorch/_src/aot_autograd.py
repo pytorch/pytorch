@@ -312,25 +312,31 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     # else is just getting the types right.
 
     seen_args = {}
-    deduped_flat_args = []
-    drop_args = set()
+    keep_arg_mask = []
+    dropped_args = False
     add_dupe_map = {}
     duped_arg_len = len(flat_args)
+
+    j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):
         if t in seen_args:
-            drop_args.add(i)
+            keep_arg_mask.append(False)
+            dropped_args = True
             add_dupe_map[i] = seen_args[t]
             continue
-        seen_args[t] = len(deduped_flat_args)
-        add_dupe_map[i] = len(deduped_flat_args)
-        deduped_flat_args.append(t)
+        keep_arg_mask.append(True)
+        seen_args[t] = j
+        add_dupe_map[i] = j
+        j += 1
 
+    # NB: Hot path, avoid set lookups here
     def remove_dupe_args(args):
+        if not dropped_args:
+            return args
         r = []
-        for i, t in enumerate(args):
-            if i in drop_args:
-                continue
-            r.append(t)
+        for t, keep in zip(args, keep_arg_mask):
+            if keep:
+                r.append(t)
         return r
 
     def add_dupe_args(args):
@@ -338,6 +344,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         for i in range(duped_arg_len):
             r.append(args[add_dupe_map[i]])
         return r
+
+    deduped_flat_args = remove_dupe_args(flat_args)
 
     joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
 
@@ -432,7 +440,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
             return tuple(out)
 
-    return lambda *args: CompiledFunction.apply(*remove_dupe_args(args))
+    @wraps(CompiledFunction.apply)
+    def compiled_function(*args):
+        return CompiledFunction.apply(*remove_dupe_args(args))
+
+    return compiled_function
 
 
 @dynamo_timed
@@ -473,11 +485,8 @@ def create_aot_dispatcher_function(
     with preserve_rng_state(), fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
-            if config.use_fake_tensor:
-                def convert(x):
-                    return fake_mode.from_tensor(x, shape_env=shape_env)
-
-                return pytree.tree_map_only(Tensor, convert, flat_args)
+            if mode:
+                return pytree.tree_map_only(Tensor, mode.from_tensor, flat_args)
             else:
                 return flat_args
 
