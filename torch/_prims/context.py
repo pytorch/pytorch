@@ -231,11 +231,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         )
     def _is_rand_like(self, func):
         result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
-            (
-                isinstance(func, torch._ops.OpOverload)
-                or isinstance(func, torch._ops.OpOverloadPacket)
-            )
-            and "aten.rand_like" in str(func)
+            func == torch.ops.aten.rand_like or func == torch.ops.aten.rand_like.default
         )
         return result
 
