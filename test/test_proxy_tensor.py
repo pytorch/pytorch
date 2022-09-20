@@ -335,6 +335,7 @@ def forward(self, x_1):
             self.assertTrue("square" not in str(n.target))
             self.assertTrue("norm" not in str(n.target))
 
+    @unittest.skip("way too slow")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
