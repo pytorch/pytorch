@@ -16,17 +16,22 @@ New operators:
     ScatterND
 """
 
-from typing import List, Optional, Sequence, Tuple, Union
+import functools
+from typing import Sequence
 
 from torch import _C
 from torch.onnx import symbolic_helper
-from torch.onnx._internal import _beartype
-
+from torch.onnx._internal import _beartype, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
+__all__ = ["col2im"]
 
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=18)
+
+
+@_onnx_symbolic("aten::col2im")
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is")
 @_beartype.beartype
 def col2im(
@@ -34,14 +39,14 @@ def col2im(
     input: _C.Value,
     output_size: _C.Value,
     kernel_size: _C.Value,
-    dilation: List[int],
-    padding: List[int],
-    stride: List[int],
+    dilation: Sequence[int],
+    padding: Sequence[int],
+    stride: Sequence[int],
 ):
-    # Padding for onnx::col2im has separate beginning and ending values for each dimension
+    # convert [i0, i1, ..., in] into [i0, i0, i1, i1, ..., in, in]
     adjusted_padding = []
-    for i in range(2):
-        for pad in padding:
+    for pad in padding:
+        for _ in range(2):
             adjusted_padding.append(pad)
     return g.op(
         "Col2Im",
