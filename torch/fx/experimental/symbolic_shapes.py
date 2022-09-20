@@ -149,6 +149,11 @@ class PySymFloat:
         return f"{self.expr}"
 
 class FloorDiv(sympy.Function):
+    """
+    We maintain this so that:
+    1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
+    2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
+    """
     nargs = (2,)
 
     @classmethod
@@ -159,12 +164,6 @@ class FloorDiv(sympy.Function):
             return base
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-
-        gcd = sympy.gcd(base, divisor)
-        if gcd != 1:
-            return FloorDiv(
-                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-            )
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -298,6 +297,7 @@ class ShapeEnv(object):
         """
         Tries to evaluate expr without introducing guards
         """
+        expr = self.simplify(expr)
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
         symbols = list(expr.free_symbols)
         new_shape_env = {
@@ -308,8 +308,7 @@ class ShapeEnv(object):
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = atom.args[0] // atom.args[1]
-        new_expr = new_expr.xreplace(floor_div_replace)
-        new_expr = sympy.expand(new_expr)
+        new_expr = sympy.expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
