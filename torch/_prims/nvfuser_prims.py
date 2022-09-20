@@ -541,6 +541,7 @@ _vjp_impls: Dict[str, Any] = {
     "rsqrt": lambda grad, result, self: prims.mul(
         grad, prims.mul(-0.5, prims.div(result, self))
     ),
+    "sign": lambda grad, result, self: prims.mul(grad, 0),
     "sin": lambda grad, result, self: prims.mul(grad, prims.cos(self)),
     "sinh": lambda grad, result, self: prims.mul(grad, prims.cosh(self)),
     "sqrt": lambda grad, result, self: prims.mul(grad, prims.div(0.5, result)),
