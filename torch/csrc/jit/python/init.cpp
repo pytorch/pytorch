@@ -2127,6 +2127,7 @@ void initJITBindings(PyObject* module) {
   });
 
   m.def("wait", [](const std::shared_ptr<PythonFutureWrapper>& fut) {
+    TORCH_CHECK(fut, "Future can't be None");
     return fut->wait();
   });
 
@@ -2134,12 +2135,14 @@ void initJITBindings(PyObject* module) {
       "_collect_all",
       [](const std::vector<std::shared_ptr<jit::PythonFutureWrapper>>& futures)
           -> std::shared_ptr<jit::PythonFutureWrapper> {
-        auto typePtr =
-            futures.empty() ? AnyType::get() : futures[0]->fut->elementType();
+        auto typePtr = futures.empty() || futures[0] == nullptr
+            ? AnyType::get()
+            : futures[0]->fut->elementType();
         c10::List<c10::intrusive_ptr<c10::ivalue::Future>> asList(
             c10::FutureType::create(typePtr));
         asList.reserve(futures.size());
         for (const auto& f : futures) {
+          TORCH_CHECK(f, "Future can't be None");
           asList.push_back(f->fut);
         }
         return std::make_shared<jit::PythonFutureWrapper>(
