@@ -439,9 +439,9 @@ of very low signal to reviewers.
 ## Merging your Change
 If you know the right people or team that should approve your PR, add them to the Reviewers list.
 
-If not, your PR will get triaged and assigned to the appropriate reviewer in a couple business days.
+If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
 
-Occasionally, things might fall through the cracks (sorry!). In case your PR doesn't get assigned to a reviewer and commented on within 3 days, please leave a comment on it (mentioning the reviewer if one has been assigned) to get it nudged back onto people's radar.  If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Contact-Pytorch-Dev-Infra-Office)
+Occasionally, things might fall through the cracks (sorry!). In case your PR either doesn't get assigned to a reviewer or doesn't get commented on within 4 days, please leave comment on the PR (mentioning the reviewer if one has been assigned). That'll get it nudged back onto people's radar.  If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Contact-Pytorch-Dev-Infra-Office)
 
 Once your PR is approved, you can merge it in by entering a comment with the content `@pytorchmergebot merge`
 
