@@ -58,7 +58,6 @@ logger = logging.getLogger(__name__)
 _ignore_rref_leak = True
 _default_pickler = _internal_rpc_pickler
 
-
 @contextlib.contextmanager
 def _use_rpc_pickler(rpc_pickler):
     r"""
