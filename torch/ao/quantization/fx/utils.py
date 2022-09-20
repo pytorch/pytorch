@@ -2,11 +2,22 @@ import copy
 import re
 import torch
 import torch.nn as nn
-from torch.ao.quantization import QuantType
-from torch.ao.quantization.backend_config import BackendConfig
+from torch.ao.quantization import (
+    QuantType,
+    QConfig,
+)
+from torch.ao.quantization.backend_config import (
+    BackendConfig,
+    DTypeConfig,
+    DTypeWithConstraints,
+)
+from torch.ao.quantization.observer import (
+    _PartialWrapper,
+    ObserverBase,
+)
 from torch.ao.quantization.utils import is_per_tensor, is_per_channel
 from torch.ao.quantization.quantize import is_activation_post_process
-
+from torch.ao.quantization.quantization_types import Pattern
 
 from torch.fx import GraphModule, map_arg
 
@@ -640,3 +651,48 @@ def get_skipped_module_name_and_classes(
         skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
 
     return skipped_module_names, skipped_module_classes
+
+def _validate_qconfig_against_dtype_config(
+        qconfig: QConfig,
+        dtype_config: DTypeConfig,
+        pattern: Pattern) -> QConfig:
+    """
+    Validate whether the QConfig satisfies all of the following constraints from the backend:
+        1. QConfig specified a quantization range that falls within the backend's, if any
+        2. QConfig specified an eps value that is <= the backend's min scale value, if any
+    """
+    def validate_activation_post_process(
+            activation_post_process_ctr: Union[_PartialWrapper, Type[ObserverBase]],
+            dtype_with_constraints: DTypeWithConstraints,
+            debug_string: str) -> Union[_PartialWrapper, Type[ObserverBase]]:
+        activation_post_process = activation_post_process_ctr()
+        qconfig_qmin = getattr(activation_post_process, "quant_min", None)
+        qconfig_qmax = getattr(activation_post_process, "quant_max", None)
+        qconfig_eps = getattr(activation_post_process, "eps", None)
+        backend_qmin = dtype_with_constraints.quant_min
+        backend_qmax = dtype_with_constraints.quant_max
+        backend_scale_min = dtype_with_constraints.scale_min
+        # validate quantization ranges
+        if backend_qmin is not None and backend_qmax is not None:
+            if qconfig_qmin is None or qconfig_qmax is None:
+                raise ValueError("QConfig must specify 'quant_min' and 'quant_max' for '%s' %s:\n%s" %
+                                 (pattern, debug_string, qconfig))
+            elif qconfig_qmin < backend_qmin or qconfig_qmax > backend_qmax:
+                raise ValueError(("QConfig quantization range for '%s' %s must fall within the backend's:\n"
+                                 "QConfig = (%s, %s), BackendConfig = (%s, %s)\n%s") % (pattern, debug_string,
+                                 qconfig_qmin, qconfig_qmax, backend_qmin, backend_qmax, qconfig))
+        # validate scale min
+        if backend_scale_min is not None:
+            if qconfig_eps is None:
+                raise ValueError("QConfig must specify 'eps' for '%s' %s:\n%s" % (pattern, debug_string, qconfig))
+            elif qconfig_eps > backend_scale_min:
+                raise ValueError(("QConfig eps for '%s' %s (%s) must be less than or equal to "
+                                 "the backend's min scale value (%s):\n%s") %
+                                 (pattern, debug_string, qconfig_eps, backend_scale_min, qconfig))
+
+    if dtype_config.input_dtype is not None:
+        validate_activation_post_process(qconfig.activation, dtype_config.input_dtype, "activation")
+    if dtype_config.output_dtype is not None:
+        validate_activation_post_process(qconfig.activation, dtype_config.output_dtype, "activation")
+    if dtype_config.weight_dtype is not None:
+        validate_activation_post_process(qconfig.weight, dtype_config.weight_dtype, "weight")

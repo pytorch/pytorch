@@ -15,7 +15,6 @@ from ..quantize import (
     propagate_qconfig_,
 )
 from ..observer import (
-    _PartialWrapper,
     ObserverBase,
 )
 from ..qconfig import (
@@ -23,7 +22,6 @@ from ..qconfig import (
     float16_dynamic_qconfig,
     float16_static_qconfig,
     is_reuse_input_qconfig,
-    QConfig,
     QConfigAny,
 )
 from ..qconfig_mapping import (
@@ -71,6 +69,7 @@ from .match_utils import (
 
 from ..utils import _parent_name
 from .utils import (
+    _validate_qconfig_against_dtype_config,
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
@@ -101,7 +100,6 @@ from ..backend_config.utils import (
 from ..backend_config import (
     BackendConfig,
     DTypeConfig,
-    DTypeWithConstraints,
     get_native_backend_config,
 )
 from .backend_config_utils import (
@@ -248,82 +246,6 @@ def _get_supported_pattern_dtype_config(
         if supported:
             return dtype_config
     return None
-
-def _get_qconfig_compatible_with_dtype_config(
-        qconfig: QConfig,
-        dtype_config: DTypeConfig,
-        pattern: Pattern) -> QConfig:
-    """
-    Return an updated QConfig that satisfies constraints from the backend specified through `dtype_config`.
-
-    We require the QConfig quantization range to be a subset of the backend's quantization range,
-    and the QConfig min scale value to be equal to the backend's min scale value. If either the
-    quantization range or the min scale value is not specified in the QConfig, then we will borrow
-    the corresponding values from the backend.
-
-    If no changes to the QConfig are required, then the original QConfig is returned as is.
-    """
-    def get_new_activation_post_process(
-            activation_post_process: Union[_PartialWrapper, Type[ObserverBase]],
-            dtype_with_constraints: DTypeWithConstraints,
-            debug_string: str) -> Union[_PartialWrapper, Type[ObserverBase]]:
-        """
-        Return an updated activation post process that satisfies the constraints of the backend.
-        If the backend constraints cannot be satisfied, an error will be thrown instead.
-        If no changes to the activation post process are required, then the original activation
-        post process is returned as is.
-        """
-        extra_keywords = {}
-        backend_quant_min = dtype_with_constraints.quant_min
-        backend_quant_max = dtype_with_constraints.quant_max
-        backend_scale_min = dtype_with_constraints.scale_min
-        if isinstance(activation_post_process, _PartialWrapper):
-            qconfig_quant_min = activation_post_process.p.keywords.get("quant_min")
-            qconfig_quant_max = activation_post_process.p.keywords.get("quant_max")
-            # TODO: rename eps to scale_min
-            qconfig_scale_min = activation_post_process.p.keywords.get("eps")
-        else:
-            qconfig_quant_min, qconfig_quant_max, qconfig_scale_min = None, None, None
-        # quantization ranges
-        if backend_quant_min is not None and backend_quant_max is not None:
-            if qconfig_quant_min is None and qconfig_quant_max is None:
-                # If user did not specify quant range, take it from the backend
-                extra_keywords["quant_min"] = backend_quant_min
-                extra_keywords["quant_max"] = backend_quant_max
-            elif qconfig_quant_min < backend_quant_min or qconfig_quant_max > backend_quant_max:
-                # If user specified a quant range that falls outside of the one from backend, throw error
-                raise ValueError(("QConfig %s quantization range for '%s' must be a subset of the backend's:\n"
-                                 "QConfig = (%s, %s), BackendConfig = (%s, %s)") % (debug_string, pattern,
-                                 qconfig_quant_min, qconfig_quant_max, backend_quant_min, backend_quant_max))
-        # scale min
-        if backend_scale_min is not None:
-            if qconfig_scale_min is None:
-                # If user did not specify scale min, take it from the backend
-                extra_keywords["eps"] = backend_scale_min
-            elif qconfig_scale_min != backend_scale_min:
-                # If user specified a scale min that did not match the one from backend, throw error
-                raise ValueError("Inconsistent %s scale min for '%s':\nQConfig = %s, BackendConfig = %s" %
-                                 (debug_string, pattern, qconfig_scale_min, backend_scale_min))
-        if len(extra_keywords) == 0:
-            return activation_post_process
-        else:
-            return activation_post_process.with_args(**extra_keywords)
-
-    if qconfig is None:
-        return qconfig
-    activation = qconfig.activation
-    weight = qconfig.weight
-    # For now, assume input and output constraints match on the backend
-    # In the future, when we generalize qconfig to support separate input and output activations,
-    # we should check input and output constraints separately here
-    if activation is not None and isinstance(dtype_config.input_dtype, DTypeWithConstraints):
-        activation = get_new_activation_post_process(activation, dtype_config.input_dtype, "activation")
-    if weight is not None and isinstance(dtype_config.weight_dtype, DTypeWithConstraints):
-        weight = get_new_activation_post_process(weight, dtype_config.weight_dtype, "weight")
-    if activation is qconfig.activation and weight is qconfig.weight:
-        return qconfig
-    else:
-        return QConfig(activation, weight)
 
 def get_standalone_module_configs(
     node: Node,
@@ -1271,19 +1193,8 @@ def insert_observers_for_model(
                 supported_dtype_config = None
                 is_supported_by_backend = True
 
-            # Use an updated version of the QConfig that satisfies constraints from the backend, if any
             if qconfig is not None and supported_dtype_config is not None:
-                new_qconfig = _get_qconfig_compatible_with_dtype_config(qconfig, supported_dtype_config, pattern)
-                # Note: if the new QConfig is not the same as the old one, then we also need to update
-                #   (1) The qconfigs that were previously already attached to the matched modules
-                #   (2) The qconfigs in `matches`
-                if new_qconfig is not qconfig:
-                    qconfig = new_qconfig
-                    assert matched_node_pattern is not None
-                    for n in matched_node_pattern:
-                        if n.op == "call_module" and n.name in modules:
-                            modules[n.name].qconfig = new_qconfig  # type: ignore[assignment]
-                    matches[node.name] = (last_node, matched_node_pattern, pattern, qhandler, qconfig)  # type: ignore[assignment]
+                _validate_qconfig_against_dtype_config(qconfig, supported_dtype_config, pattern)
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
