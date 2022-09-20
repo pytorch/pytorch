@@ -89,9 +89,9 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 }
 
 void pythonDispatcherFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  auto state = c10::impl::PythonDispatcherTLS::get_state();
+  auto* state = c10::impl::PythonDispatcherTLS::get_state();
   TORCH_INTERNAL_ASSERT(state, "Hit PythonDispatcher dispatch key but PythonDispatcherTLS was not set");
-  state.pyinterpreter()->python_dispatcher(op, dispatch_keys.remove(c10::DispatchKey::PythonDispatcher), stack);
+  (*state)->python_dispatcher(op, dispatch_keys.remove(c10::DispatchKey::PythonDispatcher), stack);
 }
 
 void pythonTLSSnapshotFallback(const c10::OperatorHandle &op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
