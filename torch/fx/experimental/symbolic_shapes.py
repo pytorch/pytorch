@@ -407,24 +407,23 @@ class ShapeEnv(object):
         lhs = expr.lhs
         rhs = expr.rhs
         try:
-            solutions = sympy.solveset(lhs - rhs, free[0], domain=sympy.S.Integers)
-            if not solutions.is_finite_set:
-                if expr.has(sympy.Mod):
-                    mod_expr = tuple(expr.atoms(sympy.Mod))[0]
-                    solutions = sympy.solveset(lhs - rhs, mod_expr, domain=sympy.S.Integers)
-                    if solutions.is_finite_set and len(solutions) == 1 and tuple(solutions)[0] == 0:
-                        self.divisible[mod_expr] = sympy.Integer(0)
+            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+            if len(solutions) != 1:
                 return
-
-            if not isinstance(solutions, sympy.FiniteSet):
-                return
-
-            solutions = tuple(solutions)
-            if len(solutions) == 1 and all(t.is_integer for t in sympy.preorder_traversal(solutions[0])):
-                new_var = self._find(solutions[0])
+            solution = solutions[0][free[0]]
+            if all(t.is_integer for t in sympy.preorder_traversal(solution)):
+                new_var = self._find(solution)
                 self.replacements[cast(sympy.Symbol, free[0])] = new_var
-        except ZeroDivisionError:
-            pass
+        except NotImplementedError:
+            if expr.has(sympy.Mod):
+                mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+                try:
+                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                        self.divisible[mod_expr] = sympy.Integer(0)
+                except NotImplementedError:
+                    pass
+            return
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr"):
