@@ -2746,7 +2746,7 @@
   result: auto_linear
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
-  tensors: stack_tensors_backward(grad, dim, to_args_scalartypes(tensors))
+  tensors: "grad.defined() ? unbind(grad, dim) : std::vector<Tensor>(tensors.size())"
   result: stack_jvp(tensors, dim)
 
 # fused RNN kernels
