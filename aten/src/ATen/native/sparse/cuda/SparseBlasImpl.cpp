@@ -853,7 +853,8 @@ void addmm_out_sparse_csr(
             alpha,
             result.transpose(0, 1));
       }
-    } else if (mat2.layout() == kSparseCsc) {
+    }
+    if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kStrided) {
         return spmm(
             mat2.transpose(-2, -1),
@@ -862,7 +863,8 @@ void addmm_out_sparse_csr(
             alpha,
             result.transpose(-2, -1));
       }
-    } else if (mat2.layout() == kSparseBsc) {
+    }
+    if (mat2.layout() == kSparseBsc) {
       if (result.layout() == kStrided) {
         return block_sparse_mm(
             mat2.transpose(-2, -1),
@@ -872,40 +874,47 @@ void addmm_out_sparse_csr(
             result.transpose(-2, -1));
       }
     }
-  } else if (mat1.layout() == kSparseCsr) {
+  }
+  if (mat1.layout() == kSparseCsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         return spmm(mat1, mat2, beta, alpha, result);
       }
-    } else if (mat2.layout() == kSparseCsr) {
+    }
+    if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr) {
         return spgemm(mat1, mat2, beta, alpha, result);
       }
-    } else if (mat2.layout() == kSparseCsc) {
+    }
+    if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
         // CSR @ CSC kernel would be very fast due to format alignment
         return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
       }
     }
-  } else if (mat1.layout() == kSparseCsc) {
+  }
+  if (mat1.layout() == kSparseCsc) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided) {
         // TODO: Add native CSC support via cuSPARSE if supported.
         return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
       }
-    } else if (mat2.layout() == kSparseCsr) {
+    }
+    if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kSparseCsr)
         // TODO: Add native CSC support via cuSPARSE if supported.
         return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
-    } else if (mat2.layout() == kSparseCsc) {
+    }
+    if (mat2.layout() == kSparseCsc) {
       if (result.layout() == kSparseCsr) {
         // TODO: Add native CSC support via cuSPARSE if supported.
         return spgemm(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
       }
     }
-  } else if (mat1.layout() == kSparseBsr) {
+  }
+  if (mat1.layout() == kSparseBsr) {
     if (mat2.layout() == kStrided) {
       if (result.layout() == kStrided)
         return block_sparse_mm(mat1, mat2, beta, alpha, result);
