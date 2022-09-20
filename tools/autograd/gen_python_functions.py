@@ -1,8 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, torch._C._linalg, torch._C._nested, torch._C._sparse
-# or torch._C._special objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg, torch._C._sparse or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -222,10 +221,6 @@ def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == "linalg"
 
 
-def is_py_nested_function(f: NativeFunction) -> bool:
-    return f.python_module == "nested"
-
-
 def is_py_sparse_function(f: NativeFunction) -> bool:
     return f.python_module == "sparse"
 
@@ -309,15 +304,6 @@ def gen(
         "python_linalg_functions.cpp",
         method=False,
         symint=symint,
-    )
-
-    create_python_bindings(
-        fm,
-        functions,
-        is_py_nested_function,
-        "torch.nested",
-        "python_nested_functions.cpp",
-        method=False,
     )
 
     create_python_bindings(
@@ -894,7 +880,6 @@ if(check_has_torch_function(self_)) {{
             "torch.nn": "THPNNVariableFunctionsModule",
             "torch.fft": "THPFFTVariableFunctionsModule",
             "torch.linalg": "THPLinalgVariableFunctionsModule",
-            "torch.nested": "THPNestedVariableFunctionsModule",
             "torch.sparse": "THPSparseVariableFunctionsModule",
             "torch.special": "THPSpecialVariableFunctionsModule",
         }[module]
