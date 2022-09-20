@@ -16,11 +16,19 @@ using namespace torch::jit::fuser::cuda;
 
 // RUN CMD: bin/test_jit --gtest_filter="NVFuserTest*PyFusionCache*"
 TEST_F(NVFuserTest, PyFusionCache_CUDA) {
+  // Reset cache before testing.
+  try {
+    FusionCache::reset();
+    SUCCEED();
+  } catch (const std::exception& e) {
+    FAIL() << "Did not properly reset cache!" << e.what();
+  }
+
   // Create a fusion manager with a maximum of 1 Fusion
   FusionCache* fc = FusionCache::get(1);
-
   // You should never get a nullptr
   ASSERT_FALSE(fc == nullptr);
+  ASSERT_TRUE(fc->numFusions() == 0);
 
   // Check that cache methods all assert when presented with a null record.
   {
