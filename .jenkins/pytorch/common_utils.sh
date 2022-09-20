@@ -95,7 +95,7 @@ function install_monkeytype {
 }
 
 function install_triton {
-  TRITON_VERSION=5b04331dd2efdd23f4475823761fa975de60a514
+  TRITON_VERSION=889d9e34a114b1fe2e8871d21e713794344d12d3
   pip_install -U "git+https://github.com/openai/triton@${TRITON_VERSION}#subdirectory=python"
 }
 

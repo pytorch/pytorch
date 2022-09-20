@@ -184,35 +184,58 @@ test_dynamo_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
-  SKIP_LIST="test_autograd \
-      test_proxy_tensor \
-      test_quantization \
-      test_public_bindings \
-      test_dataloader \
-      test_reductions \
-      test_namedtensor \
-      test_namedtuple_return_api \
-      profiler/test_profiler \
-      profiler/test_profiler_tree \
-      test_overrides \
-      test_python_dispatch \
-      test_fx \
-      test_package \
-      test_vmap"
-  if [[ "${TEST_CONFIG}" == *inductor* ]]; then
-    SKIP_LIST="${SKIP_LIST} \
-      test_distributions \
-      test_dropout"
-  fi
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
-  time python test/run_test.py \
-    --exclude-jit-executor \
-    --exclude-distributed-tests \
-    --exclude "$SKIP_LIST" \
-    --shard "$1" "$NUM_TEST_SHARDS" \
-    --continue-through-error \
-    --verbose
+
+  if [[ "${TEST_CONFIG}" == *dynamo* ]]; then
+    time python test/run_test.py \
+      --exclude-jit-executor \
+      --exclude-distributed-tests \
+      --exclude \
+        test_autograd \
+        test_proxy_tensor \
+        test_quantization \
+        test_public_bindings \
+        test_dataloader \
+        test_reductions \
+        test_namedtensor \
+        test_namedtuple_return_api \
+        profiler/test_profiler \
+        profiler/test_profiler_tree \
+        test_overrides \
+        test_python_dispatch \
+        test_fx \
+        test_package \
+        test_vmap \
+      --shard "$1" "$NUM_TEST_SHARDS" \
+      --verbose
+  fi
+  if [[ "${TEST_CONFIG}" == *inductor* ]]; then
+    time python test/run_test.py \
+      --exclude-jit-executor \
+      --exclude-distributed-tests \
+      --exclude \
+        test_autograd \
+        test_proxy_tensor \
+        test_quantization \
+        test_public_bindings \
+        test_dataloader \
+        test_reductions \
+        test_namedtensor \
+        test_namedtuple_return_api \
+        profiler/test_profiler \
+        profiler/test_profiler_tree \
+        test_overrides \
+        test_python_dispatch \
+        test_fx \
+        test_package \
+        test_vmap \
+        test_distributions \
+        test_droput \
+      --shard "$1" "$NUM_TEST_SHARDS" \
+      --continue-through-error \
+      --verbose
+  fi
   assert_git_not_dirty
 }
 
