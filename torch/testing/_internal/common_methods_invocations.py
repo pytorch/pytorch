@@ -14959,7 +14959,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     BinaryUfuncInfo(
@@ -14986,7 +14985,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     OpInfo(
@@ -15012,7 +15010,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
-            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     BinaryUfuncInfo(
@@ -15042,7 +15039,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
         )
@@ -15074,7 +15070,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.skip('jiterator does not have a CPU implementation'), 'TestCommon', 'test_compare_cpu'),
             # Skip Nvfuser
             DecorateInfo(unittest.skip('Skipped!'), 'TestCudaFuserOpInfo'),
         )
