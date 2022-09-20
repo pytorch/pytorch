@@ -412,8 +412,12 @@ def _var_vjp(grad, result, self, dims, correction):
 
 def _broadcast_in_dim_vjp(grad, result, self, shape, broadcast_dimensions):
     # TODO: implement prims.sum_to and nvprims.sum_to
-    grad = grad.sum_to_size(self.shape)
-    # TODO: squeeze op is missing here
+    pre_expand_shape = [
+        1 if i not in broadcast_dimensions else x for i, x in enumerate(shape)
+    ]
+    grad = grad.sum_to_size(pre_expand_shape)
+    squeeze_dims = [i for i in range(0, grad.ndim) if i not in broadcast_dimensions]
+    grad = prims.squeeze(grad, squeeze_dims)
     return grad, *(None,) * (len(shape) + len(broadcast_dimensions))
 
 
