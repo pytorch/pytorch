@@ -9165,9 +9165,10 @@ Keyword args:
 
 add_docstr(
     torch.randn,
-    r"""
+    """
 randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 pin_memory=False) -> Tensor
+""" + r"""
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
