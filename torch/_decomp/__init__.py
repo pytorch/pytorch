@@ -9,12 +9,19 @@ import torch._ops
 import torch.library
 from torch.utils._pytree import tree_map
 
-__all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
+__all__ = [
+    "decomposition_table",
+    "register_decomposition",
+    "get_decompositions",
+    "enable_pre_autograd_decomposition",
+    "pre_autograd_decomposition_table",
+]
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
 decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
+pre_autograd_decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -168,6 +175,33 @@ def get_decompositions(
         elif isinstance(op, torch._ops.OpOverload) and op in decomposition_table:
             decompositions[op] = decomposition_table[op]
     return decompositions
+
+
+def enable_pre_autograd_decomposition(
+    aten_ops: Sequence[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]]
+) -> Dict[torch._ops.OpOverload, Callable]:
+    """
+    Register a decomposition for an operator to be used in the pre-autograd
+    decomposition pass. Its backward implementation will be generated according
+    to the decomposed forward graph.
+
+    NB: The aten ops passed to this function must be CompositeExplicitAutograd ops
+    """
+
+    decomps = get_decompositions(aten_ops)
+    assert len(decomps) == len(
+        aten_ops
+    ), "Not all operators have decompositions registered"
+
+    for opo, fn in decomps.items():
+        # For CompositeExplicitAutograd ops, we must register the decomposition function under 'Autograd' key
+        # There is some magic here, see resolve_key() in torch/_ops.py for more details
+        opo.py_impl(torch._C.DispatchKey.Autograd)(fn)
+
+    global pre_autograd_decomposition_table
+    pre_autograd_decomposition_table.update(decomps)
+
+    return pre_autograd_decomposition_table
 
 
 # populate the table
