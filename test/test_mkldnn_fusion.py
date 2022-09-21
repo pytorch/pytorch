@@ -270,6 +270,7 @@ class TestMkldnnFusion(JitTestCase):
                     graph = self._check_model(m, x)
                     self.assertFused(graph, ['aten::linear', 'aten::' + op_name])
                     self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+
     def test_unsupported_conv(self):
         class M(nn.Module):
             def __init__(self, m, in_channels, out_channels, bias, **kwargs):
