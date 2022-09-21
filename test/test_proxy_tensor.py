@@ -997,9 +997,6 @@ fake_tensor_failures = {
     # FakeTensor fallback doesn't work
     xfail('segment_reduce', 'lengths'),
     xfail('multinomial'),
-    xfail('mvlgamma', 'mvlgamma_p_1'),
-    xfail('mvlgamma', 'mvlgamma_p_3'),
-    xfail('mvlgamma', 'mvlgamma_p_5'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
     # ASAN failures due to divide by 0
@@ -1036,7 +1033,6 @@ symbolic_tensor_failures = {
     xfail('addmm', 'decomposed'),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('addr', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('all', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
     xfail('argmax', ''),  # aten.argmax.default - couldn't find symbolic meta function/decomposition
     xfail('argmin', ''),  # aten.argmin.default - couldn't find symbolic meta function/decomposition
