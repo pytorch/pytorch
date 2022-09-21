@@ -230,6 +230,9 @@ def _transpose_nvfuser(fd, a, permutation):
 
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
     for idx in reversed(sorted(dimensions)):
+        # TODO: This is a workaround for nvFuser problem in the validation pass
+        # of trivial reductions
+        a = fd.ops.set(a)
         a = fd.ops.squeeze(a, a_shape, idx)
         a_shape = a_shape[:idx] + a_shape[idx + 1 :]
     return a
