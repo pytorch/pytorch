@@ -1561,6 +1561,9 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
     input_array[i] = &input_data[i * input_matrix_stride];
   }
 
+  // needed to run lu tests in parallel, see https://github.com/pytorch/pytorch/issues/82894 for examples
+  // of failures
+  c10::cuda::device_synchronize();
   MAGMAQueue magma_queue(input.get_device());
 
   if (compute_pivots) {

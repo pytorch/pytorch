@@ -1,15 +1,24 @@
 import os
 import subprocess
 
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
+# mac has 3 CPUs and also received the best speedup with 3 processes. Setting this any larger
+# will also force use further restrict the amount of memory per process for cuda
+NUM_PROCS = 3
+
 
 def calculate_shards(
-    num_shards: int, tests: List[str], job_times: Dict[str, float]
+    num_shards: int,
+    tests: List[str],
+    job_times: Dict[str, float],
+    must_serial: Optional[Callable[[str], bool]] = None,
 ) -> List[Tuple[float, List[str]]]:
-    filtered_job_times: Dict[str, float] = {}
+    must_serial = must_serial if callable(must_serial) else lambda x: True
+
+    filtered_job_times: Dict[str, float] = dict()
     unknown_jobs: List[str] = []
     for test in tests:
         if test in job_times:
@@ -17,18 +26,30 @@ def calculate_shards(
         else:
             unknown_jobs.append(test)
 
-    # The following attempts to implement a partition approximation greedy algorithm
-    # See more at https://en.wikipedia.org/wiki/Greedy_number_partitioning
     sorted_jobs = sorted(
         filtered_job_times, key=lambda j: filtered_job_times[j], reverse=True
     )
     sharded_jobs: List[Tuple[float, List[str]]] = [(0.0, []) for _ in range(num_shards)]
-    for job in sorted_jobs:
-        min_shard_index = sorted(range(num_shards), key=lambda i: sharded_jobs[i][0])[0]
+
+    serial = [x for x in sorted_jobs if must_serial(x)]
+    parallel = [x for x in sorted_jobs if x not in serial]
+
+    for i in range(0, len(serial)):
+        min_shard_index = sorted(range(num_shards), key=lambda j: sharded_jobs[j][0])[0]
         curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
-        curr_shard_jobs.append(job)
+        curr_shard_jobs.append(serial[i])
         sharded_jobs[min_shard_index] = (
-            curr_shard_time + filtered_job_times[job],
+            curr_shard_time + filtered_job_times[serial[i]],
+            curr_shard_jobs,
+        )
+
+    # Not the best idea, but attempt to mask the long jobs with other long jobs
+    for i in range(0, len(parallel), NUM_PROCS):
+        min_shard_index = sorted(range(num_shards), key=lambda j: sharded_jobs[j][0])[0]
+        curr_shard_time, curr_shard_jobs = sharded_jobs[min_shard_index]
+        curr_shard_jobs.extend(parallel[i : i + NUM_PROCS])
+        sharded_jobs[min_shard_index] = (
+            curr_shard_time + filtered_job_times[parallel[i]],
             curr_shard_jobs,
         )
 
