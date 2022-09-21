@@ -8852,7 +8852,7 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/85409
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-            )),
+           )),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
