@@ -1882,7 +1882,7 @@ def sum(
 
 def sum_to_size(
     a: Tensor,
-    *shape: ShapeType,
+    *shape,
 ) -> Tensor:
     shape = utils.extract_shape_from_varargs(shape, validate=False)
     utils.check(
