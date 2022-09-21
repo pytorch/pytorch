@@ -4,7 +4,8 @@ import warnings
 
 import torch
 
-from .core import is_masked_tensor, MaskedTensor
+from .core import is_masked_tensor
+from .creation import as_masked_tensor, masked_tensor
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -45,30 +46,35 @@ def _get_masked_fn(fn):
 def _torch_reduce_all(fn):
     def reduce_all(self):
         masked_fn = _get_masked_fn(fn)
+        data = self.get_data()
         mask = self.get_mask().values() if self.is_sparse() else self.get_mask()
         # When reduction is "all", then torch.argmin/torch.argmax needs to return the index of the
         # element corresponding to the min/max, but this operation isn't supported correctly for sparse layouts.
         # Therefore, this implementation calculates it using the strides.
         if fn == "all":
-            result_data = masked_fn(self.get_data(), mask=mask)
+            result_data = masked_fn(data, mask=mask)
 
-        elif fn in {"argmin", "argmax"} and self.is_sparse():
-            sparse_idx = masked_fn(self, mask=mask).to(dtype=torch.int)
+        elif fn in {"argmin", "argmax"} and self.is_sparse_coo():
+            sparse_idx = masked_fn(data.values(), mask=mask).to(dtype=torch.int)
             indices = (
-                self.get_data().to_sparse_coo().indices()
+                data.to_sparse_coo().indices()
                 if not self.is_sparse_coo()
-                else self.get_data().indices()
+                else data.indices()
             )
             idx = indices.unbind(1)[sparse_idx]
-            stride = self.get_data().size().numel() / torch.tensor(
-                self.get_data().size()
+            stride = data.size().numel() / torch.tensor(
+                data.size(), device=data.device
             ).cumprod(0)
             result_data = torch.sum(idx * stride)
+
+        # we simply pass in the values for sparse COO/CSR tensors
+        elif self.is_sparse():
+            result_data = masked_fn(masked_tensor(data.values(), mask))
 
         else:
             result_data = masked_fn(self, mask=mask)
 
-        return MaskedTensor.from_values(result_data, torch.any(mask))
+        return as_masked_tensor(result_data, torch.any(mask))
 
     return reduce_all
 
@@ -97,7 +103,7 @@ def _torch_reduce_dim(fn):
             result_data = masked_fn(
                 self, dim=dim, keepdim=keepdim, dtype=dtype, mask=self.get_mask()
             )
-        return MaskedTensor.from_values(result_data, _multidim_any(mask, dim, keepdim))
+        return as_masked_tensor(result_data, _multidim_any(mask, dim, keepdim))
 
     return reduce_dim
 

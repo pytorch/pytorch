@@ -337,12 +337,12 @@ class MaskedTensor(torch.Tensor):
         self._validate_members()
 
     @staticmethod
-    def from_values(data, mask):
+    def _from_values(data, mask):
         """ Differentiable constructor for MaskedTensor """
         class Constructor(torch.autograd.Function):
             @staticmethod
             def forward(ctx, data, mask):
-                return MaskedTensor(data.clone(), mask.clone())
+                return MaskedTensor(data, mask)
 
             @staticmethod
             def backward(ctx, grad_output):
@@ -382,10 +382,6 @@ class MaskedTensor(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-
-        if func is torch.nn.functional.multi_head_attention_forward:
-            from .functions import multi_head_attention_forward as mha_mt
-            return mha_mt(*args, **kwargs)
 
         from .reductions import _apply_reduction, _is_reduction
         if _is_reduction(func):
@@ -439,16 +435,6 @@ class MaskedTensor(torch.Tensor):
         if _is_native_binary(func):
             return _apply_native_binary(func, *args, **kwargs)
 
-        from .matmul import _apply_native_matmul, _is_native_matmul
-
-        if _is_native_matmul(func):
-            return _apply_native_matmul(func, *args, **kwargs)
-
-        if func in [torch.ops.aten.mm, torch.ops.aten.bmm]:
-            _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=2, len_kwargs=0)
-            return cls.matmul(args[0], args[1], func)  # type: ignore[call-arg]
-
-        # Doesn't work for addmm where the first argument is a Tensor
         data = _get_data(args[0])
         mask = _maybe_get_mask(args[0])
         if func is torch.ops.aten.stride:
