@@ -1779,7 +1779,10 @@ aliasing_failures = (
     "nn.functional.pixel_unshuffle",
 )
 
-fake_striding_skips = [
+# tests which have inconsistent fake tensor stride propagation
+# XXX: no new tests should be added to this list as a result of a
+# decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
+fake_tensor_stride_failing_ops = [
     "fft.fft2",
     "fft.fft",
     "fft.fftn",
@@ -1802,7 +1805,7 @@ fake_striding_skips = [
     "linalg.svd",
 ]
 
-backward_skips = fake_striding_skips + [
+fake_backward_xfails = fake_tensor_stride_failing_ops + [
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
@@ -1816,11 +1819,12 @@ backward_skips = fake_striding_skips + [
     "roll",
     "svd_lowrank",
     "sgn",
+    "cholesky",
+    "linalg.eigh",
+    "symeig",
 ]
 
-backward_skips = [xfail(stride_skip) for stride_skip in backward_skips]
-
-backward_skips = backward_skips + [
+fake_backward_xfails = [xfail(stride_skip) for stride_skip in fake_backward_xfails] + [
     xfail("segment_reduce", "lengths"),
     xfail("norm", "nuc"),
     xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
@@ -1872,12 +1876,10 @@ class TestFakeTensor(TestCase):
                     # if you see a shape exception here, you may need to add
                     # a `dynamic_output_shape` tag to an operator
 
-                    check_strides = name not in fake_striding_skips
+                    check_strides = name not in fake_tensor_stride_failing_ops
 
-                    # if there is a striding failure here as a result of adding a primtorch ref,
-                    # feel free to add the op to `fake_striding_skips` but please tag
-                    # @eellison on the pr.
-                    # see: https://github.com/pytorch/pytorch/issues/78050
+                    # prims/decomps must correctly model strides,
+                    # see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
                     prims.utils.compare_tensor_meta(fake_out, real_out, check_strides)
 
                     if name not in aliasing_failures:
@@ -1907,8 +1909,10 @@ class TestFakeTensor(TestCase):
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps('TestFakeTensor', 'test_fake_crossref_backward', backward_skips)
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward', fake_backward_xfails)
     def test_fake_crossref_backward(self, device, dtype, op):
+        # tests fake tensor property propagation through a cross ref mode
+        # on ops which support backward
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for iter, sample in enumerate(samples):

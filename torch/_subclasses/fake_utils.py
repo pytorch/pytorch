@@ -10,13 +10,25 @@ from torch.utils._pytree import tree_flatten
 aten = torch.ops.aten
 
 
+def has_storage(t):
+    try:
+        t.storage()
+        return True
+    except Exception:
+        return False
+
+
 def outputs_alias_inputs(outputs, inputs):
     input_storages = set()
     for out in tree_flatten(outputs)[0]:
-        if isinstance(out, torch.Tensor):
+        if isinstance(out, torch.Tensor) and has_storage(out):
             input_storages.add(out.storage()._cdata)
     for inp in tree_flatten(inputs)[0]:
-        if isinstance(inp, torch.Tensor) and inp.storage()._cdata in input_storages:
+        if (
+            isinstance(inp, torch.Tensor)
+            and has_storage(inp)
+            and inp.storage()._cdata in input_storages
+        ):
             return True
     return False
 
@@ -105,9 +117,10 @@ class CrossRefFakeMode(TorchDispatchMode):
                     assert (
                         r_out.requires_grad == fake_out.requires_grad
                     ), f"Mismatch on {func}"
-                    assert (
-                        r_out.storage_offset() == fake_out.storage_offset()
-                    ), f"Mismatch on {func}"
+                    if has_storage(r_out):
+                        assert (
+                            r_out.storage_offset() == fake_out.storage_offset()
+                        ), f"Mismatch on {func}"
 
                     try:
                         torch._prims.utils.compare_tensor_meta(
