@@ -921,22 +921,22 @@ def forward(self, a_1):
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
         assert len(shape_env.guards) == 3
 
-        shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(2, 2)], [[(3, 3)], [(4, 4)]])
+        shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(3, 3)], [[(4, 4)], [(5, 5)]])
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
-        assert len(shape_env.guards) == 3
+        assert len(shape_env.guards) == 4
 
         shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(2, 3)], [[(3, 4)], [(4, 5)]])
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 6)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
-        assert len(shape_env.guards) == 2
+        assert len(shape_env.guards) == 3
 
-        shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(3, 2)], [[(4, 3)], [(5, 4)]])
+        shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(4, 3)], [[(5, 4)], [(6, 5)]])
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(5, 6)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
-        assert len(shape_env.guards) == 2
+        assert len(shape_env.guards) == 4
 
         # TODO alban for tomorrow
         # # torch.diagonal
