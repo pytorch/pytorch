@@ -137,10 +137,11 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
     event_pool_t* ep = nullptr;
 #endif
     int sourceRank_;
+
    protected:
     std::shared_ptr<ProgressEntry> entry_;
     c10::intrusive_ptr<ProcessGroupUCCLogger> logger_;
-    uint64_t seq_;    
+    uint64_t seq_;
 
    private:
     // The future returned by getFuture.
@@ -256,7 +257,7 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
 
   // Counting for the sequential number of UCC collective_post call.
   uint64_t seq_{0};
-  
+
   // Agrees on an initial sequence number for the whole group by having rank 0
   // create it and broadcast it to other ranks using the store.
   void setSequenceNumberForGroup() override;
