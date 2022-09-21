@@ -1670,6 +1670,21 @@ TEST_F(FunctionalTest, PixelShuffle) {
   ASSERT_TRUE(y.allclose(y_exp));
 }
 
+TEST_F(FunctionalTest, PixelShuffleInputWithZeroSizeLast3Dims) {
+  auto x_zero_dim0 = torch::ones({1,1,1,1,0}, torch::kFloat);
+  auto y_zero_dim0 = F::pixel_shuffle(x_zero_dim0, 1);
+
+  auto x_zero_dim1 = torch::ones({1,1,1,0,1}, torch::kFloat);
+  auto y_zero_dim1 = F::pixel_shuffle(x_zero_dim1, 1);
+
+  auto x_zero_dim2 = torch::ones({1,1,0,1,1}, torch::kFloat);
+  auto y_zero_dim2 = F::pixel_shuffle(x_zero_dim2, 1);
+
+  ASSERT_TRUE(y_zero_dim0.numel() == 0);
+  ASSERT_TRUE(y_zero_dim1.numel() == 0);
+  ASSERT_TRUE(y_zero_dim2.numel() == 0);
+}
+
 TEST_F(FunctionalTest, PixelUnshuffle) {
   auto x = torch::tensor(
       {{{{-17, 7, 19, 14}, {0, -15, -2, 0}, {-1, -3, 2, 1}, {-12, -3, 14, 9}}}},
