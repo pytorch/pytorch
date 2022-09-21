@@ -416,7 +416,6 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   }
 }
 
-}
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
 
 void index_put_with_sort_kernel_quantized(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
