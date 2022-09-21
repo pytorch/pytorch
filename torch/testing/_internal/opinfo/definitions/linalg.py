@@ -1450,9 +1450,9 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # This appears to be a different algorithm on cpu vs gpu
+            # This will fail reliably on CI, but locally passes with a newer cuda toolkit version
             DecorateInfo(
-                unittest.skip("eig on cpu is sometimes different than cuda"),
+                unittest.skip("cpu vs gpu is sometimes different"),
                 "TestCommon",
                 "test_compare_cpu",
             ),
@@ -1666,7 +1666,7 @@ op_db: List[OpInfo] = [
                 dtypes=[torch.float32],
             ),
             DecorateInfo(
-                unittest.skip("cpu vs gpu is sometimes the same"),
+                unittest.skip("cpu vs gpu is sometimes different"),
                 "TestCommon",
                 "test_compare_cpu",
             ),
