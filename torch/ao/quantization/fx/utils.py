@@ -2,12 +2,15 @@ import copy
 import re
 import torch
 import torch.nn as nn
-from torch.ao.quantization import QuantType
+from torch.ao.quantization import QuantType, QConfig
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.stubs import DeQuantStub
-from torch.ao.quantization.utils import is_per_tensor, is_per_channel
+from torch.ao.quantization.utils import (
+    activation_is_statically_quantized,
+    is_per_tensor,
+    is_per_channel,
+)
 from torch.ao.quantization.quantize import is_activation_post_process
-
 
 from torch.fx import GraphModule, map_arg
 
@@ -642,34 +645,33 @@ def get_skipped_module_name_and_classes(
 
     return skipped_module_names, skipped_module_classes
 
-def _is_custom_module_lstm(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
+def _is_custom_module_lstm(
+        node: Node,
+        named_modules: Dict[str, torch.nn.Module],
+        qconfig: Optional[QConfig] = None,
+        # QuantizeHandler, but we cannot include the type here due to circular imports
+        qhandler: Optional[Any] = None,
+) -> bool:
     """
     Return whether this refers to the custom module LSTM flow.
     """
-    if node.op != "call_module" or str(node.target) not in named_modules:
-        return False
-    mod = named_modules[str(node.target)]
-    return isinstance(mod, torch.nn.LSTM) or isinstance(mod, torch.ao.nn.quantizable.LSTM)
+    mod = _get_module(node, named_modules)
+    if qconfig is not None and qhandler is not None:
+        assert isinstance(qhandler, torch.ao.quantization.fx.quantization_patterns.QuantizeHandler)
+        return isinstance(mod, torch.nn.LSTM) and \
+            activation_is_statically_quantized(qconfig) and \
+            qhandler.is_custom_module()
+    else:
+        return isinstance(mod, torch.ao.nn.quantizable.LSTM)
 
-def _is_getitem_node(node: Node) -> bool:
+def _get_module(node: Node, named_modules: Dict[str, torch.nn.Module]) -> Optional[torch.nn.Module]:
     """
-    Return whether `node` refers to a `getitem` call_function node.
+    If `node` refers to a call_module node, return the module, else None.
     """
-    return node.op == "call_function" and node.target == operator.getitem
-
-def _is_dequant_stub(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
-    """
-    Return whether `node` refers to a `DeQuantStub` call_module node.
-    """
-    if node.op != "call_module" or str(node.target) not in named_modules:
-        return False
-    return isinstance(named_modules[str(node.target)], DeQuantStub)
-
-def _is_tuple_node(node: Node) -> bool:
-    """
-    Return whether `node` refers to a `tuple` call_function node.
-    """
-    return node.op == "call_function" and node.target == tuple
+    if node.op == "call_module" and str(node.target) in named_modules:
+        return named_modules[str(node.target)]
+    else:
+        return None
 
 def _insert_dequant_stub(
     node: Node,
@@ -756,7 +758,6 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
     """
     # (1) Split the LSTM node into (output, (hidden0, hidden1))
     # (2) Insert a DeQuantStub after each internal node
-    original_lstm_users = list(node.users.keys())
     with graph.inserting_after(node):
         output = graph.call_function(operator.getitem, (node, 0))
         output_dq = _insert_dequant_stub(output, model, named_modules, graph)
@@ -777,6 +778,8 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
 
     # (4) Reroute all consumers of the original LSTM node
     # First, gather the original LSTM nodes
+    def _is_getitem_node(n):
+        return n.op == "call_function" and n.target == operator.getitem
     node_to_replacement = {node: lstm_output_dq}
     for user in list(node.users.keys()):
         if _is_getitem_node(user) and user.args[1] == 0:
@@ -798,7 +801,7 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
 
     return lstm_output_dq
 
-def _get_custom_module_lstm_from_node_arg(
+def _maybe_get_custom_module_lstm_from_node_arg(
     arg: Node,
     named_modules: Dict[str, torch.nn.Module],
 ) -> Optional[Node]:
@@ -806,9 +809,10 @@ def _get_custom_module_lstm_from_node_arg(
     Given an argument of a node, if the argument refers to the path through which the node
     is a consumer of custom module LSTM, return the custom module LSTM node, or None otherwise.
 
-    This is used to determine whether to insert input observers for a node. Conceptually,
-    custom module LSTM produces quantized outputs, so any consumer of this node should *not*
-    insert input observers to avoid unnecessarily quantizing the outputs again:
+    This is used to determine whether a node is a consumer of custom module LSTM, and, if so,
+    skip inserting input observers for this node. This is because custom module LSTM produces
+    quantized outputs, so inserting an input observer for the consumer of custom module LSTM
+    would unnecessarily quantize the outputs again.
 
       lstm -> consumer
 
@@ -824,10 +828,17 @@ def _get_custom_module_lstm_from_node_arg(
     Thus, we must match against the above patterns instead of simply checking the parent node
     to determine whether this node is a consumer of a custom module LSTM.
     """
-    match_dq = lambda a: _is_dequant_stub(a, named_modules)  # noqa: E731
-    match_lstm = lambda a: _is_custom_module_lstm(a, named_modules)  # noqa: E731
-    match_getitem = _is_getitem_node
-    match_tuple = _is_tuple_node
+    def match_dq(a):
+        return isinstance(_get_module(a, named_modules), DeQuantStub)
+
+    def match_lstm(a):
+        return _is_custom_module_lstm(a, named_modules)
+
+    def match_getitem(a):
+        return a.op == "call_function" and a.target == operator.getitem
+
+    def match_tuple(a):
+        return a.op == "call_function" and a.target == tuple
 
     def _match_pattern(match_pattern: List[Callable]) -> Optional[Node]:
         """

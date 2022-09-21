@@ -71,8 +71,7 @@ from ..utils import _parent_name
 from .utils import (
     _insert_dequant_stubs_for_custom_module_lstm_output,
     _is_custom_module_lstm,
-    _is_getitem_node,
-    _get_custom_module_lstm_from_node_arg,
+    _maybe_get_custom_module_lstm_from_node_arg,
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
@@ -375,7 +374,9 @@ def get_target_activation_dtype_for_node(
             }
 
         # TODO(future PR): consider stopping matching getitem
-        if _is_getitem_node(node):
+        is_getitem = node.op == 'call_function' and \
+            node.target == operator.getitem
+        if is_getitem:
             return {
                 "input_activation_dtype": torch.float,
                 "output_activation_dtype": torch.float,
@@ -436,9 +437,11 @@ def get_arg_target_dtype_as_output(
     """
     assert isinstance(arg, Node)
     # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
-    # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`)
-    # Here we must trace through that subgraph to reach the original LSTM node
-    custom_module_lstm_node = _get_custom_module_lstm_from_node_arg(arg, modules)
+    # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
+    # Since we modified the graph in this case, we must trace back from the args through
+    # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
+    # not be able to accurately detect whether this node is a consumer of custom module LSTM.
+    custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, modules)
     if custom_module_lstm_node is not None:
         return node_name_to_target_dtype[custom_module_lstm_node.name]["output_activation_dtype"]
     elif is_activation_post_process_node(arg, modules):
@@ -778,17 +781,7 @@ def maybe_insert_output_observer_for_node(
                 matched_pattern,
                 is_qat)
         observer = act_post_process_ctr()
-
-        # Currently custom module outputs are assumed to be already quantized,
-        # so we need to insert a DeQuantStub after the output. For custom module
-        # LSTM specifically, the outputs are also a nested tuple, so we must first
-        # break down the tuple to insert DeQuantStubs after the internal nodes.
-        # TODO: Insert DeQuantStubs instead of observers for custom modules in general
-        if _is_custom_module_lstm(node, modules):
-            return _insert_dequant_stubs_for_custom_module_lstm_output(
-                node, model, modules, graph)
-        else:
-            return insert_observer(node, observer, model, modules, graph)
+        return insert_observer(node, observer, model, modules, graph)
     else:
         return None
 
@@ -1268,32 +1261,41 @@ def insert_observers_for_model(
                     is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
-                        # this returns the new observer node if it was needed
-                        maybe_output_obs_node = maybe_insert_output_observer_for_node(
-                            node, model, modules, graph, matches,
-                            node_name_to_target_dtype, pattern, qhandler, is_qat)
+                        maybe_output_obs_node = None
+                        if _is_custom_module_lstm(node, modules, qconfig, qhandler):
+                            # Currently custom module outputs are assumed to be already quantized,
+                            # so we need to insert a DeQuantStub after the output. For custom module
+                            # LSTM specifically, the outputs are also a nested tuple, so we must first
+                            # break down the tuple to insert DeQuantStubs after the internal nodes.
+                            # TODO: Insert DeQuantStubs instead of observers for custom modules in general
+                            _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, graph)
+                        else:
+                            # this returns the new observer node if it was needed
+                            maybe_output_obs_node = maybe_insert_output_observer_for_node(
+                                node, model, modules, graph, matches,
+                                node_name_to_target_dtype, pattern, qhandler, is_qat)
+
                         if maybe_output_obs_node is not None:
-                            if not _is_custom_module_lstm(node, modules):
-                                # Update users of original node to use the output observer
-                                # instead. For example, change
-                                #
-                                #           next_node
-                                #          /
-                                #   cur_node -> obs
-                                #
-                                # to
-                                #
-                                #                 next_node
-                                #                 /
-                                #   cur_node -> obs
-                                #
-                                # We need to save orig users before updating uses because
-                                # the list of users will change as we update uses
-                                orig_users = list(node.users.keys())
-                                for user_node in orig_users:
-                                    if user_node is maybe_output_obs_node:
-                                        continue
-                                    user_node.replace_input_with(node, maybe_output_obs_node)
+                            # Update users of original node to use the output observer
+                            # instead. For example, change
+                            #
+                            #           next_node
+                            #          /
+                            #   cur_node -> obs
+                            #
+                            # to
+                            #
+                            #                 next_node
+                            #                 /
+                            #   cur_node -> obs
+                            #
+                            # We need to save orig users before updating uses because
+                            # the list of users will change as we update uses
+                            orig_users = list(node.users.keys())
+                            for user_node in orig_users:
+                                if user_node is maybe_output_obs_node:
+                                    continue
+                                user_node.replace_input_with(node, maybe_output_obs_node)
 
                             is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
 
@@ -1305,6 +1307,7 @@ def insert_observers_for_model(
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 
+                        if maybe_output_obs_node is not None or _is_custom_module_lstm(node, modules, qconfig, qhandler):
                             if qhandler is not None and qhandler.is_custom_module():
                                 swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
 

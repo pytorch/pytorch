@@ -50,8 +50,8 @@ from .graph_module import (
 from ._equalize import update_obs_for_equalization, convert_eq_obs
 from torch.nn.utils.parametrize import type_before_parametrizations
 from .utils import (
+    _get_module,
     _is_custom_module_lstm,
-    _is_dequant_stub,
     get_custom_module_class_keys,
     get_quantize_node_info,
     create_getattr_from_value,
@@ -59,11 +59,11 @@ from .utils import (
     graph_module_from_producer_nodes,
     node_arg_is_weight,
 )
-
 from torch.ao.quantization.quantize import (
     _remove_qconfig,
     is_activation_post_process,
 )
+from torch.ao.quantization.stubs import DeQuantStub
 from .custom_config import (
     ConvertCustomConfig,
     PrepareCustomConfig,
@@ -460,10 +460,10 @@ def convert_weighted_module(
 
 def _remove_previous_dequantize_in_custom_module(node: Node, prev_node: Node, graph: Graph):
     """
-    Change the connection for custom module, we'll change the input
-    of custom module node to quantize node:
-    Before: quantize - dequantize - custom - module
-    After: quantize - custom - module
+    Given a custom module `node`, if the previous node is a dequantize, reroute the custom as follows:
+
+    Before: quantize - dequantize - custom_module
+    After: quantize - custom_module
                  \\ - dequantize
     """
     # expecting the input node for a custom module node to be a Node
@@ -709,7 +709,7 @@ def convert(
     # this is a temporary hack for custom module, we may want to implement
     # this properly after the custom module class design is finalized
     # TODO: Use this only for replacing DeQuantStubs; currently it's also used for replacing observers
-    def replace_with_dequantize_node(node: Node, graph: Graph):
+    def replace_observer_or_dequant_stub_with_dequantize_node(node: Node, graph: Graph):
         call_custom_module_node = node.args[0]
         assert isinstance(call_custom_module_node, Node), \
             f"Expecting the for call custom module node to be a Node, but got {call_custom_module_node}"
@@ -762,31 +762,33 @@ def convert(
             else:
                 warnings.warn(f"Unsupported node type for output_quantized_idxs: {type(output)}")
         elif node.op == "call_module":
-            if is_activation_post_process(modules[node.target]):
+            mod = _get_module(node, modules)
+            assert mod is not None
+            if is_activation_post_process(mod):
                 observed_node = node.args[0]
                 if observed_node in statically_quantized_custom_module_nodes:
-                    replace_with_dequantize_node(node, model.graph)
+                    replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
                 else:
                     replace_observer_with_quantize_dequantize_node(
                         model, model.graph, node, modules, node_name_to_scope,
                         qconfig_map)
-            elif _is_dequant_stub(node, modules):
-                replace_with_dequantize_node(node, model.graph)
-            elif is_observed_standalone_module(modules[node.target]):
+            elif isinstance(mod, DeQuantStub):
+                replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)
+            elif is_observed_standalone_module(mod):
                 convert_standalone_module(
                     node, modules, model, is_reference, backend_config)
             # below this point `type_before_parametrizations` is used
             # instead of `type` to handle situations with fx quant + sparsity
-            elif type_before_parametrizations(modules[node.target]) in set(
+            elif type_before_parametrizations(mod) in set(
                     root_module_classes).union(qat_module_classes).union(fused_module_classes):
                 # extra check for fused module classes to make sure they are fused module classes
                 # of target modules
-                if type_before_parametrizations(modules[node.target]) in fused_module_classes and \
-                   type_before_parametrizations(modules[node.target][0]) not in root_module_classes:
+                if type_before_parametrizations(mod) in fused_module_classes and \
+                   type_before_parametrizations(mod[0]) not in root_module_classes:
                     continue
                 convert_weighted_module(
                     node, modules, observed_node_names, qconfig_map, backend_config)
-            elif type_before_parametrizations(modules[node.target]) in custom_module_classes:
+            elif type_before_parametrizations(mod) in custom_module_classes:
                 convert_custom_module(
                     node, model.graph, modules, custom_module_class_mapping,
                     statically_quantized_custom_module_nodes)
