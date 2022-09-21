@@ -4,16 +4,16 @@
 
 namespace torch {
 namespace onnx {
-namespace diagnostic {
+namespace diagnostics {
 
 enum class Rule : uint32_t {
 ${rules}
 };
 
-static constexpr const char* const RuleNames [] = {
-${rule_names}
+static constexpr const char* const kPyRuleNames [] = {
+${py_rule_names}
 };
 
-} // namespace diagnostic
+} // namespace diagnostics
 } // namespace onnx
 } // namespace torch

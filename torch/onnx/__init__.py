@@ -12,7 +12,6 @@ from torch._C._onnx import (
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
-    diagnostic,
     errors,
     symbolic_caffe2,
     symbolic_helper,
@@ -96,7 +95,9 @@ producer_version = _C_onnx.PRODUCER_VERSION
 
 
 @_deprecation.deprecated(
-    since="1.12.0", removed_in="TBD", instructions="use `torch.onnx.export` instead"
+    since="1.12.0",
+    removed_in="TBD",
+    instructions="use `torch.onnx.export` instead",
 )
 def _export(*args, **kwargs):
     return utils._export(*args, **kwargs)

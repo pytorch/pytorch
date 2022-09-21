@@ -12,7 +12,7 @@
 #include <torch/csrc/jit/serialization/onnx.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <torch/csrc/onnx/diagnostic/diagnostic.h>
+#include <torch/csrc/onnx/diagnostics/diagnostics.h>
 
 #include <onnx/shape_inference/implementation.h>
 #include <algorithm>
@@ -91,7 +91,7 @@ void MergeInferredTypeAndSetMap(
 namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
-namespace diagnostic = ::torch::onnx::diagnostic;
+namespace diagnostics = ::torch::onnx::diagnostics;
 
 c10::ShapeSymbol ONNXDimToShapeSymbol(
     const onnx::TensorShapeProto_Dimension& dim,
@@ -1885,9 +1885,9 @@ void UpdateReliable(
         output->node()->kind().toDisplayString(),
         " type is missing, so it may result in wrong shape inference for the exported graph. ",
         "Please consider adding it in symbolic function.");
-    diagnostic::Diagnose(
-        diagnostic::Rule::ONNXShapeInferenceIsMissingForNode,
-        diagnostic::Level::Warning,
+    diagnostics::Diagnose(
+        diagnostics::Rule::kNodeMissingOnnxShapeInference,
+        diagnostics::Level::kWarning,
         {output->node()->kind().toDisplayString()});
   }
   auto reliable = false;

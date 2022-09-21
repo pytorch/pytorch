@@ -2,10 +2,13 @@
 ${generated_comment}
 """
 
+import dataclasses
+
 # flake8: noqa
-from torch.onnx import diagnostic
+from torch.onnx._internal.diagnostics import infra
 
 
+@dataclasses.dataclass(frozen=True)
 class _Rules:
 ${rules}
 
