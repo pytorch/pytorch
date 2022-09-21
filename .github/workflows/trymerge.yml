@@ -44,6 +44,8 @@ jobs:
           if [ -n "${REBASE}" ]; then
             python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
             git checkout master
+            # give github some time to get the push and start workflows
+            sleep 60
           fi
           if [ -n "${FORCE}" ]; then
             if [ -n "${COMMENT_ID}" ]; then
