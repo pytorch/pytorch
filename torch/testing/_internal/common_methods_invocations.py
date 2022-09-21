@@ -13243,8 +13243,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # SVD appears to be a different algorithm on cpu vs gpu
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
            )),
     OpInfo('svd_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(

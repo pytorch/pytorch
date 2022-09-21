@@ -184,6 +184,9 @@ class TestCommon(TestCase):
             cuda_results = op(sample.input, *sample.args, **sample.kwargs)
             cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
 
+            cuda_results = sample.output_process_fn_grad(cuda_results)
+            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
+
             self.assertEqual(cuda_results, cpu_results)
 
     # Tests that experimental Python References can propagate shape, dtype,
