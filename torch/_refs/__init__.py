@@ -1880,24 +1880,13 @@ def sum(
     )
 
 
-def _is_expandable_to(shape, desired):
-    # Python implementation of
-    # aten/src/ATen/ExpandUtils.h:is_expandable_to
-    if len(shape) > len(desired):
-        return False
-    for i in range(len(shape)):
-        if shape[i] != desired[i] and shape[i] != 1:
-            return False
-    return True
-
-
 def sum_to_size(
     a: Tensor,
     *shape: ShapeType,
 ) -> Tensor:
     shape = utils.extract_shape_from_varargs(shape, validate=False)
     utils.check(
-        _is_expandable_to(shape, a.shape),
+        utils.is_expandable_to(shape, a.shape),
         lambda: f'sum_to_size: size "{shape}" is not expandable to size "{a.shape}"',
     )
     # In ATen scalar tensors are sent through sum and the result is returned as
