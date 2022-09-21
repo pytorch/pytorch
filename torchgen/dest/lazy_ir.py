@@ -119,7 +119,7 @@ def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
         or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
         if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
-            return at::native::call_fallback_fn<&ltc_eager_fallback, {aten_op_str}>::call(
+            return at::native::call_fallback_fn_symint<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
         }}
