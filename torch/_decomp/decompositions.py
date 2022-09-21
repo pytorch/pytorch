@@ -14,6 +14,8 @@ from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
+old_slice = slice
+
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 # None of these functions are publicly accessible; get at them
@@ -599,7 +601,7 @@ def slice_backward(
 
 
 @register_decomposition(aten.slice.Tensor)
-def slice(
+def slice_forward(
     # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
     self: Tensor,
     dim: int = 0,
@@ -1636,6 +1638,7 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
+
     idx = (slice(None),) * dim + (index,)
     torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
     return x
