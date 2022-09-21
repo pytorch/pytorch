@@ -2627,18 +2627,20 @@ class TestSparseCSR(TestCase):
         that an exception is thrown for unsupported conversions.
         """
 
+        allowed_pairwise_layouts_sets = {
+            frozenset({torch.sparse_csc}),
+            frozenset({torch.sparse_csr}),
+            frozenset({torch.sparse_csc, torch.sparse_csr}),
+            frozenset({torch.sparse_bsc}),
+            frozenset({torch.sparse_bsr}),
+            frozenset({torch.sparse_bsc, torch.sparse_bsr}),
+            frozenset({torch.sparse_csr, torch.sparse_bsr}),
+        }
+        block_layouts = (torch.sparse_bsr, torch.sparse_bsc)
+
         def _to_from_layout(layout_a, layout_b, a):
             expect_error = True
-            allowed_layout_ab_sets = {
-                frozenset({torch.sparse_csc}),
-                frozenset({torch.sparse_csr}),
-                frozenset({torch.sparse_csc, torch.sparse_csr}),
-                frozenset({torch.sparse_bsc}),
-                frozenset({torch.sparse_bsr}),
-                frozenset({torch.sparse_bsc, torch.sparse_bsr}),
-                frozenset({torch.sparse_csr, torch.sparse_bsr}),
-            }
-            if {layout_a, layout_b} in allowed_layout_ab_sets:
+            if {layout_a, layout_b} in allowed_pairwise_layouts_sets:
                 expect_error = False
 
             # BSR -> CSR is not yet supported
@@ -2649,17 +2651,22 @@ class TestSparseCSR(TestCase):
                 if a.dim() > 2:
                     expect_error = True
 
+            b = self._convert_to_layout(a, layout_a)
             if expect_error:
                 with self.assertRaises(RuntimeError):
-                    b = self._convert_to_layout(a, layout_a)
                     self._convert_to_layout(b, layout_b)
             else:
-                b = self._convert_to_layout(a, layout_a)
                 c = self._convert_to_layout(b, layout_b)
                 self.assertEqual(a.to_dense(), c.to_dense())
 
+                # change of blocksize upon conversion is not yet supported.
+                if b.layout in block_layouts:
+                    for block_layout in block_layouts:
+                        with self.assertRaisesRegex(RuntimeError, "blocksize does not match the blocksize"):
+                            self._convert_to_layout(b, block_layout, blocksize=3)
+
         batch_dims = [(), (2,), (2, 2), (2, 2, 2)]
-        sparse_dims = (6, 10)
+        sparse_dims = (6, 12)
         for batch_dim in batch_dims:
             a = make_tensor(batch_dim + sparse_dims, dtype=torch.float, device=device)
             _to_from_layout(from_layout, to_layout, a)

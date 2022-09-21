@@ -1001,8 +1001,9 @@ void _check_blocksize_matches(
     const auto self_values = self.values();
     const auto self_blocksize = at::DimVector({self_values.size(-2), self_values.size(-1)});
     TORCH_CHECK(self_blocksize == blocksize,
-        name, "(): cannot use blocksize (", blocksize[0], ", ", blocksize[1], ") ",
-        "for block compressed input with blocksize (", self_blocksize[0], ", ", self_blocksize[1], ").");
+        name, "(): the provided blocksize does not match the blocksize of the to be converted tensor, ",
+        "got (", blocksize[0], ", ", blocksize[1], ") ",
+        "but expected (", self_blocksize[0], ", ", self_blocksize[1], ").");
   }
 }
 
