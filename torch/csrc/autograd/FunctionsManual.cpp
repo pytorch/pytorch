@@ -2750,9 +2750,16 @@ static inline int64_t _min_storage_size(
 Tensor as_strided_backward(
     Tensor grad,
     TensorGeometry input_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset_) {
+    c10::SymIntArrayRef sym_sizes,
+    c10::SymIntArrayRef sym_strides,
+    optional<c10::SymInt> sym_storage_offset_) {
+  // TODO: properly use sym
+  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
+  auto strides = c10::asIntArrayRefSlow(sym_strides);
+  auto storage_offset_ = sym_storage_offset_.has_value()
+      ? c10::make_optional(sym_storage_offset_->expect_int())
+      : c10::nullopt;
+
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -2871,9 +2878,9 @@ Tensor as_strided_scatter_backward(
     Tensor grad,
     TensorGeometry input_geometry,
     TensorGeometry src_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset) {
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    optional<c10::SymInt> storage_offset) {
   // Note [as_strided_scatter backward support]
   // as_strided_scatter handling for autograd is a beast, and is non-trivial to
   // implement for arbitrarily strided inputs. Most uses for as_strided with
@@ -2882,10 +2889,11 @@ Tensor as_strided_scatter_backward(
   // inputs. We can assume that the input was a contiguous tensor. Also, we'll
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
-  auto grad_slice = grad_.as_strided(sizes, strides, storage_offset);
+  auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
+  // TODO: geometry should return symints
   auto result =
       grad_.new_empty_strided(input_geometry.sizes(), input_geometry.strides());
-  auto result_slice = result.as_strided(sizes, strides, storage_offset);
+  auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;
 }

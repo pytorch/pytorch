@@ -784,16 +784,17 @@
 
 - func: arctanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
+- func: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    ZeroTensor, CPU, CUDA, Meta: as_strided_tensorimpl
+    ZeroTensor, CPU, CUDA: as_strided_tensorimpl
+    Meta: as_strided_tensorimpl_meta_symint
     MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
 
-- func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+- func: as_strided_(Tensor(a!) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: function, method
   device_check: NoCheck
@@ -4707,12 +4708,12 @@
     CompositeExplicitAutograd: diagonal_scatter
   autogen: diagonal_scatter.out
 
-- func: as_strided_scatter(Tensor self, Tensor src, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+- func: as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: as_strided_scatter
+    CompositeExplicitAutograd: as_strided_scatter_symint
   autogen: as_strided_scatter.out
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
@@ -6880,6 +6881,7 @@
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
     QuantizedCPU: masked_fill__quantized_cpu
+    QuantizedCUDA: masked_fill__quantized_cuda
     MPS: masked_fill__mps
   autogen: masked_fill.Scalar_out
 
@@ -6896,6 +6898,7 @@
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
     QuantizedCPU: masked_fill__quantized_cpu
+    QuantizedCUDA: masked_fill__quantized_cuda
     MPS: masked_fill__mps
   autogen: masked_fill.Tensor_out
 
@@ -12755,7 +12758,7 @@
     CompositeExplicitAutogradNonFunctional: _neg_view_copy
   tags: view_copy
 
-- func: as_strided_copy(Tensor self, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+- func: as_strided_copy(Tensor self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: as_strided_copy
@@ -12967,10 +12970,10 @@
     CompositeExplicitAutograd: _neg_view_copy_out
 
 
-- func: as_strided_copy.out(Tensor self, int[] size, int[] stride, int? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: as_strided_copy.out(Tensor self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: as_strided_copy_out
+    CompositeExplicitAutograd: as_strided_copy_out_symint
 
 
 - func: _sparse_broadcast_to_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
@@ -13153,9 +13156,7 @@
   autogen: _native_multi_head_attention.out
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=True, bool is_causal=False) -> (Tensor, Tensor)
-  python_module: nn
   variants: function
-  autogen: _scaled_dot_product_attention.out
 
 - func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
   variants: function
