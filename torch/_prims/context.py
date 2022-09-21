@@ -248,7 +248,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
-        # if self._is_rand_like(orig_func):
-        #    return torch.ops.nvprims.rand_like(*args)#, **kwargs)
+        if self._is_rand_like(orig_func):
+            return torch.ops.nvprims.rand_like(*args)
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)
