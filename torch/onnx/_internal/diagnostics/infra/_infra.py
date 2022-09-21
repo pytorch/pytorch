@@ -79,9 +79,7 @@ class Rule:
         return self._sarif_reporting_descriptor.message_strings["default"].text
 
     @message_default_template.setter
-    def message_default_template(
-        self, new_message_default_template: str
-    ) -> None:
+    def message_default_template(self, new_message_default_template: str) -> None:
         """Sets the default message template for the rule report."""
         self._sarif_reporting_descriptor.message_strings = {
             "default": sarif_om.Message(text=new_message_default_template)
@@ -188,9 +186,7 @@ class Location:
     @start_column.setter
     def start_column(self, new_start_column: Optional[int]) -> None:
         """Set the start column number of the source code location."""
-        self._sarif_location.physical_location.region.start_column = (
-            new_start_column
-        )
+        self._sarif_location.physical_location.region.start_column = new_start_column
 
     @property
     def end_column(self) -> Optional[int]:
@@ -200,9 +196,7 @@ class Location:
     @end_column.setter
     def end_column(self, new_end_column: Optional[int]) -> None:
         """Set the end column number of the source code location."""
-        self._sarif_location.physical_location.region.end_column = (
-            new_end_column
-        )
+        self._sarif_location.physical_location.region.end_column = new_end_column
 
 
 class Stack:
@@ -328,9 +322,7 @@ class DiagnosticTool:
 
     def sarif(self) -> sarif_om.Tool:
         """Returns the SARIF Tool object."""
-        self._sarif_tool.driver.rules = [
-            rule.sarif() for rule in self._triggered_rules
-        ]
+        self._sarif_tool.driver.rules = [rule.sarif() for rule in self._triggered_rules]
         return self._sarif_tool
 
     @property
@@ -437,8 +429,6 @@ class Run:
         Raises:
             ValueError: If the rule is not supported by the tool.
         """
-        diagnostic = self._tool.create_diagnostic(
-            rule, level, message_args, **kwargs
-        )
+        diagnostic = self._tool.create_diagnostic(rule, level, message_args, **kwargs)
         self._diagnostics.append(diagnostic)
         return diagnostic

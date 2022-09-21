@@ -8,6 +8,7 @@ from torch.onnx._internal.diagnostics.infra import formatter, sarif_om
 from torch.onnx._internal.diagnostics.infra.options import (
     DiagnosticOptions,  # class import for readability
 )
+from torch.onnx._internal.diagnostics.infra.sarif_om import version as sarif_version
 
 
 class DiagnosticEngine:
@@ -57,9 +58,8 @@ class DiagnosticEngine:
     _runs: List[infra.Run]
     _current_run: Optional[infra.Run]
     _options: DiagnosticOptions
-    # TODO: load sarif spec version attributes from somewhere.
-    _sarif_version: str = "2.1.0"
-    _sarif_schema_uri: str = "http://docs.oasis-open.org/sarif/sarif/v2.1.0/cs01/schemas/sarif-schema-2.1.0.json"
+    _sarif_version: str = sarif_version.SARIF_VERSION
+    _sarif_schema_uri: str = sarif_version.SARIF_SCHEMA_LINK
 
     def __init__(self) -> None:
         self._initialize()
