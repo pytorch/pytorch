@@ -144,9 +144,13 @@ class QConfigMapping:
     The user can specify QConfigs using the following methods (in increasing match priority):
 
         ``set_global`` : sets the global (default) QConfig
+
         ``set_object_type`` : sets the QConfig for a given module type, function, or method name
+
         ``set_module_name_regex`` : sets the QConfig for modules matching the given regex string
+
         ``set_module_name`` : sets the QConfig for modules matching the given module name
+
         ``set_module_name_object_type_order`` : sets the QConfig for modules matching a combination
         of the given module name, object type, and the index at which the module appears
 
