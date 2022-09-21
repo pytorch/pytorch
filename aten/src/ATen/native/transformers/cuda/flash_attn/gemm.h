@@ -29,12 +29,12 @@
 
 #include <ATen/native/transformers/cuda/flash_attn/utils.h>
 
-#include <third_party/cutlass/include/cutlass/cutlass.h>
-#include <third_party/cutlass/include/cutlass/gemm/warp/default_mma_tensor_op.h>
-#include <third_party/cutlass/include/cutlass/layout/layout.h>
-#include <third_party/cutlass/include/cutlass/arch/mma.h>
-#include <third_party/cutlass/include/cutlass/array.h>
-#include <third_party/cutlass/include/cutlass/numeric_types.h>
+#include <cutlass/cutlass.h>
+#include <cutlass/gemm/warp/default_mma_tensor_op.h>
+#include <cutlass/layout/layout.h>
+#include <cutlass/arch/mma.h>
+#include <cutlass/array.h>
+#include <cutlass/numeric_types.h>
 
 namespace fmha {
 
