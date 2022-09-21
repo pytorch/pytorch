@@ -3,6 +3,7 @@
   - .jenkins/caffe2/*
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
+  - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
   - test/jit/test_export_modes.py
@@ -15,6 +16,8 @@
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - third_party/onnx
+  - caffe2/python/onnx/**
   approved_by:
   - BowenBao
   - abock

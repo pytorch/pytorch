@@ -56,8 +56,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
+    TestCase,
 )
-from torch.testing._internal.profiler_utils import ProfilerTestCase
 
 try:
     import psutil
@@ -74,7 +74,7 @@ from torch._C._profiler import _ExtraFields_PyCall
 @unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestProfilerCUDA(ProfilerTestCase):
+class TestProfilerCUDA(TestCase):
 
     @skipCUDAVersionIn([(11, 5)])  # https://github.com/pytorch/pytorch/issues/69023
     def test_mem_leak(self):
@@ -127,7 +127,7 @@ class TestProfilerCUDA(ProfilerTestCase):
             q = s.sum()
             q.backward()
 
-class TestRecordFunction(ProfilerTestCase):
+class TestRecordFunction(TestCase):
     def _record_function_with_param(self):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
@@ -240,7 +240,7 @@ class TestRecordFunction(ProfilerTestCase):
         self.assertTrue(has_child)
 
 
-class TestExecutionGraph(ProfilerTestCase):
+class TestExecutionGraph(TestCase):
     def payload(self, use_cuda=False):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
@@ -442,7 +442,7 @@ class TestExecutionGraph(ProfilerTestCase):
         assert found_root_node
 
 
-class TestProfiler(ProfilerTestCase):
+class TestProfiler(TestCase):
 
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     def test_source(self):
@@ -1258,7 +1258,7 @@ def find_node_with_name(nodes, name):
         if result is not None:
             return result
 
-class TestTorchTidyProfiler(ProfilerTestCase):
+class TestTorchTidyProfiler(TestCase):
 
     def test_pointers_and_ids(self):
         a = torch.randn(4, 3)
@@ -1570,7 +1570,7 @@ class MockProfilerEvent():
         object.__setattr__(self, "children", children)
 
 
-class TestExperimentalUtils(ProfilerTestCase):
+class TestExperimentalUtils(TestCase):
 
     @staticmethod
     def generate_mock_profile():
