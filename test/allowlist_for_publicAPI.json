@@ -319,9 +319,6 @@
   "torch.backends": [
     "contextmanager"
   ],
-  "torch.backends.cuda": [
-    "Union"
-  ],
   "torch.cpu.amp.autocast_mode": [
     "Any"
   ],
@@ -438,55 +435,11 @@
     "Union",
     "get_logger"
   ],
-  "torch.distributed.elastic.multiprocessing.api": [
-    "Any",
-    "Callable",
-    "Dict",
-    "FrameType",
-    "IntFlag",
-    "Optional",
-    "ProcessFailure",
-    "Set",
-    "TailLog",
-    "Tuple",
-    "Union",
-    "dataclass",
-    "field",
-    "nullcontext",
-    "record",
-    "redirect_stderr",
-    "redirect_stdout"
-  ],
-  "torch.distributed.elastic.multiprocessing.errors": [
-    "Any",
-    "Callable",
-    "Dict",
-    "GlobalRank",
-    "JSON",
-    "List",
-    "Optional",
-    "Template",
-    "Tuple",
-    "TypeVar",
-    "dataclass",
-    "datetime",
-    "field",
-    "get_logger",
-    "wraps"
-  ],
   "torch.distributed.elastic.multiprocessing.redirects": [
     "contextmanager",
     "partial",
     "redirect_stderr",
     "redirect_stdout"
-  ],
-  "torch.distributed.elastic.multiprocessing.tail_log": [
-    "Dict",
-    "Event",
-    "Future",
-    "List",
-    "TextIO",
-    "ThreadPoolExecutor"
   ],
   "torch.distributed.elastic.rendezvous": [
     "RendezvousHandlerCreator"
@@ -755,37 +708,6 @@
     "Optional",
     "Union"
   ],
-  "torch.distributions.kl": [
-    "Bernoulli",
-    "Beta",
-    "Binomial",
-    "Callable",
-    "Categorical",
-    "Cauchy",
-    "ContinuousBernoulli",
-    "Dict",
-    "Dirichlet",
-    "Distribution",
-    "Exponential",
-    "ExponentialFamily",
-    "Gamma",
-    "Geometric",
-    "Gumbel",
-    "HalfNormal",
-    "Independent",
-    "Laplace",
-    "LowRankMultivariateNormal",
-    "MultivariateNormal",
-    "Normal",
-    "OneHotCategorical",
-    "Pareto",
-    "Poisson",
-    "TransformedDistribution",
-    "Tuple",
-    "Type",
-    "Uniform",
-    "total_ordering"
-  ],
   "torch.distributions.utils": [
     "Any",
     "Dict",
@@ -846,30 +768,6 @@
     "reify",
     "unify"
   ],
-  "torch.fx.experimental.unification.multipledispatch.conflict": [
-    "groupby",
-    "isvariadic"
-  ],
-  "torch.fx.experimental.unification.multipledispatch.core": [
-    "Dispatcher",
-    "MethodDispatcher"
-  ],
-  "torch.fx.experimental.unification.multipledispatch.dispatcher": [
-    "AmbiguityWarning",
-    "Variadic",
-    "ambiguities",
-    "expand_tuples",
-    "isvariadic",
-    "ordering",
-    "super_signature",
-    "warn"
-  ],
-  "torch.fx.experimental.unification.multipledispatch.utils": [
-    "OrderedDict"
-  ],
-  "torch.fx.experimental.unification.multipledispatch.variadic": [
-    "typename"
-  ],
   "torch.fx.experimental.unification.unification_tools": [
     "first",
     "getter",
@@ -915,14 +813,6 @@
     "Set",
     "Type",
     "Union",
-    "compatibility"
-  ],
-  "torch.fx.immutable_collections": [
-    "Any",
-    "Context",
-    "Dict",
-    "List",
-    "Tuple",
     "compatibility"
   ],
   "torch.fx.operator_schemas": [
