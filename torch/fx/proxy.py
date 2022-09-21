@@ -162,7 +162,6 @@ class TracerBase:
             return a.node
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
-
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     @compatibility(is_backward_compatible=True)

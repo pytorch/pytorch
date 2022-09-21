@@ -206,6 +206,8 @@ symint:
   - narrow_copy
   - view
   - view_copy
+  - as_strided_copy
+  - as_strided_scatter
   - empty_strided
   - new_empty_strided
 autograd:
