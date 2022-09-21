@@ -399,6 +399,26 @@ def gather_leaf_tensors(args, kwargs):
     return leaf_tensors
 
 
+def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradcheck_wrapper=None):
+    if gradcheck_wrapper is None:
+        results = op(*args, **kwargs)
+    else:
+        results = gradcheck_wrapper(op, *args, **kwargs)
+
+    if output_process_fn_grad is not None:
+        results = output_process_fn_grad(results)
+
+    flat_results, _ = tree_flatten(results)
+    flat_diff_results = [r for r in flat_results if r.requires_grad]
+    assert len(flat_diff_results) > 0
+
+    grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results]
+    leaf_tensors = gather_leaf_tensors(args, kwargs)
+    assert len(leaf_tensors) > 0
+    return torch.autograd.grad(flat_diff_results, leaf_tensors,
+                               grads, allow_unused=True, retain_graph=True)
+
+
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
@@ -411,27 +431,7 @@ def check_backward_formula(op: Callable, args, kwargs,
                            gradcheck_wrapper=None, assert_equal_fn=None):
     CCT = generate_cct()
 
-    def compute_expected_grads(args, kwargs):
-        if gradcheck_wrapper is None:
-            results = op(*args, **kwargs)
-        else:
-            results = gradcheck_wrapper(op, *args, **kwargs)
-
-        if output_process_fn_grad is not None:
-            results = output_process_fn_grad(results)
-
-        flat_results, _ = tree_flatten(results)
-        flat_diff_results = [r for r in flat_results if r.requires_grad]
-        assert len(flat_diff_results) > 0
-
-        grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
-                 for r in flat_diff_results]
-        leaf_tensors = gather_leaf_tensors(args, kwargs)
-        assert len(leaf_tensors) > 0
-        return torch.autograd.grad(flat_diff_results, leaf_tensors,
-                                   grads, allow_unused=True, retain_graph=True)
-
-    expected = compute_expected_grads(args, kwargs)
+    expected = compute_expected_grads(op, args, kwargs, output_process_fn_grad, gradcheck_wrapper)
 
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
