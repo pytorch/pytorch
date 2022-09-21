@@ -10686,7 +10686,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input, dim=None, *, out=None) -> Tensor
+squeeze(input, dim=None) -> Tensor
 
 Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
 
@@ -10710,9 +10710,6 @@ Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
-
-Keyword args:
-    {out}
 
 Example::
 
