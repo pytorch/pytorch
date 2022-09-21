@@ -118,7 +118,7 @@ class TestONNXOpset(common_utils.TestCase):
         x = torch.arange(1.0, 6.0, requires_grad=True)
         k = torch.tensor(3)
         module = MyModuleDynamic()
-        check_onnx_opsets_operator(module, [x, k], ops, opset_versions=[10])
+        check_onnx_opsets_operator(module, (x, k), ops, opset_versions=[10])
 
     def test_maxpool(self):
         module = torch.nn.MaxPool1d(2, stride=1)

@@ -806,6 +806,14 @@ at::Tensor conv2d(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(
+    !bias.defined() || bias.dtype() == input_.dtype(),
+    "Input type (",
+    input_.dtype().name(),
+    ") and bias type (",
+    bias.dtype().name(),
+    ") should be the same");
+
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
@@ -1301,6 +1309,7 @@ at::Tensor _convolution(
   int64_t dim = k - 2;
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
+  TORCH_CHECK(groups_ > 0, "non-positive groups is not supported");
 
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
