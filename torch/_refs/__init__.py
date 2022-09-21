@@ -1891,7 +1891,7 @@ def sum_to_size(
     )
     # In ATen scalar tensors are sent through sum and the result is returned as
     # type promoted
-    if shape == a.shape and len(shape) > 0:
+    if utils.is_same_shape(shape, a.shape) and len(shape) > 0:
         return prims.view_of(a)
     leading_dims = a.ndim - len(shape)
     reduce_dims = tuple(range(leading_dims)) + tuple(
