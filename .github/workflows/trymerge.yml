@@ -46,7 +46,7 @@ jobs:
             git checkout master
             git fetch -p
             # give github some time between the push and start workflows so that Github's messages
-            # on the PR appear in chronological order (timing issues can otherwise
+            # on the PR appear in chronological order (timing issues can shuffle them around)
             sleep 60
           fi
           if [ -n "${FORCE}" ]; then
