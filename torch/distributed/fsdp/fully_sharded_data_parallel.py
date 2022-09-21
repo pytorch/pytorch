@@ -1999,30 +1999,22 @@ class FullyShardedDataParallel(nn.Module):
             f"currently in {training_state}"
         )
         eod = self._exec_order_data
+        target_handles_key = None
         if (
             training_state == HandleTrainingState.BACKWARD_PRE
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
         ):
             target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
-            if target_handles_key is not None:
-                target_training_state = self._get_training_state(target_handles_key)
-                if (
-                    target_training_state != HandleTrainingState.BACKWARD_POST
-                    and self._needs_pre_backward_unshard.get(target_handles_key, False)
-                ):
-                    return target_handles_key
         elif (
             training_state == HandleTrainingState.BACKWARD_POST
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
         ):
             target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
-            if target_handles_key is not None:
-                target_training_state = self._get_training_state(target_handles_key)
-                if (
-                    target_training_state != HandleTrainingState.BACKWARD_POST
-                    and self._needs_pre_backward_unshard.get(target_handles_key, False)
-                ):
-                    return target_handles_key
+        if (
+            target_handles_key is not None
+            and self._needs_pre_backward_unshard.get(target_handles_key, False)
+        ):
+            return target_handles_key
         return None
 
     def _get_training_state(
