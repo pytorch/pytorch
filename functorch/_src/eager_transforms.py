@@ -14,7 +14,6 @@ import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap
 from torch._decomp import decomposition_table
-import torch._decomp.decompositions_for_jvp
 
 from functorch._C import (
     _wrap_for_grad,
@@ -635,15 +634,6 @@ def _slice_argnums(args, argnums, as_tuple=True):
         else:
             return args[argnums]
     return tuple(args[i] for i in argnums)
-
-
-def _argnums_partial(f, args, argnums):
-    def f_wrapper(*wrapper_args):
-        replaced_args = _replace_args(args, wrapper_args, argnums)
-        return f(*replaced_args)
-    wrapper_args = _slice_argnums(args, argnums)
-    wrapper_args = wrapper_args if isinstance(wrapper_args, tuple) else (wrapper_args, )
-    return (f_wrapper, wrapper_args)
 
 
 JVP_NESTING = 0

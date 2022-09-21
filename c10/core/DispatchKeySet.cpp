@@ -1,27 +1,11 @@
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/irange.h>
-#include <atomic>
 #include <iostream>
 
 namespace c10 {
 
 // On x86 architecture atomic operations are lock-less.
-static std::atomic<DispatchKeySet> default_included_set(
-    DispatchKeySet({DispatchKey::BackendSelect, DispatchKey::ADInplaceOrView}));
-
-static std::atomic<DispatchKeySet> default_excluded_set(DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-    DispatchKey::AutocastXPU,
-}));
-
-DispatchKeySet get_default_included_set() {
-  return default_included_set.load();
-}
-
-DispatchKeySet get_default_excluded_set() {
-  return default_excluded_set.load();
-}
+std::atomic<DispatchKeySet> default_included_set(DispatchKeySet({DispatchKey::BackendSelect, DispatchKey::ADInplaceOrView}));
 
 void add_to_default_include_set(std::initializer_list<DispatchKey> ks) {
   DispatchKeySet key_set = default_included_set.load();
@@ -31,16 +15,6 @@ void add_to_default_include_set(std::initializer_list<DispatchKey> ks) {
 void remove_from_default_include_set(std::initializer_list<DispatchKey> ks) {
   DispatchKeySet key_set = default_included_set.load();
   default_included_set.store(key_set - DispatchKeySet(ks));
-}
-
-void add_to_default_exclude_set(std::initializer_list<DispatchKey> ks) {
-  DispatchKeySet key_set = default_excluded_set.load();
-  default_excluded_set.store(key_set | DispatchKeySet(ks));
-}
-
-void remove_from_default_exclude_set(std::initializer_list<DispatchKey> ks) {
-  DispatchKeySet key_set = default_excluded_set.load();
-  default_excluded_set.store(key_set - DispatchKeySet(ks));
 }
 
 // backend_dispatch_keyset includes all dispatch keys that map to backends.
