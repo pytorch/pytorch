@@ -24,27 +24,22 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
     return weight.index_select(0, indices);
   }
 
-  auto size = indices.sym_sizes().vec();
-  for (auto d : weight.sym_sizes().slice(1)) {
+  auto size = indices.sizes().vec();
+  for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }
 
-  return weight.index_select(0, indices.reshape(-1)).view_symint(size);
+  return weight.index_select(0, indices.reshape(-1)).view(size);
 }
 
-Tensor embedding_backward_symint(
-    const Tensor & grad, const Tensor & indices, SymInt num_weights,
+Tensor embedding_backward(
+    const Tensor & grad, const Tensor & indices, int64_t num_weights,
     int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
   if (sparse) {
-    // TODO: if we teach sparse tensor how to propagate symints, the guard
-    // here is not strictly necessary.  However, we think it is fine as is
-    // because num weights is derived from a parameter and therefore
-    // typically not varying.
     return at::embedding_sparse_backward(
-        // TODO: change `expect_int()` back to `guard_int()`
-        grad, indices, num_weights.expect_int(), padding_idx, scale_grad_by_freq);
+        grad, indices, num_weights, padding_idx, scale_grad_by_freq);
   } else {
-    return at::embedding_dense_backward_symint(
+    return at::embedding_dense_backward(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);
   }
 }
