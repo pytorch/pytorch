@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import FakeTensorMode, CrossRefFakeMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
@@ -275,6 +275,9 @@ class AOTConfig:
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode="real")(*flat_args)
+    if config.debug_graphs:
+        print("====== Forward (only) graph ======")
+        fw_module.print_readable()
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
     fw_module.print_readable()
@@ -326,32 +329,35 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     # else is just getting the types right.
 
     seen_args = {}
-    deduped_flat_args = []
-    drop_args = set()
+    keep_arg_mask = []
+    dropped_args = False
     add_dupe_map = {}
     duped_arg_len = len(flat_args)
+
+    j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):
         if t in seen_args:
-            drop_args.add(i)
+            keep_arg_mask.append(False)
+            dropped_args = True
             add_dupe_map[i] = seen_args[t]
             continue
-        seen_args[t] = len(deduped_flat_args)
-        add_dupe_map[i] = len(deduped_flat_args)
-        deduped_flat_args.append(t)
+        keep_arg_mask.append(True)
+        seen_args[t] = j
+        add_dupe_map[i] = j
+        j += 1
 
+    # NB: Hot path, avoid set lookups here
     def remove_dupe_args(args):
-        r = []
-        for i, t in enumerate(args):
-            if i in drop_args:
-                continue
-            r.append(t)
-        return r
+        if not dropped_args:
+            return args
+        return [t for t, keep in zip(args, keep_arg_mask) if keep]
 
     def add_dupe_args(args):
-        r = []
-        for i in range(duped_arg_len):
-            r.append(args[add_dupe_map[i]])
-        return r
+        if not dropped_args:
+            return args
+        return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
+
+    deduped_flat_args = remove_dupe_args(flat_args)
 
     joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
 
@@ -446,7 +452,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
             return tuple(out)
 
-    return lambda *args: CompiledFunction.apply(*remove_dupe_args(args))
+    @wraps(CompiledFunction.apply)
+    def compiled_function(*args):
+        return CompiledFunction.apply(*remove_dupe_args(args))
+
+    return compiled_function
 
 
 @dynamo_timed
@@ -480,11 +490,19 @@ def create_aot_dispatcher_function(
     # NB: don't bother setting allow_fallback_kernels; this should not actually
     # be configurable in fake tensor, we should automatically do the right
     # thing
+    if config.debug_fake_cross_ref:
+        # This is a little messy but TorchDynamo directly changes `use_fake_tensor`
+        # so it's not enough for user to change the config manually
+        # TODO: have TorchDynamo read in `use_fake_tensor` from os environ /
+        # coordinate flags
+        config.use_fake_tensor = False
+
     fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext()
+    cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
-    with preserve_rng_state(), fake_mode, python_dispatcher_mode:
+    with preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:

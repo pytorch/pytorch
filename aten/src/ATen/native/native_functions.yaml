@@ -6883,6 +6883,7 @@
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
     QuantizedCPU: masked_fill__quantized_cpu
+    QuantizedCUDA: masked_fill__quantized_cuda
     MPS: masked_fill__mps
   autogen: masked_fill.Scalar_out
 
@@ -6899,6 +6900,7 @@
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
     QuantizedCPU: masked_fill__quantized_cpu
+    QuantizedCUDA: masked_fill__quantized_cuda
     MPS: masked_fill__mps
   autogen: masked_fill.Tensor_out
 
@@ -12620,10 +12622,6 @@
 - func: nested_to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   python_module: nested
   variants: function
-  dispatch:
-    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
-    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
-  autogen: nested_to_padded_tensor.out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
@@ -13135,6 +13133,13 @@
   dispatch:
     CompositeExplicitAutograd: alias_copy_out
 
+- func: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+  variants: method
+  dispatch:
+    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
+    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
+  autogen: to_padded_tensor.out
+
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
     NestedTensorCPU: NestedTensor_softmax_dropout
@@ -13160,9 +13165,7 @@
   autogen: _native_multi_head_attention.out
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=True, bool is_causal=False) -> (Tensor, Tensor)
-  python_module: nn
   variants: function
-  autogen: _scaled_dot_product_attention.out
 
 - func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
   variants: function
