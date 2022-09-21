@@ -31,14 +31,14 @@ The FX graph representation is pretty close to python/eager mode, it preserves m
 
 `prepare_fx`:
 ```
-Floating Point Model --> (1.1 `_fuse_fx`) --> Fused Model 
-                     --> (1.2 QAT Module Swap) --> Model with QAT modules 
+Floating Point Model --> (1.1 `_fuse_fx`) --> Fused Model
+                     --> (1.2 QAT Module Swap) --> Model with QAT modules
                      --> (1.3 Insert Observers) --> Prepared Model
 ```
 
 `convert_fx`:
 ```
-Prepared Model --> (2.1 `convert_to_reference`) --> Reference Quantized Model 
+Prepared Model --> (2.1 `convert_to_reference`) --> Reference Quantized Model
                --> (2.2 Lower to Native Backend) --> Quantized Model
 ```
 
@@ -199,7 +199,7 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 # Note: this map is generated before we insert qdqstub to graph1, and will not change in the process.
 #
 # 1. Inserting QDQStub1 (for input of qat_linear_relu)
-#    We need to look at the edge between `input` Node and `qat_linear_relu` Node here, we need to decide if we need to insert a 
+#    We need to look at the edge between `input` Node and `qat_linear_relu` Node here, we need to decide if we need to insert a
 #    QDQStub at this edge, which could serve as an input argument for `qat_linear_relu` Node (and also output for `input` Node)
 #    The way we decide if we want to insert QDQStub here is to figure out
 #    (1). The target dtype for output of `input` Node, which is torch.float32
@@ -208,8 +208,8 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 #    We also need to attach observer/fakequant module to the QDQStub we inserted here.
 # 2. Insert QDQStub2 (for output of qat_linear_relu)
 #    The logic for inserting QDQStub for output is much easier, since we assume all modules/functions in the graph produce fp32 output
-#    by default (we can have additional checks and extend this to work for other dtypes after we have type inference ready), 
-#    we just need to look at the target output dtype for qat_linear_relu Node, and if it is a quantized dtype (quint8, qint8, float16), 
+#    by default (we can have additional checks and extend this to work for other dtypes after we have type inference ready),
+#    we just need to look at the target output dtype for qat_linear_relu Node, and if it is a quantized dtype (quint8, qint8, float16),
 #    we would insert a QDQStub here.
 #
 # Questions: How to avoid inserting duplicate QDQStubs?
@@ -217,7 +217,7 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
 # input — linear1 —-
 #      \--- linear2 —
 # how do we make sure we only insert one QDQStub for input of both linear1 and linear2?
-# input - QDQStub — linear1 - 
+# input - QDQStub — linear1 -
 #              \ —- linear2 -
 #
 # The way we do it right now is before we insert QDQStub, we look at all users of `input` Node here and make sure there is no QDQStubs
@@ -238,8 +238,8 @@ Note: weight + FakeQuantize is a part of qat_linear_relu
   'dtype_configs': [{input: torch.quint8, output: torch.float32, weight: torch.qint8}],
 }
 
-# What we’ll do here is when we are trying to insert output QDQStub for `qat_linear_relu`, we look at the target output dtype for this node (node_name_to_target_dtype[“qat_linear_relu”][“output_activation”], and find that it is float, which is not a quantized dtype, so 
-# will do nothing here. 
+# What we’ll do here is when we are trying to insert output QDQStub for `qat_linear_relu`, we look at the target output dtype for this node (node_name_to_target_dtype[“qat_linear_relu”][“output_activation”], and find that it is float, which is not a quantized dtype, so
+# will do nothing here.
 # Note that this does not prevent other operators following `qat_linear_relu` to insert a QDQStub at the output of `qat_linear_relu`, since we are dealing with an `edge` of the graph here, and an `edge` is connected to two nodes, which means
 # the output of `qat_linear_relu` will also be the input of a node following `qat_linear_relu`.
 ```
@@ -256,7 +256,7 @@ BackendConfig(nniqat.LinearReLU)
 Pattern in this case is the same as before, it defines the pattern for the subgraph we are dealing with
 `set_observation_type`: sets the observation type for the patter, currently only two types:
 ```
-OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT means the output observer instance will be different from the input, which is the most common type of observer placement. 
+OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT means the output observer instance will be different from the input, which is the most common type of observer placement.
 OUTPUT_SHARE_OBSERVER_WITH_INPUT means the output observer is shared with input, they will be the same instance. This is useful for operators like cat.
 ```
 
@@ -299,7 +299,7 @@ Example:
 # graph 1
 input - QDQStub1 (FakeQuantize) - qat_linear_relu - QDQStub2 (FakeQuantize) - output
                                       |
-                                FakeQuantize 
+                                FakeQuantize
                   (need to be updated with QDQStub + FakeQuantize)
                                       |
                                     Weight
@@ -395,6 +395,6 @@ As an example, here is what fbgemm looks like:
 | QAT Module Mapping                        | nn.Conv -> torch.ao.nn.qat.Conv2d                                     |
 +-------------------------------------------+-----------------------------------------------------------------------+
 
-So instead of hardcoding the fusion mappings, float to quantized module mappings, fusion patterns etc. we will derive everything through `backend_config` throughout the code base. This allows PyTorch Quantization to work for all first-party or third-party backends that may differ from native backends in different aspects. 
+So instead of hardcoding the fusion mappings, float to quantized module mappings, fusion patterns etc. we will derive everything through `backend_config` throughout the code base. This allows PyTorch Quantization to work for all first-party or third-party backends that may differ from native backends in different aspects.
 
 For use cases, we will use TensorRT as an example use case and have a tutorial talking about `backend_config`, pytorch native backends fbgemm and qnnpack will be using this to define their behaviors as well, especially with the recent addition of xnnpack (integrated as a part of qnnpack backend in pytorch), the `backend_config` api is needed to define the new constraints from xnnpack.

@@ -498,13 +498,22 @@ def _check_trace(
                             equal_nan=True,
                         )
                     else:
-                        torch.testing.assert_close(
-                            orig.double(),
-                            ref.double(),
-                            rtol=check_tolerance,
-                            atol=default_tolerances(orig, ref)[1],
-                            equal_nan=True,
-                        )
+                        if orig.is_mps or ref.is_mps:
+                            torch.testing.assert_close(
+                                orig.float(),
+                                ref.float(),
+                                rtol=check_tolerance,
+                                atol=default_tolerances(orig, ref)[1],
+                                equal_nan=True,
+                            )
+                        else:
+                            torch.testing.assert_close(
+                                orig.double(),
+                                ref.double(),
+                                rtol=check_tolerance,
+                                atol=default_tolerances(orig, ref)[1],
+                                equal_nan=True,
+                            )
                 except AssertionError as e:
                     maybe_warn_nondeterministic()
                     warnings.warn(
