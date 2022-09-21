@@ -891,10 +891,12 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
   const auto& mat2_sizes = mat2_ptr->get_nested_size_tensor();
   const auto& self_batch_sizes = self_sizes.narrow(1, 0, self_dim-3);
   const auto& mat2_batch_sizes = mat2_sizes.narrow(1, 0, mat2_dim-3);
-  // Not printing sizemats in error message so as not to expose nt sizes
   TORCH_CHECK(at::equal(self_batch_sizes, mat2_batch_sizes),
     "matmul: For nested tensors, batch dimensions must have the same sizes, ",
-    "no broadcasting is currently performed.");
+    "no broadcasting is currently performed. Got batch shapes for self ",
+    self_batch_sizes,
+    " and batch shapes for mat2 ",
+    mat2_batch_sizes);
   // Ensure last dim of self and second last dim of mat2 have the same size
   const auto& self_dim_size = self_sizes.select(1, -1);
   const auto& mat2_dim_size = mat2_sizes.select(1, -2);
