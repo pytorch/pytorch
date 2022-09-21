@@ -16477,6 +16477,7 @@ python_ref_db = [
         "_refs.isreal",
         torch_opinfo_name="isreal",
         supports_out=True,
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.i0",

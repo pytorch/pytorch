@@ -597,11 +597,16 @@ def isneginf(a: TensorLikeType) -> TensorLikeType:
 def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=None,  # CompositeImplicitAutograd
+)
 def isreal(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a.dtype):
-        return prims.imag(a) == 0
-    return ones_like(a, dtype=torch.bool)
+        return torch.imag(a) == 0
+    return torch.ones_like(a, dtype=torch.bool)
+
 
 # TODO: if this is special maybe it should be defined there and imported here?
 @_make_elementwise_unary_reference(
