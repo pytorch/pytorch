@@ -37,13 +37,24 @@ do_backup() {
 conda_upload() {
   (
     set -x
-    ${ANACONDA} \
+    #Loop until counter is 3
+    counter=1
+    while [[ $counter -le 3 ]]
+    do
+      ${ANACONDA} \
       upload  \
       ${PKG_DIR}/*.tar.bz2 \
       -u "pytorch-${UPLOAD_CHANNEL}" \
       --label main \
       --no-progress \
       --force
+
+      rc=$?
+      # ConnectionResetError 104, Connection reset by peer retry
+      [[ $rc -eq 104 ]] && ((counter++)) || break
+    done
+
+
   )
 }
 
