@@ -446,5 +446,6 @@ class ShapeEnv(object):
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
         stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+        stack += ''.join(torch.utils.get_cpp_backtrace())
         self.guards.append((expr, concrete_val, stack))
         return concrete_val
