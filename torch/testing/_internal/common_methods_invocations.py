@@ -8337,10 +8337,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=1.3e-05),
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestCommon', 'test_numpy_refs'),
-               DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=1.3e-05)}),
-                   'TestCommon', 'test_compare_cpu')],
+                   'TestCommon', 'test_numpy_refs')],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
@@ -10417,11 +10414,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Resizing an out= argument with no elements threw a resize warning!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-
-               # It looks like there is a bug in the cpu implementation
-               # >>> assert torch.aminmax(torch.tensor(5, device='cpu'), dim=0, keepdim=True).min.ndim == 0
-               # the ndim shoud be kept at 0
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -15521,8 +15513,8 @@ op_db: List[OpInfo] = [
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            # FIXME: this fails on CI and passes on quansight's qgpu machine
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            # Fails on CI https://github.com/pytorch/pytorch/issues/85377
+            DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
             # Reference: https://github.com/pytorch/pytorch/issues/67084
             DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view', device_type='cuda'),
             # Not a problem: embedding does weird stuff to its input (it renormalizes)
