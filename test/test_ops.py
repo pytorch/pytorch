@@ -1907,12 +1907,7 @@ class TestFakeTensor(TestCase):
         context = torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
         self._test_fake_helper(device, dtype, op, context)
 
-    @onlyCUDA
-    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps('TestFakeTensor', 'test_fake_crossref_backward', fake_backward_xfails)
-    def test_fake_crossref_backward(self, device, dtype, op):
-        # tests fake tensor property propagation through a cross ref mode
-        # on ops which support backward
+    def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for iter, sample in enumerate(samples):
@@ -1929,11 +1924,24 @@ class TestFakeTensor(TestCase):
             )
             # TODO: enable check_aliasing, too many failures :/
             with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=False):
-                with warnings.catch_warnings():
+                with warnings.catch_warnings(), context():
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
                         sample.output_process_fn_grad,
                         op.gradcheck_wrapper)
+
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_no_amp', fake_backward_xfails)
+    def test_fake_crossref_backward_no_amp(self, device, dtype, op):
+        self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
+
+
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails)
+    def test_fake_crossref_backward_amp(self, device, dtype, op):
+        self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
 
 instantiate_device_type_tests(TestCommon, globals())
