@@ -116,7 +116,7 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
 
 @cond.py_impl(ProxyTorchDispatchMode)
 def inner(pred, true_fn, false_fn, operands):
-    mode = torch._C._get_torch_dispatch_mode()
+    mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
     with suspend_mode(mode):
         res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
