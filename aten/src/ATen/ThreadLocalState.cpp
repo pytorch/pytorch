@@ -19,8 +19,6 @@ ThreadLocalState::ThreadLocalState()
   rf_tls_ = at::get_record_function_tls_();
 
   saved_tensors_default_hooks_ = at::SavedTensorDefaultHooks::get_stack();
-
-  torch_dispatch_mode_state_ = c10::impl::TorchDispatchModeTLS::get_state();
 }
 
 void ThreadLocalState::set_grad_mode(bool enabled) {
@@ -33,8 +31,6 @@ void ThreadLocalState::setThreadLocalState(
   // Note that setting the InferenceMode TLS in this function is ONLY ok because we always
   // restore the dispatch key set TLS at the same time.
   c10::AutogradState::set_tls_state(state.autograd_tls_);
-
-  c10::impl::TorchDispatchModeTLS::set_state(state.torch_dispatch_mode_state_);
 
   at::impl::PythonTorchFunctionTLS::set_state(state.python_torch_function_state_);
 

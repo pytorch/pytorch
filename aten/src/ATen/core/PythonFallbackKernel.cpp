@@ -1,5 +1,5 @@
 #include <c10/core/impl/TorchDispatchMode.h>
-#include <c10/core/impl/PythonDispatcher.h>
+#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/SafePyObject.h>
 
