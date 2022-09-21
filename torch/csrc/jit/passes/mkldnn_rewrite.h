@@ -3,7 +3,6 @@
 #include <ATen/Config.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 #if AT_MKLDNN_ENABLED()
@@ -19,10 +18,10 @@ namespace jit {
 
 namespace mkldnn {
 
-struct PostOp {
-  std::vector<std::string> scalar_input;
-  std::string algorithm_input = "";
-  std::vector<torch::jit::MatchFilter> filters = {};
+const static std::map<std::string, std::vector<torch::jit::MatchFilter>>
+    fusion_rewrite_map = {
+        {"none", {}},
+        {"relu", {}},
 };
 
 } // namespace mkldnn

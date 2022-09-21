@@ -14,43 +14,6 @@ namespace jit {
 
 #if AT_MKLDNN_ENABLED()
 
-namespace mkldnn {
-
-const std::vector<std::string> zero_scalar_operand =
-    std::vector<std::string>({});
-
-std::string construct_operand_list(
-    std::vector<std::string> scalar_input,
-    std::string algorithm_indicator) {
-  std::string constructed_operand_list = "";
-
-  std::string joined_scalar_operands = c10::Join(", ", scalar_input);
-  std::string scalar_operands = "%scalars : Scalar?[] = prim::ListConstruct(" +
-      joined_scalar_operands + ")\n";
-
-  constructed_operand_list += scalar_operands;
-
-  if (algorithm_indicator.empty()) {
-    std::string algorithm_placeholder = "%algorithm : str? = prim::Constant()";
-    constructed_operand_list += algorithm_placeholder;
-  }
-
-  return constructed_operand_list;
-}
-
-const std::map<std::string, PostOp>& fusion_rewrite_map() {
-  // The fusion_rewrite_map's key is the fused element-wise OP's name,
-  // such as "relu". The fusion_rewrite_map's value is the post fusuion OP's
-  // parameters, such as gelu, there has a scalar parameter.
-  static const std::map<std::string, PostOp> fusion_rewrite_map{
-      // For element-wise OP that only has the activation as input:
-      {"relu", {zero_scalar_operand}},
-  };
-  return fusion_rewrite_map;
-}
-
-} // namespace mkldnn
-
 c10::VaryingShape<int64_t> getSizesOf(Node* n, size_t idx) {
   auto tt = n->input(idx)->type()->cast<TensorType>();
   return tt->sizes();
@@ -171,91 +134,46 @@ void insertMkldnnPrePackedOps(script::Module& module) {
   }
 }
 
-void RewriteEltwiseGraph(
-    std::shared_ptr<Graph>& graph,
-    const std::map<std::string, mkldnn::PostOp>& fusion_rewrite_map,
-    std::string prepack_op_name,
-    std::string run_op_name,
-    std::string op_context_name,
-    std::string graph_input,
-    std::string prepack_input) {
+void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   auto conv_op_rstring = at::jit::CodeTemplate(R"(
-    graph(${graph_input}
-          %input_size:int[], %attr_placeholder:str, %scalars_placeholder: Scalar?[], %algorithm_placeholder: str?${op_input_str}):
-        %packed_weight_bias = ${prepack_op_name}(
-            ${prepack_input}
-            %input_size, %attr_placeholder, %scalars_placeholder, %algorithm_placeholder)
-        %conv2d_res = ${run_op_name}(%input, %packed_weight_bias)
-        %res = aten::${op}(%conv2d_res${op_input_str})
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[],
+          %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str, %scalars_placeholder: Scalar?[], %algorithm_placeholder: str?):
+        %packed_weight_bias = mkldnn_prepacked::conv2d_prepack(
+            %weight, %bias, %stride, %padding, %dilation, %groups,
+            %input_size, %dummy_attr, %scalars_placeholder, %algorithm_placeholder)
+        %conv2d_res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
+        %res = aten::${op}(%conv2d_res)
         return (%res))");
 
   auto conv_op_fused_rstring = at::jit::CodeTemplate(R"(
-    graph(${graph_input}
-          %input_size:int[], %attr_placeholder:str, %scalars_placeholder: Scalar?[], %algorithm_placeholder: str?${op_input_str}):
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[],
+          %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str, %scalars_placeholder: Scalar?[], %algorithm_placeholder: str?):
         %attr: str = prim::Constant[value="${op_attr}"]()
-        ${construct_operand_list}
-        %packed_weight_bias : __torch__.torch.classes.${op_context_name} =  ${prepack_op_name}(
-            ${prepack_input}
-            %input_size, %attr, %scalars, %algorithm)
-        %res = ${run_op_name}(%input, %packed_weight_bias)
+        %packed_weight_bias : __torch__.torch.classes.mkldnn.ConvOpContext = mkldnn_prepacked::conv2d_prepack(
+            %weight, %bias, %stride, %padding, %dilation, %groups,
+            %input_size, %attr, %scalars_placeholder, %algorithm_placeholder)
+        %res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
         return (%res))");
 
-  for (auto const& it : fusion_rewrite_map) {
+  for (auto const& it : mkldnn::fusion_rewrite_map) {
     std::string op = it.first;
-    std::vector<std::string> op_input = it.second.scalar_input;
-    std::string algorithm_input = it.second.algorithm_input;
-
-    if (!algorithm_input.empty()) {
-      op_input.push_back(algorithm_input);
-    }
-    std::string op_input_str = c10::Join(", ", op_input);
-
-    if (!op_input.empty()) {
-      op_input_str = ", " + op_input_str;
+    if (op == std::string("none")) {
+      continue;
     }
 
     at::jit::TemplateEnv env;
     env.s("op", op);
-    env.s("op_input_str", op_input_str);
-    env.s("prepack_op_name", prepack_op_name);
-    env.s("run_op_name", run_op_name);
-    env.s("graph_input", graph_input);
-    env.s("prepack_input", prepack_input);
 
     at::jit::TemplateEnv env_fused;
     env_fused.s("op_attr", op);
-    env_fused.s("op_input_str", op_input_str);
-    env_fused.s(
-        "construct_operand_list",
-        mkldnn::construct_operand_list(
-            it.second.scalar_input, it.second.algorithm_input));
-    env_fused.s("prepack_op_name", prepack_op_name);
-    env_fused.s("run_op_name", run_op_name);
-    env_fused.s("op_context_name", op_context_name);
-    env_fused.s("graph_input", graph_input);
-    env_fused.s("prepack_input", prepack_input);
 
     SubgraphRewriter rewriter;
     rewriter.RegisterRewritePattern(
         conv_op_rstring.format(env), conv_op_fused_rstring.format(env_fused));
 
-    auto filters = it.second.filters;
+    auto filters = it.second;
     rewriter.runOnGraph(graph, filters);
   }
-}
-
-void FuseEltwiseWithPackedOps(std::shared_ptr<Graph>& graph) {
-  RewriteEltwiseGraph(
-      graph,
-      mkldnn::fusion_rewrite_map(),
-      std::string("mkldnn_prepacked::conv2d_prepack"),
-      std::string("mkldnn_prepacked::conv2d_run"),
-      std::string("mkldnn.ConvOpContext"),
-      std::string(
-          "%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int,"),
-      std::string("%weight, %bias, %stride, %padding, %dilation, %groups,"));
-
-  // TODO: add linear
 }
 
 void FuseAddReluWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -365,12 +283,10 @@ void FuseConvWithEltwise(std::shared_ptr<Graph>& graph) {
       *graph);
   insertMkldnnPrePackedOps(graph);
   GRAPH_DEBUG(
-      "After insertMkldnnPrePackedOps, before FuseEltwiseWithPackedOps\n",
-      *graph);
-  FuseEltwiseWithPackedOps(graph);
+      "After insertMkldnnPrePackedOps, before FuseReluWithPackedOps\n", *graph);
+  FuseReluWithPackedOps(graph);
   GRAPH_DEBUG(
-      "After FuseEltwiseWithPackedOps, before FuseAddReluWithPackedOps\n",
-      *graph);
+      "After FuseReluWithPackedOps, before FuseAddReluWithPackedOps\n", *graph);
   FuseAddReluWithPackedOps(graph);
   GRAPH_DEBUG(
       "After FuseAddReluWithPackedOps, before ConstantPropagation\n", *graph);

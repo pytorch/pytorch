@@ -109,7 +109,7 @@ bool add_accumu_can_be_write(
       conv_res_device_option.value() != accumu_device_option.value()) {
     return false;
   }
-  // Fro accumu = accumu + alpha*conv_output, alpha should be one.
+  // For accumu = accumu + alpha*conv_output, alpha should be one.
   if (!accumu_is_right && !alpha_is_one_value(match, vmap)) {
     return false;
   }
