@@ -17876,20 +17876,24 @@ class TestNNDeviceType(NNTestCase):
     def test_nll_loss_large_tensor(self, device, dtype):
 
         def run_test(shape):
-            input = torch.randn(shape, dtype=dtype, device=dtype, requires_grad=True)
-            labels = torch.randint(shape[0], shape, dtype=torch.long, device=device)
+            input = torch.randn(shape, dtype=dtype, device=device, requires_grad=True)
+            labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
 
             out = F.nll_loss(input, labels)
-            out.backward()
 
             with torch.no_grad():
-                input_cpu = input.cpu().requires_grad_()
+                input_cpu = input.cpu().float().requires_grad_()
                 labels_cpu = labels.cpu()
             out_cpu = F.nll_loss(input_cpu, labels_cpu).to(dtype)
-            out_cpu.backward()
+            # workaround to reduce memory usage vs. self.assertEqual, see #84944
+            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
+            with torch.no_grad():
+                self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
 
-            self.assertEqual(out, out_cpu)
-            self.assertEqual(input.grad, input_cpu.grad)
+            out.backward()
+            out_cpu.backward()
+            with torch.no_grad():
+                self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
         run_test([int(2 ** 16), int(2 ** 16) + 1])
 
