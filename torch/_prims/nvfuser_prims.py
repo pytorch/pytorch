@@ -67,6 +67,7 @@ nvprim_names = [
     "sqrt",
     "tan",
     "tanh",
+    "transpose",
     "trunc",
     "add",
     "atan2",
@@ -223,6 +224,10 @@ def _convert_element_type_nvfuser(fd: Any, a: TensorLikeType, dtype: torch.dtype
     return fd.ops.cast(a, nvfuser_dtype)  # type: ignore[attr-defined]
 
 
+def _transpose_nvfuser(fd, a, permutation):
+    return fd.ops.permute(a, permutation)  # type: ignore[attr-defined]
+
+
 def _squeeze_nvfuser(fd, a, a_shape, dimensions):
     for idx in reversed(sorted(dimensions)):
         a = fd.ops.squeeze(a, a_shape, idx)
@@ -296,6 +301,7 @@ def _amin_nvfuser(
 
 _nvfuser_impls["broadcast_in_dim"] = _broadcast_in_dim_nvfuser
 _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
+_nvfuser_impls["transpose"] = _transpose_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["view_of"] = _view_of_nvfuser
 _nvfuser_impls["rand_like"] = _rand_like_nvfuser
