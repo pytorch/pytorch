@@ -3,9 +3,11 @@ import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast
 import operator
 import functools
-from functools import lru_cache
+from functools import lru_cache, partial
 import traceback
 import collections
+import textwrap
+from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
@@ -284,26 +286,32 @@ class ShapeEnv(object):
         self.var_to_val[sympy_expr] = sympy.Integer(val)
         return cpp_sym_int
 
-    def create_shapes_for_args(self, args):
-        arg_cnt = 0
-
-        def create_shape(x):
-            nonlocal arg_cnt
-            if not isinstance(x, torch.Tensor):
-                return x
-
-            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz) for idx, sz in enumerate(x.shape)]
-            arg_cnt += 1
-            return out_shape
-        return list(map(create_shape, pytree.tree_flatten(args)[0]))
-
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
-        _ = new_env.create_shapes_for_args(args)
+        # NB: This must be kept in sync with create_aot_dispatcher_function
+        # and wrap_fake_symbolic
+        meta_converter = MetaConverter()
+        pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
         return all(guard.xreplace(new_env.var_to_val) == value for guard, value, _ in self.guards)
 
     def get_nontrivial_guards(self):
         return [(self.simplify(guard), val) for guard, val, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+
+    def format_guards(self, verbose=False):
+        def format_val(guard, val):
+            if val is sympy.true:
+                return str(guard)
+            elif val is sympy.false:
+                return f"Not({guard})"
+            else:
+                return f"Eq({guard}, {val})"
+
+        def format_tb(tb):
+            if not verbose:
+                return ""
+            return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
+
+        return '\n'.join(f" - {format_val(guard, val)}{format_tb(tb)}" for guard, val, tb in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -440,6 +448,9 @@ class ShapeEnv(object):
             self._maybe_guard_eq(expr)
         concrete_val = self.size_hint(expr)
 
-        stack = ''.join(traceback.format_stack())
+        # TODO: optimize this; avoid formatting traces until we need them
+        # NB: drop two frames; evaluate_expr and the Sym* function that
+        # actually called us
+        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
         self.guards.append((expr, concrete_val, stack))
         return concrete_val
