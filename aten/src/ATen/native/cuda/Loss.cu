@@ -233,7 +233,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
 
   sh_inputs[threadIdx.x] = static_cast<accscalar_t>(0);
   acc_weight[threadIdx.x] = static_cast<accscalar_t>(0);
-  for (int64_t i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
+  for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
     int64_t t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
