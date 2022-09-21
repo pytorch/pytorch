@@ -103,7 +103,7 @@ Linear Algebra (torch.linalg)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
--  Mario Lezcano (`Lezcano <https://github.com/Lezcano>`__)
+-  Mario Lezcano (`lezcano <https://github.com/lezcano>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
