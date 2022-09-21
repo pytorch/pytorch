@@ -911,23 +911,18 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
 
         # Iterate through users of this node to find tuple/getitem nodes to match
         for user in node.users:
-            matched = False
             if user.op == "call_function" and user.target == tuple:
                 for i, user_arg in enumerate(user.args[0]):  # type: ignore[arg-type]
                     if user_arg == node:
-                        matched = True
                         index_stack.append(i)
+                        current_pattern.append(user)
+                        find_patterns(user, index_stack, current_pattern, matched_patterns, seen)
             elif user.op == "call_function" and user.target == operator.getitem:
                 if len(index_stack) > 0:
                     if user.args[1] == index_stack[-1]:
-                        matched = True
                         index_stack.pop()
-            # Recursively find a match. If this node was not a match, start a new stack
-            if matched:
-                current_pattern.append(user)
-                find_patterns(user, index_stack, current_pattern, matched_patterns, seen)
-            else:
-                find_patterns(user, [], [], matched_patterns, seen)
+                        current_pattern.append(user)
+                        find_patterns(user, index_stack, current_pattern, matched_patterns, seen)
         return matched_patterns
 
     # Collect all matched patterns
