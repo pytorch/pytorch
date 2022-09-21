@@ -17884,9 +17884,9 @@ class TestNNDeviceType(NNTestCase):
             with torch.no_grad():
                 input_cpu = input.cpu().float().requires_grad_()
                 labels_cpu = labels.cpu()
-            out_cpu = F.nll_loss(input_cpu, labels_cpu).to(dtype)
+            out_cpu = F.nll_loss(input_cpu, labels_cpu)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
+            rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
             with torch.no_grad():
                 self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
 
