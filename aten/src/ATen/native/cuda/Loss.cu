@@ -445,8 +445,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     int nframe,
     int ndim,
     int64_t n_classes,
-    int64_t ignore_index,
-    int64_t numel) {
+    int64_t ignore_index) {
   const auto grad = -(size_average ? *grad_output / *total_weight
                                    : *grad_output);
 
@@ -456,9 +455,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       const uint64_t index = static_cast<uint64_t>(i) * ndim + t;
       CUDA_KERNEL_ASSERT(index >= 0);
-      if (index < numel) {
-        grad_input[index] = weights != nullptr ? weights[t] * grad : grad;
-      }
+      grad_input[index] = weights != nullptr ? weights[t] * grad : grad;
     }
   }
 }
@@ -563,8 +560,7 @@ void nll_loss_backward_out_cuda_template(
                     input.size(0),
                     input.size(1),
                     n_classes,
-                    ignore_index,
-		    grad_input.numel());
+                    ignore_index);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           });
         });
