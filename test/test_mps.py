@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_UBSAN, dtype_abbrs)
 from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
-from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
 from functools import partial
@@ -1577,6 +1577,13 @@ class TestMPS(TestCase):
         y_mps = torch.full((2, 2), 247, device='mps', dtype=torch.uint8)
         y_cpu = torch.full((2, 2), 247, device='cpu', dtype=torch.uint8)
         self.assertEqual(y_mps, y_cpu)
+
+    # See https://github.com/pytorch/pytorch/issues/84995
+    def test_div_bugs(self):
+        for (dtype, mode) in itertools.product(integral_types(), ['trunc', 'floor']):
+            x = torch.tensor(list(range(1, 11)), device='mps', dtype=dtype)
+            y = torch.div(x, 101, rounding_mode=mode)
+            self.assertEqual(y.sum(), 0)
 
     # See https://github.com/pytorch/pytorch/issues/82663
     def test_bool_expand(self):
@@ -5998,6 +6005,19 @@ class TestConvolutionMPS(TestCase):
 
         self.assertEqual(tcpu, tgpu.cpu(), rtol=2.6e-05, atol=2e-04)
 
+    def test_conv_backward_1d_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/84511
+        conv_cpu = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=3)
+        conv_mps = copy.deepcopy(conv_cpu).to(device='mps')
+
+        data = torch.rand(1, 176, 1, dtype=torch.float32)
+        x_cpu = data.permute(0, 2, 1).contiguous()
+        x_mps = data.permute(0, 2, 1).contiguous().to("mps")
+        res_cpu = conv_cpu(x_cpu).sum().backward()
+        res_mps = conv_mps(x_mps).sum().backward()
+
+        self.assertEqual(res_cpu, res_mps)
+
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
         a_cpu = torch.ones(128, 1, 176)
@@ -6490,6 +6510,11 @@ class TestConsistency(TestCase):
         'arange': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'amax': ['f32'],
+        'amix': ['f32'],
+        'logsumexp': ['f32'],
+        'mean': ['f32'],
+        'sum': ['f32'],
         'asin': ['f32', 'i16', 'i32', 'u8'],
         'asinh': ['f32', 'i16', 'i32', 'u8'],
         'atan': ['f32', 'i16', 'i32', 'u8'],
