@@ -189,60 +189,39 @@ magic_methods = {
 
 float_magic_methods = {"add", "sub", "mul", "truediv"}
 
-for method, _func in magic_methods.items():
-    def _create_magic_impl(func):
-        method_name = method
+def make_magic(method, func, py_type):
+    func = lru_cache(256)(func)
 
-        def magic_impl(self, other):
-            if SYM_FUNCTION_MODE:
-                return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
-            if isinstance(other, PySymInt):
-                other = other.expr
-            # TODO: consider constant prop here
-            expr = self.shape_env.replace(self.expr)
-            other = self.shape_env.replace(other)
-            out = func(expr, other)
-            out = sympy.expand(out)
-            if method_name in ["truediv"]:
-                return PySymFloat(out, self.shape_env)
-            else:
-                # TODO: relational operators actually technically return a
-                # PysymBool, this is a type error
-                return PySymInt(out, self.shape_env)
-        return magic_impl
+    def magic_impl(self, other):
+        if SYM_FUNCTION_MODE:
+            return _handle_sym_dispatch(getattr(operator, method), (self, other), {})
+        if isinstance(other, py_type):
+            other = other.expr
+        # TODO: consider constant prop here
+        expr = self.shape_env.replace(self.expr)
+        other = self.shape_env.replace(other)
+        out = func(expr, other)
+        out = sympy.expand(out)
+        if method in ["truediv"]:
+            return PySymFloat(out, self.shape_env)
+        else:
+            # TODO: relational operators actually technically return a
+            # PysymBool, this is a type error
+            return py_type(out, self.shape_env)
 
-    _func = lru_cache(256)(_func)
     # this should be wrapped transparently into torch.SymIntNode
-    setattr(PySymInt, method, _create_magic_impl(_func))
-    setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
+    setattr(py_type, method, magic_impl)
+    setattr(py_type, f"__{method}__", magic_impl)
     if method in reflectable_magic_methods:
-        setattr(PySymInt, f"__r{method}__", _create_magic_impl(_func))
+        setattr(py_type, f"__r{method}__", magic_impl)
 
-for method, _func in magic_methods.items():
+for method, func in magic_methods.items():
+    make_magic(method, func, PySymInt)
+
+for method, func in magic_methods.items():
     if method not in float_magic_methods:
         continue
-
-    def _create_magic_impl(func):
-        method_name = method
-
-        def magic_impl(self, other):
-            if SYM_FUNCTION_MODE:
-                return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
-            if isinstance(other, PySymFloat):
-                other = other.expr
-            # TODO: consider constant prop here
-            expr = self.shape_env.replace(self.expr)
-            other = self.shape_env.replace(other)
-            out = func(expr, other)
-            out = sympy.expand(out)
-            return PySymFloat(out, self.shape_env)
-        return magic_impl
-
-    _func = lru_cache(256)(_func)
-    setattr(PySymFloat, method, _create_magic_impl(_func))
-    setattr(PySymFloat, f"__{method}__", _create_magic_impl(_func))
-    if method in reflectable_magic_methods:
-        setattr(PySymFloat, f"__r{method}__", _create_magic_impl(_func))
+    make_magic(method, func, PySymFloat)
 
 def _lru_cache(fn, maxsize=None):
     """
