@@ -67,9 +67,8 @@ struct TensorMetadata {
   uint32_t dim_;
 };
 
-static_assert(
-    sizeof(TensorMetadata) <= 24,
-    "Expected TensorMetadata to take 24 bytes: (8 + 8 + 1 + 1 + 1 + 1 + 4)");
+// 8 + 8 + 1 + 1 + 1 + 1 + 4
+STATIC_ASSERT_MAXIMUM_SIZE(TensorMetadata, 24);
 
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
