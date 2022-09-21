@@ -125,7 +125,10 @@ from torch.ao.quantization.fx.qconfig_mapping_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
-from torch.ao.quantization.fx.utils import NodeInfo
+from torch.ao.quantization.fx.utils import (
+    _reroute_tuple_getitem_pattern,
+    NodeInfo,
+)
 
 from torch.ao.quantization.fake_quantize import (
     default_fixed_qparams_range_0to1_fake_quant,
@@ -4204,6 +4207,70 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_function(tuple): 1,
         }
         self._test_static_lstm_helper(m2, prepare_node_occurrence, convert_node_occurrence2)
+
+    def test_reroute_tuple_getitem_patterns(self):
+        """
+        The following graph should redirect the output to `b`. After the transformation,
+        all other nodes, including the inputs `a` and `c`, are no longer needed.
+
+             a   b     c
+             |   \\   /
+             \\   tuple
+              \\   /
+               tuple
+               /  \\
+              /    \\
+             |      \\
+             |       \\
+             |        \\
+        getitem0    getitem1
+             |      /     \\
+             | getitem0  getitem1
+             |     \\     /
+             \\      tuple
+              \\      /
+               \\    /
+                tuple
+                  |
+               getitem1
+                  |
+               getitem0
+                  |
+                output
+        """
+        # Construct graph manually because symbolic_trace does not insert tuple and getitem nodes
+        graph = torch.fx.Graph()
+        a = graph.create_node("placeholder", "a")
+        b = graph.create_node("placeholder", "b")
+        c = graph.create_node("placeholder", "c")
+        bc = graph.call_function(tuple, args=([b, c],))
+        abc = graph.call_function(tuple, args=([a, bc],))
+
+        # Break down tuple and reconstruct it again
+        a2 = graph.call_function(operator.getitem, args=(abc, 0))
+        bc2 = graph.call_function(operator.getitem, args=(abc, 1))
+        b2 = graph.call_function(operator.getitem, args=(bc2, 0))
+        c2 = graph.call_function(operator.getitem, args=(bc2, 1))
+        bc3 = graph.call_function(tuple, args=([b2, c2],))
+        abc2 = graph.call_function(tuple, args=([a2, bc3],))
+
+        # Output tuple[1][0]
+        bc4 = graph.call_function(operator.getitem, args=(abc2, 1))
+        b3 = graph.call_function(operator.getitem, args=(bc4, 0))
+        output = graph.output(b3)
+
+        # Do reroute
+        _reroute_tuple_getitem_pattern(graph)
+
+        # Assert that output reroutes to `b` directly, and all other nodes can be removed
+        output_ancestors = []
+        def gather_ancestors(current_node):  # noqa: E306
+            for arg in current_node.args:
+                output_ancestors.append(arg)
+                gather_ancestors(arg)
+        gather_ancestors(output)
+        self.assertEqual(output_ancestors, [b])
+        self.assertEqual(output.args[0], b)
 
     def test_relu_lowering(self):
         class M(torch.nn.Module):

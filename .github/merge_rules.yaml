@@ -120,7 +120,7 @@
   - test/test_linalg.py
   approved_by:
   - mruberry
-  - Lezcano
+  - lezcano
   - IvanYashchuk
   mandatory_checks_name:
   - Facebook CLA Check

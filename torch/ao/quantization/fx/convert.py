@@ -784,7 +784,7 @@ def convert(
                 # extra check for fused module classes to make sure they are fused module classes
                 # of target modules
                 if type_before_parametrizations(mod) in fused_module_classes and \
-                   type_before_parametrizations(mod[0]) not in root_module_classes:
+                   type_before_parametrizations(mod[0]) not in root_module_classes:  # type: ignore[index]
                     continue
                 convert_weighted_module(
                     node, modules, observed_node_names, qconfig_map, backend_config)

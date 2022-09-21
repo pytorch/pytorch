@@ -162,7 +162,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     if hasattr(activation_post_process, "compute_dtype"):
         compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
-    if dtype in [torch.quint8, torch.qint8]:
+    if dtype in [torch.quint8, torch.qint8] and \
+            not hasattr(activation_post_process, 'compute_dtype'):
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
@@ -174,11 +175,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             quantize_op = torch.quantize_per_tensor
-    elif dtype == torch.float16:
-        node_type = "call_method"
-        quantize_op = "to"
-        qparams = {"_dtype_": dtype}
-    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # TODO(future PR): switch compute_dtype to is_dynamic
         # dynamic quantization
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic
@@ -186,6 +184,10 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         # reduce_range = activation_post_process.reduce_range
         reduce_range = torch.backends.quantized.engine == "fbgemm"
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
+    elif dtype == torch.float16:
+        node_type = "call_method"
+        quantize_op = "to"
+        qparams = {"_dtype_": dtype}
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
         return None
@@ -657,7 +659,7 @@ def _is_custom_module_lstm(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(qhandler, torch.ao.quantization.fx.quantization_patterns.QuantizeHandler)
+        assert isinstance(qhandler, torch.ao.quantization.fx.quantization_patterns.QuantizeHandler)  # type: ignore[attr-defined]
         return isinstance(mod, torch.nn.LSTM) and \
             activation_is_statically_quantized(qconfig) and \
             qhandler.is_custom_module()
@@ -747,7 +749,6 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
                 original_user(s)
 
     For step (4), reroute all users of the original LSTM node(s) as follows:
-
       lstm_output -> lstm_output_dq
       lstm_output[0] -> output_dq
       lstm_output[1] -> hidden_dq
@@ -776,29 +777,15 @@ def _insert_dequant_stubs_for_custom_module_lstm_output(
     with graph.inserting_after(hidden_dq):
         lstm_output_dq = graph.call_function(tuple, ([output_dq, hidden_dq],))
 
-    # (4) Reroute all consumers of the original LSTM node
-    # First, gather the original LSTM nodes
-    def _is_getitem_node(n):
-        return n.op == "call_function" and n.target == operator.getitem
-    node_to_replacement = {node: lstm_output_dq}
+    # (4) Reroute all consumers of the original LSTM node and its sub-nodes
     for user in list(node.users.keys()):
-        if _is_getitem_node(user) and user.args[1] == 0:
-            node_to_replacement[user] = output_dq  # lstm_output[0]
-        if _is_getitem_node(user) and user.args[1] == 1:
-            node_to_replacement[user] = hidden_dq  # lstm_output[1]
-            for hidden_user in list(user.users.keys()):
-                if _is_getitem_node(hidden_user) and hidden_user.args[1] == 0:
-                    node_to_replacement[hidden_user] = hidden0_dq  # lstm_output[1][0]
-                if _is_getitem_node(hidden_user) and hidden_user.args[1] == 1:
-                    node_to_replacement[hidden_user] = hidden1_dq  # lstm_output[1][1]
-    # Do not reroute nodes we added or the original nodes that will be consumed
-    nodes_added = [output, output_dq, hidden, hidden_dq, hidden0, hidden0_dq, hidden1, hidden1_dq]
-    nodes_to_skip = set(node_to_replacement.keys()).union(nodes_added)
-    for original_node, replacement in node_to_replacement.items():
-        for user in list(original_node.users.keys()):
-            if user not in nodes_to_skip:
-                user.replace_input_with(original_node, replacement)
-
+        if user != output and user != hidden:
+            user.replace_input_with(node, lstm_output_dq)
+    # The getitem and tuple nodes we added here may interfere with reference quantized
+    # pattern matching, so we need to redirect the consumers of internal nodes to the
+    # corresponding nodes with DeQuantStubs (e.g. lstm_output_dq[0] -> output_dq) attached,
+    # in order to preserve reference patterns like "dequantize - consumer - quantize".
+    _reroute_tuple_getitem_pattern(graph)
     return lstm_output_dq
 
 def _maybe_get_custom_module_lstm_from_node_arg(
@@ -869,3 +856,94 @@ def _maybe_get_custom_module_lstm_from_node_arg(
         if matched_node is not None:
             return matched_node
     return None
+
+def _reroute_tuple_getitem_pattern(graph: Graph):
+    """
+    Search for patterns where N consecutive `tuple` call_function nodes are followed by
+    N consecutive `getitem` call_function nodes that are "reverses" of the `tuple` nodes.
+    If we find this pattern, reroute the consumers of the last `getitem` to skip these
+    N `tuple` and `getitem` nodes.
+
+    Before:
+
+        a   b     c
+        |   \\   /
+        \\   tuple
+         \\   /
+          tuple
+            |
+        getitem(1)
+            |
+        getitem(0)
+            |
+            d
+
+    After:
+
+        b
+        |
+        d
+    """
+    def find_patterns(
+            node: Node,
+            index_stack: List[int],
+            current_pattern: List[Node],
+            matched_patterns: List[List[Node]],
+            seen: Set[Tuple[Node, Tuple[int, ...]]]):
+        """
+        Traverse the graph recursively to match for the N-tuple - N-getitem patterns,
+        starting at the given node.
+
+        We use a stack to keep track of the expected `getitem` indices, since these are
+        reversed from the `tuple` indices. In the above example, the stack after
+        (b -> tuple -> tuple) will be [0, 1], which will be popped by getitem(1) first
+        and then by getitem(0).
+        """
+        if len(index_stack) == 0 and len(current_pattern) > 0:
+            matched_patterns.append(copy.copy(current_pattern))
+            current_pattern.clear()
+
+        # Avoid duplicating work
+        state = (node, tuple(index_stack))
+        if state in seen:
+            return
+        seen.add(state)
+
+        # Iterate through users of this node to find tuple/getitem nodes to match
+        for user in node.users:
+            matched = False
+            if user.op == "call_function" and user.target == tuple:
+                for i, user_arg in enumerate(user.args[0]):  # type: ignore[arg-type]
+                    if user_arg == node:
+                        matched = True
+                        index_stack.append(i)
+            elif user.op == "call_function" and user.target == operator.getitem:
+                if len(index_stack) > 0:
+                    if user.args[1] == index_stack[-1]:
+                        matched = True
+                        index_stack.pop()
+            # Recursively find a match. If this node was not a match, start a new stack
+            if matched:
+                current_pattern.append(user)
+                find_patterns(user, index_stack, current_pattern, matched_patterns, seen)
+            else:
+                find_patterns(user, [], [], matched_patterns, seen)
+        return matched_patterns
+
+    # Collect all matched patterns
+    matched_patterns: List[List[Node]] = []
+    seen: Set[Tuple[Node, Tuple[int, ...]]] = set()  # (node, index_stack)
+    for node in graph.nodes:
+        find_patterns(node, [], [], matched_patterns, seen)
+
+    # For each pattern, redirect all consumers of the last getitem node to the correct input
+    # of the first tuple node
+    for pattern in matched_patterns:
+        first_tuple = pattern[0]
+        last_getitem = pattern[-1]
+        assert first_tuple.op == "call_function" and first_tuple.target == tuple
+        assert last_getitem.op == "call_function" and last_getitem.target == operator.getitem
+        last_getitem_index = last_getitem.args[1]
+        new_input = first_tuple.args[0][last_getitem_index]  # type: ignore[index]
+        for user in list(last_getitem.users.keys()):
+            user.replace_input_with(last_getitem, new_input)
