@@ -6,7 +6,6 @@
 
 import itertools
 import torch
-import functorch
 from functorch import vmap
 import torch.utils._pytree as pytree
 from functorch_additional_op_db import additional_op_db
