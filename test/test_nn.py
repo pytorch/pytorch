@@ -17869,6 +17869,30 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16)
+    @largeTensorTest("90GB", "cpu")
+    @largeTensorTest("18GB", "cuda")
+    def test_nll_loss_large_tensor(self, device, dtype):
+
+        def run_test(shape):
+            input = torch.randn(shape, dtype=dtype, device=dtype, requires_grad=True)
+            labels = torch.randint(shape[0], shape, dtype=torch.long, device=device)
+
+            out = F.nll_loss(input, labels)
+            out.backward()
+
+            with torch.no_grad():
+                input_cpu = input.cpu().requires_grad_()
+                labels_cpu = labels.cpu()
+            out_cpu = F.nll_loss(input_cpu, labels_cpu).to(dtype)
+            out_cpu.backward()
+
+            self.assertEqual(out, out_cpu)
+            self.assertEqual(input.grad, input_cpu.grad)
+
+        run_test([int(2 ** 16), int(2 ** 16) + 1])
+
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
@@ -17959,12 +17983,6 @@ class TestNNDeviceType(NNTestCase):
             result_byte, grad_byte = compute_result_and_gradient(reduction, torch.uint8)
             self.assertEqual(result_long, result_byte)
             self.assertEqual(grad_long, grad_byte)
-
-    @onlyCUDA
-    @largeTensorTest("90GB", "cpu")
-    @largeTensorTest("18GB", "cuda")
-    def test_nll_loss_large_tensor(self, device):
-        self._nll_loss_helper([int(2 ** 16), int(2 ** 16) + 1], "none", torch.empty([int(2 ** 16)]), device)
 
     def test_cross_entropy_loss_prob_target_all_reductions(self, device):
         # Test with k-dimensional loss.
