@@ -2986,11 +2986,7 @@ class _TestParamsMaxPoolBase(object):
             yield dict(zip(keys, values))
 
     def gen_input_params(self):
-        # Limited to 100 entries
-        random.seed(42)
-        values = list(product(self._gen_shape(), self._gen_kwargs()))
-        random.shuffle(values)
-        yield from tuple(values)[:100]
+        yield from product(self._gen_shape(), self._gen_kwargs())
 
 class _TestParamsMaxPool1d(_TestParamsMaxPoolBase):
 
