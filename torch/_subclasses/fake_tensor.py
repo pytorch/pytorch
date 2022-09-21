@@ -724,7 +724,6 @@ class FakeTensorMode(TorchDispatchMode):
             aten.empty_strided.default,
             aten.as_strided.default,
             aten.zeros.default,
-            aten.clone.default,
             aten.detach.default,
         ]
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
