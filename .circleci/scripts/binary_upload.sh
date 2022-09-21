@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-
+source "$(dirname "${BASH_SOURCE[0]}")../../.jenkins/pytorch/common.sh"
 PACKAGE_TYPE=${PACKAGE_TYPE:-conda}
 
 PKG_DIR=${PKG_DIR:-/tmp/workspace/final_pkgs}
@@ -24,8 +24,6 @@ if [[ "${DRY_RUN}" = "disabled" ]]; then
   AWS_S3_CP="aws s3 cp"
 fi
 
-retry () { "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@") }
-
 do_backup() {
   local backup_dir
   backup_dir=$1
@@ -39,7 +37,6 @@ do_backup() {
 conda_upload() {
   (
     set -x
-
     retry \
     ${ANACONDA} \
     upload  \
