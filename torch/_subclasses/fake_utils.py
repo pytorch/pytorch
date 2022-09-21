@@ -1,9 +1,10 @@
 from typing import Callable, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._ops import OpOverload
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_flatten
 
 aten = torch.ops.aten
 
@@ -23,18 +24,6 @@ class CrossRefFakeMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
-        def on_tensor(f):
-            def go(t):
-                if isinstance(t, torch.Tensor):
-                    assert not isinstance(
-                        t, torch._subclasses.FakeTensor
-                    ), "FakeTensor -> Real Cross Ref NYI"
-                    return f(t)
-                else:
-                    return t
-
-            return go
-
         from torch._subclasses.fake_tensor import (
             FakeTensorMode,
             UnsupportedFakeTensorException,
@@ -46,11 +35,11 @@ class CrossRefFakeMode(TorchDispatchMode):
         # aten._to_dense.default this one is getting called with csc
         if (
             func
-            not in [
-                torch.ops.aten.lift_fresh.default,
+            not in (
+                aten.lift_fresh.default,
                 aten.lift_fresh_copy.default,
-                torch.ops.aten.set_.source_Storage_storage_offset,
-            ]
+                aten.set_.source_Storage_storage_offset,
+            )
             and not self.ignore_op_fn(func)
             and torch.Tag.dynamic_output_shape not in func.tags  # type: ignore[attr-defined]
             and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
@@ -58,8 +47,8 @@ class CrossRefFakeMode(TorchDispatchMode):
         ):
             try:
                 with FakeTensorMode() as fake_mode:
-                    fake_args, fake_kwargs = tree_map(
-                        on_tensor(fake_mode.from_tensor), (args, kwargs)
+                    fake_args, fake_kwargs = pytree.tree_map_only(
+                        torch.Tensor, fake_mode.from_tensor, (args, kwargs)
                     )
                     fake_r = func(*fake_args, **fake_kwargs)
             except UnsupportedFakeTensorException:
