@@ -17869,14 +17869,14 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
+    # TODO(crcrpar): double check cpu mem
     @onlyCUDA
-    @dtypes(torch.float32, torch.float16)
-    @largeTensorTest("90GB", "cpu")
+    @largeTensorTest("45GB", "cpu")
     @largeTensorTest("18GB", "cuda")
-    def test_nll_loss_large_tensor(self, device, dtype):
+    def test_nll_loss_large_tensor(self, device):
 
         def run_test(shape):
-            input = torch.randn(shape, dtype=dtype, device=device, requires_grad=True)
+            input = torch.randn(shape, device=device, requires_grad=True)
             labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
 
             out = F.nll_loss(input, labels)
