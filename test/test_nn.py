@@ -17873,10 +17873,11 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
     @largeTensorTest("18GB", "cuda")
-    def test_nll_loss_large_tensor(self, device):
+    @dtypes(torch.float32)
+    def test_nll_loss_large_tensor(self, device, dtype):
 
         def run_test(shape):
-            input = torch.randn(shape, device=device, requires_grad=True)
+            input = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
             labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
 
             out = F.nll_loss(input, labels)
@@ -17886,7 +17887,7 @@ class TestNNDeviceType(NNTestCase):
                 labels_cpu = labels.cpu()
             out_cpu = F.nll_loss(input_cpu, labels_cpu)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
             with torch.no_grad():
                 self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
 
