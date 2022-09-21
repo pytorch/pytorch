@@ -1002,9 +1002,7 @@ void LLVMCodeGenImpl::visit(HalfImmPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      buildErrorMessage("Fuser's LLVM codegen does not support bfloat16"));
+  value_ = llvm::ConstantInt::get(ShortTy_, v->value().x);
 }
 
 void LLVMCodeGenImpl::visit(BoolImmPtr v) {

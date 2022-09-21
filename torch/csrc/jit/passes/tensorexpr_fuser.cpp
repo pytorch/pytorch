@@ -940,6 +940,12 @@ class TensorExprFuser {
           return false;
         }
 
+        if (*st == c10::ScalarType::BFloat16 && *device == c10::kCPU) {
+#ifndef TORCH_ENABLE_LLVM
+          return false;
+#endif
+        }
+
         // These operators only support floats, because integer divisors need to
         // raise ZeroDivisionError.
         if (node->isMemberOf(float_only_operator_set) && !isFloatingType(*st)) {
