@@ -13,3 +13,7 @@ jobs:
         uses: necojackarc/auto-request-review@v0.7.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+concurrency:
+  group: auto-request-review-${{ github.event.client_payload.pr_num }}
+  cancel-in-progress: true
