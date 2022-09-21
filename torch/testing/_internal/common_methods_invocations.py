@@ -11683,6 +11683,8 @@ op_db: List[OpInfo] = [
             # This test fails on trunk CUDA 10.2 tests, can be removed when we stop 10.2 support
             DecorateInfo(unittest.skip("Skipped!"), 'TestMeta', 'test_meta',
                          device_type='cuda', dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.skip("Not Implemented"), 'TestMeta', 'test_dispatch_meta',
+                         device_type='cuda', dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
             # No meta function
