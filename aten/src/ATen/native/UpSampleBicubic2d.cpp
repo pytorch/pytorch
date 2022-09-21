@@ -109,8 +109,7 @@ static void upsample_bicubic2d_backward_out_frame(
       for (const auto output_x : c10::irange(output_width)) {
         scalar_t* in = &idata[output_y * input_width + output_x];
         scalar_t* out = &odata[output_y * output_width + output_x];
-        for (const auto c : c10::irange(channels)) {
-          (void)c; //Suppress unused variable warning
+        for (const auto c C10_UNUSED : c10::irange(channels)) {
           in[0] = out[0];
           in += input_width * input_height;
           out += output_width * output_height;
@@ -146,8 +145,7 @@ static void upsample_bicubic2d_backward_out_frame(
       get_cubic_upsample_coefficients<scalar_t>(x_coeffs, t_x);
       get_cubic_upsample_coefficients<scalar_t>(y_coeffs, t_y);
 
-      for (const auto c : c10::irange(channels)) {
-        (void)c; //Suppress unused variable warning
+      for (const auto c C10_UNUSED : c10::irange(channels)) {
         scalar_t out_value = out[output_y * output_width + output_x];
 
         for (const auto i : c10::irange(4)) {
