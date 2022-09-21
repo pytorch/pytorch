@@ -306,8 +306,10 @@ auto handle_torch_function_no_python_arg_parser(
     at::optional<torch::overrides::StashTorchFunctionModeGuard> tf_g;
     at::optional<torch_dispatch_mode::StashTorchDispatchModeGuard> td_g;
     if (is_torch_function) {
+      std::cout << "HERE" << std::endl;
       tf_g.emplace();
     } else {
+      std::cout << "dispatch here" << std::endl;
       td_g.emplace();
     }
     // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below

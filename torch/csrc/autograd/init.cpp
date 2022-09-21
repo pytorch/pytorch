@@ -598,6 +598,16 @@ static PyObject* set_torch_function_mode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* is_torch_function_mode_enabled(PyObject* _unused, PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  if (at::impl::function_mode_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* push_on_torch_function_stack(
     PyObject* _unused,
     PyObject* arg) {
@@ -756,6 +766,10 @@ static PyMethodDef methods[] = { // NOLINT
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),
      METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_is_torch_function_mode_enabled",
+     is_torch_function_mode_enabled,
+     METH_NOARGS,
      nullptr},
     {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
     {"_push_on_torch_function_stack",

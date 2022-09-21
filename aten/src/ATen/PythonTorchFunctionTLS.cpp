@@ -54,5 +54,9 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
   return pythonTorchFunctionState;
 }
 
+bool function_mode_enabled() {
+  return static_cast<bool>(PythonTorchFunctionTLS::get_mode());
+}
+
 } // namespace impl
 } // namespace at

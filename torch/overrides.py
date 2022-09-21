@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr,
     _push_on_torch_function_stack, _pop_torch_function_stack, _get_function_stack_at, _len_torch_function_stack,
-    _set_torch_function_mode)
+    _set_torch_function_mode, _is_torch_function_mode_enabled)
 
 __all__ = [
     "get_ignored_functions",
@@ -1510,8 +1510,8 @@ def handle_torch_function(
     types = tuple(map(type, overloaded_args))
 
     # Check for __torch_function__ mode.
-    mode = _get_current_function_mode()
-    if mode is not None:
+    if _is_torch_function_mode_enabled():
+        mode = _get_current_function_mode()
         # NB: unlike on tensors, modes are instances
         with _no_torch_function_mode():
             result = mode.__torch_function__(public_api, types, args, kwargs)
@@ -1541,8 +1541,8 @@ def handle_torch_function(
         "no implementation found for '{}' on types that implement "
         '__torch_function__: {}'
     ).format(func_name, [type(arg) for arg in overloaded_args])
-    if mode is not None:
-        msg += f" nor in mode {mode}"
+    if _is_torch_function_mode_enabled():
+        msg += f" nor in mode {_get_current_function_mode()}"
     raise TypeError(msg)
 
 has_torch_function = _add_docstr(
@@ -1874,13 +1874,12 @@ class BaseTorchFunctionMode(TorchFunctionMode):
 # library code though, e.g., in handle_torch_function
 @contextlib.contextmanager
 def _no_torch_function_mode() -> Iterator[None]:
-    if _len_torch_function_stack() > 0:
-        _set_torch_function_mode(None)
+    _set_torch_function_mode(None)
     try:
         yield
     finally:
-        if _len_torch_function_stack() > 0:
-            _set_torch_function_mode(_TorchFunctionStackMode())
+       if _len_torch_function_stack() > 0:
+         _set_torch_function_mode(_TorchFunctionStackMode)
 
 
 class enable_reentrant_dispatch():
