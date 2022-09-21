@@ -192,6 +192,7 @@ class SubgraphMatcher:
         in practice, it's unlikely to blow up.
 
         """
+        from torch.fx.passes.utils.fuser_utils import validate_partition
 
         # find candidate nodes to match with pattern anchors
         match_candidates: Dict[Node, List[Node]] = defaultdict(list)
@@ -227,7 +228,15 @@ class SubgraphMatcher:
         # filter out the matches where the subgraph is not fully_contained
         matches = [match for match in matches if self._is_contained(match.nodes_map)]
 
+        # filter out the matches that that forms a cycle if the subgraph is fused
+        valid_matches = []
+        for match in matches:
+            matched_compute_nodes = \
+                [gn for pn, gn in match.nodes_map.items() if pn.op not in {"placeholder", "output"}]
+            if validate_partition(matched_compute_nodes):
+                valid_matches.append(match)
+
         if self.remove_overlapping_matches:
-            matches = self._remove_overlapping_matches(matches)
+            matches = self._remove_overlapping_matches(valid_matches)
 
         return matches
