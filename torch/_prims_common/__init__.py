@@ -1518,7 +1518,7 @@ def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
     if len(shape) > len(desired):
         return False
     for i in range(len(shape)):
-        if shape[i] != desired[i] and shape[i] != 1:
+        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
             return False
     return True
 
