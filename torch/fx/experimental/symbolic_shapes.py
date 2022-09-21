@@ -189,7 +189,7 @@ magic_methods = {
 
 float_magic_methods = {"add", "sub", "mul", "truediv"}
 
-def make_magic(method, func, py_type):
+def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
 
     def magic_impl(self, other):
@@ -216,12 +216,12 @@ def make_magic(method, func, py_type):
         setattr(py_type, f"__r{method}__", magic_impl)
 
 for method, func in magic_methods.items():
-    make_magic(method, func, PySymInt)
+    _make_magic(method, func, PySymInt)
 
 for method, func in magic_methods.items():
     if method not in float_magic_methods:
         continue
-    make_magic(method, func, PySymFloat)
+    _make_magic(method, func, PySymFloat)
 
 def _lru_cache(fn, maxsize=None):
     """
