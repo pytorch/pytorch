@@ -3,7 +3,7 @@
 #include "torch/csrc/autograd/FunctionsManual.h"
 
 #include <ATen/RedispatchFunctions.h>
-#include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/core/impl/TorchDispatchMode.h>
 #include <ATen/core/TorchDispatchUtils.h>
 #include <torch/library.h>
 

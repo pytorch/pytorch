@@ -4,7 +4,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
-#include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/core/impl/TorchDispatchMode.h>
 
 namespace at {
 namespace impl {

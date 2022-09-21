@@ -11,7 +11,7 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/record_function.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
-#include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/core/impl/TorchDispatchMode.h>
 
 namespace at {
 

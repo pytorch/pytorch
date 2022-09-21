@@ -588,10 +588,10 @@ static PyObject* python_exit_dual_level(
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
-    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
+    c10::impl::TorchDispatchMode::set_state(nullptr);
   } else {
     Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::set_state(
+    c10::impl::TorchDispatchMode::set_state(
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
@@ -602,7 +602,7 @@ static PyObject* get_torch_dispatch_mode(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::get_state();
+  const auto& mode = c10::impl::TorchDispatchMode::get_state();
   if (!mode) {
     Py_RETURN_NONE;
   } else {

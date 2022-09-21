@@ -1,6 +1,6 @@
 #pragma once
 #include <ATen/ATen.h>
-#include <c10/core/impl/TorchDispatchModeTLS.h>
+#include <c10/core/impl/TorchDispatchMode.h>
 
 namespace at {
 
