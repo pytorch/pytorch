@@ -599,6 +599,27 @@ class MultipleOutputsHorizontalPattern:
         TestCase(True, True, 0)
     ]
 
+class MultiOutputWithWithInvalidMatches:
+    @staticmethod
+    def forward(x):
+        res0 = torch.nn.functional.linear(x, torch.rand(3, 3))
+        res1 = torch.sigmoid(res0)
+        res2 = res0 * res1
+        res3 = torch.sum(res2, dim=1)
+        return res3
+
+    @staticmethod
+    def pattern(a, b, c):
+        lin_res = torch.nn.functional.linear(a, b)
+        mul_res = lin_res * c
+        return lin_res, mul_res
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 0),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+    ]
 
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
@@ -616,7 +637,8 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsMultipleOverlappingMatches,
         MultipleOutputsMultipleNonOverlappingMatches,
         MultipleOutputsIdenticalAnchor,
-        MultipleOutputsHorizontalPattern
+        MultipleOutputsHorizontalPattern,
+        MultiOutputWithWithInvalidMatches,
     ])
     def test_subgraph_matcher(self, test_model):
         traced = symbolic_trace(test_model.forward)
