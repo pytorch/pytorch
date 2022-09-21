@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <ATen/core/Tensor.h>
@@ -35,6 +36,7 @@
 #include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 
 #include <limits>
 
@@ -1214,6 +1216,35 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
             });
       });
 }
+
+template <typename scalar_t, typename mask_t>
+void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_val) {
+    gpu_kernel(
+        iter, [quantized_val] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
+          if (mask) {
+            return quantized_val;
+          }
+          return self;
+    });
+}
+
+void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
+  AT_DISPATCH_QINT_TYPES(
+      iter.common_dtype(), "masked_fill_", [&]() {
+        float float_val = value.to<float>();
+        const auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
+        auto mask_dtype = iter.input_dtype(0);
+
+        if (mask_dtype == at::ScalarType::Bool) {
+            cuda_masked_fill_kernel_quantized<scalar_t, bool>(iter, quantized_val);
+        }
+        else {
+            cuda_masked_fill_kernel_quantized<scalar_t, uint8_t>(iter, quantized_val);
+        }
+    });
+}
+
+REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_quantized);
 
 } // anonymous namespace
 
