@@ -268,7 +268,12 @@ static inline NodePtr MakeSizeDiv(const Value& a, const Value& b) {
 }
 
 inline Value GetSymIntValue(c10::SymInt a) {
-  return MakeScalar(at::Scalar(a.expect_int()), at::kLong);
+  return Value(
+      a.is_symbolic() ? dynamic_cast<torch::lazy::SymIntNodeImpl*>(
+                            a.toSymIntNodeImpl().get())
+                            ->node_
+                      : MakeScalar(a.as_int_unchecked(), at::kLong),
+      0);
 }
 
 // TODO: this should return Value
