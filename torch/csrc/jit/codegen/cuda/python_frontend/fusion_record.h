@@ -27,6 +27,7 @@ enum class RecordType {
   Start,
   VarianceOp,
   VarianceMeanOp,
+  CopyToOp,
   PermuteOp,
 };
 
@@ -1318,17 +1319,24 @@ struct VarianceMeanOpRecord : NormOpRecord {
 };
 
 struct CopyToOpRecord : RecordFunctor {
-  CopyToOpRecord(std::vector<size_t> _args, std::vector<size_t> _outputs)
-      : RecordFunctor(std::move(_args), std::move(_outputs)) {}
+  CopyToOpRecord(std::vector<State> args, std::vector<State> outputs)
+      : RecordFunctor(
+            std::move(args),
+            std::move(outputs),
+            "copy_to",
+            RecordType::CopyToOp) {}
   virtual ~CopyToOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new CopyToOpRecord(*this);
+  }
 
   void operator()(FusionDefinition& fd) final {
-    auto dest = fd.getFusionState(args.at(0))->as<NvfTensorView>();
-    auto source = fd.getFusionState(args.at(1))->as<NvfTensorView>();
+    auto dest = fd.getFusionState(args_.at(0).index)->as<Nvf::TensorView>();
+    auto source = fd.getFusionState(args_.at(1).index)->as<Nvf::TensorView>();
 
     auto tmp = torch::jit::fuser::cuda::set(source);
     if (dest->isFusionInput()) {
-      fd.fusionPtr()->aliasOutputToInput(tmp, dest);
+      fd.aliasOutputToInput(tmp, dest);
     } else {
       dest = torch::jit::fuser::cuda::set(tmp);
       // aliasOutputToInput implicitly adds the output to the fusion
@@ -1336,7 +1344,7 @@ struct CopyToOpRecord : RecordFunctor {
       fd.addOutput(source);
     }
 
-    fd.setFusionState(outputs.at(0), dest);
+    fd.setFusionState(outputs_.at(0).index, dest);
   }
 };
 

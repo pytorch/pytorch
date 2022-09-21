@@ -30,6 +30,11 @@ void FusionInterface::addOutput(Nvf::Val* output) const {
   fusionPtr()->addOutput(output);
 }
 
+void FusionInterface::aliasOutputToInput(Nvf::Val* output, Nvf::Val* input)
+    const {
+  fusionPtr()->aliasOutputToInput(output, input);
+}
+
 std::vector<at::Tensor> FusionInterface::execute(
     const at::ArrayRef<c10::IValue>& inputs) const {
   return fusionExecutorCachePtr()->runFusionWithInputs(inputs);

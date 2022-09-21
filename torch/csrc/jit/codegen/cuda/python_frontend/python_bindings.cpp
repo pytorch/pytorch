@@ -1262,11 +1262,13 @@ void initNvFuserPythonBindings(PyObject* module) {
   nvf_ops.def(
       "copy_to",
       [](nvfuser::FusionDefinition::Operators& self,
-         nvfuser::Tensor* dest,
-         nvfuser::Tensor* source) -> nvfuser::Tensor* {
-        nvfuser::Tensor* output = self.fusion_definition->defineTensor();
-        self.fusion_definition->defineRecord(new nvfuser::CopyToOpRecord(
-            {dest->index, source->index}, {output->index}));
+         nvfuser::Tensor dest,
+         nvfuser::Tensor source) -> nvfuser::Tensor {
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        fd->defineRecord(new nvfuser::CopyToOpRecord(
+            {fd->recordingState(dest()), fd->recordingState(source())},
+            {fd->recordingState(output())}));
         return output;
       },
       py::return_value_policy::reference);
