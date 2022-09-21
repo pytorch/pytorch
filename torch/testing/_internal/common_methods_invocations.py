@@ -5558,7 +5558,7 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5577,12 +5577,10 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
     for lhs_shape, rhs_shape in test_cases:
         lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
         rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-        if op_info.name == 'matmul':
+        if not is_rmatmul:
             sample_inputs.append(SampleInput(lhs, args=(rhs,)))
-        elif op_info.name == '__rmatmul__':
-            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
         else:
-            raise RuntimeError("`op_info.name` must be 'matmul' or '__rmatmul__'")
+            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
     return tuple(sample_inputs)
 
 
@@ -9972,7 +9970,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_matmul,
+           sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=False),
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
@@ -12679,7 +12677,7 @@ op_db: List[OpInfo] = [
                                                        *[torch.bfloat16]
                                                        if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_matmul,
+           sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=True),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,

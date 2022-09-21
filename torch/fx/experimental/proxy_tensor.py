@@ -442,7 +442,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-        return proxy_call(self, func, args, kwargs)
+        out = proxy_call(self, func, args, kwargs)
+        return out
 
 
 SymInt = torch.SymIntNode
