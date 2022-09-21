@@ -63,7 +63,12 @@ void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
     const auto& sizes = t.sizes();
+    const auto dim = sizes.size();
     const auto layout = t.layout();
+    TORCH_CHECK(
+        dim <= std::numeric_limits<uint32_t>::max(),
+        "Cannot profile Tensors of size > uint32 max. Got dim: ",
+        dim);
 
     tensor_metadata_.emplace_back(
         /*impl_=*/TensorImplAddress(t.unsafeGetTensorImpl()),
@@ -73,7 +78,7 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         /*device_index_*/ t.device().index(),
         /*dtype_=*/t.scalar_type(),
         /*layout_=*/layout,
-        /*dim_=*/sizes.size());
+        /*dim_=*/(uint32_t)dim);
 
     tensor_sizes_strides_.copy(sizes);
     if (layout == at::kStrided) {
@@ -807,8 +812,9 @@ trace_ptr_t addKinetoEvents(
   return trace;
 }
 
+template <typename T>
 struct PairHash {
-  size_t operator()(const auto& i) {
+  size_t operator()(const std::pair<T, T>& i) {
     return c10::get_hash(i.first, i.second);
   }
 };
@@ -866,7 +872,8 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // Step 2) Handle the case that the storage of a TensorImpl changed.
   // --------------------------------------------------------------------------
   using storage_id_pair_t = std::pair<storage_id_t, storage_id_t>;
-  ska::flat_hash_set<storage_id_pair_t, PairHash> same_group_set;
+  ska::flat_hash_set<storage_id_pair_t, PairHash<storage_id_pair_t>>
+      same_group_set;
   {
     ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
     for (const auto& t : tensors) {
