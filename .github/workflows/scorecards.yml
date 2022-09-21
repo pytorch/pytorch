@@ -1,7 +1,8 @@
-name: Scorecards supply-chain security
+name: ossf-scorecard
 on:
   # Only the default branch is supported.
   branch_protection_rule:
+  workflow_dispatch:
   schedule:
     - cron: '32 16 * * 3'
   push:
@@ -19,6 +20,8 @@ jobs:
       security-events: write
       # Used to receive a badge.
       id-token: write
+
+    if: github.repository == 'pytorch/pytorch'  # don't run on forks
 
     steps:
       - name: "Checkout code"
