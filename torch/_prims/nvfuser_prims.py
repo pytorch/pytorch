@@ -8,7 +8,6 @@
 from typing import Any, Dict, Optional
 
 import torch
-from torch._prims import TensorMeta
 
 from torch._prims_common import (
     DimsSequenceType,
@@ -325,7 +324,7 @@ def register_rand_like():
         memory_format=None,
     ):
         strides = make_contiguous_strides_for(self.shape)
-        return TensorMeta(
+        return torch._prims.TensorMeta(
             shape=self.shape,
             strides=strides,
             dtype=dtype,
