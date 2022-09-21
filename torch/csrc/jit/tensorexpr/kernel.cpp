@@ -291,6 +291,7 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
 #if AT_MKLDNN_ENABLED()
   auto const& input = getTensorInfoJit(node->input(0));
   auto const& weight = getTensorInfoJit(node->input(1));
+  auto const& output = getTensorInfoJit(node->output(0));
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
   auto const& dilation = toIValue(node->input(5));
@@ -299,7 +300,7 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
 
   // Everything should be statically known (bias could be NoneType =
   // prim::Constant()).
-  if (!input || !weight || !stride || !pad || !dilation || !groups) {
+  if (!input || !weight || !output || !stride || !pad || !dilation || !groups) {
     GRAPH_DEBUG("some params aren't static");
     return false;
   }
@@ -323,6 +324,7 @@ bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
   return mkldnnPrepackedConvIsSupported(
       *input,
       *weight,
+      *output,
       _pair_int(*stride),
       _pair_int(*pad),
       _pair_int(*dilation),
