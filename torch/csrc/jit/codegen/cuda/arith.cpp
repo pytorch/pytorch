@@ -63,7 +63,11 @@ Val* promoteSize(Val* v1, Val* v2) {
   } else if (v1->isConstInt() && v2->isConstInt()) {
     TORCH_INTERNAL_ASSERT(
         v1->evaluateInt() == v2->evaluateInt(),
-        "Expected sizes to match but found ",
+        "Expected sizes of, ",
+        v1->toString(),
+        " and ",
+        v2->toString(),
+        " to match but found ",
         v1->evaluateInt(),
         " and ",
         v2->evaluateInt(),
@@ -404,17 +408,6 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
   TORCH_INTERNAL_ASSERT(
       type != UnaryOpType::Address,
       "The reference operator & is not accessible in the Fusion IR");
-
-  // TODO: We should add the following, but we need to go through schedulers
-  // and make sure all calls to "fusion->inputs" includes the output of RandLike
-  //
-  //  If rand like, there isn't a real dependency on the input value, so map it
-  //  to a dummy scalar. if
-  //
-  // (type == UnaryOpType::RandLike) {
-  //   v1 = new NamedScalar("__rnd", v1->getDataType().value());
-  // }
-
   Val* out = newValLike(v1, v1->getDataType().value());
   IrBuilder::create<UnaryOp>(type, out, v1);
   return out;
@@ -447,6 +440,48 @@ TensorView* unaryOp(
   return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
+// TENSOR FACTORIES
+TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(RNGOpType::Uniform, out);
+  return out;
+}
+
+TensorView* arange(Val* end, DataType dtype) {
+  return arange(FusionGuard::getCurFusion()->zeroVal(), end, dtype);
+}
+
+TensorView* arange(Val* start, Val* end, DataType dtype) {
+  return arange(start, end, FusionGuard::getCurFusion()->oneVal(), dtype);
+}
+
+TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
+  if (isIntegralType(dtype)) {
+    start = castOp(DataType::Int, start);
+    end = castOp(DataType::Int, end);
+    step = castOp(DataType::Int, step);
+  } else if (isFloatingPointType(dtype)) {
+    start = castOp(DataType::Double, start);
+    end = castOp(DataType::Double, end);
+    step = castOp(DataType::Double, step);
+  }
+  auto size = castOp(DataType::Int, ceilDiv(sub(end, start), step));
+  auto out = TensorViewBuilder()
+                 .ndims(1)
+                 .dtype(dtype)
+                 .contiguity({true})
+                 .shape({size})
+                 .build();
+  IrBuilder::create<ARangeOp>(out, start, end, step);
+  return out;
+}
+
 // UNARY OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \
@@ -469,28 +504,21 @@ NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
 NVFUSER_DEFINE_UNARY_OP(print, Print)
 #undef NVFUSER_DEFINE_UNARY_OP
 
-Val* randlike(Val* v) {
-  TORCH_CHECK(
-      isFloatingPointType(v->dtype()),
-      "input must have floating point type, but got ",
-      v->dtype());
-  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
-  return where(
-      eq(rand_vals, IrBuilder::create<Double>(1.0)),
-      IrBuilder::create<Double>(0.0),
-      rand_vals);
-}
-
 TensorView* randlike(TensorView* v) {
   TORCH_CHECK(
       isFloatingPointType(v->dtype()),
       "input must have floating point type, but got ",
       v->dtype());
-  auto rand_vals = unaryOp(UnaryOpType::RandLike, v);
-  return where(
-      eq(rand_vals, IrBuilder::create<Double>(1.0)),
-      IrBuilder::create<Double>(0.0),
-      rand_vals);
+  std::vector<Val*> shape;
+  shape.reserve(v->getMaybeRFactorDomain().size());
+  for (auto id : v->getMaybeRFactorDomain()) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return rand(shape, v->dtype());
+}
+
+Val* randlike(Val* v) {
+  return randlike(v->as<TensorView>());
 }
 
 Val* bitwise_not(Val* v) {
@@ -1417,12 +1445,12 @@ WelfordResult Welford(
       out_avg,
       out_var,
       out_N, /*out var/avg/count */
+      tv, /*in var/avg/count */
+      FusionGuard::getCurFusion()->zeroVal(),
+      FusionGuard::getCurFusion()->oneVal(),
       init_avg_val,
       init_var_val,
-      init_N, /*init var/avg/count */
-      tv,
-      FusionGuard::getCurFusion()->zeroVal(),
-      FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
+      init_N); /*init var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
 }

@@ -41,7 +41,9 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::PythonDefinition, false},
       {DebugDumpOption::PythonFrontendDebug, false},
       {DebugDumpOption::TransformPropagator, false},
-      {DebugDumpOption::InlinePropagator, false}};
+      {DebugDumpOption::InlinePropagator, false},
+      {DebugDumpOption::Cubin, false},
+      {DebugDumpOption::Ptx, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -100,6 +102,10 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::TransformPropagator] = true;
       } else if (token == "inline_propagator") {
         options_map[DebugDumpOption::InlinePropagator] = true;
+      } else if (token == "cubin") {
+        options_map[DebugDumpOption::Cubin] = true;
+      } else if (token == "ptx") {
+        options_map[DebugDumpOption::Ptx] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -112,7 +118,7 @@ auto parseDebugDumpOptions() {
             "\tdraw_segmented_fusion, scheduler_params, parallel_dimensions,\n",
             "\tbuffer_reuse_verbose, ptxas_verbose, halo, segmenter_logging,\n",
             "\tperf_debug_verbose, python_definition, python_frontend_debug,\n",
-            "\ttransform_propagator, inline_propagator\n");
+            "\ttransform_propagator, inline_propagator, cubin, ptx\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -130,8 +136,7 @@ auto parseDisableOptions() {
       {DisableOption::Fma, false},
       {DisableOption::IndexHoist, false},
       {DisableOption::Nvtx, false},
-      {DisableOption::PredicateElimination, false},
-      {DisableOption::UnrollWithRng, false}};
+      {DisableOption::PredicateElimination, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DISABLE")) {
     c10::string_view options_view(dump_options);
@@ -152,16 +157,13 @@ auto parseDisableOptions() {
         options_map[DisableOption::Nvtx] = true;
       } else if (token == "predicate_elimination") {
         options_map[DisableOption::PredicateElimination] = true;
-      } else if (token == "unroll_with_rng") {
-        options_map[DisableOption::UnrollWithRng] = true;
       } else {
         TORCH_CHECK(
             false,
             "Invalid disable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n",
-            "unroll_with_rng");
+            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -177,7 +179,8 @@ auto parseEnableOptions() {
       {EnableOption::Complex, false},
       {EnableOption::KernelProfile, false},
       {EnableOption::LinearDecomposition, false},
-      {EnableOption::ConvDecomposition, false}};
+      {EnableOption::ConvDecomposition, false},
+      {EnableOption::TransposeScheduler, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
     c10::string_view options_view(dump_options);
@@ -192,13 +195,16 @@ auto parseEnableOptions() {
         options_map[EnableOption::LinearDecomposition] = true;
       } else if (token == "conv_decomposition") {
         options_map[EnableOption::ConvDecomposition] = true;
+      } else if (token == "transpose_scheduler") {
+        options_map[EnableOption::TransposeScheduler] = true;
       } else {
         TORCH_CHECK(
             false,
-            "Invalid disable option: '",
+            "Invalid enable option: '",
             token,
             "'\nAvailable options:\n",
-            "\tcomplex, kernel_profile");
+            "\tcomplex, kernel_profile, linear_decomposition,",
+            "conv_decomposition, transpose_scheduler");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -287,9 +293,76 @@ bool is_cpu_scalar(const c10::TensorType& tensor_type) {
   auto opt_device = tensor_type.device();
   auto opt_dim = tensor_type.dim();
   auto opt_numel = tensor_type.numel();
-  return opt_device.has_value() && opt_device.value().is_cpu() &&
+  return opt_device.has_value() && opt_device->is_cpu() &&
       opt_dim.has_value() && opt_numel.has_value() && opt_dim.value() == 0 &&
       opt_numel.value() == 1;
+}
+
+// Check device of TensorType in all inputs ensure all tensors are on cuda
+// devices.
+// return common device index (or -1 if device differs).
+int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs) {
+  int index = -1;
+  for (const auto& input : inputs) {
+    if (!input.isTensor()) {
+      continue;
+    }
+    const auto& device = input.toTensor().device();
+    // skip cpu scalar tensor as they'll be promoted to scalar later
+    if (device.is_cpu() && is_cpu_scalar(input.toTensor())) {
+      continue;
+    }
+    TORCH_CHECK(device.is_cuda(), "nvfuser only supports cuda device");
+    auto cur_index = device.index();
+    if (index != -1 && index != cur_index) {
+      return -1;
+    }
+    index = (int)cur_index; // NOLINT
+  }
+  return index;
+}
+
+KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs) {
+  // Save 1 more bit besides the sign bit to be conservative
+  constexpr int64_t most_positive_int32_index =
+      std::numeric_limits<int>::max() / 2;
+  constexpr int64_t most_negative_int32_index =
+      std::numeric_limits<int>::min() / 2;
+
+  // Check all runtime inputs, and if any one of
+  //  the input's index exceeds max_int32 will
+  //  fall back to int64 indexing
+  for (auto ivalue_input : inputs) {
+    if (ivalue_input.isTensor()) {
+      auto tensor_input = ivalue_input.toTensor();
+      int64_t tensor_most_positive_index = 0;
+      int64_t tensor_most_negative_index = 0;
+      for (auto dim_i = 0; dim_i < tensor_input.ndimension(); dim_i++) {
+        // Ignore broadcast dimensions
+        if (tensor_input.size(dim_i) > 1) {
+          // accumulate based on the sign of stride
+          if (tensor_input.stride(dim_i) > 0) {
+            // Acuumulate positive stride
+            tensor_most_positive_index +=
+                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
+          } else {
+            // Acuumulate negative stride
+            tensor_most_negative_index +=
+                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
+          }
+        }
+      }
+
+      // Fall back to int64 if it can be either too positive
+      //  or too negative.
+      if (tensor_most_positive_index > most_positive_int32_index ||
+          tensor_most_negative_index < most_negative_int32_index) {
+        return KernelIndexMode::INT64;
+      }
+    }
+  }
+  // return index mode as int32
+  return KernelIndexMode::INT32;
 }
 
 bool isDebugDumpEnabled(DebugDumpOption option) {

@@ -29,6 +29,8 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
     "torch/csrc/jit/codegen/cuda/runtime/fp16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/fused_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/fused_welford_helper.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/fused_welford_impl.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_broadcast.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_sync.cu",

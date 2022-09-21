@@ -478,6 +478,11 @@ class AllocationInserter : public kir::ExprMutator {
               out->name() == welford->outN()->name(), "Unreachable");
           init = welford->initN();
         }
+      } else if (expr->isA<GroupedWelfordOp>()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Welford should not have a default initialization value for predicate elimination.");
+        init = expr->as<GroupedWelfordOp>()->getInitValOfOutput(out);
       } else if (default_val != nullptr) {
         init = default_val;
       }

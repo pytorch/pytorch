@@ -304,6 +304,14 @@ struct hash<std::tuple<Types...>> {
   }
 };
 
+template <typename T1, typename T2>
+struct hash<std::pair<T1, T2>> {
+  size_t operator()(const std::pair<T1, T2>& pair) const {
+    std::tuple<T1, T2> tuple = std::make_tuple(pair.first, pair.second);
+    return _hash_detail::simple_get_hash(tuple);
+  }
+};
+
 template <typename T>
 struct hash<c10::ArrayRef<T>> {
   size_t operator()(c10::ArrayRef<T> v) const {

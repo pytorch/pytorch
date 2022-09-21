@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
@@ -16,6 +17,11 @@ bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
 
 bool is_cpu_scalar(const at::Tensor& tensor);
 bool is_cpu_scalar(const c10::TensorType& tensor_type);
+
+// TODO: merge these two
+// check if input is compatible with 32b index mode
+int getCommonDeviceCUDA(const at::ArrayRef<IValue>& inputs);
+KernelIndexMode collectIndexMode(const at::ArrayRef<at::IValue>& inputs);
 
 //! Types of debug print-outs
 //!
@@ -51,8 +57,10 @@ enum class DebugDumpOption {
   PythonFrontendDebug, //! Python Frontend debug information.
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
-  InlinePropagator //! When running InlinePropagator, print propagation
-                   //! path and inlining result
+  InlinePropagator, //! When running InlinePropagator, print propagation
+                    //! path and inlining result
+  Cubin, //! Dump compiled CUBIN
+  Ptx //! Dump compiled PTX
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
@@ -67,8 +75,7 @@ enum class DisableOption {
   Fma, //! Disable FMA instructions
   IndexHoist, //! Disable index hoisting
   Nvtx, //! Disable NVTX instrumentation
-  PredicateElimination, //! Disable predicate elimination
-  UnrollWithRng //! Disable unrolling for kernels with RNG in them
+  PredicateElimination //! Disable predicate elimination
 };
 
 TORCH_CUDA_CU_API bool isOptionDisabled(DisableOption option);
@@ -81,7 +88,8 @@ enum class EnableOption {
   Complex, //! Enable complex support on python
   KernelProfile, //! Enable intra-kernel performance profiling
   LinearDecomposition, //! Enable linear-bias decomposition
-  ConvDecomposition //! Enable conv-bias decomposition
+  ConvDecomposition, //! Enable conv-bias decomposition
+  TransposeScheduler //! Enable the experimental transpose scheduler
 };
 
 TORCH_CUDA_CU_API bool isOptionEnabled(EnableOption option);

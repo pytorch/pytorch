@@ -372,16 +372,16 @@ bool isConnectedFusionGraph(Fusion* fusion) {
   // Iterate through all used exprs
   for (auto expr : fusion->exprs()) {
     TORCH_INTERNAL_ASSERT(
-        !expr->inputs().empty(), "unknown expr with zero input");
+        !expr->outputs().empty(), "unknown expr with zero output");
 
     // Each expr maps all its inputs and
     //  outputs to the same component
-    auto input0 = expr->inputs()[0];
-    for (auto input : expr->inputs()) {
-      component_sets.mapEntries(input0, input);
+    auto output0 = expr->output(0);
+    for (auto input : ir_utils::filterByType<TensorView>(expr->inputs())) {
+      component_sets.mapEntries(output0, input);
     }
     for (auto output : expr->outputs()) {
-      component_sets.mapEntries(input0, output);
+      component_sets.mapEntries(output0, output);
     }
   }
 
@@ -405,20 +405,20 @@ bool isConnectedFusionGraph(Fusion* fusion) {
 
 } // namespace
 
-SchedulerRuntimeInfo::SchedulerRuntimeInfo(
-    Fusion* complete_fusion,
-    const at::ArrayRef<IValue>& inputs,
-    bool create_expr_evaluator)
-    : complete_fusion_(complete_fusion) {
+void SchedulerRuntimeInfo::initialize(
+    const KernelArgumentHolder& args,
+    bool create_expr_evaluator) {
   TORCH_INTERNAL_ASSERT(
-      complete_fusion_->inputs().size() == inputs.size(),
+      complete_fusion_->inputs().size() == args.size(),
       "Invalid number of arguments passed in for provided fusion group.");
 
-  for (auto inp_i : c10::irange(inputs.size())) {
-    auto aten_inp = inputs[inp_i];
-    if (aten_inp.isTensor()) {
+  for (auto inp_i : c10::irange(args.size())) {
+    auto kernel_arg = args[inp_i];
+    // Note: we are skipping CpuScalar tensor here
+    if (auto tensor_arg_abstract =
+            dynamic_cast<const TensorArgAbstract*>(kernel_arg)) {
       auto fusion_inp = complete_fusion_->inputs()[inp_i];
-      auto data_ptr = aten_inp.toTensor().data_ptr();
+      auto data_ptr = tensor_arg_abstract->getPointer();
       input_ptrs_[fusion_inp] = (size_t)data_ptr;
     }
   }
@@ -426,9 +426,28 @@ SchedulerRuntimeInfo::SchedulerRuntimeInfo(
   expression_evaluator_ =
       std::make_unique<ExpressionEvaluator>(complete_fusion_);
   if (create_expr_evaluator) {
-    initializeExpressionEvaluator(inputs);
+    initializeExpressionEvaluator(args);
   }
-  collectIndexModeInfo(inputs);
+  index_mode_ = args.getIndexMode();
+}
+
+SchedulerRuntimeInfo::SchedulerRuntimeInfo(
+    Fusion* complete_fusion,
+    const KernelArgumentHolder& args,
+    bool create_expr_evaluator)
+    : complete_fusion_(complete_fusion) {
+  initialize(args, create_expr_evaluator);
+}
+
+// TODO: remove this one
+SchedulerRuntimeInfo::SchedulerRuntimeInfo(
+    Fusion* complete_fusion,
+    const at::ArrayRef<at::IValue>& aten_inputs,
+    bool create_expr_evaluator)
+    : complete_fusion_(complete_fusion) {
+  KernelArgumentHolder args =
+      KernelArgumentHolder::createKernelArgumentHolder(aten_inputs);
+  initialize(args, create_expr_evaluator);
 }
 
 // TODO: Output tensors could have an alignment that is not 16 Bytes passed in
@@ -441,11 +460,11 @@ size_t SchedulerRuntimeInfo::ptrOf(TensorView* tv) {
 }
 
 void SchedulerRuntimeInfo::initializeExpressionEvaluator(
-    const at::ArrayRef<IValue>& inputs) {
+    const KernelArgumentHolder& args) {
   // TODO: refactor bindFusionInputs to better support this
   //  use case, i.e. support construct and bind input.
   *expression_evaluator_ =
-      executor_utils::bindFusionInputs(inputs, complete_fusion_);
+      executor_utils::bindFusionInputs(args, complete_fusion_);
 }
 
 size_t SchedulerRuntimeInfo::computeAlignmentSize(size_t ptr_address) {
@@ -551,7 +570,7 @@ size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
     }
 
     // Still contiguous
-    numel *= dim_size.value().as<int64_t>();
+    numel *= dim_size->as<int64_t>();
   }
 
   // Assuming intermediate tensors have friendly alignment, and
@@ -651,7 +670,7 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   auto maybe_inner_dimension_size =
       expression_evaluator_->evaluate(inner_most_dim->extent());
   TORCH_INTERNAL_ASSERT(maybe_inner_dimension_size.has_value());
-  size_t inner_dimension_size = maybe_inner_dimension_size.value();
+  size_t inner_dimension_size = maybe_inner_dimension_size->as<int64_t>();
 
   while (next_vector_size <= max_vector_size &&
          next_vector_size <= inner_dimension_size &&
@@ -664,54 +683,6 @@ size_t SchedulerRuntimeInfo::getInnerDimVectorizableWidth(TensorView* tv) {
   inner_vectorword_map_[tv] = vector_size;
 
   return vector_size;
-}
-
-void SchedulerRuntimeInfo::collectIndexModeInfo(
-    const at::ArrayRef<at::IValue>& inputs) {
-  // TODO: Need to check the output sizes as well.
-
-  // Save 1 more bit besides the sign bit to be conservative
-  constexpr int64_t most_positive_int32_index =
-      std::numeric_limits<int>::max() / 2;
-  constexpr int64_t most_negative_int32_index =
-      std::numeric_limits<int>::min() / 2;
-
-  // Start by setting index mode to int32
-  index_mode_ = KernelIndexMode::INT32;
-
-  // Check all runtime inputs, and if any one of
-  //  the input's index exceeds max_int32 will
-  //  fall back to int64 indexing
-  for (auto ivalue_input : inputs) {
-    if (ivalue_input.isTensor()) {
-      auto tensor_input = ivalue_input.toTensor();
-      int64_t tensor_most_positive_index = 0;
-      int64_t tensor_most_negative_index = 0;
-      for (auto dim_i = 0; dim_i < tensor_input.ndimension(); dim_i++) {
-        // Ignore broadcast dimensions
-        if (tensor_input.size(dim_i) > 1) {
-          // accumulate based on the sign of stride
-          if (tensor_input.stride(dim_i) > 0) {
-            // Acuumulate positive stride
-            tensor_most_positive_index +=
-                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
-          } else {
-            // Acuumulate negative stride
-            tensor_most_negative_index +=
-                (tensor_input.size(dim_i) - 1) * tensor_input.stride(dim_i);
-          }
-        }
-      }
-
-      // Fall back to int64 if it can be either too positive
-      //  or too negative.
-      if (tensor_most_positive_index > most_positive_int32_index ||
-          tensor_most_negative_index < most_negative_int32_index) {
-        index_mode_ = KernelIndexMode::INT64;
-        return;
-      }
-    }
-  }
 }
 
 bool SchedulerEntry::sameAs(const SchedulerEntry* other) {
@@ -829,7 +800,7 @@ class ReductionScheduler : public SchedulerEntry {
 
   //! Check if the reduction heuristics apply in given fusion
   static bool canScheduleCompileTime(Fusion* fusion) {
-    // Temporarily allow view in reduction scheduler
+    // Temporarily disallow view in reduction scheduler
     // TODO Add more testing before enabling
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
@@ -1256,9 +1227,21 @@ class TransposeScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
-    // Not enabling this yet. Needs more validation.
-    return false;
-#if 0
+    if (!isOptionEnabled(EnableOption::TransposeScheduler)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose, "not enabled");
+      return false;
+    }
+
+    // Temporarily disallow view in transpose scheduler
+    // TODO Add more testing before enabling
+    auto view_tvs = scheduler_utils::getViewTVs(fusion);
+    if (view_tvs.size() > 0) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose, "No support for view op");
+      return false;
+    }
+
     if (!hasAtLeastTwoValidGroups(fusion)) {
       scheduler_debug_utils::canScheduleRejectReason(
           ScheduleHeuristic::Transpose,
@@ -1284,7 +1267,6 @@ class TransposeScheduler : public SchedulerEntry {
     }
 
     return true;
-#endif
   }
 
   static bool canScheduleRunTime(
