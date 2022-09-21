@@ -5558,7 +5558,7 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_matmul(op_info, device, dtype, requires_grad, is_rmatmul=False, **kwargs):
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -5577,12 +5577,10 @@ def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
     for lhs_shape, rhs_shape in test_cases:
         lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
         rhs = make_tensor(rhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
-        if op_info.name == 'matmul':
+        if not is_rmatmul:
             sample_inputs.append(SampleInput(lhs, args=(rhs,)))
-        elif op_info.name == '__rmatmul__':
-            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
         else:
-            raise RuntimeError("`op_info.name` must be 'matmul' or '__rmatmul__'")
+            sample_inputs.append(SampleInput(rhs, args=(lhs,)))
     return tuple(sample_inputs)
 
 
@@ -7251,34 +7249,6 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
         if with_distance:
             kwargs["distance_function"] = torch.nn.PairwiseDistance()
         yield SampleInput(input, args=args, kwargs=kwargs)
-
-
-def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
-    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    N, N_prime, L, S, E = 5, 2, 4, 3, 6
-    dim_3_q_shape = (N, L, E)
-    dim_3_kv_shape = (N, S, E)
-    dim_4_q_shape = (N, N_prime, L, E)
-    dim_4_kv_shape = (N, N_prime, S, E)
-
-    qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape)]
-    shapes_and_kwargs = []
-    for qkv_shapes, is_causal, need_attn_weights, dropout_p in product(
-            qkv_shapes, [True, False], [True, False], [0.0, 0.5]):
-        shapes_and_kwargs.append((qkv_shapes[0], qkv_shapes[1],
-                                  dict(is_causal=is_causal,
-                                       need_attn_weights=need_attn_weights,
-                                       dropout_p=dropout_p)))
-
-    return [
-        SampleInput(make(shape_q), args=(
-            make(shape_kv),
-            make(shape_kv),
-        ),
-            kwargs=kwargs)
-        for shape_q, shape_kv, kwargs in shapes_and_kwargs
-    ]
 
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -10000,7 +9970,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_matmul,
+           sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=False),
            decorators=[
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
@@ -11618,29 +11588,6 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
     ),
-    OpInfo(
-        'nn.functional._scaled_dot_product_attention',
-        op=lambda inp, *args, **kwargs:
-               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, inp, *args, **kwargs),
-        sample_inputs_func=sample_inputs_scaled_dot_product_attention,
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=False,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
-        check_batched_forward_grad=False,
-        decorators=[DecorateInfo(toleranceOverride(
-            {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
-        skips=(
-            # This is only failing on Linux Bionic 3.10 Cuda 11.6
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda'),
-            # AssertionError: JIT Test does not execute any logic
-            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-            # No meta function
-            DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),),
-    ),
     UnaryUfuncInfo(
         'nn.functional.silu',
         aten_backward_name='silu_backward',
@@ -12730,7 +12677,7 @@ op_db: List[OpInfo] = [
                                                        *[torch.bfloat16]
                                                        if (SM53OrLater and CUDA11OrLater) or TEST_WITH_ROCM else []),
            assert_autodiffed=True,
-           sample_inputs_func=sample_inputs_matmul,
+           sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=True),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,
@@ -17386,7 +17333,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
-        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.ravel",
@@ -17455,12 +17401,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose",
         torch_opinfo_name="transpose",
-        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.t",
         torch_opinfo_name="t",
-        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.unfold_copy",

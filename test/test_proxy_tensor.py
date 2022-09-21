@@ -22,6 +22,7 @@ import re
 
 import types
 import functools
+import itertools
 
 aten = torch.ops.aten
 
@@ -1368,7 +1369,9 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
         return op.op(*args, **kwargs)
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
     new_f = None
-    for sample_input in sample_inputs_itr:
+
+    # Limit ourselves to first 100 inputs so symbolic tracing tests don't take too long
+    for sample_input in itertools.islice(sample_inputs_itr, 100):
         args = [sample_input.input] + list(sample_input.args)
         kwargs = sample_input.kwargs
 
@@ -1376,7 +1379,6 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode):
             new_f = make_fx(f, tracing_mode=tracing_mode)(args, kwargs)
         except DynamicOutputShapeException as e:
             self.skipTest("Dynamic output shape operation in trace")
-
         for arg in args:
             if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                 arg.uniform_(0, 1)
