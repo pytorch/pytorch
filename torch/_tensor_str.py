@@ -610,36 +610,34 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
         torch._sync(tensor)
 
     value = torch._C._functorch.get_unwrapped(tensor)
-    dl_enabled = torch._C._functorch.tls_set_is_included()
+    dl_enabled = torch._C._are_functorch_transforms_active()
     try:
         # Disable temporarily FuncTorchDynamicLayerFrontMode and
         # FuncTorchDynamicLayerBackMode as included dispatch keys
-        if (dl_enabled):
+        if dl_enabled:
             torch._C._functorch._set_dynamic_layer_keys_included(False)
         value_repr = repr(value)
     finally:
         # Reenable FuncTorchDynamicLayerFrontMode and
         # FuncTorchDynamicLayerBackMode as included dispatch keys
-        if (dl_enabled):
+        if dl_enabled:
             torch._C._functorch._set_dynamic_layer_keys_included(True)
 
-    indented_value_repr = textwrap.indent(value_repr, ' ' * 4)
+    indented_value_repr = textwrap.indent(value_repr, " " * 4)
     if torch._C._functorch.is_batchedtensor(tensor):
         bdim = torch._C._functorch.maybe_get_bdim(tensor)
         assert bdim != -1
         return (
-            f'BatchedTensor(lvl={level}, bdim={bdim}, value=\n'
-            f'{indented_value_repr}\n'
-            f')'
+            f"BatchedTensor(lvl={level}, bdim={bdim}, value=\n"
+            f"{indented_value_repr}\n"
+            f")"
         )
     if torch._C._functorch.is_gradtrackingtensor(tensor):
         return (
-            f'GradTrackingTensor(lvl={level}, value=\n'
-            f'{indented_value_repr}\n'
-            f')'
+            f"GradTrackingTensor(lvl={level}, value=\n" f"{indented_value_repr}\n" f")"
         )
     if torch._C._functorch.is_functionaltensor(tensor):
-        return f'FunctionalTensor(lvl={level}, value=\\\n{value_repr})'
+        return f"FunctionalTensor(lvl={level}, value=\\\n{value_repr})"
 
     raise ValueError("We don't know how to print this, please file us an issue")
 

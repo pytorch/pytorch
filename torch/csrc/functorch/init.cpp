@@ -347,11 +347,6 @@ static void tls_set_vmap_excluded(bool excluded) {
       DispatchKey::FuncTorchBatched, excluded);
 }
 
-static bool tls_set_is_included() {
-  return c10::impl::tls_is_dispatch_key_included(
-      DispatchKey::FuncTorchDynamicLayerFrontMode);
-}
-
 static void _set_dynamic_layer_keys_included(bool value) {
   return setDynamicLayerFrontBackKeysIncluded(value);
 }
@@ -432,7 +427,6 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("maybe_get_bdim", &maybe_get_bdim);
   m.def("current_level", &currentLevel);
   m.def("tls_set_vmap_excluded", &tls_set_vmap_excluded);
-  m.def("tls_set_is_included", &tls_set_is_included);
   m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
   m.def("dump_dls", &dump_dls);
   m.def("dump_local_tls", &dump_local_tls);
