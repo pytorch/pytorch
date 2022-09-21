@@ -3279,7 +3279,9 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
         xfail('cat'),
-        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised
+        xfail('nn.functional.conv1d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv2d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised on ErrorInput
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3331,7 +3333,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('any'),
         xfail('count_nonzero'),
         xfail('nanmean'),
-        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised
+        xfail('nn.functional.conv1d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv2d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised on ErrorInput
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
         xfail('resize_'),
         xfail('view_as_complex'),
