@@ -1,6 +1,8 @@
 #pragma once
 
-// ${generated_comment}
+/**
+${generated_comment}
+ */
 
 namespace torch {
 namespace onnx {
