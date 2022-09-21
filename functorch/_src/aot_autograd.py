@@ -128,7 +128,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
         special_stack = forward_node_stack.copy()
         special_stack.append(
-            "Gradient addition node due to mulitple use of tensor around:"
+            "Gradient addition node due to multiple use of tensor around:"
         )
         node.register_hook(get_posthook(special_stack))
 
