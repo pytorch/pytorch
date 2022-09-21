@@ -410,9 +410,8 @@ __global__ void nll_loss_backward_no_reduce_cuda_kernel(
       continue;
     }
     CUDA_KERNEL_ASSERT(cur_target >= 0 && cur_target < n_classes);
-    // scalar_t weight = weights != nullptr ? weights[cur_target] : static_cast<scalar_t>(1);
-    scalar_t weight = static_cast<scalar_t>(1);
-    // grad_input[index][cur_target] = -weight * grad_output[index];
+    scalar_t weight = weights != nullptr ? weights[cur_target] : static_cast<scalar_t>(1);
+    grad_input[index][cur_target] = -weight * grad_output[index];
   }
 };
 
@@ -431,8 +430,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   if (t != static_cast<int64_t>(ignore_index)) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     const auto grad = -(size_average ? *grad_output / *total_weight : *grad_output);
-    // grad_input[t] = weights != nullptr ? weights[t] * grad : grad;
-    // grad_input[t] = grad;
+    grad_input[t] = weights != nullptr ? weights[t] * grad : grad;
   }
 }
 
@@ -465,7 +463,6 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
   }
 }
 
-#include <iostream>
 void nll_loss_backward_out_cuda_template(
     const Tensor& grad_input_,
     const Tensor& grad_output_,
@@ -491,7 +488,6 @@ void nll_loss_backward_out_cuda_template(
       // This guards from unnecessary operations and launching CUDA kernel with 0 blocks.
       return;
     }
-    std::cout << "nll_loss_backward_no_reduce_cuda_kernel\n";
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -521,7 +517,6 @@ void nll_loss_backward_out_cuda_template(
   }
 
   if (n_dims == 1) {
-    std::cout << "nll_loss_backward_reduce_cuda_kernel_1d\n";
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
@@ -547,7 +542,6 @@ void nll_loss_backward_out_cuda_template(
               });
         });
   } else {
-    std::cout << "nll_loss_backward_reduce_cuda_kernel_2d\n";
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half,
         at::ScalarType::BFloat16,
