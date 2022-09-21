@@ -298,9 +298,8 @@ static Tensor get_unwrapped(const Tensor& tensor) {
   if (wrapped) {
     return wrapped->value();
   }
-  auto* functional =
-      dynamic_cast<FunctionalTensorWrapper*>(tensor.unsafeGetTensorImpl());
-  if (functional) {
+  if (at::functionalization::impl::isFunctionalTensor(tensor)) {
+    auto* functional = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
     return functional->value();
   }
   TORCH_CHECK(false, "No wrappers present!");
@@ -319,9 +318,8 @@ static int64_t maybe_get_level(const Tensor& tensor) {
     // TODO: this is a weird special case...
     return -2;
   }
-  auto* functional =
-      dynamic_cast<FunctionalTensorWrapper*>(tensor.unsafeGetTensorImpl());
-  if (functional) {
+  if (at::functionalization::impl::isFunctionalTensor(tensor)) {
+    auto* functional = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
     return functional->level();
   }
   return -1;
