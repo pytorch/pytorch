@@ -72,7 +72,6 @@ from .utils import (
     _insert_dequant_stubs_for_custom_module_lstm_output,
     _is_custom_module_lstm,
     _maybe_get_custom_module_lstm_from_node_arg,
-    _reroute_tuple_getitem_pattern,
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
@@ -476,7 +475,7 @@ def get_arg_target_dtype_as_output(
     # not be able to accurately detect whether this node is a consumer of custom module LSTM.
     custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, modules)
     if custom_module_lstm_node is not None:
-        return node_name_to_target_dtype[custom_module_lstm_node.name]["output_activation_dtype"]
+        return node_name_to_target_dtype[custom_module_lstm_node.name]["output_activation_dtype"][0]  # type: ignore[index]
     elif is_activation_post_process_node(arg, modules):
         observed_arg = arg.args[0]
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
@@ -1312,9 +1311,14 @@ def insert_observers_for_model(
                             # so we need to insert a DeQuantStub after the output. For custom module
                             # LSTM specifically, the outputs are also a nested tuple, so we must first
                             # break down the tuple to insert DeQuantStubs after the internal nodes.
-                            # TODO: Insert DeQuantStubs instead of observers for custom modules in general
+
+                            # TODO: This currently diverges from how custom modules are handled today,
+                            # where we insert observers after the output instead of DeQuantStubs, and
+                            # replace these observers with "dequantize" nodes during convert. Conceptually,
+                            # these output observers are the same as DeQuantStubs. In the future, we
+                            # should resolve this inconsistency by inserting DeQuantStubs for all custom
+                            # modules, not just for LSTM.
                             _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, graph)
-                            _reroute_tuple_getitem_pattern(graph)
                         else:
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = maybe_insert_output_observer_for_node(

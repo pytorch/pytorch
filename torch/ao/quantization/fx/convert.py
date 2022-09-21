@@ -708,7 +708,9 @@ def convert(
 
     # this is a temporary hack for custom module, we may want to implement
     # this properly after the custom module class design is finalized
-    # TODO: Use this only for replacing DeQuantStubs; currently it's also used for replacing observers
+    # TODO: DeQuantStubs are currently inserted only after custom module LSTM, while observers are inserted
+    # after all other custom modules. In the future, we should simply insert QuantStubs before and DeQuantStubs
+    # after custom modules in general, and replace these with "quantize" and "dequantize" nodes respectively.
     def replace_observer_or_dequant_stub_with_dequantize_node(node: Node, graph: Graph):
         call_custom_module_node = node.args[0]
         assert isinstance(call_custom_module_node, Node), \
