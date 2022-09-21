@@ -64,8 +64,12 @@ struct TensorMetadata {
 
   c10::ScalarType dtype_;
   c10::Layout layout_;
-  size_t dim_;
+  uint32_t dim_;
 };
+
+static_assert(
+    sizeof(TensorMetadata) <= 24,
+    "Expected TensorMetadata to take 24 bytes: (8 + 8 + 1 + 1 + 1 + 1 + 4)");
 
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;

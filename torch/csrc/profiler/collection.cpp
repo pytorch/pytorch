@@ -62,7 +62,12 @@ void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
     const auto& sizes = t.sizes();
+    const auto dim = sizes.size();
     const auto layout = t.layout();
+    TORCH_CHECK(
+        dim <= std::numeric_limits<uint32_t>::max(),
+        "Cannot profile Tensors of size > uint32 max. Got dim: ",
+        dim);
 
     tensor_metadata_.emplace_back(
         /*impl_=*/TensorImplAddress(t.unsafeGetTensorImpl()),
@@ -72,7 +77,7 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         /*device_index_*/ t.device().index(),
         /*dtype_=*/t.scalar_type(),
         /*layout_=*/layout,
-        /*dim_=*/sizes.size());
+        /*dim_=*/(uint32_t)dim);
 
     tensor_sizes_strides_.copy(sizes);
     if (layout == at::kStrided) {
