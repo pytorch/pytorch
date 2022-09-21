@@ -1,5 +1,5 @@
 from functools import reduce
-from typing import Tuple
+from typing import Callable, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -35,6 +35,8 @@ class WeightNormSparsifier(BaseSparsifier):
         sparsity_level: The target level of sparsity
         sparse_block_shape: The shape of a sparse block (see note below)
         zeros_per_block: Number of zeros in a sparse block
+        norm: Norm to use. Could be either `int` or a callable.
+            If `int`, only L1 and L2 are implemented.
 
     Note::
         The `sparse_block_shape` is tuple representing (block_ROWS, block_COLS),
@@ -51,7 +53,8 @@ class WeightNormSparsifier(BaseSparsifier):
     def __init__(self,
                  sparsity_level: float = 0.5,
                  sparse_block_shape: Tuple[int, int] = (1, 4),
-                 zeros_per_block: int = None):
+                 zeros_per_block: Optional[int] = None,
+                 norm: Optional[Union[Callable, int]] = None):
         if zeros_per_block is None:
             zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
         defaults = {
@@ -59,6 +62,16 @@ class WeightNormSparsifier(BaseSparsifier):
             "sparse_block_shape": sparse_block_shape,
             "zeros_per_block": zeros_per_block,
         }
+        if norm is None:
+            norm = 2
+        if callable(norm):
+            self.norm_fn = norm
+        elif norm == 1:
+            self.norm_fn = lambda T: T.abs()
+        elif norm == 2:
+            self.norm_fn = lambda T: T * T
+        else:
+            raise NotImplementedError(f"L-{norm} is not yet implemented.")
         super().__init__(defaults=defaults)
 
     def _scatter_fold_block_mask(self, output_shape, dim, indices, block_shape,
@@ -174,7 +187,7 @@ class WeightNormSparsifier(BaseSparsifier):
         elif sparsity_level >= 1.0 and (zeros_per_block == values_per_block):
             mask.data = torch.zeros_like(mask)
         else:
-            ww = getattr(module, tensor_name)**2
+            ww = self.norm_fn(getattr(module, tensor_name))
             tensor_mask = self._make_tensor_mask(
                 data=ww, input_shape=ww.shape, sparsity_level=sparsity_level, sparse_block_shape=sparse_block_shape
             )
