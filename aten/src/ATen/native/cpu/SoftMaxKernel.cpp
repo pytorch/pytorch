@@ -22,6 +22,14 @@
 // computations per task. Each task works across dim_size elements. 16 should be
 // a very rough approximation of the number of computations per dim_size element
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
+//
+// We use a chunk size of (number of threads) for all dtypes.
+// Prior to https://github.com/pytorch/pytorch/issues/80252, the chunk-size was
+// a multiple of vector-length, which made chunk-size 256 for FP32, FP16, BF16
+// when AVX2 was used, but 512 when AVX512 was used.
+// That led to fewer threads being used in case of AVX512 in some cases.
+// Also, due to the way grain_size was being computed, it was usually 0.
+// The CPUs were underutilized in both cases.
 
 namespace at { namespace native {
 namespace {
@@ -33,15 +41,19 @@ inline void _vec_log_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
-  static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size();
-  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
-  if (grain_size < CHUNK_SIZE)
-    grain_size = CHUNK_SIZE;
-
+  // Since number of threads can change at runtime, this variable is not static.
+  int64_t CHUNK_SIZE = get_num_threads();
+  if (16 * dim_size * CHUNK_SIZE < internal::GRAIN_SIZE) {
+    // If compute would be less than GRAIN_SIZE, we would use larger chunks.
+    // Using 256 simply because it was being used earlier because of some
+    // heuristic.
+    // TODO: optimize further
+    CHUNK_SIZE = 256;
+  }
   parallel_for(
       0,
       outer_size,
-      grain_size,
+      CHUNK_SIZE,
       [&](int64_t begin, int64_t end) {
         // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
         scalar_t tmp_sum_scalar[CHUNK_SIZE];
