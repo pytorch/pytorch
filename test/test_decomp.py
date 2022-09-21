@@ -517,7 +517,8 @@ class TestDecomp(TestCase):
 
     def test_slice(self):
         class SampleInput:
-            def __init__(self, input, args, kwargs={}):
+            def __init__(self, input, args, kwargs=None):
+                kwargs = kwargs if kwargs is not None else {}
                 self.input = input
                 self.args = args
                 self.kwargs = kwargs
@@ -526,6 +527,7 @@ class TestDecomp(TestCase):
             name = "fake slice"
             supports_autograd = False
             decomp_aten_name = "aten.slice.Tensor"
+
             def op(self, *args, **kwargs):
                 return torch.ops.aten.slice(*args, **kwargs)
 
