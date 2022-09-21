@@ -191,7 +191,7 @@ class TestLazyOpInfo(TestCase):
         # check aliases
         if not found:
             for alias in op.aliases:
-                alias_found = f"{prefix}::{alias.name}" in remove_suffixes(torch._lazy.metrics.counter_names())
+                alias_found = f"{prefix}::{alias.name}{symint_suffix}" in remove_suffixes(torch._lazy.metrics.counter_names())
                 found = found or alias_found
                 if found:
                     break
