@@ -152,8 +152,8 @@ static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optio
   const auto in_vulkan = in_cpu.vulkan();
 
   // Act
-  const auto out_cpu = at::slice(in_cpu, dim, start, end, step);
-  const auto out_vulkan = at::slice(in_vulkan, dim, start, end, step);
+  const auto out_cpu = at::native::slice(in_cpu, dim, start, end, step);
+  const auto out_vulkan = at::native::slice(in_vulkan, dim, start, end, step);
 
   // Assert
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
@@ -173,7 +173,8 @@ static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>&
     slice_test(dim2size.second, dim2size.first, -30, -10, 1);       // i.e., 4D tensor's equivalent indexing = [:,:,:,-30:-10:1] with negative start/end
     slice_test(dim2size.second, dim2size.first, 0, INT64_MAX, 1);   // i.e., 4D 's equivalent indexing = [:,:,:,0:9223372036854775807:1] with end=INT64_MAX
     slice_test(dim2size.second, dim2size.first, -10, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-10:9223372036854775807:1] with negative start and end=INT64_MAX
-    slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
+    // This triggers a SymInt assert since [-2^63, -2^62-1] range is reserved for packed symints
+    //slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
     slice_test(dim2size.second, dim2size.first, {}, {}, 1);         // i.e., 4D 's equivalent indexing = [:,:,:,::1] with empty start/end
   }
 }
