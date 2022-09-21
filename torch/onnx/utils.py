@@ -9,7 +9,6 @@ import contextlib
 import copy
 import inspect
 import io
-import itertools
 import os
 import re
 import textwrap
@@ -1139,7 +1138,8 @@ def _model_to_graph(
 
     if (
         do_constant_folding
-        and GLOBALS.export_onnx_opset_version in _constants.onnx_constant_folding_opsets
+        and GLOBALS.export_onnx_opset_version
+        >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
     ):
         params_dict = _C._jit_pass_onnx_constant_fold(
             graph, params_dict, GLOBALS.export_onnx_opset_version
@@ -1204,7 +1204,7 @@ def export_to_pretty_string(
       A UTF-8 str containing a human-readable representation of the ONNX model.
     """
     if opset_version is None:
-        opset_version = _constants.onnx_default_opset
+        opset_version = _constants.ONNX_DEFAULT_OPSET
     if custom_opsets is None:
         custom_opsets = {}
     symbolic_helper._set_opset_version(opset_version)
@@ -1265,7 +1265,7 @@ def unconvertible_ops(
         of the unconvertible ops.
     """
 
-    opset_version = opset_version or _constants.onnx_default_opset
+    opset_version = opset_version or _constants.ONNX_DEFAULT_OPSET
     symbolic_helper._set_opset_version(opset_version)
     # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
@@ -1418,7 +1418,7 @@ def _export(
         symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
 
         if opset_version is None:
-            opset_version = _constants.onnx_default_opset
+            opset_version = _constants.ONNX_DEFAULT_OPSET
 
         if export_modules_as_functions and opset_version < 15:
             raise ValueError(
@@ -1913,9 +1913,7 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in itertools.chain(
-        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
-    ):
+    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.register_op(op_name, symbolic_fn, ns, version)
 
@@ -1933,9 +1931,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     """
     ns, op_name = get_ns_op_name_from_custom_op(symbolic_name)
 
-    for version in itertools.chain(
-        _constants.onnx_stable_opsets, [_constants.onnx_main_opset]
-    ):
+    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
         if version >= opset_version:
             symbolic_registry.unregister_op(op_name, ns, version)
 
