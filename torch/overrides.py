@@ -1878,8 +1878,8 @@ def _no_torch_function_mode() -> Iterator[None]:
     try:
         yield
     finally:
-       if _len_torch_function_stack() > 0:
-         _set_torch_function_mode(_TorchFunctionStackMode)
+        if _len_torch_function_stack() > 0:
+            _set_torch_function_mode(_TorchFunctionStackMode())
 
 
 class enable_reentrant_dispatch():

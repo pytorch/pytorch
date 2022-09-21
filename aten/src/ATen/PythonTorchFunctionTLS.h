@@ -31,7 +31,7 @@ struct TORCH_API PythonTorchFunctionTLS {
   //   - stack_, which is a vector of modes representing the stack of user
   //   defined modes
   bool disabled_;
-  std::shared_ptr<c10::SafePyObject> mode_;
+  std::shared_ptr<c10::SafePyObject> mode_ = nullptr;
   std::vector<std::shared_ptr<c10::SafePyObject>> stack_;
 };
 
