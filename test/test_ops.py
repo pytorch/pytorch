@@ -16,6 +16,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
+from test_proxy_tensor import xfail, skipOps
 
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -59,6 +60,8 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
 )
+from torch._subclasses.fake_utils import outputs_alias_inputs
+
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
@@ -93,6 +96,8 @@ _ref_test_ops = tuple(
     )
 )
 _ops_and_refs = op_db + python_ref_db
+
+aten = torch.ops.aten
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -1774,8 +1779,7 @@ aliasing_failures = (
     "nn.functional.pixel_unshuffle",
 )
 
-fake_striding_skips = (
-    "diag_embed",
+fake_striding_skips = [
     "fft.fft2",
     "fft.fft",
     "fft.fftn",
@@ -1796,11 +1800,34 @@ fake_striding_skips = (
     "fft.rfftn",
     "svd",
     "linalg.svd",
-)
+]
 
+backward_skips = fake_striding_skips + [
+    "linalg.cond",
+    "linalg.matrix_norm",
+    "linalg.norm",
+    "linalg.svd",
+    "linalg.svdvals",
+    "nn.functional.binary_cross_entropy_with_logits",
+    "nn.functional.huber_loss",
+    "nn.functional.logsigmoid",
+    "nn.functional.multilabel_soft_margin_loss",
+    "pca_lowrank",
+    "roll",
+    "svd_lowrank",
+    "sgn",
+]
+
+backward_skips = [xfail(stride_skip) for stride_skip in backward_skips]
+
+backward_skips = backward_skips + [
+    xfail("segment_reduce", "lengths"),
+    xfail("norm", "nuc"),
+    xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
+]
 
 @skipIfSlowGradcheckEnv
-class TestFakeTensorNonErroring(TestCase):
+class TestFakeTensor(TestCase):
     def _test_fake_helper(self, device, dtype, op, context):
         name = op.name
         if op.variant_test_name:
@@ -1833,15 +1860,6 @@ class TestFakeTensorNonErroring(TestCase):
                     with enable_torch_dispatch_mode(mode):
                         res_fake = op(input, *args, **kwargs)
 
-                def outputs_alias_inputs(outputs, inputs):
-                    input_storages = set()
-                    for out in tree_flatten(outputs)[0]:
-                        if isinstance(out, torch.Tensor):
-                            input_storages.add(out.storage()._cdata)
-                    for inp in tree_flatten(inputs)[0]:
-                        if isinstance(inp, torch.Tensor) and inp.storage()._cdata in input_storages:
-                            return True
-                    return False
 
                 for fake_out, real_out in zip(
                     tree_flatten(res_fake)[0], tree_flatten(res)[0]
@@ -1887,12 +1905,38 @@ class TestFakeTensorNonErroring(TestCase):
         context = torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
         self._test_fake_helper(device, dtype, op, context)
 
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward', backward_skips)
+    def test_fake_crossref_backward(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+
+        for iter, sample in enumerate(samples):
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+
+            # skip these to speed up tests
+            common_skip_ops = (
+                aten.detach.default,
+                aten.empty_strided.default,
+                aten.copy_.default,
+                aten.is_same_size.default,
+
+            )
+            # TODO: enable check_aliasing, too many failures :/
+            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=False):
+                with warnings.catch_warnings():
+                    composite_compliance.compute_expected_grads(
+                        op.get_op(), args, kwargs,
+                        sample.output_process_fn_grad,
+                        op.gradcheck_wrapper)
+
 
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensorNonErroring, globals())
+instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals())
 
 if __name__ == "__main__":
