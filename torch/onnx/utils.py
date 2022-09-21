@@ -172,7 +172,6 @@ def setup_onnx_logging(verbose: bool):
             torch.onnx.disable_log()
 
 
-# @contextlib.contextmanager
 @_beartype.beartype
 def setup_onnx_diagnostic():
     engine = diagnostics.engine
