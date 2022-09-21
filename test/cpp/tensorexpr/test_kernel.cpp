@@ -30,7 +30,7 @@ class Kernel : public ::testing::Test {
   }
 };
 
-TEST(Kernel, ParallelExternalCallBuf) {
+TEST_F(Kernel, ParallelExternalCallBuf) {
   const auto graph_string = R"IR(
     graph(%0 : Float(1000, 5000, strides=[5000, 1], device=cpu),
           %1 : Float(1000, 5000, strides=[5000, 1], device=cpu),
