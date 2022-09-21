@@ -438,6 +438,9 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("dump_local_tls", &dump_local_tls);
   m.def("set_fwd_grad_enabled", &set_fwd_grad_enabled);
   m.def("get_fwd_grad_enabled", &get_fwd_grad_enabled);
+  m.def("is_functorch_wrapped_tensor", [](const Tensor& tensor) {
+    return maybe_get_level(tensor) != -1;
+  });
 
   torch::functorch::initCompileCacheBindings(m.ptr());
 }
