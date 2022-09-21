@@ -6135,20 +6135,33 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
     # list of tuples (shape, shape) defining the shapes of the input and output tensors
     sample_shapes = [
         ((), ()),
-        ((S), (1)),
+        ((S,), (1,)),
         ((S, S), (1, 1)),
         ((S, S), (1, S)),
         ((S, S), (S, S)),
         ((S, S, S), (S, 1, S)),
     ]
 
-    samples = []
-
     for input_shape, output_shape in sample_shapes:
         input_t = make_arg(input_shape)
-        samples.append(SampleInput(input_t, args=(output_shape,)))
+        yield SampleInput(input_t, args=(output_shape,))
+        if output_shape == ():
+            continue
+        yield SampleInput(input_t, args=(list(output_shape),))
+        yield SampleInput(input_t, args=(*output_shape,))
 
-    return samples
+
+def error_inputs_sum_to_size(op_info, device, **kwargs):
+    shape = (M, S, M)
+    err_msg = "is not expandable to size"
+    si = SampleInput(make_tensor(shape, device=device, dtype=torch.float32), args=(M, M))
+    yield ErrorInput(si, error_regex=err_msg)
+
+    shape = (M + 1, S, S, M)
+    err_msg = "is not expandable to size"
+    si = SampleInput(make_tensor(shape, device=device, dtype=torch.float32), args=(M + 1, 1))
+    yield ErrorInput(si, error_regex=err_msg)
+
 
 def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
@@ -8841,13 +8854,20 @@ op_db: List[OpInfo] = [
            op=lambda x, *args, **kwargs: x.sum_to_size(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sum_to_size,
+           error_inputs_func=error_inputs_sum_to_size,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
            skips=(
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),),),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),
+               # AssertionError: Tensor-likes are not close!
+               # Mismatched elements: 5 / 5 (100.0%)
+               # https://github.com/pytorch/pytorch/issues/85409
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+           )),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
@@ -17536,6 +17556,11 @@ python_ref_db = [
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.sum_to_size",
+        torch_opinfo_name="sum_to_size",
+        validate_view_consistency=False,
     ),
     ReductionPythonRefInfo(
         "_refs.prod",
