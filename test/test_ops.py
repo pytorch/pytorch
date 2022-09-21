@@ -379,7 +379,8 @@ class TestCommon(TestCase):
                              "_refs.native_instance_norm",
                              "_refs.logsumexp",
                              "_refs.log_softmax",
-                             "_refs.softmax"]
+                             "_refs.softmax",
+                             "_refs.sum_to_size"]
         if executor == "nvfuser" and op.name in normalization_ops:
             skip_zero_dim = True
 
@@ -1654,6 +1655,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.isreal',
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
@@ -1673,6 +1675,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
+        '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
@@ -1684,7 +1687,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
-        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
         '_refs.real',
