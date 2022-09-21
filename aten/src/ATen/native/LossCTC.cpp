@@ -401,10 +401,25 @@ Tensor ctc_loss_backward_tensor(
   return at::_ctc_loss_backward(grad, log_probs, targets, il, tl, neg_log_likelihood, log_alpha, BLANK, zero_infinity);
 }
 
+namespace {
+
+Tensor get_clamped_target_length(
+    IntArrayRef target_lengths,
+    const TensorOptions& options) {
+  return at::tensor(target_lengths, options).clamp_min(1);
+}
+
+Tensor get_clamped_target_length(
+    Tensor target_lengths,
+    const TensorOptions& options) {
+  return target_lengths.clamp_min(1);
+}
+
 // this wrapper function dispatches to the native and cudnn implementations and hides the alpha/grad from the user (by just returning the loss)
 // the gradient is implemented for _cudnn_ctc_loss (just in derivatives.yaml) and _ctc_loss and this function has automatic gradients
 // it also handles the reduction if desired
-Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+template <typename LengthsType>
+Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsType input_lengths, LengthsType target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   auto is_batched = log_probs_.dim() == 3;
   Tensor log_probs = is_batched ? log_probs_ : log_probs_.unsqueeze(1);
   bool use_cudnn =
@@ -432,8 +447,7 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
     }
   }
   if (reduction == at::Reduction::Mean) {
-    auto target_lengths_t =
-        at::tensor(target_lengths, res.options()).clamp_min(1);
+    auto target_lengths_t = get_clamped_target_length(target_lengths, res.options());
     return (res / target_lengths_t).mean();
   } else if (reduction == at::Reduction::Sum) {
     return res.sum();
@@ -441,59 +455,22 @@ Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef inp
   return is_batched ? res : res.squeeze(0);
 }
 
+} // namespace
+
+Tensor ctc_loss(const Tensor& log_probs_, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
+  return ctc_loss_impl(log_probs_, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
+}
+
 // Convenience function accepting Tensors
 Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK, int64_t reduction, bool zero_infinity) {
   if (at::areAnyTensorSubclassLike(
           {log_probs, targets, input_lengths, target_lengths})) {
     // Composite Compliant path for TensorSubclasses
-    auto is_batched = log_probs.dim() == 3;
-    Tensor log_probs_ = is_batched ? log_probs : log_probs.unsqueeze(1);
-    bool use_cudnn =
-        (log_probs.device().type() == at::kCUDA) &&
-        at::_use_cudnn_ctc_loss(
-            log_probs, targets, input_lengths, target_lengths, BLANK);
-
-    Tensor res;
-    if (use_cudnn) {
-      // non-deterministic ctc loss on cudnn disabled due to inconsistent
-      // results see: https://github.com/pytorch/pytorch/issues/21680
-      res = std::get<0>(at::_cudnn_ctc_loss(
-          log_probs,
-          targets,
-          input_lengths,
-          target_lengths,
-          BLANK,
-          /*deterministic=*/true,
-          zero_infinity));
-    } else {
-      // NOTE: Calling data-ptr is not Composite Compliant!,
-      // so we call the _ctc_loss.Tensor overload.
-      res = std::get<0>(at::_ctc_loss(
-          log_probs_,
-          // if the targets are on CPU (which you need for CuDNN, let's move
-          // them to GPU as a service for the user)
-          targets.to(log_probs.device(), kLong),
-          input_lengths,
-          target_lengths,
-          BLANK,
-          zero_infinity));
-      if (zero_infinity) {
-        res = at::where(
-            res == Scalar(std::numeric_limits<double>::infinity()),
-            at::zeros({}, res.options()),
-            res);
-      }
-    }
-    if (reduction == at::Reduction::Mean) {
-      auto target_lengths_t = target_lengths.clamp_min(1);
-      return (res / target_lengths_t).mean();
-    } else if (reduction == at::Reduction::Sum) {
-      return res.sum();
-    }
-    return is_batched ? res : res.squeeze(0);
+    return ctc_loss_impl(log_probs, targets, input_lengths, target_lengths, BLANK, reduction, zero_infinity);
   }
 
-  // Fast path for regular tensors
+  // Fast path (which accesses data_ptr) and less operator dispatches for
+  // regular tensors
   TORCH_CHECK(isIntegralType(input_lengths.scalar_type(), /*includeBool=*/false), "input_lengths must be integral");
   TORCH_CHECK(isIntegralType(target_lengths.scalar_type(), /*includeBool=*/false), "target_lengths must be integral");
 
