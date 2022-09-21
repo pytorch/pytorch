@@ -14,8 +14,6 @@ from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
 
-old_slice = slice
-
 DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 # None of these functions are publicly accessible; get at them
