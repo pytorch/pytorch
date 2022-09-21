@@ -405,8 +405,8 @@ static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, int64_t 
 // given (sizes, strides, storage_offset) returns the maximum location that
 // can be indexed (or nullopt if such a location doesn't exist, e.g., tensors
 // with zero-size dims).
-static optional<int64_t> maximum_indexable_location(
-    IntArrayRef sizes, IntArrayRef strides, int64_t storage_offset) {
+static optional<c10::SymInt> maximum_indexable_location(
+    c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, c10::SymInt storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
     return nullopt;
@@ -421,12 +421,12 @@ static optional<int64_t> maximum_indexable_location(
 static void checkBasicAsStridedValidForSlice(
     const Tensor& physical_tensor,
     int64_t num_batch_dims,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> maybe_storage_offset) {
-  auto slice_sizes = physical_tensor.sizes().slice(num_batch_dims);
-  auto slice_strides = physical_tensor.strides().slice(num_batch_dims);
-  auto base_offset = physical_tensor.storage_offset();
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    optional<c10::SymInt> maybe_storage_offset) {
+  auto slice_sizes = physical_tensor.sym_sizes().slice(num_batch_dims);
+  auto slice_strides = physical_tensor.sym_strides().slice(num_batch_dims);
+  auto base_offset = physical_tensor.sym_storage_offset();
 
   auto storage_offset = maybe_storage_offset.value_or(base_offset);
 
@@ -479,12 +479,12 @@ static void checkBasicAsStridedValidForSlice(
 // >>> z = [x[i].as_strided([1], [1], 1 + x[i].storage_offset() - 1) for i in range(4)]
 Tensor as_strided_batching_rule(
     const Tensor& tensor,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset) {
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    optional<c10::SymInt> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::as_strided(tensor, sizes, strides, storage_offset);
+    return at::as_strided_symint(tensor, sizes, strides, storage_offset);
   }
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(tensor);
   auto num_batch_dims = physical_view.numBatchDims();
@@ -506,7 +506,7 @@ Tensor as_strided_batching_rule(
 
   // physical_strides = physical tensor's batch strides + (logical) strides
   auto batch_strides = physical_tensor.strides().slice(0, num_batch_dims);
-  VmapDimVector physical_strides;
+  SymDimVector physical_strides;
   physical_strides.reserve(num_batch_dims + strides.size());
   physical_strides.insert(
       physical_strides.end(), batch_strides.begin(), batch_strides.end());
@@ -518,7 +518,7 @@ Tensor as_strided_batching_rule(
   // xs.as_strided(physical_sizes, physical_strides, offset) always succeeds
   // and creates a tensor y such that each y[i] references the same memory
   // locations as zi. See NOTE: [When will the as_strided batching rule fail?]
-  auto result = physical_view.tensor().as_strided(
+  auto result = physical_view.tensor().as_strided_symint(
       physical_sizes, physical_strides, storage_offset);
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }

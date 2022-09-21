@@ -146,6 +146,7 @@ struct FUNCTORCH_API VmapPhysicalView {
   // Maps a logical shape to a physical shape by pre-pending the batch
   // sizes to the logical shape.
   VmapDimVector getPhysicalShape(IntArrayRef logical_shape) const;
+  SymDimVector getPhysicalShape(c10::SymIntArrayRef logical_shape) const;
 
   int64_t numBatchDims() const;
 

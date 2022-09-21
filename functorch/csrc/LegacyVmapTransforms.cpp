@@ -76,6 +76,15 @@ VmapDimVector VmapPhysicalView::getPhysicalShape(IntArrayRef logical_shape) cons
   return result;
 }
 
+SymDimVector VmapPhysicalView::getPhysicalShape(c10::SymIntArrayRef logical_shape) const {
+  SymDimVector result;
+  result.reserve(logical_shape.size() + numBatchDims());
+  auto tensor_sizes = tensor_.sym_sizes();
+  result.insert(result.end(), tensor_sizes.begin(), tensor_sizes.begin() + numBatchDims());
+  result.insert(result.end(), logical_shape.begin(), logical_shape.end());
+  return result;
+}
+
 static std::tuple<int64_t, int64_t> computeFrontBatchDimsFromLevels(std::bitset<kVmapNumLevels> levels_bitset) {
   int64_t level = 0;
   int64_t dim = 0;
