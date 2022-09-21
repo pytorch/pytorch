@@ -9,6 +9,8 @@ from torch.distributed.optim.zero_redundancy_optimizer import (
 )
 from torch.nn.parallel.distributed import DistributedDataParallel
 
+__all__ = ["hook_with_zero_step", "hook_with_zero_step_interleaved"]
+
 # Functional optimizers require passing a list of gradients to their `step()`
 # method, and ZeRO requires a functional optimizer to overlap with DDP
 # Passing a `None` instead of an actual gradient indicates to the optimizer
