@@ -347,23 +347,27 @@ decltype(auto) if_constexpr(
   if constexpr (Condition) {
     if constexpr (detail::function_takes_identity_argument<
                       ThenCallback>::value) {
-      return ::std::forward<ThenCallback>(thenCallback)(detail::_identity());
+      // Note that we use static_cast<T&&>(t) instead of std::forward (or
+      // ::std::forward) because using the latter produces some compilation
+      // errors about ambiguous `std` on MSVC when using C++17. This static_cast
+      // is just what std::forward is doing under the hood, and is equivalent.
+      return static_cast<ThenCallback&&>(thenCallback)(detail::_identity());
     } else {
-      return ::std::forward<ThenCallback>(thenCallback)();
+      return static_cast<ThenCallback&&>(thenCallback)();
     }
   } else {
     if constexpr (detail::function_takes_identity_argument<
                       ElseCallback>::value) {
-      return ::std::forward<ElseCallback>(elseCallback)(detail::_identity());
+      return static_cast<ElseCallback&&>(elseCallback)(detail::_identity());
     } else {
-      return ::std::forward<ElseCallback>(elseCallback)();
+      return static_cast<ElseCallback&&>(elseCallback)();
     }
   }
 #else
   // C++14 implementation of if constexpr
   return detail::_if_constexpr<Condition>::call(
-      ::std::forward<ThenCallback>(thenCallback),
-      ::std::forward<ElseCallback>(elseCallback));
+      static_cast<ThenCallback&&>(thenCallback),
+      static_cast<ElseCallback&&>(elseCallback));
 #endif
 }
 
@@ -375,15 +379,19 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
   if constexpr (Condition) {
     if constexpr (detail::function_takes_identity_argument<
                       ThenCallback>::value) {
-      return ::std::forward<ThenCallback>(thenCallback)(detail::_identity());
+      // Note that we use static_cast<T&&>(t) instead of std::forward (or
+      // ::std::forward) because using the latter produces some compilation
+      // errors about ambiguous `std` on MSVC when using C++17. This static_cast
+      // is just what std::forward is doing under the hood, and is equivalent.
+      return static_cast<ThenCallback&&>(thenCallback)(detail::_identity());
     } else {
-      return ::std::forward<ThenCallback>(thenCallback)();
+      return static_cast<ThenCallback&&>(thenCallback)();
     }
   }
 #else
   // C++14 implementation of if constexpr
   return if_constexpr<Condition>(
-      ::std::forward<ThenCallback>(thenCallback), [](auto) {});
+      static_cast<ThenCallback&&>(thenCallback), [](auto) {});
 #endif
 }
 
