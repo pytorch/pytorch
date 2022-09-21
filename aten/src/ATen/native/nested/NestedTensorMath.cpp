@@ -699,6 +699,7 @@ Tensor softmax_nested(
     const Tensor& input,
     const int64_t dim,
     const bool half_to_float) {
+  // to_padded_tensor only supports contiguous inputs
   auto input_contig = input.contiguous();
   auto input_ptr = get_nested_tensor_impl(input_contig);
   int64_t ntensors = input_ptr->size(0);
@@ -710,6 +711,8 @@ Tensor softmax_nested(
       positive_dim >= 1,
       "softmax: For NestedTensors softmax cannot be applied along the nested dimension 0");
 
+  const auto& input_sizes = input_ptr->get_nested_size_tensor();
+
   Tensor output_nested;
   AT_DISPATCH_ALL_TYPES_AND2(
     at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -717,7 +720,6 @@ Tensor softmax_nested(
       scalar_t pad_val = std::numeric_limits<scalar_t>::has_infinity ?
                          -std::numeric_limits<scalar_t>::infinity() :
                          std::numeric_limits<scalar_t>::lowest();
-      const auto& input_sizes = input_ptr->get_nested_size_tensor();
       const auto input_padded = nested_to_padded_tensor(input_contig, pad_val);
       const auto output_padded = at::_softmax(input_padded, dim, half_to_float);
       output_nested = nested_from_padded_generic(output_padded, input_sizes);

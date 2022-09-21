@@ -73,6 +73,7 @@ Tensor nested_softmax_backward(
     ScalarType input_dtype) {
   TORCH_INTERNAL_ASSERT(grad.is_nested(), "softmax_backward: Should be nested grad")
   TORCH_INTERNAL_ASSERT(output.is_nested(), "softmax_backward: Should be nested output")
+  // to_padded_tensor only supports contiguous inputs
   auto grad_contig = grad.contiguous();
 
   auto output_ptr = get_nested_tensor_impl(output);
