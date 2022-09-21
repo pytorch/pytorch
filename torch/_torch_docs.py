@@ -2327,6 +2327,9 @@ ceil(input, *, out=None) -> Tensor
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
+
 .. math::
     \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil
 """
@@ -4163,6 +4166,9 @@ floor(input, *, out=None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. math::
     \text{out}_{i} = \left\lfloor \text{input}_{i} \right\rfloor
@@ -8081,7 +8087,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (Tensor or int): the starting dimension
     length (int): the distance to the ending dimension
 
 Example::
@@ -8094,6 +8100,52 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+""",
+)
+
+add_docstr(
+    torch.narrow_copy,
+    r"""
+narrow_copy(input, dim, start, length, *, out=None) -> Tensor
+
+Same as :meth:`Tensor.narrow` except this returns a copy rather
+than shared storage. This is primarily for sparse tensors, which
+do not have a shared-storage narrow method.
+
+Args:
+    input (Tensor): the tensor to narrow
+    dim (int): the dimension along which to narrow
+    start (int): the starting offset
+    length (int): the distance to the ending dimension
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> torch.narrow_copy(x, 0, 0, 2)
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
+    >>> torch.narrow_copy(x, 1, 1, 2)
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
+    >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
+    >>> torch.narrow_copy(s, 0, 0, 1)
+    tensor(indices=tensor([[0, 0],
+                        [0, 1]]),
+        values=tensor([[[0, 1],
+                        [2, 3]],
+
+                        [[4, 5],
+                        [6, 7]]]),
+        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+
+.. seealso::
+
+        :func:`torch.narrow` for a non copy variant
+
 """,
 )
 
@@ -9585,6 +9637,9 @@ round(input, *, decimals=0, out=None) -> Tensor
 
 Rounds elements of :attr:`input` to the nearest integer.
 
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
+
 .. note::
     This function implements the "round half to even" to
     break ties when a number is equidistant from two
@@ -10631,7 +10686,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input, dim=None, *, out=None) -> Tensor
+squeeze(input, dim=None) -> Tensor
 
 Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
 
@@ -10655,9 +10710,6 @@ Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
-
-Keyword args:
-    {out}
 
 Example::
 
@@ -11963,6 +12015,9 @@ trunc(input, *, out=None) -> Tensor
 
 Returns a new tensor with the truncated integer values of
 the elements of :attr:`input`.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 Args:
     {input}
