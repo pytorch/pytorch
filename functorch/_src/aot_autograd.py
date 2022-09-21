@@ -312,32 +312,35 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     # else is just getting the types right.
 
     seen_args = {}
-    deduped_flat_args = []
-    drop_args = set()
+    keep_arg_mask = []
+    dropped_args = False
     add_dupe_map = {}
     duped_arg_len = len(flat_args)
+
+    j = 0  # index into deduped_flat_args
     for i, t in enumerate(flat_args):
         if t in seen_args:
-            drop_args.add(i)
+            keep_arg_mask.append(False)
+            dropped_args = True
             add_dupe_map[i] = seen_args[t]
             continue
-        seen_args[t] = len(deduped_flat_args)
-        add_dupe_map[i] = len(deduped_flat_args)
-        deduped_flat_args.append(t)
+        keep_arg_mask.append(True)
+        seen_args[t] = j
+        add_dupe_map[i] = j
+        j += 1
 
+    # NB: Hot path, avoid set lookups here
     def remove_dupe_args(args):
-        r = []
-        for i, t in enumerate(args):
-            if i in drop_args:
-                continue
-            r.append(t)
-        return r
+        if not dropped_args:
+            return args
+        return [t for t, keep in zip(args, keep_arg_mask) if keep]
 
     def add_dupe_args(args):
-        r = []
-        for i in range(duped_arg_len):
-            r.append(args[add_dupe_map[i]])
-        return r
+        if not dropped_args:
+            return args
+        return [args[add_dupe_map[i]] for i in range(duped_arg_len)]
+
+    deduped_flat_args = remove_dupe_args(flat_args)
 
     joint_forward_backward = create_joint_forward_backward(lambda *args: flat_fn(*add_dupe_args(args)))
 
@@ -432,7 +435,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
             return tuple(out)
 
-    return lambda *args: CompiledFunction.apply(*remove_dupe_args(args))
+    @wraps(CompiledFunction.apply)
+    def compiled_function(*args):
+        return CompiledFunction.apply(*remove_dupe_args(args))
+
+    return compiled_function
 
 
 @dynamo_timed
