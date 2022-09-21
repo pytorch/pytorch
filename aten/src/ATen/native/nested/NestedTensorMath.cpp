@@ -864,6 +864,7 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
   else if (!self.is_nested() && mat2.is_nested()) {
     AT_ERROR("Expected both to be nested, but got a non-nested self and nested other");
   }
+  // to_padded_tensor only supports contiguous inputs
   auto self_contig = self.contiguous();
   auto mat2_contig = mat2.contiguous();
   // dispatcher should have guaranteed that at least one is nested
