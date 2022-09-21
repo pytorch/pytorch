@@ -1450,12 +1450,6 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # This will fail reliably on CI, but locally passes with a newer cuda toolkit version
-            DecorateInfo(
-                unittest.skip("cpu vs gpu is sometimes different"),
-                "TestCommon",
-                "test_compare_cpu",
-            ),
         ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, with_tf32_off],
     ),
@@ -1535,8 +1529,6 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # linalg.eigh appears to be a different algorithm on cpu vs gpu
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
@@ -1637,7 +1629,16 @@ op_db: List[OpInfo] = [
         supports_out=True,
         sample_inputs_func=sample_inputs_linalg_lstsq,
         error_inputs_func=error_inputs_lstsq,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[
+            skipCUDAIfNoMagma,
+            skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                "TestCommon",
+                "test_compare_cpu",
+                device_type="cuda",
+            ),
+        ],
         skips=(
             # we skip gradient checks for this suite as they are tested in
             # variant_test_name='grad_oriented'
@@ -1664,11 +1665,6 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
-            ),
-            DecorateInfo(
-                unittest.skip("cpu vs gpu is sometimes different"),
-                "TestCommon",
-                "test_compare_cpu",
             ),
         ),
     ),
@@ -2284,8 +2280,6 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
-            # This appears to be a different algorithm on cpu vs gpu
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     OpInfo(
@@ -2372,10 +2366,6 @@ python_ref_db: List[OpInfo] = [
         supports_out=True,
         supports_nvfuser=False,
         op_db=op_db,
-        skips=(
-            # This appears to be a different algorithm on cpu vs gpu
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
-        ),
     ),
     PythonRefInfo(
         "_refs.linalg.svdvals",
