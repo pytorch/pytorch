@@ -50,11 +50,9 @@ conda_upload() {
       --force
 
       rc=$?
-      # ConnectionResetError 104, Connection reset by peer retry
-      [[ $rc -eq 104 ]] && ((counter++)) || break
+      # In case of failure, do a retry upload
+      [[ $rc -ne 0 ]] && ((counter++)) || break
     done
-
-
   )
 }
 
