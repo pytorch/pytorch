@@ -624,16 +624,6 @@ class TestUnaryUfuncs(TestCase):
                 ):
                     torch.frexp(input, out=(mantissa, exponent))
 
-    def test_mvlgamma_argcheck(self, device):
-        def run_test(d):
-            input = torch.linspace((d - 2) / 2, 10, 10, device=device)
-            torch.mvlgamma(input, d)
-
-        with self.assertRaisesRegex(
-            RuntimeError, r"All elements must be greater than \(p-1\)/2"
-        ):
-            run_test(3)
-
     def test_polygamma_neg(self, device):
         with self.assertRaisesRegex(
             RuntimeError, r"polygamma\(n, x\) does not support negative n\."
