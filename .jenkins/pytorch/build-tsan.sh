@@ -19,7 +19,7 @@ if [ -n "$(which conda)" ]; then
 fi
 
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  CFLAGS="-fsanitize=thread -shared-libsan" \
+  CFLAGS="-fsanitize=thread -static-libsan" \
   USE_TSAN=1 USE_CUDA=0 USE_MKLDNN=0 \
   python setup.py bdist_wheel
   python -mpip install dist/*.whl
