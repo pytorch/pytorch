@@ -16,7 +16,6 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
-#include <functorch/csrc/dim/dim.h>
 #include <torch/csrc/functorch/CompileCache.h>
 
 // This file contains functorch's Python bindings.
