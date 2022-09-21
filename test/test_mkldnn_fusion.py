@@ -19,7 +19,10 @@ class TestMkldnnFusion(JitTestCase):
         for pat in fused_patterns:
             self.assertGraphContainsExactly(graph, pat, 0)
 
-    def _check_model(self, m, x, trace=False):
+    def _check_model(self, m, x, trace=False, bf16=False, dtype_cast=False):
+        rtol = 1.6e-2 if bf16 else 1.3e-6
+        atol = 1e-2 if bf16 else 1e-5
+
         old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
         torch._C._debug_set_fusion_group_inlining(False)
 
@@ -30,20 +33,27 @@ class TestMkldnnFusion(JitTestCase):
         torch._C._jit_set_te_must_use_llvm_cpu(False)
 
         m.eval()
-        with torch.no_grad():
+        with torch.no_grad(), torch.cpu.amp.autocast(enabled=bf16, cache_enabled=False):
             if trace:
                 script = torch.jit.trace(m, x)
             else:
                 script = torch.jit.script(m)
         script = torch.jit.freeze(script)
 
-        with torch.no_grad():
+        with torch.no_grad(), torch.cpu.amp.autocast(enabled=bf16):
             y = warmup_and_run_forward(script, x)
             y = script(x)
             y_ref = m(x)
 
             graph = script.graph_for(*x)
-            self.assertEqual(y, y_ref)
+            # For conv + gelu, when running with autocast, the graph becomes to_bf16 -> conv -> to_fp32 -> gelu
+            # While for imperative mode, the workflow will be to_bf16 -> conv -> gelu
+            # due to this issue: https://github.com/pytorch/pytorch/issues/75956
+            # If we disable JIT autocast with torch._C._jit_set_autocast_mode(False), when using torch.jit.script
+            # the input and weight dtype on the graph is FP32 while the output dtype will be BF16.
+            if dtype_cast:
+                y = y.to(y_ref.dtype)
+            self.assertEqual(y, y_ref, rtol=rtol, atol=atol)
 
         torch._C._debug_set_fusion_group_inlining(old_fusion_inlining)
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
@@ -64,7 +74,7 @@ class TestMkldnnFusion(JitTestCase):
             [torch.contiguous_format, False],
             [torch.channels_last, True],
         ]:
-            for trace in [True, False]:
+            for trace, bf16 in itertools.product([True, False], [True, False]):
                 input_size = 224
                 batch_size = 1
                 kernel_size = 3
@@ -81,7 +91,7 @@ class TestMkldnnFusion(JitTestCase):
                           dilation=dilation,
                           groups=groups).to(memory_format=memory_format)
                     x = torch.randn(batch_size, iC, input_size, input_size).to(memory_format=memory_format)
-                    graph = self._check_model(m, x, trace)
+                    graph = self._check_model(m, x, trace, bf16)
                     conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
                     if enabled:
                         self.assertFused(graph, [conv_node_name])
@@ -105,18 +115,25 @@ class TestMkldnnFusion(JitTestCase):
             [torch.contiguous_format, False],
             [torch.channels_last, True],
         ]:
-            for eltwise_fn in [torch.relu]:
-                for bias in [True, False]:
-                    for oC in [1, 10]:
-                        m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
-                        x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+            for trace, bf16, eltwise_fn, bias, oC in itertools.product(
+                    [True, False],
+                    [True, False],
+                    [torch.relu],
+                    [True, False],
+                    [1, 10]):
 
-                        graph = self._check_model(m, x)
-                        if enabled:
-                            self.assertFused(graph, ['aten::conv2d', 'aten::' + eltwise_fn.__name__])
-                            self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
-                        else:
-                            self.assertGraphContains(graph, kind='aten::conv2d')
+                m = M(eltwise_fn, 3, oC, bias, kernel_size=(3, 3)).to(memory_format=memory_format)
+                x = torch.randn(1, 3, 224, 224).to(memory_format=memory_format)
+
+                # GeLU will encounter the JIT autocast issue: https://github.com/pytorch/pytorch/issues/75956
+                dtype_cast = True if bf16 and eltwise_fn.__name__ == "gelu" else False
+                graph = self._check_model(m, x, trace, bf16, dtype_cast)
+                conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
+                if enabled:
+                    self.assertFused(graph, [conv_node_name, 'aten::' + eltwise_fn.__name__])
+                    self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
+                else:
+                    self.assertGraphContains(graph, kind=conv_node_name)
 
     def test_unsupported_conv(self):
         class M(nn.Module):
