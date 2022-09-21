@@ -723,8 +723,7 @@ constexpr double QUARTER = 0.25;
 }
 
 static inline void mvlgamma_check(const Tensor& self, int64_t p) {
-  TORCH_CHECK((self > HALF * (p - 1)).all().item<bool>(),
-              "All elements must be greater than (p-1)/2");
+  TORCH_CHECK(self.scalar_type() != kBool, "The input tensor may not be a boolean tensor.");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
 }
 
