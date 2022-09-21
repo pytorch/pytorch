@@ -14,7 +14,7 @@
 //#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/Export.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <functorch/csrc/DynamicLayer.h>
+#include <ATen/functorch/DynamicLayer.h>
 #include <ATen/ATen.h>
 #include <memory>
 #include "arena.h"

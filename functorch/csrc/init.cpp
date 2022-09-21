@@ -8,12 +8,13 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
 
-#include <functorch/csrc/TensorWrapper.h>
-#include <functorch/csrc/DynamicLayer.h>
+#include <ATen/functorch/TensorWrapper.h>
+#include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
-#include <functorch/csrc/LegacyVmapTransforms.h>
-#include <functorch/csrc/BatchedFallback.h>
-#include <functorch/csrc/BatchRulesHelper.h>
+#include <ATen/functorch/LegacyVmapTransforms.h>
+#include <ATen/functorch/BatchedFallback.h>
+#include <ATen/functorch/BatchRulesHelper.h>
+#include <ATen/functorch/PlumbingHelper.h>
 #include <torch/csrc/functorch/CompileCache.h>
 #include <c10/core/AutogradState.h>
 #include <functorch/csrc/dim/dim.h>
@@ -323,17 +324,6 @@ static int64_t currentLevel() {
   return current_level;
 }
 
-static std::tuple<Tensor, int64_t> unwrapTensorAtCurrentLevel(const Tensor& tensor) {
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t current_level = maybe_layer->layerId();
-  auto result = unwrapTensorAtLevel(tensor, current_level);
-  auto value = std::get<0>(result);
-  auto bdim = std::get<1>(result);
-  value = moveBatchDimToFront(value, bdim);
-  return std::make_tuple(value, bdim.has_value() ? 0 : -1);
-}
-
 static void tls_set_vmap_excluded(bool excluded) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::FuncTorchBatched, excluded);
 }
@@ -398,7 +388,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("maybe_get_level", &at::functorch::maybe_get_level);
   m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
   m.def("current_level", &at::functorch::currentLevel);
-  m.def("unwrap_batchedtensor", &at::functorch::unwrapTensorAtCurrentLevel);
   m.def("tls_set_vmap_excluded", &at::functorch::tls_set_vmap_excluded);
   m.def("tls_set_is_included", &at::functorch::tls_set_is_included);
   m.def("_set_dynamic_layer_keys_included", &at::functorch::_set_dynamic_layer_keys_included);
