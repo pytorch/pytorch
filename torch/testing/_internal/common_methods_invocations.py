@@ -740,7 +740,10 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     for start, end, step in samples:
         if start is None:
             assert step is None
+            # Pass end as positional arg
             yield SampleInput(end, kwargs={"dtype": dtype, "device": device})
+            # (Similar to) calling torch.arange(end=3)
+            yield SampleInput(0, kwargs={"end": end, "dtype": dtype, "device": device})
         elif step is None:
             yield SampleInput(start, args=(end,), kwargs={"dtype": dtype, "device": device})
         else:
@@ -772,6 +775,13 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
     for shape, hi, lo in samples:
         yield SampleInput(make_arg(shape), args=(hi, lo))
 
+def sample_inputs_ones_zeros(op, device, dtype, requires_grad, **kwargs):
+    sizes = (
+        (M,),
+        (S, S),
+    )
+    for size in sizes:
+        yield SampleInput(size, kwargs={'dtype': dtype, 'device': device})
 
 def error_inputs_uniform(op, device, **kwargs):
     t = torch.zeros([10], device=device)
@@ -4038,33 +4048,29 @@ def sample_inputs_to(op_info, device, dtype, requires_grad, **kwargs):
         devices = [torch.device('cpu'), torch.device('cuda:0')] if torch.cuda.is_available() else devices
     memory_formats = [torch.preserve_format, torch.channels_last]
 
+    # TODO: can't switch `to.device` overload to use positional arguments
+    # https://github.com/pytorch/pytorch/issues/84265
     # to.device overload
     for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
         kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
             "memory_format": mem_f,
         }
-        yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(device, torch.float64, nb, cp), kwargs=kwargs)
 
     # to.dtype overload
     for nb, cp, mem_f in product([True, False], [True, False], memory_formats):
         kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
             "memory_format": mem_f,
         }
-        yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(torch.float64, nb, cp), kwargs=kwargs)
 
     # to.other overload
     for device, nb, cp, mem_f in product(devices, [True, False], [True, False], memory_formats):
         kwargs = {
-            "non_blocking": nb,
-            "copy": cp,
             "memory_format": mem_f,
         }
         other = make_arg((S, S, S, S), dtype=torch.float64, device=device)
-        yield SampleInput(make_arg((S, S, S, S)), args=(other,), kwargs=kwargs)
+        yield SampleInput(make_arg((S, S, S, S)), args=(other, nb, cp), kwargs=kwargs)
 
 
 def sample_inputs_topk(op_info, device, dtype, requires_grad, **kwargs):
@@ -5197,6 +5203,9 @@ def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((3, 3, 3)), args=(1,))
     yield SampleInput(make_arg((3, 3, 3)), args=(1,), kwargs={'keepdim': True})
 
+    yield SampleInput(make_arg((3, 0)), args=(1,))
+    yield SampleInput(make_arg((3, 0)), args=(1,), kwargs={'keepdim': True})
+
     # test zero scalar tensor
     zero = make_arg(())
     zero.zero_()
@@ -5660,25 +5669,20 @@ def skips_mvlgamma(skip_redundant=False):
 # To test reference numerics against multiple values of argument `p`,
 # we make multiple OpInfo entries with each entry corresponding to different value of p.
 # We run the op tests from test_ops.py only for `p=1` to avoid redundancy in testing.
-# Class `MvlGammaInfo` already contains the basic information related to the operator,
-# it only takes arguments like `domain`, `skips` and `sample_kwargs`, which
-# differ between the entries.
-class MvlGammaInfo(UnaryUfuncInfo):
-    def __init__(self, variant_test_name, domain, skips, sample_kwargs):
-        super(MvlGammaInfo, self).__init__(
-            'mvlgamma',
-            ref=reference_mvlgamma if TEST_SCIPY else None,
-            aliases=('special.multigammaln',),
-            variant_test_name=variant_test_name,
-            domain=domain,
-            decorators=(precisionOverride({torch.float16: 5e-2}),),
-            dtypes=all_types_and(torch.bfloat16),
-            dtypesIfCUDA=all_types_and(torch.half),
-            sample_inputs_func=sample_inputs_mvlgamma,
-            supports_forward_ad=True,
-            supports_fwgrad_bwgrad=True,
-            skips=skips,
-            sample_kwargs=sample_kwargs)
+def make_mvlgamma_opinfo(variant_test_name, domain, skips, sample_kwargs):
+    return UnaryUfuncInfo('mvlgamma',
+                          ref=reference_mvlgamma if TEST_SCIPY else None,
+                          aliases=('special.multigammaln',),
+                          variant_test_name=variant_test_name,
+                          domain=domain,
+                          decorators=(precisionOverride({torch.float16: 5e-2}),),
+                          dtypes=all_types_and(torch.bfloat16),
+                          dtypesIfCUDA=all_types_and(torch.float16),
+                          sample_inputs_func=sample_inputs_mvlgamma,
+                          supports_forward_ad=True,
+                          supports_fwgrad_bwgrad=True,
+                          skips=skips,
+                          sample_kwargs=sample_kwargs)
 
 
 def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
@@ -7247,6 +7251,34 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
         if with_distance:
             kwargs["distance_function"] = torch.nn.PairwiseDistance()
         yield SampleInput(input, args=args, kwargs=kwargs)
+
+
+def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    N, N_prime, L, S, E = 5, 2, 4, 3, 6
+    dim_3_q_shape = (N, L, E)
+    dim_3_kv_shape = (N, S, E)
+    dim_4_q_shape = (N, N_prime, L, E)
+    dim_4_kv_shape = (N, N_prime, S, E)
+
+    qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape)]
+    shapes_and_kwargs = []
+    for qkv_shapes, is_causal, need_attn_weights, dropout_p in product(
+            qkv_shapes, [True, False], [True, False], [0.0, 0.5]):
+        shapes_and_kwargs.append((qkv_shapes[0], qkv_shapes[1],
+                                  dict(is_causal=is_causal,
+                                       need_attn_weights=need_attn_weights,
+                                       dropout_p=dropout_p)))
+
+    return [
+        SampleInput(make(shape_q), args=(
+            make(shape_kv),
+            make(shape_kv),
+        ),
+            kwargs=kwargs)
+        for shape_q, shape_kv, kwargs in shapes_and_kwargs
+    ]
 
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -9091,7 +9123,9 @@ op_db: List[OpInfo] = [
            skips=(
                # cumprod does not handle correctly out= dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
+               DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
+                            dtypes=(torch.bfloat16,), device_type='cpu'),
            ),
            # gradgradcheck fails in fast_mode=True: #56275
            sample_inputs_func=sample_inputs_cumprod,
@@ -11584,6 +11618,29 @@ op_db: List[OpInfo] = [
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
     ),
+    OpInfo(
+        'nn.functional._scaled_dot_product_attention',
+        op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.nn.functional._scaled_dot_product_attention, inp, *args, **kwargs),
+        sample_inputs_func=sample_inputs_scaled_dot_product_attention,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        check_batched_forward_grad=False,
+        decorators=[DecorateInfo(toleranceOverride(
+            {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon', device_type='cuda',), ],
+        skips=(
+            # This is only failing on Linux Bionic 3.10 Cuda 11.6
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda'),
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # No meta function
+            DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+            DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),),
+    ),
     UnaryUfuncInfo(
         'nn.functional.silu',
         aten_backward_name='silu_backward',
@@ -12123,35 +12180,36 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
            ),
            sample_inputs_func=sample_inputs_mode,),
-    MvlGammaInfo(variant_test_name='mvlgamma_p_1',
-                 domain=(1, None),
-                 skips=skips_mvlgamma() + \
-                 (DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                  DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                               dtypes=(torch.float16, torch.int8)),
-                  DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                               dtypes=(torch.int8,)),),
-                 sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
-    MvlGammaInfo(variant_test_name='mvlgamma_p_3',
-                 domain=(2, None),
-                 skips=skips_mvlgamma(skip_redundant=True) + (
-                     DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                     DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                  dtypes=(torch.float16, torch.int8)),
-                     DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                  dtypes=(torch.int8,)),
-                 ),
-                 sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
-    MvlGammaInfo(variant_test_name='mvlgamma_p_5',
-                 domain=(3, None),
-                 skips=skips_mvlgamma(skip_redundant=True) + (
-                     DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
-                     DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
-                                  dtypes=(torch.float16, torch.int8)),
-                     DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
-                                  dtypes=(torch.int8,)),
-                 ),
-                 sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
+    make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_1',
+                         domain=(1, None),
+                         skips=skips_mvlgamma() + (
+                             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                          dtypes=(torch.float16, torch.int8)),
+                             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
+                                          dtypes=(torch.int8,)),
+                         ),
+                         sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
+    make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_3',
+                         domain=(2, None),
+                         skips=skips_mvlgamma() + (
+                             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                          dtypes=(torch.float16, torch.int8)),
+                             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
+                                          dtypes=(torch.int8,)),
+                         ),
+                         sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
+    make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_5',
+                         domain=(3, None),
+                         skips=skips_mvlgamma() + (
+                             DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
+                             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                                          dtypes=(torch.float16, torch.int8)),
+                             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
+                                          dtypes=(torch.int8,)),
+                         ),
+                         sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     BinaryUfuncInfo('ne',
                     ref=np.not_equal,
                     aliases=('not_equal',),
@@ -13971,6 +14029,48 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
            ),
            supports_autograd=False),
+    OpInfo('ones',
+           op=torch.ones,
+           supports_autograd=False,
+           is_factory_function=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_ones_zeros,
+           skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
+    OpInfo('zeros',
+           op=torch.zeros,
+           supports_autograd=False,
+           is_factory_function=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_ones_zeros,
+           skips=(
+               # Tests that assume input is a tensor or sequence of tensors
+               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_noncontiguous_samples"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+
+               # Same failure as arange: cannot find linspace in captured graph
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+           )),
     OpInfo('new_empty',
            op=lambda x, *args, **kwargs: x.new_empty(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -15708,10 +15808,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_prod,
         ref=reference_reduction_numpy(np.prod),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
             # FIXME: prod does not support passing keepdim without passing dim
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_default_keepdim'),
             # FIXME: prod reduces all dimensions when dim=[]
@@ -16165,6 +16261,28 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     PythonRefInfo(
+        "_refs.ones",
+        torch_opinfo_name="ones",
+        skips=(
+            # Tests that assume input is a tensor or sequence of tensors
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+        ),
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.zeros",
+        torch_opinfo_name="zeros",
+        skips=(
+            # Tests that assume input is a tensor or sequence of tensors
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+        ),
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
         "_refs.arange",
         torch_opinfo_name="arange",
         skips=(
@@ -16172,9 +16290,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # See https://github.com/pytorch/pytorch/issues/82364
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
 
             # Prims arange does not follow aten
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
@@ -16244,12 +16359,11 @@ python_ref_db = [
         torch_opinfo_variant_name="variadic_tensors",
         supports_nvfuser=False,
     ),
-    # TODO: https://github.com/pytorch/pytorch/issues/84264
-    # PythonRefInfo(
-    #     "_refs.to",
-    #     torch_opinfo_name="to",
-    #     supports_nvfuser=False,
-    # ),
+    PythonRefInfo(
+        "_refs.to",
+        torch_opinfo_name="to",
+        supports_nvfuser=False,
+    ),
     PythonRefInfo(
         "_refs.triu",
         torch_opinfo_name="triu",
@@ -16415,6 +16529,24 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.lgamma",
         torch_opinfo_name="lgamma",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.multigammaln",
+        torch_opinfo_name="mvlgamma",
+        torch_opinfo_variant_name="mvlgamma_p_1",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.multigammaln",
+        torch_opinfo_name="mvlgamma",
+        torch_opinfo_variant_name="mvlgamma_p_3",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.multigammaln",
+        torch_opinfo_name="mvlgamma",
+        torch_opinfo_variant_name="mvlgamma_p_5",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log",
