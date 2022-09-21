@@ -910,7 +910,7 @@ def _new_process_group_helper(
             # is_ucc_available() from above elif-condition and raise
             # RuntimeError if is_ucc_available() returns false.
 
-            pg = ProcessGroupUCC(prefix_store, rank, world_size, timeout=timeout)
+            pg = ProcessGroupUCC(prefix_store, group_rank, world_size, timeout=timeout)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
             if get_debug_level() == DebugLevel.DETAIL:
@@ -926,7 +926,7 @@ def _new_process_group_helper(
                         wrapped_pg=pg,
                         store_prefix=group_name,
                         store=store,
-                        rank=rank,
+                        rank=group_rank,
                         world_size=world_size,
                         timeout=timeout,
                     )
