@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch._dispatch.python import enable_python_dispatcher
 
 import itertools
 import functools
@@ -486,7 +487,7 @@ class TestDecomp(TestCase):
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
@@ -495,7 +496,7 @@ class TestDecomp(TestCase):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
-                    with enable_torch_dispatch_mode(DecompCrossRefMode):
+                    with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
@@ -504,7 +505,7 @@ class TestDecomp(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name)
