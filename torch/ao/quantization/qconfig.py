@@ -223,7 +223,7 @@ default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
 Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
 """
 
-def get_default_qconfig(backend='x86', version=0):
+def get_default_qconfig(backend='fbgemm', version=0):
     """
     Returns the default PTQ qconfig for the specified backend.
 
@@ -245,7 +245,8 @@ def get_default_qconfig(backend='x86', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
-            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
+            qconfig = QConfig(activation=HistogramObserver.with_args(quant_min=0,
+                                                                     quant_max=127),
                               weight=default_per_channel_weight_observer)
         else:
             qconfig = default_qconfig
@@ -297,7 +298,7 @@ default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=
 default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
-def get_default_qat_qconfig(backend='x86', version=1):
+def get_default_qat_qconfig(backend='fbgemm', version=1):
     """
     Returns the default QAT qconfig for the specified backend.
 
@@ -331,8 +332,7 @@ def get_default_qat_qconfig(backend='x86', version=1):
         if backend == 'x86':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
-                                                                quant_max=255,
-                                                                reduce_range=True),
+                                                                quant_max=127),
                               weight=default_per_channel_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
@@ -358,8 +358,7 @@ def get_default_qat_qconfig(backend='x86', version=1):
         elif backend == 'x86':
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
-                                                                                 quant_max=255,
-                                                                                 reduce_range=True),
+                                                                                 quant_max=127),
                               weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2

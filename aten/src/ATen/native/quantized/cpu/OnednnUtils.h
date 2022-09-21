@@ -380,8 +380,8 @@ static bool is_weight_symmetric_quant(
   return is_symmetric;
 }
 
-// Check if onednn is preferred w.r.t fbgemm
-static bool prefer_onednn(
+// Check if onednn should be used w.r.t fbgemm
+static bool should_use_onednn_quant(
     const at::Tensor& weight,
     bool is_transposed_conv,
     int groups,

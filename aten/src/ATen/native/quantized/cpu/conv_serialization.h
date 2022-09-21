@@ -334,9 +334,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
-    bool prefer_onednn = onednn_utils::prefer_onednn(
+    bool use_onednn = onednn_utils::should_use_onednn_quant(
         weight.value(), transpose, groups, output_padding);
-    if (prefer_onednn) {
+    if (use_onednn) {
       return PackedConvWeightsOnednn<kSpatialDim>::prepack(
         weight.value(),
         bias,
