@@ -29,15 +29,6 @@ def suspend_mode(mode):
     finally:
         torch._C._set_torch_dispatch_mode(mode)
 
-@contextmanager
-def enable_mode(mode):
-    curr_mode = torch._C._get_torch_dispatch_mode()
-    torch._C._set_torch_dispatch_mode(mode)
-    try:
-        yield
-    finally:
-        torch._C._set_torch_dispatch_mode(curr_mode)
-
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     def _unwrap_proxy(e):

@@ -616,7 +616,7 @@ class FakeTensor(torch.Tensor):
 
 
 # We keep one instantiation of `fake_tensor_converter` active
-# for the duration of `with torch_enable_mode(FakeTensorMode)`.
+# for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
