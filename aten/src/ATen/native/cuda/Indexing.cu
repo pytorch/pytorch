@@ -325,7 +325,7 @@ int64_t largestIndex(const Tensor &self) {
   return result;
 }
 
-void index_put_with_sort_helper(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, std::function<void() func) {
+void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
@@ -415,8 +415,6 @@ void index_put_with_sort_helper(Tensor & self, const c10::List<c10::optional<Ten
       }
   }
 }
-
-void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, bool accumulate, bool unsafe) {
 
 }
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
