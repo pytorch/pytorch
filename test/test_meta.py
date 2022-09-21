@@ -195,7 +195,7 @@ def should_check_strides(func):
     if not isinstance(func, torch._ops.OpOverload):
         return False
     # Prims are expected to model strides correctly
-    if func.namespace == "prims":
+    if hasattr(func, 'namespace') and func.namespace == "prims":
         return True
     # Check if it's a view, by testing if any of the returns have
     # a non-empty alias set
