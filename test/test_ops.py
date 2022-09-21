@@ -1660,6 +1660,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
+        '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
