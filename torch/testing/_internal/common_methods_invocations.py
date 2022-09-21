@@ -6131,20 +6131,20 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
     # list of tuples (shape, shape) defining the shapes of the input and output tensors
     sample_shapes = [
         ((), ()),
-        ((S), (1)),
+        ((S,), (1,)),
         ((S, S), (1, 1)),
         ((S, S), (1, S)),
         ((S, S), (S, S)),
         ((S, S, S), (S, 1, S)),
     ]
 
-    samples = []
-
     for input_shape, output_shape in sample_shapes:
         input_t = make_arg(input_shape)
-        samples.append(SampleInput(input_t, args=(output_shape,)))
-
-    return samples
+        yield SampleInput(input_t, args=(output_shape,))
+        if output_shape == ():
+            continue
+        yield SampleInput(input_t, args=(list(output_shape),))
+        yield SampleInput(input_t, args=(*output_shape,))
 
 
 def error_inputs_sum_to_size(op_info, device, **kwargs):
@@ -8846,7 +8846,13 @@ op_db: List[OpInfo] = [
            skips=(
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),),),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),
+               # AssertionError: Tensor-likes are not close!
+               # Mismatched elements: 5 / 5 (100.0%)
+               # https://github.com/pytorch/pytorch/issues/85409
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            )),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
            check_batched_grad=False,
