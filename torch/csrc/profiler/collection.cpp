@@ -63,6 +63,7 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     tags_.emplace_back(Tag::Tensor);
     const auto& sizes = t.sizes();
     const auto dim = sizes.size();
+    const auto layout = t.layout();
     TORCH_CHECK(
         dim <= std::numeric_limits<uint32_t>::max(),
         "Cannot profile Tensors of size > uint32 max. Got dim: ",
@@ -74,10 +75,13 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         /*device_index_*/ t.device().index(),
         /*dtype=*/t.scalar_type(),
         /*dim_=*/(uint32_t)dim,
-        /*layout_=*/t.layout());
+        /*layout_=*/layout);
 
     tensor_sizes_strides_.copy(sizes);
-    tensor_sizes_strides_.copy(t.strides());
+    if (layout == at::kStrided) {
+      // Only Strided layout tensors have strides
+      tensor_sizes_strides_.copy(t.strides());
+    }
   } else {
     tags_.emplace_back(Tag::UndefinedTensor);
   }
@@ -102,9 +106,11 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             (void)_; // Suppress unused variable warning
             out.shapes_.back().push_back(*tensor_size_strides_it++);
           }
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
-            out.strides_.back().push_back(*tensor_size_strides_it++);
+          if (md.layout_ == at::kStrided) {
+            for (const auto _ : c10::irange(md.dim_)) {
+              (void)_; // Suppress unused variable warning
+              out.strides_.back().push_back(*tensor_size_strides_it++);
+            }
           }
           out.tensor_metadata_.emplace_back(md);
           out.ivalues_.emplace_back();
@@ -335,43 +341,7 @@ struct SubQueueThreadCache {
 // `sub_queue_cache_` and fall back to a different mechanism.
 std::atomic<uint32_t> queue_id_{0};
 thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
-} // namespace
 
-namespace python_tracer {
-namespace {
-GetFn get_fn;
-
-struct NoOpPythonTracer : public PythonTracerBase {
-  static NoOpPythonTracer& singleton() {
-    static NoOpPythonTracer singleton_;
-    return singleton_;
-  }
-  void start(RecordQueue*) override {}
-  void stop() override {}
-  void clear() override {}
-  std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)>,
-      std::vector<CompressedEvent>&,
-      time_t) override {
-    return {};
-  }
-  ~NoOpPythonTracer() = default;
-};
-} // namespace
-
-void registerTracer(GetFn get_tracer) {
-  get_fn = get_tracer;
-}
-
-PythonTracerBase& PythonTracerBase::get() {
-  if (get_fn == nullptr) {
-    return NoOpPythonTracer::singleton();
-  }
-  return get_fn();
-}
-} // namespace python_tracer
-
-namespace {
 std::string toString(const ExtraFields<EventType::PyCall>& e) {
   if (e.module_.has_value()) {
     return fmt::format(
@@ -493,7 +463,7 @@ RecordQueue::RecordQueue(
     std::set<ActivityType> activities)
     : id_(++queue_id_), config_{config}, activities_{activities} {
   if (tracePython()) {
-    python_tracer::PythonTracerBase::get().start(this);
+    python_tracer_ = python_tracer::PythonTracerBase::make(this);
   }
 }
 
@@ -528,8 +498,8 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
 }
 
 void RecordQueue::stop() {
-  if (tracePython()) {
-    python_tracer::PythonTracerBase::get().stop();
+  if (python_tracer_) {
+    python_tracer_->stop();
   }
 }
 
@@ -830,7 +800,7 @@ trace_ptr_t addKinetoEvents(
   passEventsToKineto(results, start_time_us, end_time_us);
 
   // In on demand mode kineto is directly controlled by other machinery.
-  if (config.state == ProfilerState::KINETO_ONDEMAND) {
+  if (config.global()) {
     return nullptr;
   }
 
@@ -987,13 +957,12 @@ RecordQueue::getRecords(
     }
   }
 
-  if (tracePython()) {
-    auto& tracer = python_tracer::PythonTracerBase::get();
-    for (auto i :
-         tracer.getEvents(converter, python_enters, end_time_us * 1000)) {
+  if (python_tracer_) {
+    for (auto i : python_tracer_->getEvents(
+             converter, python_enters, end_time_us * 1000)) {
       out.push_back(i);
     }
-    tracer.clear();
+    python_tracer_.reset();
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);

@@ -165,7 +165,7 @@ def create_default_global_save_plan(all_plans: List[SavePlan]) -> Tuple[List[Sav
 
     The only global planning change is to update index hints in all ``MetadataIndex`` objects.
     """
-    md: Dict[str, STORAGE_TYPES] = dict()
+    md: Dict[str, STORAGE_TYPES] = {}
     new_plans = []
     for plan in all_plans:
         new_items = []

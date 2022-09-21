@@ -681,7 +681,12 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       //       that would provide a way to recreate the grad_fn chain.
       if (view_info.has_view_fn()) {
         auto view_fn = view_info.view_fn();
-        auto diff_view = view_fn(view_info.base_);
+        Tensor diff_view;
+        {
+          // We can reach this path with grad_mode disabled, e.g. engine
+          AutoGradMode grad_mode(true);
+          diff_view = view_fn(view_info.base_);
+        }
         diff_view_meta->grad_fn_ = diff_view.grad_fn();
       } else {
         auto fn =

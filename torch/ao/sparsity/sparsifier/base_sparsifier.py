@@ -51,7 +51,7 @@ class BaseSparsifier(abc.ABC):
     """
     def __init__(self, defaults: Optional[Dict[str, Any]] = None):
         super().__init__()
-        self.defaults: Dict[str, Any] = defaults or dict()
+        self.defaults: Dict[str, Any] = defaults or {}
 
         self.state: Dict[str, Dict] = defaultdict(dict)
         self.groups: List[Dict[str, Any]] = []
@@ -275,7 +275,7 @@ class BaseSparsifier(abc.ABC):
             tensor_name = config['tensor_name']
             parametrize.remove_parametrizations(module, tensor_name,
                                                 leave_parametrized=True)
-            sparse_params = dict()
+            sparse_params = {}
             if params_to_keep is not None:
                 global_params = {k: config[k] for k in params_to_keep}
                 sparse_params.update(global_params)
