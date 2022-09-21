@@ -21,8 +21,11 @@
 
 // This file contains functorch's Python bindings.
 
-namespace at {
+namespace torch {
 namespace functorch {
+namespace impl {
+
+using namespace at::functorch;
 
 static bool has_level(const Tensor& self, int64_t level) {
   const auto* batched = maybeGetBatchedImpl(self);
@@ -82,29 +85,6 @@ static std::pair<Tensor,int64_t> remove_existing_batch_dim(
   return std::make_pair(batched->value(), batched->bdim());
 }
 
-// Poor man's version of np.moveaxis. Moves the dimension at `dst` to `src`
-// while preserving the order of other existing dimensions.
-// We should probably add np.moveaxis (it is more general) to PyTorch. (#36048)
-// When we do, replace the following with it.
-static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
-  auto logical_dim = self.dim();
-  src = maybe_wrap_dim(src, logical_dim);
-  dst = maybe_wrap_dim(dst, logical_dim);
-  if (src == dst) {
-    return self;
-  }
-  VmapDimVector permutation;
-  permutation.reserve(logical_dim);
-  for (int64_t dim = 0; dim < logical_dim; dim++) {
-    if (dim == src) {
-      continue;
-    }
-    permutation.push_back(dim);
-  }
-  permutation.insert(permutation.begin() + dst, src);
-  return self.permute(permutation);
-}
-
 // Removes the batch dim with level `level` from `self`. If this causes the
 // last batch dim to be removed from a BatchedTensor, then this returns a
 // regular Tensor.
@@ -137,7 +117,7 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   Tensor self_without_bdim;
   int64_t newly_exposed_logical_dim;
   std::tie(self_without_bdim, newly_exposed_logical_dim) = remove_existing_batch_dim(batched, level);
-  auto result = _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
+  auto result = self_without_bdim.movedim(newly_exposed_logical_dim, out_dim);
   return result;
 }
 
@@ -346,64 +326,55 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
-} // namespace functorch
-}
+void initFuncTorchBindings(PyObject* module) {
+  auto _C = py::handle(module).cast<py::module>();
+  auto m = _C.def_submodule("_functorch");
 
-
-namespace at { namespace functorch {
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("_add_batch_dim", &at::functorch::_add_batch_dim, "add batch dim");
-  m.def("_remove_batch_dim", &at::functorch::_remove_batch_dim, "remove batch dim");
-  m.def("_wrap_functional_tensor", &at::functorch::_wrap_functional_tensor, "add functional tensor");
-  m.def("_assert_wrapped_functional", &at::functorch::_assert_wrapped_functional, "assert wrapped functional");
-  m.def("_propagate_functional_input_mutation", &at::functorch::_propagate_functional_input_mutation, "propagate functional input mutations");
-  m.def("_unwrap_functional_tensor", &at::functorch::_unwrap_functional_tensor, "remove functional tensor");
-  m.def("_vmap_increment_nesting", &at::functorch::_vmap_increment_nesting, "remove batch dim");
-  m.def("_vmap_decrement_nesting", &at::functorch::_vmap_decrement_nesting, "remove batch dim");
-  m.def("_func_increment_nesting", &at::functorch::_func_increment_nesting, "functionalization start");
-  m.def("_func_decrement_nesting", &at::functorch::_func_decrement_nesting, "functionalization end");
-  m.def("_grad_increment_nesting", &at::functorch::_grad_increment_nesting, "remove batch dim");
-  m.def("_grad_decrement_nesting", &at::functorch::_grad_decrement_nesting, "remove batch dim");
-  m.def("_jvp_increment_nesting", &at::functorch::_jvp_increment_nesting);
-  m.def("_jvp_decrement_nesting", &at::functorch::_jvp_decrement_nesting);
-  m.def("_wrap_for_grad", &at::functorch::_wrap_for_grad, "wrap as gradtrackingtensor");
-  m.def("_unwrap_for_grad", &at::functorch::_unwrap_for_grad, "unwrap from gradtrackingtensor");
+  m.def("_add_batch_dim", &_add_batch_dim, "add batch dim");
+  m.def("_remove_batch_dim", &_remove_batch_dim, "remove batch dim");
+  m.def("_wrap_functional_tensor", &_wrap_functional_tensor, "add functional tensor");
+  m.def("_assert_wrapped_functional", &_assert_wrapped_functional, "assert wrapped functional");
+  m.def("_propagate_functional_input_mutation", &_propagate_functional_input_mutation, "propagate functional input mutations");
+  m.def("_unwrap_functional_tensor", &_unwrap_functional_tensor, "remove functional tensor");
+  m.def("_vmap_increment_nesting", &_vmap_increment_nesting);
+  m.def("_vmap_decrement_nesting", &_vmap_decrement_nesting);
+  m.def("_func_increment_nesting", &_func_increment_nesting, "functionalization start");
+  m.def("_func_decrement_nesting", &_func_decrement_nesting, "functionalization end");
+  m.def("_grad_increment_nesting", &_grad_increment_nesting);
+  m.def("_grad_decrement_nesting", &_grad_decrement_nesting);
+  m.def("_jvp_increment_nesting", &_jvp_increment_nesting);
+  m.def("_jvp_decrement_nesting", &_jvp_decrement_nesting);
+  m.def("_wrap_for_grad", &_wrap_for_grad, "wrap as gradtrackingtensor");
+  m.def("_unwrap_for_grad", &_unwrap_for_grad, "unwrap from gradtrackingtensor");
   m.def("_set_vmap_fallback_warning_enabled", &at::functorch::setVmapFallbackWarningEnabled, "Set vmap fallback warnings");
   m.def("_set_vmap_fallback_enabled", &at::functorch::setVmapFallbackEnabled);
   m.def("_is_vmap_fallback_enabled", &at::functorch::isVmapFallbackEnabled);
   m.def("set_inplace_requires_grad_allowed", &at::functorch::setInplaceRequiresGradAllowed);
   m.def("get_inplace_requires_grad_allowed", &at::functorch::getInplaceRequiresGradAllowed);
-  m.def("dlevel", &at::functorch::dlevel, "dlevel");
-  m.def("dump_tensor", &at::functorch::dump_tensor, "dump_tensor");
+  m.def("dlevel", &dlevel, "dlevel");
+  m.def("dump_tensor", &dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);
   m.def("reshape_dim_outof", &at::functorch::reshape_dim_outof);
   m.def("are_transforms_active", &at::functorch::areTransformsActive);
   // various debugging things. Maybe we should offer these as first-class APIs
   // on Tensors?
-  m.def("is_batchedtensor", &at::functorch::is_batchedtensor);
-  m.def("is_gradtrackingtensor", &at::functorch::is_gradtrackingtensor);
-  m.def("is_functionaltensor", &at::functorch::is_functionaltensor);
-  m.def("get_unwrapped", &at::functorch::get_unwrapped);
-  m.def("maybe_get_level", &at::functorch::maybe_get_level);
-  m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
-  m.def("current_level", &at::functorch::currentLevel);
-  m.def("tls_set_vmap_excluded", &at::functorch::tls_set_vmap_excluded);
-  m.def("tls_set_is_included", &at::functorch::tls_set_is_included);
-  m.def("_set_dynamic_layer_keys_included", &at::functorch::_set_dynamic_layer_keys_included);
-  m.def("dump_dls", &at::functorch::dump_dls);
-  m.def("dump_local_tls", &at::functorch::dump_local_tls);
-  m.def("set_fwd_grad_enabled", &at::functorch::set_fwd_grad_enabled);
-  m.def("get_fwd_grad_enabled", &at::functorch::get_fwd_grad_enabled);
+  m.def("is_batchedtensor", &is_batchedtensor);
+  m.def("is_gradtrackingtensor", &is_gradtrackingtensor);
+  m.def("is_functionaltensor", &is_functionaltensor);
+  m.def("get_unwrapped", &get_unwrapped);
+  m.def("maybe_get_level", &maybe_get_level);
+  m.def("maybe_get_bdim", &maybe_get_bdim);
+  m.def("current_level", &currentLevel);
+  m.def("tls_set_vmap_excluded", &tls_set_vmap_excluded);
+  m.def("tls_set_is_included", &tls_set_is_included);
+  m.def("_set_dynamic_layer_keys_included", &_set_dynamic_layer_keys_included);
+  m.def("dump_dls", &dump_dls);
+  m.def("dump_local_tls", &dump_local_tls);
+  m.def("set_fwd_grad_enabled", &set_fwd_grad_enabled);
+  m.def("get_fwd_grad_enabled", &get_fwd_grad_enabled);
 
   torch::functorch::initCompileCacheBindings(m.ptr());
 
-  // initialize first-class dims and install it as a submodule on _C
-  auto dim = Dim_init();
-  if (!dim) {
-    throw py::error_already_set();
-  }
-  py::setattr(m, "dim", py::reinterpret_steal<py::object>(dim));
 }
 
-}}
+}}}
