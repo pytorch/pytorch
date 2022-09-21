@@ -119,6 +119,9 @@ std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dyna
 void setInplaceRequiresGradAllowed(bool allowed);
 bool getInplaceRequiresGradAllowed();
 
+//
+void setDuringFunctorchTransform(bool during_transform);
+bool getDuringFunctorchTransform();
 
 }
 } // namespace at

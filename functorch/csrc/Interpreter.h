@@ -181,7 +181,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
 //   args[i] = func(args[i], i - begin)
 // NOTE: relative_skips must be sorted
 void foreachTensorInplaceSkips(std::vector<IValue>& args, int64_t begin, int64_t end, std::vector<int64_t> relative_skips,
-    std::function<Tensor(const Tensor&)> func);
+    std::function<Tensor(const Tensor&, bool)> func);
 
 std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begin, int64_t end);
 

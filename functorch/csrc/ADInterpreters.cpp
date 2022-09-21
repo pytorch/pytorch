@@ -26,19 +26,20 @@ static void checkForInvalidMutationOnCaptures(
 }
 
 static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
+  const bool generated = getDuringFunctorchTransform();
   if (!tensor.defined()) {
     return tensor;
   }
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
-    return makeTensorWrapper(tensor, current_level, /*generated=*/true);
+    return makeTensorWrapper(tensor, current_level, generated);
   }
   TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
   if (wrapper->level().value() == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }
-  return makeTensorWrapper(tensor, current_level, /*generated=*/true);
+  return makeTensorWrapper(tensor, current_level, generated);
 }
 
 static void autogradBasedTransformProcess(
@@ -91,14 +92,14 @@ static void autogradBasedTransformSendToNext(
     }
     return tensor;
   };
-  auto wrap = [&](const Tensor& tensor) {
+  auto wrap = [&](const Tensor& tensor, bool generated) {
     if (!tensor.defined()) {
       return tensor;
     }
     // if (c10::show_dispatch_trace_enabled()) {
     //   std::cout << "wrap " << current_level << std::endl;
     // }
-    return makeTensorWrapper(tensor, current_level);
+    return makeTensorWrapper(tensor, current_level, generated);
   };
 
   // TODO: we only need to do the following (marked with !) on in-place functions
@@ -153,10 +154,11 @@ static void autogradBasedTransformSendToNext(
   if (getDynamicLayerStack().size() == 0) {
     sanityCheckStack(op, stack);
   }
-  op.callBoxed(stack);
 
   // Step 4, 5, 6
   auto ret_size = op.schema().returns().size();
+
+  op.callBoxed(stack);
 
   auto aliased_input_outputs = findAliasedInputs(op.schema());
   std::vector<int64_t> unwrapped_outputs; // indexes of outputs that should remain unwrapped
@@ -168,7 +170,6 @@ static void autogradBasedTransformSendToNext(
       }
     }
   }
-
   // Step 4
   foreachTensorInplaceSkips(*stack, stack->size() - ret_size, stack->size(), unwrapped_outputs, wrap);
 
