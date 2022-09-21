@@ -154,12 +154,19 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
-    compute_dtype = None
-    if hasattr(activation_post_process, "compute_dtype"):
-        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
+    is_dynamic = False
+    if hasattr(activation_post_process, "is_dynamic"):
+        is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
-    if dtype in [torch.quint8, torch.qint8] and \
-            not hasattr(activation_post_process, 'compute_dtype'):
+    if is_dynamic:
+        # dynamic quantization
+        node_type = "call_function"
+        quantize_op = torch.quantize_per_tensor_dynamic
+        # TODO: get reduce range from observer
+        # reduce_range = activation_post_process.reduce_range
+        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        qparams = {"_dtype_": dtype, "_reduce_range_": reduce_range}
+    elif dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
@@ -171,15 +178,6 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             quantize_op = torch.quantize_per_tensor
-    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
-        # TODO(future PR): switch compute_dtype to is_dynamic
-        # dynamic quantization
-        node_type = "call_function"
-        quantize_op = torch.quantize_per_tensor_dynamic
-        # TODO: get reduce range from observer
-        # reduce_range = activation_post_process.reduce_range
-        reduce_range = torch.backends.quantized.engine == "fbgemm"
-        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     elif dtype == torch.float16:
         node_type = "call_method"
         quantize_op = "to"

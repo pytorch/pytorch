@@ -1318,14 +1318,20 @@ class PlaceholderObserver(ObserverBase):
                reference model spec.
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
-        compute_dtype: if set, marks the future quantize function to use
+        compute_dtype (deprecated): if set, marks the future quantize function to use
                        dynamic quantization instead of static quantization.
-                       Note: this field will be removed in the near future and
-                       replaced with `is_dynamic`.
+                       This field is deprecated, use `is_dynamic=True` instead.
+        is_dynamic: if True, the `quantize` function in the reference model
+                    representation taking stats from this observer instance will
+                    use dynamic quantization.
     """
 
     def __init__(
-        self, dtype=torch.float32, custom_op_name="", compute_dtype=None
+        self,
+        dtype=torch.float32,
+        custom_op_name="",
+        compute_dtype=None,
+        is_dynamic=False,
     ) -> None:
         super(PlaceholderObserver, self).__init__(dtype=dtype)
         # dtype of input of the target operator, e.g. for dynamic quantization
@@ -1333,9 +1339,10 @@ class PlaceholderObserver(ObserverBase):
         self.dtype = dtype
         self.custom_op = custom_op_name
         # used for configuration of computation type for dynamic quantization
-        # TODO(future PR): replace this with `is_dynamic`
         if compute_dtype:
-            self.compute_dtype = compute_dtype
+            is_dynamic = True
+            # TODO(before land): add deprecation warning
+        self.is_dynamic = is_dynamic
 
     def forward(self, x):
         return x
@@ -1551,7 +1558,7 @@ Per-channel, symmetric weight observer with the 8-bit values restricted to [-127
 """
 
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
-    dtype=torch.quint8, compute_dtype=torch.quint8
+    dtype=torch.quint8, is_dynamic=True,
 )
 """
 Default observer for dynamic quantization.
