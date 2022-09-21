@@ -780,12 +780,12 @@ class TestNestedTensorDeviceType(TestCase):
         # error case: softmax across nested dimension
         self.assertRaisesRegex(
             RuntimeError,
-            "Cannot apply softmax across nested dimension 0",
+            "For NestedTensors softmax cannot be applied along the nested dimension 0",
             lambda: torch.nn.functional.softmax(nt, 0)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "Cannot apply softmax across nested dimension 0",
+            "For NestedTensors softmax cannot be applied along the nested dimension 0",
             lambda: torch.nn.functional.softmax(nt, -3)
         )
         # error case: dimension out of range
@@ -840,42 +840,42 @@ class TestNestedTensorDeviceType(TestCase):
         nt2 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            "batch1 must be a 3D tensor",
+            "bmm: self must be a 3D tensor",
             lambda: nt0.bmm(nt0)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "batch1 must be a 3D tensor",
+            "bmm: self must be a 3D tensor",
             lambda: nt0.bmm(nt1)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "batch1 must be a 3D tensor",
+            "bmm: self must be a 3D tensor",
             lambda: nt0.bmm(nt2)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "batch1 must be a 3D tensor",
+            "bmm: self must be a 3D tensor",
             lambda: nt1.bmm(nt0)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "batch1 must be a 3D tensor",
+            "bmm: self must be a 3D tensor",
             lambda: nt1.bmm(nt1)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "batch1 must be a 3D tensor",
+            "bmm: self must be a 3D tensor",
             lambda: nt1.bmm(nt2)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "batch2 must be a 3D tensor",
+            "bmm: mat2 must be a 3D tensor",
             lambda: nt2.bmm(nt0)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "batch2 must be a 3D tensor",
+            "bmm: mat2 must be a 3D tensor",
             lambda: nt2.bmm(nt1)
         )
         # error case: incompatible batch size
@@ -886,19 +886,19 @@ class TestNestedTensorDeviceType(TestCase):
                                   device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            "Expected size for the 1st dimension of batch2 tensor to be: 2 but got: 3.",
+            "bmm: Expected size for the 1st dimension of mat2 to be: 2 but got: 3.",
             lambda: nt0.bmm(nt1)
         )
         self.assertRaisesRegex(
             RuntimeError,
-            "Expected size for the 1st dimension of batch2 tensor to be: 3 but got: 2.",
+            "bmm: Expected size for the 1st dimension of mat2 to be: 3 but got: 2.",
             lambda: nt1.bmm(nt0)
         )
         # error case: underlying matrices cannot be multiplied
         nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"0-th nested matrices in batch cannot be multiplied \(2x4 and 2x4\)",
+            "bmm: Nested tensors cannot be matrix multiplied, last dimension",
             lambda: nt0.bmm(nt0)
         )
         # normal nested tensor

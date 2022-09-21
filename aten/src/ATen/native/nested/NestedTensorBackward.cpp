@@ -71,42 +71,31 @@ Tensor nested_softmax_backward(
     const Tensor& output,
     int64_t dim,
     ScalarType input_dtype) {
-  TORCH_INTERNAL_ASSERT(grad.is_nested(), "Should be nested grad")
-  TORCH_INTERNAL_ASSERT(output.is_nested(), "Should be nested output")
+  TORCH_INTERNAL_ASSERT(grad.is_nested(), "softmax_backward: Should be nested grad")
+  TORCH_INTERNAL_ASSERT(output.is_nested(), "softmax_backward: Should be nested output")
+  auto grad_contig = grad.contiguous();
 
   auto output_ptr = get_nested_tensor_impl(output);
-  auto grad_ptr = get_nested_tensor_impl(grad);
+  auto grad_ptr = get_nested_tensor_impl(grad_contig);
   int64_t ntensors = output_ptr->size(0);
   if (ntensors == 0) {
     return grad.clone();
   }
   int64_t positive_dim = at::maybe_wrap_dim(dim, output_ptr->dim());
 
-  //  Get the info about the output
-  const Tensor &output_buffer = output_ptr->get_buffer(),
-               &output_sizemat = output_ptr->get_nested_size_tensor();
-
-  //  Get the info about the grad
+  const Tensor &output_sizemat = output_ptr->get_nested_size_tensor();
   const Tensor &grad_sizemat = grad_ptr->get_nested_size_tensor();
-
   TORCH_INTERNAL_ASSERT(output_sizemat.equal(grad_sizemat));
-  Tensor grad_output =
-      wrap_buffer(at::empty_like(output_buffer), output_sizemat.clone());
 
-  // Unbind nt into individual tensor slices for calculating the derivative
-  std::vector<Tensor> grad_output_unbind{grad_output.unbind()},
-      grad_unbind{grad.unbind()}, output_unbind{output.unbind()};
+  const auto grad_padded = nested_to_padded_tensor(grad, 0.);
+  const auto output_padded = nested_to_padded_tensor(output, 0.);
+  auto output_grad_padded = at::_softmax_backward_data(grad_padded,
+                                                       output_padded,
+                                                       positive_dim,
+                                                       input_dtype);
+  auto output_grad_nested = nested_from_padded_generic(output_grad_padded, output_sizemat.clone());
 
-  for(const auto i: c10::irange(ntensors)) {
-    at::_softmax_backward_data_out(
-        grad_output_unbind[i],
-        grad_unbind[i],
-        output_unbind[i],
-        positive_dim - 1,
-        input_dtype);
-  }
-  return grad_output;
-
+  return output_grad_nested;
 }
 
 // Rudimentary sum backward assuming the conditions in #82387
