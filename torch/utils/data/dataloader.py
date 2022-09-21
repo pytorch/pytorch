@@ -478,7 +478,7 @@ class DataLoader(Generic[T_co]):
 
             # Cannot statically verify that dataset is Sized
             length = self._IterableDataset_len_called = len(self.dataset)  # type: ignore[assignment, arg-type]
-            if self.batch_size is not None:  # IterableDataset doesn't allow custom sampler or batch_sampler
+            if self.batch_size is not None and self.batch_size <= length:  # IterableDataset doesn't allow custom sampler or batch_sampler
                 from math import ceil
                 if self.drop_last:
                     length = length // self.batch_size
