@@ -1939,11 +1939,10 @@ def all(
     # Computes nelem
     if isinstance(dim, int):
         dim = (dim,)  # type: ignore[assignment]
-    dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
-    nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
 
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    result = eq(sum(a_, dim=dim, keepdim=keepdim), nelem)  # type: ignore[arg-type]
+    # avoid comparison with symbolic number of elements to make this op symint friendly
+    result = eq(sum(logical_not(a_), dim=dim, keepdim=keepdim), 0)
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
