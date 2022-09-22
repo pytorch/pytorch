@@ -227,7 +227,6 @@ mha_fwd(const at::Tensor &q,         // total_q x num_heads x head_size, total_q
     // number of times random will be generated per thread, to offset philox counter in thc random
     // state
     int64_t counter_offset = launch_params.elts_per_thread;
-    at::PhiloxCudaState rng_engine_inputs;
 
     if( is_dropout ) {
         // See Note [Acquire lock when using random generators]
