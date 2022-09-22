@@ -230,9 +230,9 @@ def apply_activation_checkpointing(
         model (nn.Module):
             The model whose submodules should be wrapped with activation checkpointing.
         checkpoint_wrapper_fn (Optional[Callable[nn.Module]])
-            A `Callable` which will wrap modules
+            A ``Callable`` which will wrap modules
         check_fn (Optional[Callable[nn.Module, nn.Module]])
-            A lambda function which will be passed each child of `model` and returns
+            A lambda function which will be passed each child submoule of ``model`` and returns
             ``True`` or ``False`` depending on whether the submodule should be wrapped.
     Returns: None (`model` is modified inplace)
     """
