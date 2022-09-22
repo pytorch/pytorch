@@ -70,14 +70,14 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         dim);
 
     tensor_metadata_.emplace_back(
-        /*UNSAFE_impl_ptr_=*/(void*)t.unsafeGetTensorImpl(),
-        /*UNSAFE_storage_data_ptr_=*/t.has_storage() ? t.storage().data()
-                                                     : nullptr,
+        /*impl_=*/TensorImplAddress(t.unsafeGetTensorImpl()),
+        /*data_=*/
+        StorageImplData(t.has_storage() ? t.storage().data() : nullptr),
         /*device_type_*/ t.device().type(),
         /*device_index_*/ t.device().index(),
-        /*dtype=*/t.scalar_type(),
-        /*dim_=*/(uint32_t)dim,
-        /*layout_=*/layout);
+        /*dtype_=*/t.scalar_type(),
+        /*layout_=*/layout,
+        /*dim_=*/(uint32_t)dim);
 
     tensor_sizes_strides_.copy(sizes);
     if (layout == at::kStrided) {
