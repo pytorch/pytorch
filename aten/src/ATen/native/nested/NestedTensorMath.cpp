@@ -720,7 +720,7 @@ Tensor softmax_nested(
       scalar_t pad_val = std::numeric_limits<scalar_t>::has_infinity ?
                          -std::numeric_limits<scalar_t>::infinity() :
                          std::numeric_limits<scalar_t>::lowest();
-      const auto input_padded = nested_to_padded_tensor(input_contig, pad_val);
+      const auto input_padded = input_contig.to_padded_tensor(pad_val);
       const auto output_padded = at::_softmax(input_padded, dim, half_to_float);
       output_nested = nested_from_padded_generic(output_padded, input_sizes);
     });
@@ -761,8 +761,8 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   Tensor output_sizes = self_sizes.clone();
   // The last entry in every row of output_sizes should be last column of mat2_sizes
   output_sizes.index_put_({at::indexing::Slice(), -1}, mat2_sizes.select(1, -1).clone());
-  auto self_padded = nested_to_padded_tensor(self_contig, 0.);
-  auto mat2_padded = nested_to_padded_tensor(mat2_contig, 0.);
+  auto self_padded = self_contig.to_padded_tensor(0.);
+  auto mat2_padded = mat2_contig.to_padded_tensor(0.);
   auto output_padded = at::matmul(self_padded, mat2_padded);
   auto output_nested = nested_from_padded_generic(output_padded, output_sizes);
 

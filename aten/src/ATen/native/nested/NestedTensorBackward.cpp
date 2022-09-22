@@ -88,8 +88,8 @@ Tensor nested_softmax_backward(
   const Tensor &grad_sizemat = grad_ptr->get_nested_size_tensor();
   TORCH_INTERNAL_ASSERT(output_sizemat.equal(grad_sizemat));
 
-  const auto grad_padded = nested_to_padded_tensor(grad, 0.);
-  const auto output_padded = nested_to_padded_tensor(output, 0.);
+  const auto grad_padded = grad.to_padded_tensor(0.);
+  const auto output_padded = output.to_padded_tensor(0.);
   auto output_grad_padded = at::_softmax_backward_data(grad_padded,
                                                        output_padded,
                                                        positive_dim,
