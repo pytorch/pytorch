@@ -2911,15 +2911,7 @@ def noncontiguous_like(t):
     if not t.is_contiguous():
         return t
 
-    # Save requires_grad since the zero_dim case re-assigns t
-    requires_grad = t.requires_grad
-
-    # Special-cases 0-dim tensors
-    zero_dim = t.ndim == 0
-    if zero_dim:
-        t = t.unsqueeze(0)
-
-    result = torch.repeat_interleave(t.detach(), 2, dim=-1)
+    result = t[..., None].detach().repeat_interleave(2, dim=-1)
 
     # Choose a "weird" value that won't be accessed
     if t.dtype.is_floating_point or t.dtype.is_complex:
@@ -2929,15 +2921,9 @@ def noncontiguous_like(t):
     else:
         value = 12
 
-    if zero_dim:
-        result[0] = value
-        result.set_(result.storage(), 1, (), ())
-    else:
-        result[..., 1::2] = value
-        strides = list(result.stride())
-        strides[-1] *= 2
-        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
-    result.requires_grad_(requires_grad)
+    result[..., 0] = value
+    result = result[..., 1]
+    result.requires_grad_(t.requires_grad)
     return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)

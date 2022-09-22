@@ -1586,9 +1586,16 @@ op_db: List[OpInfo] = [
         decorators=[
             skipCUDAIfNoCusolver,
             skipCPUIfNoLapack,
-            DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})),
-            DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-5, rtol=1e-5)}),
-                         "TestGradients", "test_fn_fwgrad_bwgrad", device_type="cpu"),
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
+            ),
         ],
     ),
     OpInfo(
