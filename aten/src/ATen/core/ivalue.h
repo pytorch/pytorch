@@ -1357,6 +1357,10 @@ struct WeakOrStrongCompilationUnit {
     return strong_ptr_ != c10::nullopt;
   }
 
+  bool holdingEmptyStrongRef() const {
+    return holdingStrongRef() && *strong_ptr_ == nullptr;
+  }
+
   c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
   c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
 };
@@ -1380,8 +1384,13 @@ struct TORCH_API WeakOrStrongTypePtr {
 
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
+
   bool holds_strong_ref() const {
     return cu_.holdingStrongRef();
+  }
+
+  bool holds_empty_strong_ref() const {
+    return cu_.holdingEmptyStrongRef();
   }
 };
 

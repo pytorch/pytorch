@@ -1464,6 +1464,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return !type_.holds_strong_ref();
   }
 
+  bool is_empty_strong_compilation_ref() const {
+    return type_.holds_empty_strong_ref();
+  }
+
  private:
   void resizeObject(size_t slot);
   WeakOrStrongTypePtr type_;
