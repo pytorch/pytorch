@@ -15,7 +15,7 @@ from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed.fsdp._utils import _set_fsdp_flattened
-from torch.distributed.fsdp.flat_param import _set_tensor_flattener, TensorFlattener
+from torch.distributed.fsdp.flat_param import _set_tensor_flattener, _TensorFlattener
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
@@ -59,7 +59,7 @@ class STShardingInfo(NamedTuple):
     process_group: dist.ProcessGroup
 
 
-class ShardedTensorFlattener(TensorFlattener):
+class ShardedTensorFlattener(_TensorFlattener):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
