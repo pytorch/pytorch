@@ -219,10 +219,10 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     return True
 
 def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
-    pattern: Pattern,
-    qconfig: QConfigAny,
-    matched_node_pattern: List[Node],
+    pattern: Optional[Pattern],
+    matched_node_pattern: Optional[List[Node]],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
+    qconfig: QConfigAny,
     backend_config: BackendConfig,
 ) -> bool:
     """ Check is the dtype configuration of a pattern is supported by
@@ -1234,7 +1234,7 @@ def insert_observers_for_model(
             )
 
             is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
-                pattern, qconfig, matched_node_pattern, node_name_to_target_dtype, backend_config)
+                pattern, matched_node_pattern, node_name_to_target_dtype, qconfig, backend_config)
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
