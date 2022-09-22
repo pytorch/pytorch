@@ -118,6 +118,8 @@ jobs:
             echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
           fi
       - name: Upload binaries
+        # Please note this is temporary disabling of uploading pypi cudnn wheel to our wheels repo
+        if: ${{ !contains(inputs.build_name, 'with-pypi-cudnn') }}
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
