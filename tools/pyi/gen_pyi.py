@@ -433,6 +433,7 @@ def gen_pyi(
                 " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
+            "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
