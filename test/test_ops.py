@@ -16,7 +16,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
-from test_proxy_tensor import xfail, skipOps
+from test_proxy_tensor import xfail, skip, skipOps
 
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -1782,7 +1782,7 @@ aliasing_failures = (
 # tests which have inconsistent fake tensor stride propagation
 # XXX: no new tests should be added to this list as a result of a
 # decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-fake_tensor_stride_failing_ops = [
+fake_tensor_stride_failing_ops = {
     "fft.fft2",
     "fft.fft",
     "fft.fftn",
@@ -1803,9 +1803,9 @@ fake_tensor_stride_failing_ops = [
     "fft.rfftn",
     "svd",
     "linalg.svd",
-]
+}
 
-fake_backward_xfails = fake_tensor_stride_failing_ops + [
+fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
@@ -1822,13 +1822,18 @@ fake_backward_xfails = fake_tensor_stride_failing_ops + [
     "cholesky",
     "linalg.eigh",
     "symeig",
-]
+}
 
-fake_backward_xfails = [xfail(stride_skip) for stride_skip in fake_backward_xfails] + [
+fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
     xfail("segment_reduce", "lengths"),
     xfail("norm", "nuc"),
-    xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
-]
+    xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
+}
+
+fake_autocast_backward_xfails = {
+    skip("nn.functional.binary_cross_entropy"),
+    skip("sparse.sampled_addmm"),
+}
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensor(TestCase):
@@ -1920,10 +1925,10 @@ class TestFakeTensor(TestCase):
                 aten.empty_strided.default,
                 aten.copy_.default,
                 aten.is_same_size.default,
-
             )
+
             # TODO: enable check_aliasing, too many failures :/
-            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=False):
+            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
                 with warnings.catch_warnings(), context():
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
@@ -1939,7 +1944,7 @@ class TestFakeTensor(TestCase):
 
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails)
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
