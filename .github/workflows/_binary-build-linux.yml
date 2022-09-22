@@ -154,7 +154,7 @@ jobs:
           git clean -fxd
         working-directory: pytorch
 
-      - name: Checkout atalman/builder to builder dir 1
+      - name: Checkout atalman/builder to builder dir
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: main
