@@ -1721,6 +1721,7 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
             "and use context information from the object instead.",
             category=FutureWarning,
         )
+
         def wrapper(graph_context: torchscript.GraphContext, *args, **kwargs):
             symbolic_context = _exporter_states.SymbolicContext(
                 params_dict=graph_context.params_dict,

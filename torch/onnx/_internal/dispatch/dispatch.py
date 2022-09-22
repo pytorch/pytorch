@@ -2,9 +2,9 @@
 
 Implementation reference: torch/_ops.py
 """
+import types
 from typing import Callable, Sequence
 
-import types
 from torch.onnx import errors
 from torch.onnx._internal import registration, torchscript
 
@@ -28,6 +28,7 @@ class _OpDomain(types.ModuleType):
 
 class _SymbolicFunctionDispatcher(types.ModuleType):
     """Dispatches to the symbolic function for the given domain and op."""
+
     def __init__(self):
         super().__init__("torch.onnx.symbolics")
 
