@@ -1467,10 +1467,6 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
-        if op.name == "permute" and op.variant_test_name == "tensor_method":
-            # a test variant implemented as a lambda
-            self.skipTest("lambda op vs. fx")
-
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
