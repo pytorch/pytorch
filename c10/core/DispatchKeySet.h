@@ -648,8 +648,9 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
 // See Note [TLS Initialization]
 extern C10_API std::atomic<DispatchKeySet> default_included_set;
 
-void add_to_default_include_set(std::initializer_list<DispatchKey> ks);
-void remove_from_default_include_set(std::initializer_list<DispatchKey> ks);
+void C10_API add_to_default_include_set(std::initializer_list<DispatchKey> ks);
+void C10_API
+remove_from_default_include_set(std::initializer_list<DispatchKey> ks);
 
 constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
     DispatchKey::AutocastCPU,
