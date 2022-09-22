@@ -151,6 +151,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
+    case TypeKind::SymFloatType:
+      if (torch::is_symfloat_node(obj.ptr())) {
+        return py::cast<c10::SymFloat>(obj);
+      }
+      return py::cast<double>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
         throw py::cast_error(
@@ -238,6 +243,15 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             symints.push_back(si);
           }
           return symints;
+        }
+        case TypeKind::SymFloatType: {
+          c10::List<c10::SymFloat> symfloats;
+          for (auto it = obj.begin(); it != obj.end(); it++) {
+            auto elm = *it;
+            auto si = py::cast<c10::SymFloat>(elm);
+            symfloats.push_back(si);
+          }
+          return symfloats;
         }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {

@@ -26,6 +26,18 @@ class C10_API SymFloatNodeImpl : public c10::intrusive_ptr_target {
   virtual SymFloatNode wrap(double num) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymFloatNode add(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode sub(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode mul(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
+  virtual SymFloatNode truediv(const SymFloatNode& other) {
+    TORCH_CHECK(false, "NYI");
+  }
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
