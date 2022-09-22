@@ -898,6 +898,9 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         reversed from the `tuple` indices. In the above example, the stack after
         (b -> tuple -> tuple) will be [0, 1], which will be popped by getitem(1) first
         and then by getitem(0).
+
+        TODO: traverse upwards from the output and handle the case when tuple is not a
+        separate node, e.g. graph.call_function(operator.getitem, args=(a, (b, c)))
         """
         if len(index_stack) == 0 and len(current_pattern) > 0:
             matched_patterns.append(copy.copy(current_pattern))

@@ -1305,7 +1305,6 @@ def insert_observers_for_model(
                     is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
-                        maybe_output_obs_node = None
                         if _is_custom_module_lstm(node, modules, qconfig, qhandler):
                             # Currently custom module outputs are assumed to be already quantized,
                             # so we need to insert a DeQuantStub after the output. For custom module
@@ -1319,47 +1318,47 @@ def insert_observers_for_model(
                             # should resolve this inconsistency by inserting DeQuantStubs for all custom
                             # modules, not just for LSTM.
                             _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, graph)
+                            swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
                         else:
                             # this returns the new observer node if it was needed
                             maybe_output_obs_node = maybe_insert_output_observer_for_node(
                                 node, model, modules, graph, matches,
                                 node_name_to_target_dtype, pattern, qhandler, is_qat)
 
-                        if maybe_output_obs_node is not None:
-                            # Update users of original node to use the output observer
-                            # instead. For example, change
-                            #
-                            #           next_node
-                            #          /
-                            #   cur_node -> obs
-                            #
-                            # to
-                            #
-                            #                 next_node
-                            #                 /
-                            #   cur_node -> obs
-                            #
-                            # We need to save orig users before updating uses because
-                            # the list of users will change as we update uses
-                            orig_users = list(node.users.keys())
-                            for user_node in orig_users:
-                                if user_node is maybe_output_obs_node:
-                                    continue
-                                user_node.replace_input_with(node, maybe_output_obs_node)
+                            if maybe_output_obs_node is not None:
+                                # Update users of original node to use the output observer
+                                # instead. For example, change
+                                #
+                                #           next_node
+                                #          /
+                                #   cur_node -> obs
+                                #
+                                # to
+                                #
+                                #                 next_node
+                                #                 /
+                                #   cur_node -> obs
+                                #
+                                # We need to save orig users before updating uses because
+                                # the list of users will change as we update uses
+                                orig_users = list(node.users.keys())
+                                for user_node in orig_users:
+                                    if user_node is maybe_output_obs_node:
+                                        continue
+                                    user_node.replace_input_with(node, maybe_output_obs_node)
 
-                            is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
+                                is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
 
-                            # for general tensor value ops, we modify the graph
-                            # to make all inputs and outputs use the first input's
-                            # observer
-                            if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
-                                    is_reuse_input_qconfig_:
-                                if not maybe_make_input_output_share_observers(node, model, modules):
-                                    remove_output_observer(node, model, modules)
+                                # for general tensor value ops, we modify the graph
+                                # to make all inputs and outputs use the first input's
+                                # observer
+                                if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
+                                        is_reuse_input_qconfig_:
+                                    if not maybe_make_input_output_share_observers(node, model, modules):
+                                        remove_output_observer(node, model, modules)
 
-                        if maybe_output_obs_node is not None or _is_custom_module_lstm(node, modules, qconfig, qhandler):
-                            if qhandler is not None and qhandler.is_custom_module():
-                                swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
+                                if qhandler is not None and qhandler.is_custom_module():
+                                    swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
 
                 else:  # output
                     maybe_insert_observers_before_graph_output(

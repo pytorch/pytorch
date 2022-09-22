@@ -218,7 +218,7 @@
       - run_brew_for_macos_build
       - run:
           name: Test
-          no_output_timeout: "2h"
+          no_output_timeout: "1h"
           command: |
             set -x
 
