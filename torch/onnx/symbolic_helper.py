@@ -672,7 +672,7 @@ def _slice_helper(
     steps=None,
     dynamic_slice=False,
 ):
-    if GLOBALS.export_onnx_opset_version <= 9:
+    if g.opset <= 9:
         from torch.onnx.symbolic_opset9 import _slice as _slice9
 
         return _slice9(g, input, axes, starts, ends)
@@ -754,7 +754,7 @@ def _sort_helper(g: torchscript.GraphContext, input, dim, decending=True, out=No
         shape_,
         g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)),
     )
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         if not decending:
             _unimplemented("Sort", "Ascending is not supported")
         return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
@@ -776,7 +776,7 @@ def _topk_helper(
         k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
         if _try_get_scalar_type(k) != "Long":
             k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         if not largest:
             _unimplemented("TopK", "Ascending is not supported")
         return g.op("TopK", input, k, axis_i=dim, outputs=2)
@@ -788,7 +788,7 @@ def _topk_helper(
 
 @_beartype.beartype
 def _lt_helper(g: torchscript.GraphContext, input, other):
-    if GLOBALS.export_onnx_opset_version <= 8:
+    if g.opset <= 8:
         from torch.onnx.symbolic_opset8 import lt as _lt8
 
         return _lt8(g, input, other)
@@ -819,12 +819,12 @@ def _interpolate_warning(interpolate_mode):
 @_beartype.beartype
 def _unsqueeze_helper(g: torchscript.GraphContext, input, axes_i):
     if _is_constant(axes_i[0]):
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
         return g.op("Unsqueeze", input, axes_i=axes_i)
     # Tensor type
-    if GLOBALS.export_onnx_opset_version < 13:
+    if g.opset < 13:
         raise errors.SymbolicValueError(
             "Opset version must be >= 13 for Unsqueeze with dynamic axes.", input
         )
@@ -834,12 +834,12 @@ def _unsqueeze_helper(g: torchscript.GraphContext, input, axes_i):
 @_beartype.beartype
 def _squeeze_helper(g: torchscript.GraphContext, input, axes_i):
     if _is_constant(axes_i[0]):
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Squeeze", input, axes)
         return g.op("Squeeze", input, axes_i=axes_i)
     # Tensor type
-    if GLOBALS.export_onnx_opset_version < 13:
+    if g.opset < 13:
         raise errors.SymbolicValueError(
             "Opset version must be >= 13 for Squeeze with dynamic axes.", input
         )
@@ -866,7 +866,7 @@ def _reducesum_helper(
     noop_with_empty_axes_i=0,
 ):
     keepdims_i = _maybe_get_const(keepdims_i, "i")
-    if GLOBALS.export_onnx_opset_version >= 13:
+    if g.opset >= 13:
         if axes_i:
             if not _is_value(axes_i):
                 axes_i = g.op(
@@ -1008,7 +1008,7 @@ def _argmin_argmax_helper(
     op_name: str,
 ):
     def op_wrapper(input, axis_i, keepdims_i):
-        if GLOBALS.export_onnx_opset_version >= 12:
+        if g.opset >= 12:
             return g.op(
                 op_name,
                 input,
@@ -1062,7 +1062,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
             )
             output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
-            if GLOBALS.export_onnx_opset_version >= 13:
+            if g.opset >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
                 empty_scales = _optional_input_placeholder_tensor(g)
             else:
@@ -1085,7 +1085,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
                 nearest_mode_s="floor",
             )  # only valid when mode="nearest"
         else:
-            if GLOBALS.export_onnx_opset_version >= 13:
+            if g.opset >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
             else:
                 empty_roi = g.op(
@@ -1163,7 +1163,7 @@ def __interpolate_helper(
         size = g.op("Cast", size, to_i=_C_onnx.TensorProtoDataType.INT64)
         size = g.op("Concat", input_size, size, axis_i=0)
 
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
             empty_scales = _optional_input_placeholder_tensor(g)
         else:
@@ -1188,7 +1188,7 @@ def __interpolate_helper(
         if rank is None:
             return _unimplemented("interpolate (with scales)", "missing input shape")
 
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
         else:
             empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
@@ -1208,9 +1208,9 @@ def __interpolate_helper(
 
 @_beartype.beartype
 def _unbind_helper(g: torchscript.GraphContext, self, dim, _outputs):
-    if GLOBALS.export_onnx_opset_version < 11:
+    if g.opset < 11:
         from torch.onnx.symbolic_opset9 import unbind
-    elif GLOBALS.export_onnx_opset_version <= 12:
+    elif g.opset <= 12:
         from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
     else:
         from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
@@ -1219,7 +1219,7 @@ def _unbind_helper(g: torchscript.GraphContext, self, dim, _outputs):
 
 @_beartype.beartype
 def _scatter_helper(g: torchscript.GraphContext, self, dim, index, src):
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
@@ -1229,7 +1229,7 @@ def _scatter_helper(g: torchscript.GraphContext, self, dim, index, src):
 
 @_beartype.beartype
 def _repeat_interleave_split_helper(g: torchscript.GraphContext, self, reps, dim):
-    if GLOBALS.export_onnx_opset_version <= 12:
+    if g.opset <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
         from torch.onnx.symbolic_opset13 import split
@@ -1283,7 +1283,7 @@ def _arange_cast_helper(
 
 @_beartype.beartype
 def _arange_helper(g: torchscript.GraphContext, *args):
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import arange
     else:
         from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
@@ -1307,7 +1307,7 @@ def _index_fill_reshape_helper(g: torchscript.GraphContext, self, dim, index):
 
     from torch.onnx.symbolic_opset9 import expand
 
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
@@ -1337,7 +1337,7 @@ def _reshape_helper(g: torchscript.GraphContext, input, shape, allowzero=0):
     shape = _maybe_get_const(shape, "is")
     if not _is_value(shape):
         shape = g.op("Constant", value_t=torch.LongTensor(shape))
-    if GLOBALS.export_onnx_opset_version <= 13:
+    if g.opset <= 13:
         if allowzero == 1:
             _onnx_opset_unsupported(
                 "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14, input
