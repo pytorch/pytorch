@@ -533,14 +533,15 @@ class PackageExporter:
             # Couldn't find a source!  Add it to our dependency graph as broken
             # and continue.
             filename = getattr(module_obj, "__file__", None)
-            error_context = None
+            error_context = f"module_name: {module_name} "
+            if filename is not None:
+                error_context += f"filename: {filename}"
             if filename is None:
                 packaging_error = PackagingErrorReason.NO_DUNDER_FILE
             elif filename.endswith(tuple(importlib.machinery.EXTENSION_SUFFIXES)):
                 packaging_error = PackagingErrorReason.IS_EXTENSION_MODULE
             else:
                 packaging_error = PackagingErrorReason.SOURCE_FILE_NOT_FOUND
-                error_context = f"filename: {filename}"
             self.dependency_graph.add_node(
                 module_name,
                 action=_ModuleProviderAction.INTERN,
