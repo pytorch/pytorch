@@ -1128,6 +1128,16 @@ class TestBinaryUfuncs(TestCase):
                 # Cases that throw warnings
                 op(*inputs, out=torch.empty(2, device=device))
                 self.assertEqual(len(w), 1)
+        # test that multi-d out doesn't trigger segfault
+        arg1 = (torch.ones(2, 1, device=device), torch.ones(1, device=device))
+        arg2 = (torch.ones(2, device=device), torch.ones(1, 1, device=device))
+        outs = (torch.ones(2, 1, 1, 1, device=device), torch.ones(2, 2, 2, 2, device=device))
+
+        for a1, a2, o in zip(arg1, arg2, outs):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                torch.mul(a1, a2, out=o)
+                self.assertEqual(len(w), 1)
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @expectedFailureMeta  # UserWarning not triggered
@@ -4128,6 +4138,22 @@ class TestBinaryUfuncs(TestCase):
         # Special Values Scalar-Tensor
         test_zeros_special_helper(*xlogy_fns, scalar=True)
         test_zeros_special_helper(*xlog1py_fns, scalar=True)
+
+    @dtypes(torch.float64)
+    def test_xlogy_xlog1py_gradients(self, device, dtype):
+        make_arg = partial(torch.tensor, dtype=dtype, device=device, requires_grad=True)
+
+        zeros = torch.zeros((2,), dtype=dtype, device=device)
+
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-1.5, 0.0])
+        torch.special.xlogy(x, y).sum().backward()
+        self.assertEqual(x.grad, zeros)
+
+        x = make_arg([0.0, 0.0])
+        y = make_arg([-2.5, -1.0])
+        torch.special.xlog1py(x, y).sum().backward()
+        self.assertEqual(x.grad, zeros)
 
     def test_xlogy_xlog1py_scalar_type_promotion(self, device):
         # Test that python numbers don't participate in type promotion at the same

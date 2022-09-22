@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
+from torch.multiprocessing import Pool
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -127,6 +128,10 @@ TESTS = discover_tests(
         "test_deploy",
     ]
 )
+
+# The doctests are a special case that don't correspond to a file that discover
+# tests can enable.
+TESTS = TESTS + ['doctests']
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
@@ -242,7 +247,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
-    "test_openmp",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -293,6 +297,14 @@ if dist.is_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
+        }
+    if dist.is_ucc_available():
+        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+            "UCX_TLS": "tcp",
+            "UCC_TLS": "nccl,ucp",
+            "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
         }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
@@ -348,20 +360,6 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
-            # Enable xdoctest
-            # TODO: enable xdoctest later
-            # Many doctests assume the existence of these variables
-            # xdoctest_global_exec_lines = r'\n'.join([
-            #     'from torch import nn',
-            #     'import torch.nn.functional as F',
-            #     'import torch',
-            # ])
-            # executable += [
-            #     "--xdoctest",
-            #     "--xdoctest-style=google",
-            #     f"--xdoctest-global-exec='{xdoctest_global_exec_lines}'",
-            #     "--xdoctest-options=+IGNORE_WHITESPACE"
-            # ]
         else:
             print_to_stderr(
                 "Pytest cannot be used for this test. Falling back to unittest."
@@ -370,7 +368,12 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
 
 
 def run_test(
-    test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None
+    test_module,
+    test_directory,
+    options,
+    launcher_cmd=None,
+    extra_unittest_args=None,
+    env=None,
 ):
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
@@ -401,7 +404,7 @@ def run_test(
 
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
-    return shell(command, test_directory)
+    return shell(command, test_directory, env=env)
 
 
 def test_cuda_primary_ctx(test_module, test_directory, options):
@@ -492,15 +495,24 @@ def test_distributed(test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
     config = DISTRIBUTED_TESTS_CONFIG
-    for backend, env_vars in config.items():
-        if sys.platform == "win32" and backend != "gloo":
-            continue
-        if backend == "mpi" and not mpi_available:
-            continue
-        for with_init_file in {True, False}:
+
+    for with_init_file in {True, False}:
+        # Run all distributed backends in parallel, trying to run env/file init
+        # methods in parallel too ends in failures in which the subprocesses
+        # timeout
+        pool = Pool(processes=len(config))
+        return_codes = []
+        tmp_dirs = []
+
+        for backend, env_vars in config.items():
+            if sys.platform == "win32" and backend != "gloo":
+                continue
+            if backend == "mpi" and not mpi_available:
+                continue
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
+            tmp_dirs.append(tmp_dir)
             if options.verbose:
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
@@ -520,6 +532,7 @@ def test_distributed(test_module, test_directory, options):
                 else:
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
                 os.environ["INIT_METHOD"] = init_method
+
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -550,19 +563,117 @@ def test_distributed(test_module, test_directory, options):
                         )
 
                     mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-
-                    return_code = run_test(
-                        test_module, test_directory, options, launcher_cmd=mpiexec
+                    return_code = pool.apply_async(
+                        run_test,
+                        args=(test_module, test_directory, options),
+                        kwds={
+                            "launcher_cmd": mpiexec,
+                            "env": os.environ.copy(),
+                        }
                     )
                 else:
-                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
-                if return_code != 0:
-                    return return_code
+                    return_code = pool.apply_async(
+                        run_test,
+                        args=(test_module, test_directory, options),
+                        kwds={
+                            "extra_unittest_args": ["--subprocess"],
+                            "env": os.environ.copy(),
+                        }
+                    )
+
+                return_codes.append(return_code)
+
             finally:
-                shutil.rmtree(tmp_dir)
                 os.environ.clear()
                 os.environ.update(old_environ)
+
+        pool.close()
+        # Close the pool and wait for all the processes to finish
+        pool.join()
+
+        for tmp_dir in tmp_dirs:
+            shutil.rmtree(tmp_dir)
+
+        for return_code in return_codes:
+            if return_code.get() != 0:
+                return return_code
+
     return 0
+
+
+def run_doctests(test_module, test_directory, options):
+    """
+    Assumes the incoming test module is called doctest, and simply executes the
+    xdoctest runner on the torch library itself.
+    """
+    import xdoctest
+    import pathlib
+    pkgpath = pathlib.Path(torch.__file__).parent
+
+    #
+    enabled = {
+        # TODO: expose these options to the user
+        # Temporary disable all feature-conditional tests
+        # 'lapack': 'auto',
+        # 'cuda': 'auto',
+        # 'cuda1': 'auto',
+        # 'qengine': 'auto',
+        'lapack': 0,
+        'cuda': 0,
+        'cuda1': 0,
+        'qengine': 0,
+    }
+
+    # Resolve "auto" based on a test to determine if the feature is available.
+    if enabled['cuda'] == 'auto' and torch.cuda.is_available():
+        enabled['cuda'] = True
+
+    if enabled['cuda1'] == 'auto' and torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        enabled['cuda1'] = True
+
+    if enabled['lapack'] == 'auto' and torch._C.has_lapack:
+        enabled['lapack'] = True
+
+    if enabled['qengine'] == 'auto':
+        try:
+            # Is there a better check if quantization is enabled?
+            import torch.nn.quantized as nnq  # NOQA
+            torch.backends.quantized.engine = 'qnnpack'
+            torch.backends.quantized.engine = 'fbgemm'
+        except (ImportError, RuntimeError):
+            ...
+        else:
+            enabled['qengine'] = True
+
+    # Set doctest environment variables
+    if enabled['cuda']:
+        os.environ['TORCH_DOCTEST_CUDA'] = '1'
+
+    if enabled['cuda1']:
+        os.environ['TORCH_DOCTEST_CUDA1'] = '1'
+
+    if enabled['lapack']:
+        os.environ['TORCH_DOCTEST_LAPACK'] = '1'
+
+    if enabled['qengine']:
+        os.environ['TORCH_DOCTEST_QENGINE'] = '1'
+
+    pkgpath = os.path.dirname(torch.__file__)
+    xdoctest_config = {
+        'global_exec': r'\n'.join([
+            'from torch import nn',
+            'import torch.nn.functional as F',
+            'import torch',
+        ]),
+        'style': 'google',
+        'options': '+IGNORE_WHITESPACE',
+    }
+    xdoctest_verbose = max(1, options.verbose)
+    run_summary = xdoctest.runner.doctest_module(
+        os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
+        command=options.xdoctest_command, argv=[])
+    result = 1 if run_summary.get('n_failed', 0) else 0
+    return result
 
 
 CUSTOM_HANDLERS = {
@@ -583,6 +694,7 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "doctests": run_doctests,
 }
 
 
@@ -738,6 +850,15 @@ def parse_args():
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
+    )
+    parser.add_argument(
+        "--xdoctest-command",
+        default='list',
+        help=(
+            "Control the specific doctest action. "
+            "Use 'list' to simply parse doctests and check syntax. "
+            "Use 'all' to execute all doctests or specify a specific "
+            "doctest to run")
     )
     return parser.parse_args()
 

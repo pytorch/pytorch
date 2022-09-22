@@ -1,6 +1,7 @@
 
 import torch._C
 
+
 def format_time(time_us=None, time_ms=None, time_s=None):
     '''Defines how to format time'''
     assert sum([time_us is not None, time_ms is not None, time_s is not None]) == 1
@@ -47,7 +48,6 @@ class ExecutionStats(object):
     def total_time_seconds(self):
         return self.num_iters * (
             self.latency_avg_ms / 1000.0) / self.benchmark_config.num_calling_threads
-
 
     def __str__(self):
         return '\n'.join([

@@ -75,7 +75,7 @@ static bool IsComparisonOp(const NodeKind& nkind) {
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
-  AT_ASSERT(typePtr != nullptr);
+  TORCH_INTERNAL_ASSERT(typePtr != nullptr);
   return typePtr->withScalarType({scalar_type});
 }
 

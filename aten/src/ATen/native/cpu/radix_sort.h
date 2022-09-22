@@ -5,6 +5,8 @@
 
 namespace at { namespace native {
 
+bool is_radix_sort_available() { return false; }
+
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
     K* inp_key_buf,
@@ -21,17 +23,20 @@ std::pair<K*, V*> radix_sort_parallel(
 #else
 
 #include <omp.h>
+#include <c10/util/llvmMathExtras.h>
 
 namespace at { namespace native {
 
 namespace {
+
+bool is_radix_sort_available() { return true; }
 
 // `radix_sort_parallel` is primarily used for converting COO to CSR when sorting
 // the indices, which is used in scatter_reduce optimization on CPU.
 //
 // Copied from fbgemm implementation here:
 // https://github.com/pytorch/FBGEMM/blob/main/fbgemm_gpu/src/cpu_utils.cpp
-// 
+//
 // `radix_sort_parallel` is only available when ATen is compiled with OpenMP,
 // since the algorithm requires sync between omp threads, which can not be perfectly
 // mapped to `at::parallel_for` at the current stage.
@@ -148,7 +153,9 @@ std::pair<K*, V*> radix_sort_parallel(
   if (max_value == 0) {
     return std::make_pair(inp_key_buf, inp_value_buf);
   }
-  int num_bits = sizeof(K) * 8 - __builtin_clz(max_value);
+
+  // __builtin_clz is not portable
+  int num_bits = sizeof(K) * 8 - llvm::countLeadingZeros(static_cast<std::make_unsigned_t<K>>(max_value));
   unsigned int num_passes = (num_bits + 7) / 8;
 
 #pragma omp parallel
