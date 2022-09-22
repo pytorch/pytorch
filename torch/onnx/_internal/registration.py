@@ -155,7 +155,7 @@ class _SymbolicFunctionGroup:
                 opset,
                 self.get_min_supported(),
             )
-        return function(*args, **kwargs)
+        return function(context, *args, **kwargs)
 
     # TODO(justinchuby): Add @functools.lru_cache(maxsize=None) if lookup time becomes
     # a problem.
