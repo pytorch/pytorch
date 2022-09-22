@@ -6302,7 +6302,9 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(ctx: SymbolicContext, g: torchscript.GraphContext, *inputs, **kwargs) -> None:
+def prim_device(
+    ctx: SymbolicContext, g: torchscript.GraphContext, *inputs, **kwargs
+) -> None:
     output_type = ctx.cur_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None
