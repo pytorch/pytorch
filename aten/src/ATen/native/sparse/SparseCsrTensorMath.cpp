@@ -147,7 +147,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
     // For the case of (0x0) result tensor, manually resize `result` tensor
     // to the size of `self` tensor
     if (result.numel() == 0) {
-      at::native::resize_as_sparse_csr_(result, self);
+      at::native::resize_as_sparse_compressed_(result, self);
     }
     // copy_sparse_compressed_ internally checks the sizes of result and self tensors
     // Hence no external size check required
@@ -522,14 +522,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
 #if !AT_USE_MKL_SPARSE()
   // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
   // strided -> strided
-  // TORCH_CHECK(
-  //     (mat1.is_sparse_csr() ||
-  //      (mat2.is_sparse_csr() && result.is_sparse_csr())),
-  //     "Calling addmm on sparse CPU tensors requires Linux platform. ",
-  //     "Please use PyTorch built with MKL on Linux.");
-  // TORCH_CHECK(
-  //     result.layout() == kStrided,
-  //     "Calling addmm on CPU with sparse output requires MKL.");
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
@@ -793,7 +785,7 @@ Tensor& add_out_sparse_csr_cpu(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
-    at::native::resize_as_sparse_csr_(out, self);
+    at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
   return out;

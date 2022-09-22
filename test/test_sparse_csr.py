@@ -100,7 +100,7 @@ def _test_addmm_addmv(
     def convert_layout(mat):
         if layout == torch.sparse_csr:
             return mat.to_sparse_csr()
-        if layout == torch.sparse_csc:
+        elif layout == torch.sparse_csc:
             return mat.to_sparse_csc()
         else:
             assert mat.layout == layout
@@ -109,6 +109,7 @@ def _test_addmm_addmv(
     if mode == "all_sparse":
         res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
         res1 = res1.to_dense()
+        test_case.assertEqual(res1.layout, layout)
     elif mode == "dense_result":
         res1 = f(t, convert_layout(m), convert_layout(v), alpha=alpha, beta=beta)
     else:
@@ -902,6 +903,10 @@ class TestSparseCompressed(TestCase):
             self.assertEqual(sparse.dense_dim(), dense_dim)
 
 
+def _npref_block_addmm_addmv(c, a, b, alpha, beta):
+    return alpha * (a @ b) + beta * c
+
+
 class TestSparseCSR(TestCase):
 
     def test_csr_stride(self):
@@ -1046,6 +1051,118 @@ class TestSparseCSR(TestCase):
             a.resize_(new_shape[-2], new_shape[-1])
             self.assertEqual(a.shape, (new_shape[-2], new_shape[-1]))
             self.assertEqual(a._nnz(), 5)
+
+    @skipMeta
+    @dtypes(torch.float, torch.bool)
+    @all_sparse_compressed_layouts('layout_a')
+    @all_sparse_compressed_layouts('layout_b')
+    def test_resize_as_sparse_compressed(self, device, dtype, layout_a, layout_b):
+
+        def _check_resize_b_as_a(b, a, should_resize=True):
+            br = b.clone()
+            br.resize_as_sparse_(a)
+
+            # layout and shape are inherited from a
+            self.assertEqual(a.shape, br.shape)
+            self.assertEqual(a.layout, br.layout)
+            # other metadata is not affected
+            self.assertEqual(b.device, br.device)
+            self.assertEqual(b.dtype, br.dtype)
+
+            def _get_compressed_plain_inds(t):
+                compressed_indices_mth, plain_indices_mth = sparse_compressed_indices_methods[t.layout]
+                return compressed_indices_mth(t), plain_indices_mth(t)
+
+            br_compressed_indices, br_plain_indices = _get_compressed_plain_inds(br)
+            br_values = br.values()
+
+            b_compressed_indices, b_plain_indices = _get_compressed_plain_inds(b)
+            a_compressed_indices, a_plain_indices = _get_compressed_plain_inds(a)
+
+            if should_resize:
+                # contents of the indices tensors should be updated with data from a, if resize is performed
+                self.assertEqual(a_plain_indices, br_plain_indices, exact_dtype=False)
+                self.assertEqual(a_compressed_indices, br_compressed_indices, exact_dtype=False)
+                # the device/dtype of indices should always be unaffected
+                self.assertEqual(b_plain_indices.dtype, br_plain_indices.dtype)
+                self.assertEqual(b_plain_indices.device, br_plain_indices.device)
+                self.assertEqual(b_compressed_indices.dtype, br_compressed_indices.dtype)
+                self.assertEqual(b_compressed_indices.device, br_compressed_indices.device)
+
+                # values are generated empty, shape is updated
+                self.assertEqual(a.values().shape, br_values.shape)
+                # the device/dtype of indices should always be unaffected
+                b_values = b.values()
+                self.assertEqual(b_values.dtype, br_values.dtype)
+                self.assertEqual(b_values.device, br_values.device)
+                # nnz will be picked up from a via new shape of values
+                self.assertEqual(a._nnz(), br._nnz())
+            else:
+                # if a resize is not done, they should remain unchanged
+                self.assertEqual(b_plain_indices, br_plain_indices, exact_device=True)
+                self.assertEqual(b_compressed_indices, br_compressed_indices, exact_device=True)
+
+                # if a resize is not triggered they should remain unchanged
+                self.assertEqual(b.values(), br_values, exact_device=True)
+
+            # post resize the invariants of the layout are respected
+            torch._validate_sparse_compressed_tensor_args(br_compressed_indices, br_plain_indices, br_values, br.shape,
+                                                          br.layout)
+
+        a_block_sparse = layout_a in (torch.sparse_bsr, torch.sparse_bsc)
+        b_block_sparse = layout_b in (torch.sparse_bsr, torch.sparse_bsc)
+        shape = (2, 1, 6, 4)
+        nnz = 4
+        blocksize_a = (2, 2) if a_block_sparse else ()
+        blocksize_b = (3, 2) if b_block_sparse else ()
+        for index_dtype in [torch.int32, torch.int64]:
+            a = self.genSparseCompressedTensor(shape,
+                                               layout=layout_a,
+                                               device=device,
+                                               index_dtype=index_dtype,
+                                               dtype=dtype,
+                                               nnz=nnz,
+                                               blocksize=blocksize_a)
+            # TODO: we could clone + convert but not all layouts are supported, so we generate from scratch
+            # same size, different layouts should trigger resize
+            b = self.genSparseCompressedTensor(shape,
+                                               layout=layout_b,
+                                               device=device,
+                                               index_dtype=index_dtype,
+                                               dtype=dtype,
+                                               nnz=nnz,
+                                               blocksize=blocksize_a if
+                                               (a_block_sparse and b_block_sparse) else blocksize_b)
+
+            # This test will not always trigger a resize, if the layouts are the same nothing should happen to b
+            _check_resize_b_as_a(b, a, should_resize=layout_a != layout_b)
+
+            # same ndim, but bigger, more nnz, different dtype, different blocksize
+            b = self.genSparseCompressedTensor(tuple(s * 2 for s in shape),
+                                               layout=layout_b,
+                                               device=device,
+                                               dtype=torch.chalf,
+                                               index_dtype=torch.int64 if index_dtype == torch.int32 else torch.int32,
+                                               nnz=nnz * 2,
+                                               blocksize=blocksize_b)
+            _check_resize_b_as_a(b, a)
+
+            # different device, only check on cuda pass as we know we are testing in an environment that has multiple devices
+            if device == 'cuda':
+                b = a.clone().cpu()
+                _check_resize_b_as_a(b, a)
+
+            # error on a strided
+            a_strided = a.to_dense()
+            with self.assertRaisesRegex(
+                    RuntimeError, r'"resize_as_sparse_compressed_: src " expected sparse compressed tensor layout'):
+                b.resize_as_sparse_(a_strided)
+
+            # error on b strided
+            b_strided = b.to_dense()
+            with self.assertRaisesRegex(
+                    RuntimeError, r'"resize_as_sparse_compressed_: self " expected sparse compressed tensor layout'):
+                b_strided.resize_as_sparse_(a)
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
@@ -1318,7 +1435,17 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     run_test(a, a_batched, b, op_b, op_out, dtype=dtype, device=device)
 
-    def run_test_block_addmm_addmv(self, addmv_addmm, c, a, b, op_b=False, op_out=False, *, dtype=None, device=None):
+    def run_test_block_addmm_addmv(self,
+                                   addmv_addmm,
+                                   c,
+                                   a,
+                                   b,
+                                   op_b=False,
+                                   op_out=False,
+                                   *,
+                                   dtype=None,
+                                   device=None,
+                                   ref=_npref_block_addmm_addmv):
         alpha = complex(random.random(), random.random()) if dtype.is_complex else random.random()
         beta = complex(random.random(), random.random()) if dtype.is_complex else random.random()
         b = b.mH if (op_b and a.shape == b.shape) else b
@@ -1336,23 +1463,9 @@ class TestSparseCSR(TestCase):
             ),
             shape=a.shape,
         )
-        expected = alpha * (a_bsr * b.cpu().resolve_conj().numpy()) + beta * c.cpu().numpy()
+        expected = ref(c.cpu().numpy(), a_bsr, b.cpu().resolve_conj().numpy(), alpha, beta)
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
-
-        if addmv_addmm == torch.addmm:
-            # test dense x bsc by transposing the entire test case
-            a_t = a.transpose(-2, -1)
-            b_t = b.transpose(-2, -1)
-            c_t = c.transpose(-2, -1)
-            actual_t = addmv_addmm(c_t, b_t, a_t, alpha=alpha, beta=beta)
-            out_t = torch.empty_like(out.transpose(-2, -1))
-            addmv_addmm(c_t, b_t, a_t, alpha=alpha, beta=beta, out=out_t)
-
-            expected_t = alpha * (b.cpu().resolve_conj().numpy().transpose() *
-                                  a_bsr.transpose()) + beta * c.cpu().numpy().transpose()
-            self.assertEqual(actual_t, out_t)
-            self.assertEqual(actual_t, expected_t)
 
     # TODO: block_size 1 is broken
     @parametrize("block_size", [2, 3])
@@ -1361,25 +1474,59 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
-                        torch.float64: 1e-5, torch.complex128: 1e-5})
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-5, torch.complex128: 1e-5})
     def test_block_addmm(self, device, dtype, index_dtype, block_size, noncontiguous):
+
+        def make_transposed_addmm_op(f):
+
+            def tt(t):
+                if isinstance(t, torch.Tensor):
+                    return t.transpose(-2, -1)
+                else:
+                    # assume numpy/scipy spmatrix
+                    return t.transpose()
+
+            @functools.wraps(f)
+            def wrapper(c, a, b, alpha=None, beta=None, out=None):
+                if out is not None:
+                    # the ref takes no out kwarg
+                    assert isinstance(out, torch.Tensor)
+                    # tranpose inplace to propogate out to checking context
+                    out.transpose_(-2, -1)
+                    return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta, out=out)
+                else:
+                    return f(tt(c), tt(b), tt(a), alpha=alpha, beta=beta)
+
+            return wrapper
+
         for (m, n, k) in itertools.product([2, 5], repeat=3):
             nnz = random.randint(0, m * k)
             if not noncontiguous:
-                a = self.genSparseCSRTensor((m * block_size, k * block_size), nnz,
-                                            dtype=dtype, device=device, index_dtype=index_dtype)
+                a = self.genSparseCSRTensor((m * block_size, k * block_size),
+                                            nnz,
+                                            dtype=dtype,
+                                            device=device,
+                                            index_dtype=index_dtype)
                 a = a.to_sparse_bsr((block_size, block_size))
             else:
                 a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
-                a_data = a_data.mT if noncontiguous else a_data   # Test column-major blocks
-                a = torch._sparse_bsr_tensor_unsafe(a.crow_indices(), a.col_indices(),
-                                                    a_data, (m * block_size, k * block_size))
+                a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
+                a = torch._sparse_bsr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data,
+                                                    (m * block_size, k * block_size))
             b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for op_b, op_out in itertools.product([True, False], repeat=2):
                 self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
+                self.run_test_block_addmm_addmv(make_transposed_addmm_op(torch.addmm),
+                                                c,
+                                                a,
+                                                b,
+                                                op_b,
+                                                op_out,
+                                                dtype=dtype,
+                                                device=device,
+                                                ref=make_transposed_addmm_op(_npref_block_addmm_addmv))
 
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
