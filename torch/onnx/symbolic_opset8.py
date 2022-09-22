@@ -35,7 +35,7 @@ import warnings
 
 import torch
 from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
-from torch.onnx._internal import registration
+from torch.onnx._internal import registration, torchscript
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=8)
 
@@ -125,7 +125,14 @@ def _interpolate(name, dim, interpolate_mode):
 
 @_onnx_symbolic("aten::__interpolate")
 def __interpolate(
-    g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
+    g: torchscript.GraphContext,
+    input,
+    size,
+    scale_factor,
+    mode,
+    align_corners,
+    recompute_scale_factor,
+    antialias,
 ):
     align_corners = symbolic_helper._maybe_get_const(align_corners, "b")
     if not symbolic_helper._is_none(align_corners) and align_corners:
@@ -150,7 +157,7 @@ def __interpolate(
 # NOTE: We should create a wrapper for this kind of operation, after resolving the shape/type propagation
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
 #       is lost after casting.
-def _try_cast_integer_to_float(g, *args):
+def _try_cast_integer_to_float(g: torchscript.GraphContext, *args):
     floating_scalar_types = {"Half", "Float", "Double"}
     old_type = None
     # Cast the input tensor to Float if its scalarType is known and is not floating number.
@@ -175,13 +182,13 @@ def _try_cast_integer_to_float(g, *args):
     return (old_type,) + args
 
 
-def _cast_to_type(g, input, to_type):
+def _cast_to_type(g: torchscript.GraphContext, input, to_type):
     if to_type is None:
         return input
     return getattr(opset9, f"_cast_{to_type}")(g, input, False)
 
 
-def _comparison_operator(g, input, other, op_name):
+def _comparison_operator(g: torchscript.GraphContext, input, other, op_name):
     other = symbolic_helper._maybe_get_scalar(other)
     other = symbolic_helper._if_scalar_type_as(other, input)
     _, input, other = _try_cast_integer_to_float(g, input, other)
@@ -191,17 +198,17 @@ def _comparison_operator(g, input, other, op_name):
 # NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
 #       integer input type not supported in opset8. Cast to float if possible.
 @_onnx_symbolic("aten::gt")
-def gt(g, input, other):
+def gt(g: torchscript.GraphContext, input, other):
     return _comparison_operator(g, input, other, "Greater")
 
 
 @_onnx_symbolic("aten::lt")
-def lt(g, input, other):
+def lt(g: torchscript.GraphContext, input, other):
     return _comparison_operator(g, input, other, "Less")
 
 
 @_onnx_symbolic("aten::bmm")
-def bmm(g, self, other):
+def bmm(g: torchscript.GraphContext, self, other):
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, other = _try_cast_integer_to_float(g, self, other)
         return _cast_to_type(g, g.op("MatMul", self, other), old_type)
@@ -210,12 +217,12 @@ def bmm(g, self, other):
 
 
 @_onnx_symbolic("aten::matmul")
-def matmul(g, self, other):
+def matmul(g: torchscript.GraphContext, self, other):
     return bmm(g, self, other)
 
 
 @_onnx_symbolic("aten::prelu")
-def prelu(g, self, weight):
+def prelu(g: torchscript.GraphContext, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
     weight_sizes = symbolic_helper._get_tensor_sizes(weight)
     if self_rank is not None and self_rank > 2:
@@ -231,7 +238,7 @@ def prelu(g, self, weight):
 
 
 @_onnx_symbolic("aten::mm")
-def mm(g, self, other):
+def mm(g: torchscript.GraphContext, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
     scalar_type = symbolic_helper._try_get_scalar_type(self, other)
@@ -260,7 +267,7 @@ def mm(g, self, other):
 
 @_onnx_symbolic("aten::addmm")
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
-def addmm(g, self, mat1, mat2, beta, alpha):
+def addmm(g: torchscript.GraphContext, self, mat1, mat2, beta, alpha):
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, mat1, mat2 = _try_cast_integer_to_float(g, self, mat1, mat2)
         return _cast_to_type(
@@ -287,7 +294,7 @@ def addmm(g, self, mat1, mat2, beta, alpha):
 
 
 @_onnx_symbolic("aten::flatten")
-def flatten(g, input, start_dim, end_dim):
+def flatten(g: torchscript.GraphContext, input, start_dim, end_dim):
     start_dim_i = symbolic_helper._get_const(start_dim, "i", "start_dim")
     end_dim_i = symbolic_helper._get_const(end_dim, "i", "end_dim")
 
@@ -315,7 +322,7 @@ def flatten(g, input, start_dim, end_dim):
     return opset9.flatten(g, input, start_dim, end_dim)
 
 
-def _constant_fill(g, sizes, dtype: int, const_value):
+def _constant_fill(g: torchscript.GraphContext, sizes, dtype: int, const_value):
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
     else:
@@ -341,45 +348,79 @@ def _constant_fill(g, sizes, dtype: int, const_value):
 
 @_onnx_symbolic("aten::empty")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
-def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+def empty(
+    g: torchscript.GraphContext,
+    sizes,
+    dtype,
+    layout,
+    device,
+    pin_memory=False,
+    memory_format=None,
+):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
 @_onnx_symbolic("aten::empty_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
-def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def empty_like(
+    g: torchscript.GraphContext,
+    input,
+    dtype,
+    layout,
+    device,
+    pin_memory=False,
+    memory_format=None,
+):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
 @_onnx_symbolic("aten::zeros")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
-def zeros(g, sizes, dtype, layout, device, pin_memory=False):
+def zeros(g: torchscript.GraphContext, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return _constant_fill(g, sizes, dtype, 0)
 
 
 @_onnx_symbolic("aten::zeros_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
-def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def zeros_like(
+    g: torchscript.GraphContext,
+    input,
+    dtype,
+    layout,
+    device,
+    pin_memory=False,
+    memory_format=None,
+):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 0)
 
 
 @_onnx_symbolic("aten::ones")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
-def ones(g, sizes, dtype, layout, device, pin_memory=False):
+def ones(g: torchscript.GraphContext, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 1)
 
 
 @_onnx_symbolic("aten::ones_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
-def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
+def ones_like(
+    g: torchscript.GraphContext,
+    input,
+    dtype,
+    layout,
+    device,
+    pin_memory=False,
+    memory_format=None,
+):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 1)
 
 
 @_onnx_symbolic("aten::full")
-def full(g, sizes, value, dtype, layout, device, pin_memory=False):
+def full(
+    g: torchscript.GraphContext, sizes, value, dtype, layout, device, pin_memory=False
+):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
         tmp = zeros(g, sizes, dtype, layout, device)
@@ -392,14 +433,21 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 @_onnx_symbolic("aten::full_like")
 @symbolic_helper.parse_args("v", "f", "i", "v", "v", "v", "v")
 def full_like(
-    g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None
+    g: torchscript.GraphContext,
+    input,
+    fill_value,
+    dtype,
+    layout,
+    device,
+    pin_memory=False,
+    memory_format=None,
 ):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, fill_value)
 
 
 @_onnx_symbolic("aten::repeat")
-def repeat(g, self, repeats):
+def repeat(g: torchscript.GraphContext, self, repeats):
     if not symbolic_helper._is_value(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
     if symbolic_helper._is_packed_list(repeats):
