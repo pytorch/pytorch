@@ -182,7 +182,7 @@ class MixedPrecision:
         are checkpointed in their full precision (and then restored back to
         to their reduced precision) as expected. Note that this checkpoint
         support is currently limited to ``StateDictType.FULL_STATE_DICT``.
-        ``keep_casted_gradients``: Whether to upcast gradients back to the
+        ``keep_low_precision_grads``: Whether to upcast gradients back to the
         full parameter precision after backwards or not. This can be disabled
         to keep the gradients in the lower precision, which can potentially
         save memory if custom Optimizers are able to perform parameter updates
@@ -214,12 +214,7 @@ class MixedPrecision:
     # TODO: buffer + param are usually of the same type, if user specifies
     # param but not buffer, should we automatically make buffer be the same?
     buffer_dtype: Optional[torch.dtype] = None
-    # Whether to upcast gradients back to the full parameter precision after
-    # backwards or not. This can be disabled to keep the gradients in the
-    # lower precision, which can potentially save memory if custom Optimizers
-    # are able to perform parameter updates effectively with lower precision
-    # grads.
-    keep_casted_gradients: Optional[bool] = False
+    keep_low_precision_grads: Optional[bool] = False
 
 
 @dataclass
@@ -1065,7 +1060,7 @@ class FullyShardedDataParallel(nn.Module):
             self.cpu_offload.offload_params,
             self.mixed_precision.param_dtype,
             self.mixed_precision.reduce_dtype,
-            self.mixed_precision.keep_casted_gradients,
+            self.mixed_precision.keep_low_precision_grads,
         )
         self._fsdp_wrapped_module = FlattenParamsWrapper(
             module,
@@ -1688,7 +1683,7 @@ class FullyShardedDataParallel(nn.Module):
     def _mixed_precision_keep_low_precision_grads(self) -> bool:
         return (
             self.mixed_precision is not None
-            and self.mixed_precision.keep_casted_gradients
+            and self.mixed_precision.keep_low_precision_grads
         )
 
     def _low_precision_hook_enabled(self) -> bool:
