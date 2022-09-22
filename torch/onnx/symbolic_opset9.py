@@ -26,6 +26,7 @@ from torch.onnx import (  # noqa: F401
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal.dispatch import symbolics
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -871,7 +872,7 @@ def expand(g: torchscript.GraphContext, self, size, implicit):
         # Expand with -1 dim value means dim is unchanged.
         # Since onnx::expand supports two-way broadcasting,
         # -1 dim value can be exported to onnx as 1
-        size = symbolic_helper._reshape_helper(
+        size = symbolics.aten.reshape(
             g, stack(g, size, 0), g.op("Constant", value_t=torch.tensor([-1]))
         )
     dtype = _type_utils.JitScalarType.INT64
@@ -3489,7 +3490,7 @@ def tensor(
         input_list = list()
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
-            t = symbolic_helper._reshape_helper(g, t, shape_reference)
+            t = symbolics.aten.reshape(g, t, shape_reference)
             t = g.op("Cast", t, to_i=_type_utils.JitScalarType(dtype).onnx_type())
             input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
@@ -3922,9 +3923,9 @@ def unsqueeze(g: torchscript.GraphContext, self, dim):
 
 @_onnx_symbolic("aten::sort")
 # TODO(justinchuby): Support multiple quantized args in output
-@symbolic_helper.parse_args("v", "i", "i", "none")
+@symbolic_helper.parse_args("v", "i", "b", "none")
 @_beartype.beartype
-def sort(g: torchscript.GraphContext, self, dim, decending, out=None):
+def sort(g: torchscript.GraphContext, self, dim: int, decending: bool, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Sort", "Out parameter is not supported for sort", self
@@ -4060,7 +4061,7 @@ def repeat_interleave(
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if symbolic_helper._is_none(dim):
-        input = symbolic_helper._reshape_helper(
+        input = symbolics.aten.reshape(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
         dim = 0
@@ -4147,7 +4148,7 @@ def repeat_interleave(
         ]
         r_concat = g.op("Concat", *r_concat, axis_i=0)
         i_split = expand(g, i_split, r_concat, None)
-        i_split = symbolic_helper._reshape_helper(
+        i_split = symbolics.aten.reshape(
             g,
             i_split,
             g.op("Constant", value_t=torch.LongTensor(input_sizes)),
@@ -4167,7 +4168,7 @@ def pixel_shuffle(g: torchscript.GraphContext, self, upscale_factor):
             "pixel_shuffle", "only support 4d input", self
         )
     if any(i is None for i in dims[1:]):
-        after_view = symbolic_helper._reshape_helper(
+        after_view = symbolics.aten.reshape(
             g,
             symbolic_helper._unsqueeze_helper(g, self, [2, 3]),
             g.op(
@@ -4178,13 +4179,13 @@ def pixel_shuffle(g: torchscript.GraphContext, self, upscale_factor):
         )
         after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
         # For dynamic input shapes, two reshapes are performed
-        reshape_h = symbolic_helper._reshape_helper(
+        reshape_h = symbolics.aten.reshape(
             g,
             after_transpose,
             g.op("Constant", value_t=torch.tensor([0, 0, -1, 1, 0, 0])),
             allowzero=0,
         )
-        reshape_w = symbolic_helper._reshape_helper(
+        reshape_w = symbolics.aten.reshape(
             g,
             reshape_h,
             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, 1])),
@@ -4193,7 +4194,7 @@ def pixel_shuffle(g: torchscript.GraphContext, self, upscale_factor):
         return symbolic_helper._squeeze_helper(g, reshape_w, [3, 5])
     else:
         output_channel = dims[1] // upscale_factor // upscale_factor
-        after_view = symbolic_helper._reshape_helper(
+        after_view = symbolics.aten.reshape(
             g,
             self,
             g.op(
@@ -4212,7 +4213,7 @@ def pixel_shuffle(g: torchscript.GraphContext, self, upscale_factor):
             allowzero=0,
         )
         after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 4, 2, 5, 3])
-        return symbolic_helper._reshape_helper(
+        return symbolics.aten.reshape(
             g,
             after_transpose,
             g.op(
@@ -4241,20 +4242,20 @@ def pixel_unshuffle(g: torchscript.GraphContext, self, downscale_factor):
         )
     if any(i is None for i in dims[1:]):
         # For dynamic input shapes, two reshapes are performed
-        reshape_h = symbolic_helper._reshape_helper(
+        reshape_h = symbolics.aten.reshape(
             g,
             symbolic_helper._unsqueeze_helper(g, self, [3]),
             g.op("Constant", value_t=torch.tensor([0, 0, -1, downscale_factor, 0])),
             allowzero=0,
         )
-        reshape_w = symbolic_helper._reshape_helper(
+        reshape_w = symbolics.aten.reshape(
             g,
             reshape_h,
             g.op("Constant", value_t=torch.tensor([0, 0, 0, 0, -1, downscale_factor])),
             allowzero=0,
         )
         after_transpose = g.op("Transpose", reshape_w, perm_i=[0, 1, 3, 5, 2, 4])
-        final_reshape = symbolic_helper._reshape_helper(
+        final_reshape = symbolics.aten.reshape(
             g,
             after_transpose,
             g.op("Constant", value_t=torch.tensor([0, -1, 1, 1, 0, 0])),
@@ -4263,7 +4264,7 @@ def pixel_unshuffle(g: torchscript.GraphContext, self, downscale_factor):
         return symbolic_helper._squeeze_helper(g, final_reshape, [2, 3])
     else:
         output_channel = dims[1] * downscale_factor * downscale_factor
-        after_view = symbolic_helper._reshape_helper(
+        after_view = symbolics.aten.reshape(
             g,
             self,
             g.op(
@@ -4282,7 +4283,7 @@ def pixel_unshuffle(g: torchscript.GraphContext, self, downscale_factor):
             allowzero=0,
         )
         after_transpose = g.op("Transpose", after_view, perm_i=[0, 1, 3, 5, 2, 4])
-        return symbolic_helper._reshape_helper(
+        return symbolics.aten.reshape(
             g,
             after_transpose,
             g.op(
@@ -4508,7 +4509,7 @@ def _generic_rnn(
             # Transpose, and then combining it with hidden_size
             # with Reshape.
             prev_output = g.op("Transpose", prev_output, perm_i=[0, 2, 1, 3])
-            prev_output = symbolic_helper._reshape_helper(
+            prev_output = symbolics.aten.reshape(
                 g,
                 prev_output,
                 g.op("Constant", value_t=torch.LongTensor([0, 0, -1])),
@@ -5465,7 +5466,7 @@ def index(g: torchscript.GraphContext, self, index):
                 folded_adv_idx_shape = g.op(
                     "Concat", *folded_adv_idx_shape_list, axis_i=0
                 )
-                self = symbolic_helper._reshape_helper(g, self, folded_adv_idx_shape)
+                self = symbolics.aten.reshape(g, self, folded_adv_idx_shape)
 
                 # Transpose folded advanced indexed axis to its original location.
                 adv_idx_permute = (
@@ -5498,7 +5499,7 @@ def index(g: torchscript.GraphContext, self, index):
                     axis_i=0,
                 )
 
-            return symbolic_helper._reshape_helper(g, self, final_shape)
+            return symbolics.aten.reshape(g, self, final_shape)
 
 
 @_onnx_symbolic("aten::linalg_norm")
@@ -5516,7 +5517,7 @@ def linalg_norm(
     ord_value = None
     if dim is None:
         if symbolic_helper._is_none(ord):
-            self = symbolic_helper._reshape_helper(g, self, [-1])
+            self = symbolics.aten.reshape(g, self, [-1])
             ord = g.op("Constant", value_t=torch.LongTensor([2]))
         self_dim = symbolic_helper._get_tensor_rank(self)
         if self_dim is None:
@@ -5550,7 +5551,7 @@ def linalg_vector_norm(
 ):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
-        self = symbolic_helper._reshape_helper(g, self, [-1])
+        self = symbolics.aten.reshape(g, self, [-1])
         keepdim = False
 
     if ord == math.inf:
@@ -5715,9 +5716,7 @@ def meshgrid(g: torchscript.GraphContext, tensor_list, indexing: Optional[str] =
     if indexing == "xy":
         tensor_list[0], tensor_list[1] = tensor_list[1], tensor_list[0]
     tensors = [
-        symbolic_helper._reshape_helper(
-            g, t, g.op("Constant", value_t=torch.LongTensor([-1]))
-        )
+        symbolics.aten.reshape(g, t, g.op("Constant", value_t=torch.LongTensor([-1])))
         for t in symbolic_helper._unpack_list(tensor_list)
     ]
     tensors_shape = [g.op("Shape", t) for t in tensors]
@@ -5798,7 +5797,7 @@ def group_norm(
         return symbolic_helper._unimplemented("group_norm", "unknown input rank", input)
     # 0 in the shape list keeps dimension value unchanged.
     shape = [0, num_groups, -1]
-    input_reshaped = symbolic_helper._reshape_helper(
+    input_reshaped = symbolics.aten.reshape(
         g, input, g.op("Constant", value_t=torch.LongTensor(shape))
     )
 
@@ -5827,7 +5826,7 @@ def group_norm(
     norm_reshaped = g.op(
         "InstanceNormalization", input_reshaped, weight_, bias_, epsilon_f=eps
     )
-    norm = symbolic_helper._reshape_helper(g, norm_reshaped, g.op("Shape", input))
+    norm = symbolics.aten.reshape(g, norm_reshaped, g.op("Shape", input))
 
     if weight is None or weight.node().mustBeNone():
         weight_value = torch.tensor(
@@ -5908,7 +5907,7 @@ def item(g: torchscript.GraphContext, self):
 @_onnx_symbolic("aten::take")
 @_beartype.beartype
 def take(g: torchscript.GraphContext, self, index):
-    self_flattened = symbolic_helper._reshape_helper(
+    self_flattened = symbolics.aten.reshape(
         g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
     )
     out = index_select(g, self_flattened, 0, index)
@@ -5963,7 +5962,7 @@ def kl_div(g: torchscript.GraphContext, input, target, reduction, log_target):
 def as_strided(g: torchscript.GraphContext, self, sizes, strides, offset=None):
     sizes = symbolic_helper._maybe_get_const(sizes, "is")
     rank = len(strides)
-    self_1d = symbolic_helper._reshape_helper(
+    self_1d = symbolics.aten.reshape(
         g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
     )
     ind: Optional[torch.Tensor]
@@ -5987,7 +5986,7 @@ def as_strided(g: torchscript.GraphContext, self, sizes, strides, offset=None):
                 g.op("Constant", value_t=torch.tensor([0])),
                 g.op("Constant", value_t=torch.tensor(i)),
             )
-            tmp_ind = symbolic_helper._reshape_helper(
+            tmp_ind = symbolics.aten.reshape(
                 g,
                 arange(g, size, 4, None, None, None),
                 g.op("Constant", value_t=torch.tensor(r_size)),
@@ -6000,8 +5999,8 @@ def as_strided(g: torchscript.GraphContext, self, sizes, strides, offset=None):
             else:
                 ind = g.op("Add", ind, tmp_ind)
         if offset:
-            ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
-        return g.op("Gather", self_1d, ind)
+            ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))  # type: ignore[arg-type]
+        return g.op("Gather", self_1d, ind)  # type: ignore[arg-type]
 
 
 @_onnx_symbolic("aten::__derive_index")

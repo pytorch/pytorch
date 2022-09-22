@@ -653,7 +653,7 @@ def _select_helper(g: torchscript.GraphContext, self, dim, index, apply_reshape=
     elif index_dim is not None and apply_reshape:
         if index_dim == 0:
             # Index is a scalar. Reshape it to a size 1 tensor.
-            index = _reshape_helper(
+            index = symbolics.aten.reshape(
                 g, index, g.op("Constant", value_t=torch.LongTensor([1]))
             )
 
@@ -980,7 +980,7 @@ def _argmin_argmax_helper(
         return g.op(op_name, input, axis_i=axis_i, keepdims_i=keepdims_i)
 
     if _is_none(dim):
-        flattened = _reshape_helper(
+        flattened = symbolics.aten.reshape(
             g, input, g.op("Constant", value_t=torch.tensor([-1]))
         )
         output = op_wrapper(flattened, axis_i=0, keepdims_i=False)

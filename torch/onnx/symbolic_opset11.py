@@ -18,6 +18,7 @@ from torch.onnx import (
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal.dispatch import symbolics
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -66,12 +67,10 @@ __all__ = [
     "scatter",
     "select",
     "size",
-    "sort",
     "split_with_sizes",
     "split",
     "squeeze",
     "stack",
-    "topk",
     "unbind",
     "unique_dim",
     "unsqueeze",
@@ -299,7 +298,7 @@ def index_put(
     rank = symbolic_helper._get_tensor_rank(values)
     if rank is not None and rank == 0:
         values = opset9.expand(g, values, values_shape, None)
-    values = symbolic_helper._reshape_helper(g, values, values_shape)
+    values = symbolics.aten.reshape(g, values, values_shape)
 
     dtype = self.type().scalarType()
     if dtype is not None and dtype != values.type().scalarType():
@@ -450,7 +449,7 @@ def masked_scatter(g: torchscript.GraphContext, self, mask, source):
     # NOTE: source can have more elements than needed.
     # It could also have arbitrary shape.
     # This is not supported by ONNX::ScatterND, so we need to flatten and slice source tensor.
-    source = symbolic_helper._reshape_helper(g, source, torch.LongTensor([-1]))
+    source = symbolics.aten.reshape(g, source, torch.LongTensor([-1]))
     source = symbolic_helper._slice_helper(
         g,
         source,
@@ -632,12 +631,10 @@ def unique_dim(
 
 
 @_onnx_symbolic("aten::argsort")
-@symbolic_helper.parse_args("v", "i", "i", "none")
+@symbolic_helper.parse_args("v", "i", "b", "none")
 @_beartype.beartype
-def argsort(g: torchscript.GraphContext, self, dim, decending, out=None):
-    _, indices = symbolic_helper._sort_helper(
-        g, self, dim, decending=decending, out=out
-    )
+def argsort(g: torchscript.GraphContext, self, dim: int, decending: bool, out=None):
+    _, indices = symbolics.aten.sort(g, self, dim, decending=decending, out=out)
     return indices
 
 
@@ -766,11 +763,11 @@ def _prepare_onnx_paddings(g: torchscript.GraphContext, input, pad):
     # paddings = [[..., 0, dim_n-1_begin, dim_n_begin],
     #               [..., 0, dim_n-1_end, dim_n_end]]
     # Reshape back to 1-D paddings = [..., 0, dim_n - 1_begin, dim_n_begin, ..., 0, dim_n - 1_end, dim_n_end]
-    paddings = symbolic_helper._reshape_helper(
+    paddings = symbolics.aten.reshape(
         g, paddings, g.op("Constant", value_t=torch.tensor([-1, 2]))
     )
     paddings = g.op("Transpose", opset10.flip(g, paddings, [0]), perm_i=[1, 0])
-    paddings = symbolic_helper._reshape_helper(
+    paddings = symbolics.aten.reshape(
         g, paddings, g.op("Constant", value_t=torch.tensor([-1]))
     )
     padding_c = g.op("Cast", paddings, to_i=_C_onnx.TensorProtoDataType.INT64)
@@ -1133,7 +1130,7 @@ def _get_im2col_indices_along_dim(
     blocks_d_indices = symbolic_helper._unsqueeze_helper(
         g, blocks_d_indices, [0]
     )  # Reshape to [1, -1]
-    kernel_mask = symbolic_helper._reshape_helper(
+    kernel_mask = symbolics.aten.reshape(
         g, kernel_grid, g.op("Constant", value_t=torch.tensor([-1, 1]))
     )
     block_mask = g.op("Add", blocks_d_indices, kernel_mask)
@@ -1218,7 +1215,7 @@ def im2col(g: torchscript.GraphContext, input, kernel_size, dilation, padding, s
     output = g.op("Gather", padded_input, blocks_row_indices, axis_i=2)
     output = g.op("Gather", output, blocks_col_indices, axis_i=4)
     output = g.op("Transpose", output, perm_i=[0, 1, 2, 4, 3, 5])
-    return symbolic_helper._reshape_helper(g, output, output_shape)
+    return symbolics.aten.reshape(g, output, output_shape)
 
 
 @_onnx_symbolic("aten::narrow")
@@ -1271,7 +1268,7 @@ def linalg_vector_norm(
 ):
     if ord == 0:
         if dim is None:
-            self = symbolic_helper._reshape_helper(
+            self = symbolics.aten.reshape(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
             keepdim = False

@@ -15,6 +15,7 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal.dispatch import symbolics
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)
@@ -123,7 +124,8 @@ def split(g: torchscript.GraphContext, self, split_size_or_sizes, dim, _outputs=
     if leftover:
         splits.append(leftover)
     splits = g.op("Constant", value_t=torch.tensor(splits))
-    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
+    # FIXME(justinchuby): Fix mypy error when _is_value supports type narrowing
+    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)  # type: ignore[arg-type]
 
 
 @_onnx_symbolic("aten::split_with_sizes")
@@ -479,11 +481,12 @@ def unsafe_chunk(g: torchscript.GraphContext, self, chunks, dim, _outputs=None):
     if leftover:
         splits.append(leftover)
 
-    # TODO: So far we don"t have a module using this method. We"ll keep
+    # TODO(bowenbao): So far we don"t have a module using this method. We"ll keep
     # this as a constant unless we see a request of dynamics in any
     # user's modules.
+    # FIXME(justinchuby): Fix mypy error when _is_value supports type narrowing
     splits = g.op("Constant", value_t=torch.tensor(splits, dtype=torch.long))
-    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
+    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)  # type: ignore[arg-type]
 
 
 @_onnx_symbolic("aten::repeat_interleave")
@@ -496,7 +499,7 @@ def repeat_interleave(
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
     if symbolic_helper._is_none(dim):
-        input = symbolic_helper._reshape_helper(
+        input = symbolics.aten.reshape(
             g, self, g.op("Constant", value_t=torch.tensor([-1]))
         )
         dim = 0
@@ -607,7 +610,7 @@ def repeat_interleave(
     ]
     r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
     i_split = opset9.expand(loop_block, i_split, r_concat, None)
-    i_split = symbolic_helper._reshape_helper(
+    i_split = symbolics.aten.reshape(
         loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes))
     )
     final_splits = loop_block.op("SequenceInsert", final_splits, i_split)

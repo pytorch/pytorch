@@ -18,6 +18,7 @@ from torch.onnx import (  # noqa: F401
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal.dispatch import symbolics
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -138,18 +139,18 @@ def topk(g: torchscript.GraphContext, self, k, dim, largest, sorted, out=None):
     if not symbolic_helper._is_value(k):
         k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
     else:
-        k = symbolic_helper._reshape_helper(
-            g, k, g.op("Constant", value_t=torch.tensor([1]))
-        )
+        k = symbolics.aten.reshape(g, k, g.op("Constant", value_t=torch.tensor([1])))
         if symbolic_helper._try_get_scalar_type(k) != "Long":
             k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
     if g.opset <= 10:
         if not largest:
             symbolic_helper._unimplemented("TopK", "Ascending is not supported")
-        return g.op("TopK", input, k, axis_i=dim, outputs=2)
+        # FIXME(justinchuby): Fix mypy error when _is_value supports type narrowing
+        return g.op("TopK", input, k, axis_i=dim, outputs=2)  # type: ignore[arg-type]
 
+    # FIXME(justinchuby): Fix mypy error when _is_value supports type narrowing
     return g.op(
-        "TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2
+        "TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2  # type: ignore[arg-type]
     )
 
 
