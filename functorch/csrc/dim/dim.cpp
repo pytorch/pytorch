@@ -1511,15 +1511,14 @@ static PyObject* _dims(PyObject *self,
     }
 
     PyThreadState* state = PyThreadState_GET();
-    PyFrameObject* f = PyThreadState_GetFrame(state);
-    PyCodeObject* c = PyFrame_GetCode(f);
-    auto code = _PyCode_CODE(c);
+    auto f = py::obj<PyFrameObject>::steal(PyThreadState_GetFrame(state));
+    auto c = py::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
+    auto code = _PyCode_CODE(c.ptr());
 #if PY_VERSION_HEX >= 0x030a00f0
-    int first = PyFrame_GetLasti(f) + 1;
+    int first = PyFrame_GetLasti(f.ptr()) + 1;
 #else
-    int first = PyFrame_GetLasti(f) /  2 + 1;
+    int first = PyFrame_GetLasti(f.ptr()) /  2 + 1;
 #endif
-    Py_DECREF(f);
     auto unpack = code[first];
     int names_start = first;
     if (relevant_op(unpack)) {
@@ -1531,7 +1530,6 @@ static PyObject* _dims(PyObject *self,
 
     if (specified_ndims == -1) {
         if (found_ndims == 0) {
-            Py_DECREF(c);
             py::raise_error(PyExc_SyntaxError, "dims() must be assigned to a sequence of variable names or have argument n specified");
         }
         specified_ndims = found_ndims;
@@ -1543,7 +1541,7 @@ static PyObject* _dims(PyObject *self,
     auto genobject = [&](int i) -> py::object {
         py::object name;
         if (i < found_ndims) {
-            name = getname(c, code[names_start + i]);
+            name = getname(c.ptr(), code[names_start + i]);
         }
         if (!name.ptr()) {
             name = py::unicode_from_format("d%d", i);
@@ -1552,7 +1550,6 @@ static PyObject* _dims(PyObject *self,
         return create_object(std::move(name), sizes != -1 ? py::sequence_view(py_sizes)[i] : py::handle(Py_None));
     };
     if (sizes != -1 && sizes != specified_ndims) {
-        Py_DECREF(c);
         py::raise_error(PyExc_ValueError, "expected %d sizes but found %d", int(specified_ndims), int(sizes));
     }
     if (specified_ndims == 1) {
@@ -1562,7 +1559,6 @@ static PyObject* _dims(PyObject *self,
     for (int i = 0; i < specified_ndims; ++i) {
         result.set(i, genobject(i));
     }
-    Py_DECREF(c);
     return result.release();
     PY_END(nullptr)
 }
