@@ -703,7 +703,7 @@ def run_test_ops(test_module, test_directory, options):
                         )
     NUM_PROCS = 3
     return_codes = []
-    os.environ["PARALLEL_TESTING"] = "1"
+    os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
     pool = get_context("spawn").Pool(NUM_PROCS)
     for i in range(NUM_PROCS):
         return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
@@ -714,7 +714,7 @@ def run_test_ops(test_module, test_directory, options):
         return_codes.append(return_code)
     pool.close()
     pool.join()
-    del os.environ['PARALLEL_TESTING']
+    del os.environ['NUM_PARALLEL_PROCS']
 
     for return_code in return_codes:
         if return_code.get() != 0:
