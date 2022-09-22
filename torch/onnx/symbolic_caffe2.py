@@ -176,7 +176,7 @@ def upsample_nearest2d(
     g, input, output_size, align_corners=None, scales_h=None, scales_w=None
 ):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.upsample_nearest2d(g, input, output_size, align_corners)
+        return opset9.upsample_nearest2d(g, input, output_size, align_corners)  # type: ignore[attr-defined]
 
     output_size = symbolic_helper._parse_arg(output_size, "is")
     kwargs = {
@@ -194,7 +194,7 @@ def upsample_nearest2d(
 @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.max_pool2d(
+        return opset9.max_pool2d(  # type: ignore[attr-defined]
             g, input, kernel_size, stride, padding, dilation, ceil_mode
         )
     kwargs = {
@@ -224,7 +224,7 @@ def avg_pool2d(
     divisor_override=None,
 ):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.avg_pool2d(
+        return opset9.avg_pool2d(  # type: ignore[attr-defined]
             g,
             input,
             kernel_size,
