@@ -4,36 +4,33 @@ from typing import Callable, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._ops import OpOverload
+from torch._subclasses.fake_tensor import (
+    FakeTensorMode,
+    tree_flatten_only,
+    UnsupportedFakeTensorException,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_flatten
+
 
 aten = torch.ops.aten
 
 
 def outputs_alias_inputs(outputs, inputs):
-    input_storages = set()
-    for out in tree_flatten(outputs)[0]:
-        if isinstance(out, torch.Tensor) and torch._C._has_storage(out):
-            input_storages.add(out.storage()._cdata)
-    for inp in tree_flatten(inputs)[0]:
-        if (
-            isinstance(inp, torch.Tensor)
-            and torch._C._has_storage(inp)
-            and inp.storage()._cdata in input_storages
-        ):
-            return True
-    return False
+    input_storages = {
+        inp.storage()._cdata
+        for inp in tree_flatten_only(inputs, torch.Tensor)
+        if torch._C._has_storage(inp)
+    }
+    return any(
+        torch._C._has_storage(out) and out.storage()._cdata in input_storages
+        for out in tree_flatten_only(outputs, torch.Tensor)
+    )
 
 
 def outputs_are_inputs(outputs, inputs):
-    input_ids = set()
-    for out in tree_flatten(outputs)[0]:
-        if isinstance(out, torch.Tensor):
-            input_ids.add(id(out))
-    for inp in tree_flatten(inputs)[0]:
-        if isinstance(inp, torch.Tensor) and id(inp) in input_ids:
-            return True
-    return False
+    input_ids = {id(inp) for inp in tree_flatten_only(inputs, torch.Tensor)}
+    return any(id(out) in input_ids for out in tree_flatten_only(outputs, torch.Tensor))
 
 
 class CrossRefFakeMode(TorchDispatchMode):
@@ -52,11 +49,6 @@ class CrossRefFakeMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-
-        from torch._subclasses.fake_tensor import (
-            FakeTensorMode,
-            UnsupportedFakeTensorException,
-        )
 
         fake_r = None
 
