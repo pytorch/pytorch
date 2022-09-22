@@ -984,8 +984,6 @@ make_fx_failures = {
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
-    # ???
-    skip('nn.functional.ctc_loss'),  # sometimes it passes
 
     # proxy tensor doesn't support sparse correctly right now
     skip('to_sparse'),
@@ -1182,6 +1180,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.cosine_embedding_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nn.functional.cosine_similarity', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
+    xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.dropout2d', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.dropout3d', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.dropout', ''),  # Tensors of type TensorImpl do not have numel
