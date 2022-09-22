@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
-source "$(dirname "${BASH_SOURCE[0]}")../../.jenkins/pytorch/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/../../.jenkins/pytorch/common.sh"
 PACKAGE_TYPE=${PACKAGE_TYPE:-conda}
 
 PKG_DIR=${PKG_DIR:-/tmp/workspace/final_pkgs}
