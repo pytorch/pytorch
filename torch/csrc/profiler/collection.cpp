@@ -872,8 +872,7 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // Step 2) Handle the case that the storage of a TensorImpl changed.
   // --------------------------------------------------------------------------
   using storage_id_pair_t = std::pair<storage_id_t, storage_id_t>;
-  ska::flat_hash_set<storage_id_pair_t, PairHash<storage_id_pair_t>>
-      same_group_set;
+  ska::flat_hash_set<storage_id_pair_t, PairHash<storage_id_t>> same_group_set;
   {
     ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
     for (const auto& t : tensors) {

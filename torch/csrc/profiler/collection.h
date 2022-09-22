@@ -68,9 +68,6 @@ struct RawTensorMetadata {
   uint32_t dim_;
 };
 
-// 8 + 8 + 1 + 1 + 1 + 1 + 4
-STATIC_ASSERT_MAXIMUM_SIZE(RawTensorMetadata, 24);
-
 struct TensorMetadata : public RawTensorMetadata {
   explicit TensorMetadata(const RawTensorMetadata& m) : RawTensorMetadata(m) {}
 
