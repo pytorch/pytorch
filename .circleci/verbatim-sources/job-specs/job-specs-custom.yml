@@ -146,6 +146,7 @@
             set -x
 
             git submodule sync
+            git config --global url."https://github".insteadOf git://github
             git submodule update --init --recursive --depth 1 --jobs 0
 
             export PATH="/usr/local/bin:$PATH"
@@ -594,6 +595,7 @@
             # sync submodules
             cd ${PROJ_ROOT}
             git submodule sync
+            git config --global url."https://github".insteadOf git://github
             git submodule update --init --recursive --depth 1 --jobs 0
 
             # export
