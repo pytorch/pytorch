@@ -11,3 +11,5 @@ from .fully_sharded_data_parallel import (
     StateDictType,
 )
 from .wrap import ParamExecOrderWrapPolicy
+
+from .comm import default_hooks as default_comm_hooks
