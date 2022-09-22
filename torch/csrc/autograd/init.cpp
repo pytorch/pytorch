@@ -661,13 +661,19 @@ static PyObject* len_torch_function_stack(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* get_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
+static PyObject* get_torch_dispatch_mode(
+    PyObject* _unused,
+    PyObject* _unused2) {
   HANDLE_TH_ERRORS
   const auto& mode = c10::impl::TorchDispatchModeTLS::get_mode();
-  auto* r = mode->ptr(getPyInterpreter());
-  Py_INCREF(r);
-  return r;
-  END_HANDLE_TH_ERRORS;
+  if (!mode) {
+    Py_RETURN_NONE;
+  } else {
+    auto* r = mode->ptr(getPyInterpreter());
+    Py_INCREF(r);
+    return r;
+  }
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
