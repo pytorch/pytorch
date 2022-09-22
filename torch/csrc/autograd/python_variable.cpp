@@ -285,8 +285,11 @@ struct ConcretePyInterpreterVTable final
     concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>(event);
   }
   void trace_kernel_launch(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const override;
+      const c10::FunctionSchema& schema,
+      std::vector<uintptr_t>& inputs,
+      std::vector<uintptr_t>& outputs) const override {
+    concrete_trace_cuda<trace_kernel_launch>(schema, inputs, outputs);
+  }
 
   static ConcretePyInterpreterVTable* instance() {
     static ConcretePyInterpreterVTable s;
@@ -2652,35 +2655,6 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
 
   return c10::SymIntArrayRef(start, len);
   END_HANDLE_TH_ERRORS_PYBIND
-}
-
-void ConcretePyInterpreterVTable::trace_kernel_launch(
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) const {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  const auto& schema = op.schema();
-  const auto num_arguments = schema.arguments().size();
-  auto arguments = torch::jit::pop(*stack, num_arguments);
-  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-
-  py::handle function = getTorchApiFunction(op);
-  auto args = std::move(args_kwargs.first);
-  auto kwargs = std::move(args_kwargs.second);
-
-  if (Py_IsInitialized()) {
-    try {
-      py::module mod = py::module::import("torch.utils._cuda_trace");
-      py::object hook =
-          mod.attr(trace_kernel_launch_fn_name).attr("fire_callbacks");
-      PyObject_CallFunctionObjArgs(
-          hook.ptr(), function.ptr(), args.ptr(), kwargs.ptr(), nullptr);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "CUDA trace kernel launch hook execution failed: "
-                 << e.what();
-    }
-  }
 }
 
 } // anonymous namespace
