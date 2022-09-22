@@ -6,6 +6,8 @@
 #include <torch/csrc/jit/codegen/cuda/python_frontend/fusion_definition.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
+#include <algorithm>
+
 namespace nvfuser {
 
 //! This enum it to give a Record Type for record hashing given that the
@@ -27,6 +29,7 @@ enum class RecordType {
   Start,
   VarianceOp,
   VarianceMeanOp,
+  ViewOp,
   PermuteOp,
 };
 
@@ -277,27 +280,65 @@ struct OpRecord : RecordFunctor {
 
 struct ViewOpRecord : RecordFunctor {
   ViewOpRecord(
-      std::vector<size_t> _args,
-      std::vector<size_t> _outputs,
-      std::vector<int64_t>& original_sizes,
-      std::vector<int64_t>& new_sizes)
-      : RecordFunctor(std::move(_args), std::move(_outputs)),
-        original_sizes_(std::move(original_sizes)),
-        new_sizes_(std::move(new_sizes)) {}
+      std::vector<State> _args,
+      std::vector<State> _outputs,
+      std::vector<int64_t>& original_shape,
+      std::vector<int64_t>& new_shape)
+      : RecordFunctor(
+            std::move(_args),
+            std::move(_outputs),
+            "view",
+            RecordType::ViewOp),
+        original_shape_(std::move(original_shape)),
+        new_shape_(std::move(new_shape)) {}
   virtual ~ViewOpRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new ViewOpRecord(*this);
+  }
+
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 -------------- 16 | 15 --------------  0 |
+  //! | original_shape hash  | new_shape hash       |
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    size_t new_shape_hash = 0;
+    for (auto shape : new_shape_) {
+      new_shape_hash ^= static_cast<size_t>(shape);
+    }
+    size_t original_shape_hash = 0;
+    for (auto shape : original_shape_) {
+      original_shape_hash |= 1 << ((new_shape_.size() - 1) - shape);
+    }
+    original_shape_hash = (original_shape_hash & 0xffff) << 16;
+    return result | original_shape_hash | (new_shape_hash & 0xffff);
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const ViewOpRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+      result &= std::equal(
+          original_shape_.begin(),
+          original_shape_.end(),
+          child_ptr->original_shape_.begin());
+      result &= std::equal(
+          new_shape_.begin(), new_shape_.end(), child_ptr->new_shape_.begin());
+    }
+    return result;
+  }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args.at(0))->template as<TensorView>();
+    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
     auto output =
-        torch::jit::fuser::cuda::view(arg, original_sizes_, new_sizes_);
-    fd.setFusionState(outputs.at(0), output);
+        torch::jit::fuser::cuda::view(arg, original_shape_, new_shape_);
+    fd.setFusionState(outputs_.at(0).index, output);
   }
 
  private:
   //! Represents the tensor dimensions of the input tensor.
-  std::vector<int64_t> original_sizes_;
+  std::vector<int64_t> original_shape_;
   //! Represents the tensor dimensions of the output tensor.
-  std::vector<int64_t> new_sizes_;
+  std::vector<int64_t> new_shape_;
 };
 
 struct PermuteOpRecord : RecordFunctor {
