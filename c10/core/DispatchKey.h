@@ -135,7 +135,7 @@ enum class DispatchKey : uint16_t {
   //
   // and Undefined == nullopt.  We didn't actually represent
   // it this way because optional<RealDispatchKey> would take two
-  // words, when DispatchKey fits in eight bits.
+  // words, when DispatchKey fits in 16 bits.
 
   Undefined = 0,
 
@@ -426,7 +426,7 @@ enum class DispatchKey : uint16_t {
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // Note [Alias Dispatch Keys]
   // Alias dispatch keys are synthetic dispatch keys which map to multiple
-  // runtime dispatch keys. Alisa keys have precedence, but they are always
+  // runtime dispatch keys. Alias keys have precedence, but they are always
   // lower precedence than runtime keys. You can register a kernel to an
   // alias key, the kernel might be populated to the mapped runtime keys
   // during dispatch table computation.
@@ -503,7 +503,7 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 // [Note: Per-Backend Functionality Dispatch Keys]
 // Check if a DispatchKey is a per-backend functionality key
 // Any functionalities that can be customized per-backend should be added here.
-// These keys correspond to functionalities that can be customized indivually
+// These keys correspond to functionalities that can be customized individually
 // per backend. While they only take up one bit in the `DispatchKeySet` bitset,
 // they map to (# backends) slots in the operator table.
 // Each of these keys also has a separate set of "runtime keys" in the dispatch

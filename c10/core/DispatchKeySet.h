@@ -80,7 +80,7 @@ C10_ALWAYS_INLINE static const std::
 // 5 categories.
 //
 // (1) "Building block" keys
-//    (a) backends: jEverything in the BackendComponent enum (e.g. CPUBit,
+//    (a) backends: Everything in the BackendComponent enum (e.g. CPUBit,
 //    CUDABIt) (b) functionalities: (per-backend) functionality-bit DispatchKeys
 //    (e.g. AutogradFunctionality, Sparse, Dense)
 // (2) "Runtime" keys
