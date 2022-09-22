@@ -95,6 +95,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::NestedTensor:
       return "NestedTensor";
 
+    case DispatchKey::CUDASanitizer:
+      return "CUDASanitizer";
+
     case DispatchKey::BackendSelect:
       return "BackendSelect";
 
@@ -257,6 +260,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Sparse", c10::DispatchKey::Sparse},
       {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
       {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
+      {"CUDASanitizer", c10::DispatchKey::CUDASanitizer},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
       {"PythonTLSSnapshot", c10::DispatchKey::PythonTLSSnapshot},

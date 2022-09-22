@@ -80,6 +80,7 @@ class DispatchKey(Enum):
 
     Python = auto()
     ZeroTensor = auto()
+    CUDASanitizer = auto()
     BackendSelect = auto()
     Named = auto()
     AutogradOther = auto()

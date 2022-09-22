@@ -431,6 +431,7 @@ static PyObject* getPythonTensorClass(c10::Device d) {
 
 void activateCUDATrace() {
   c10::impl::GPUTrace::set_trace(self_interpreter.get());
+  c10::add_to_default_include_set({DispatchKey::CUDASanitizer});
 }
 
 // TODO: Make this take Variable by const reference

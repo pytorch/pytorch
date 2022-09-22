@@ -216,6 +216,8 @@ enum class DispatchKey : uint16_t {
 
   NestedTensor,
 
+  CUDASanitizer,
+
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
   // have any "tensor" arguments.  In this case, a BackendSelect function
