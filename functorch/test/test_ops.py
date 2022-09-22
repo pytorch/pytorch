@@ -287,7 +287,6 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
-    xfail('nn.functional.ctc_loss'),  # data_ptr composite compliance
 }
 
 
@@ -470,6 +469,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # silent incorrectness; Flaky
         skip('nn.functional.max_unpool2d'),  # silent incorrectness; Flaky
+        xfail('nn.functional.ctc_loss'),  # Not Implemented
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
         # AssertionError: Tensor-likes are not close!
@@ -552,6 +552,7 @@ class TestOperators(TestCase):
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm"),
         xfail("nn.functional.binary_cross_entropy"),  # vmap: inplace into a regular tensor
+        xfail("nn.functional.ctc_loss"),  # derivate not implemented for _ctc_loss_backward
         skip("nn.functional.dropout"),  # calls random op
         skip("nn.functional.dropout2d"),  # calls random op
         skip("nn.functional.dropout3d"),  # calls random op
@@ -695,6 +696,8 @@ class TestOperators(TestCase):
 
         xfail('scatter_reduce', 'prod'),  # item call
 
+        # Batching rule not implemented for aten::_use_cudnn_ctc_loss.Tensor
+        xfail('nn.functional.ctc_loss', device_type='cuda'),
         # NYI: querying is_contiguous inside of vmap for memory_format other than torch.contiguous_format
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
@@ -940,6 +943,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
+        xfail('nn.functional.ctc_loss'),
         xfail('as_strided'),
         xfail('stft'),
         xfail('nn.functional.rrelu'),
@@ -1130,6 +1134,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.multilabel_margin_loss', ''),  # NYI: multilabel_margin_loss_forward
         xfail('nn.functional.multilabel_soft_margin_loss', ''),  # NYI: log_sigmoid_backward
         xfail('nn.functional.soft_margin_loss', ''),  # NYI: forward-AD for log_sigmoid_backward
+        xfail('nn.functional.ctc_loss', ''),  # NYI: forward-AD for _ctc_loss
         xfail('nn.functional.pdist', ''),  # NYI: forward-AD with _pdist_forward
         xfail('nn.functional.multi_margin_loss', ''),  # NYI: forward AD with multi_margin_loss
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
@@ -1239,6 +1244,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
         xfail('nn.functional.binary_cross_entropy'),  # vmap: inplace into a regular tensor
+        xfail("nn.functional.ctc_loss"),  # ForwardAD not implemented and no decomposition
         xfail('nn.functional.dropout2d'),  # calls random op
         xfail('nn.functional.dropout3d'),  # calls random op
         xfail('nn.functional.dropout'),  # calls random op

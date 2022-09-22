@@ -181,11 +181,21 @@
   dispatch:
     CUDA: _use_cudnn_ctc_loss
 
+- func: _use_cudnn_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also _cudnn_ctc_loss
+  dispatch:
+    CUDA: _use_cudnn_ctc_loss_tensor
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
   dispatch:
     CUDA: _cudnn_ctc_loss
   autogen: _cudnn_ctc_loss.out
+
+- func: _cudnn_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
+  dispatch:
+    CUDA: _cudnn_ctc_loss_tensor
 
 - func: _use_cudnn_rnn_flatten_weight() -> bool
 
@@ -1770,11 +1780,19 @@
     CUDA: ctc_loss_gpu
   autogen: _ctc_loss.out
 
+- func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU, CUDA: ctc_loss_tensor
+
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
   autogen: _ctc_loss_backward.out
+
+- func: _ctc_loss_backward.Tensor(Tensor grad, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
+  dispatch:
+    CPU, CUDA: ctc_loss_backward_tensor
 
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   variants: function, method
