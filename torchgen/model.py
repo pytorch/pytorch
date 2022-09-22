@@ -1137,7 +1137,7 @@ class UfuncInnerLoop:
 # (the 'dispatch' entry in native_functions.yaml).
 # However, there can be other examples of different backends having different information.
 # External backends can choose to opt their kernels to be structured independently from in-tree backends,
-# which means that this information isn't inherentely tied to a NativeFunction- it's different per backend.
+# which means that this information isn't inherently tied to a NativeFunction- it's different per backend.
 @dataclass(frozen=True)
 class BackendIndex:
     dispatch_key: DispatchKey
