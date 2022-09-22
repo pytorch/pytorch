@@ -184,8 +184,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -202,8 +201,7 @@ struct cpu_scatter_gather_base_kernel {
             for (const auto i : c10::irange(index_dim_size)) {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
-              for (const auto nelem : c10::irange(n)) {
-                (void)nelem; //Suppress unused variable warning
+              for (const auto nelem C10_UNUSED : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -268,8 +266,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -290,8 +287,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem : c10::irange(n)) {
-                (void)nelem; //Suppress unused variable warning
+              for (const auto nelem C10_UNUSED : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -357,8 +353,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -379,8 +374,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem : c10::irange(n)) {
-                (void)nelem; //Suppress unused variable warning
+              for (const auto nelem C10_UNUSED : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -446,8 +440,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -468,8 +461,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem : c10::irange(n)) {
-                (void)nelem; //Suppress unused variable warning
+              for (const auto nelem C10_UNUSED : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -535,8 +527,7 @@ struct cpu_scatter_gather_base_kernel {
           // vs dim-TensorIterator loop order depending on
           // whether dim is the last dimension
           if (dim== self.dim() - 1) {
-            for (const auto nelem : c10::irange(n)) {
-              (void)nelem; //Suppress unused variable warning
+            for (const auto nelem C10_UNUSED : c10::irange(n)) {
               // dim loop is a separate code block
               // for better performance
               _cpu_scatter_gather_dim_loop<is_scatter_like>()(
@@ -557,8 +548,7 @@ struct cpu_scatter_gather_base_kernel {
               auto* self_data = self_data_bytes;
               auto* index_data = (char*)((int64_t*)index_data_bytes + i * index_dim_stride);
               auto* src_data = src_data_bytes;
-              for (const auto nelem : c10::irange(n)) {
-                (void)nelem; //Suppress unused variable warning
+              for (const auto nelem C10_UNUSED : c10::irange(n)) {
                 int64_t idx_dim = *(int64_t*)index_data;
                 // we are not putting idx_dim in the error message because it disables
                 // loop optimization in clang-7
@@ -728,14 +718,20 @@ void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& inde
 }
 
 inline bool is_fast_path_scatter(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-#if AT_PARALLEL_OPENMP
-  //TODO: add optimization when inner_size is 1
+  if (!is_radix_sort_available()) { return false; }
+
+  // skip when having empty tensor
+  if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) { return false; }
+
+  //skip when having scalar tensor
+  if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) { return false; }
+
   // currently inner_size == 1 will go sequetial
   if (index.numel() == index.size(0)) { return false; }
-  return dim == 0 && index.stride(dim) == 1 && src.is_contiguous() && self.is_contiguous();
-#else
-  return false;
-#endif
+
+  // index is expanded
+  return dim == 0 && index.stride(0) == 1 && src.is_contiguous() && self.is_contiguous();
+
 }
 
 void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {

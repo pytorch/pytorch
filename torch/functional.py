@@ -136,7 +136,6 @@ def broadcast_shapes(*shapes):
             return tensors[0].shape
 
 
-
 def split(
     tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
 ) -> List[Tensor]:
@@ -451,6 +450,7 @@ else:
 
             `torch.meshgrid` is commonly used to produce a grid for
             plotting.
+            >>> # xdoctest: +REQUIRES(module:matplotlib)
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)
@@ -458,8 +458,6 @@ else:
             >>> z = torch.sin(torch.sqrt(x * x + y * y))
             >>> ax = plt.axes(projection='3d')
             >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
-            >>> # xdoctest: +SKIP
-            <mpl_toolkits.mplot3d.art3d.Poly3DCollection object at 0x7f8f30d40100>
             >>> plt.show()
 
         .. image:: ../_static/img/meshgrid.png
@@ -736,23 +734,22 @@ def _unique_impl(input: Tensor, sorted: bool = True,
 
         >>> output = torch.unique(torch.tensor([1, 3, 2, 3], dtype=torch.long))
         >>> output
-        >>> # xdoctest: +SKIP
-        tensor([ 2,  3,  1])
+        tensor([1, 2, 3])
 
         >>> output, inverse_indices = torch.unique(
         ...     torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3])
         >>> inverse_indices
-        tensor([ 0,  2,  1,  2])
+        tensor([0, 2, 1, 2])
 
         >>> output, inverse_indices = torch.unique(
         ...     torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3])
         >>> inverse_indices
-        tensor([[ 0,  2],
-                [ 1,  2]])
+        tensor([[0, 2],
+                [1, 2]])
 
     """
     if has_torch_function_unary(input):
@@ -983,6 +980,7 @@ else:
     def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
+
 def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     r"""Returns a contraction of a and b over multiple dimensions.
 
@@ -1019,9 +1017,9 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
                 [4796., 5162.],
                 [4928., 5306.]])
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> a = torch.randn(3, 4, 5, device='cuda')
         >>> b = torch.randn(4, 5, 6, device='cuda')
-        >>> # xdoctest: +SKIP
         >>> c = torch.tensordot(a, b, dims=2).cpu()
         tensor([[ 8.3504, -2.5436,  6.2922,  2.7556, -1.0732,  3.2741],
                 [ 3.3161,  0.0704,  5.0187, -0.4079, -4.3126,  4.8744],
@@ -1073,7 +1071,8 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     else:
         return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore[attr-defined]
 
-def cartesian_prod(*tensors):
+
+def cartesian_prod(*tensors: Tensor) -> Tensor:
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
 
@@ -1087,9 +1086,9 @@ def cartesian_prod(*tensors):
 
     Example::
 
+        >>> import itertools
         >>> a = [1, 2, 3]
         >>> b = [4, 5]
-        >>> # xdoctest: +SKIP
         >>> list(itertools.product(a, b))
         [(1, 4), (1, 5), (2, 4), (2, 5), (3, 4), (3, 5)]
         >>> tensor_a = torch.tensor(a)
@@ -1106,6 +1105,7 @@ def cartesian_prod(*tensors):
     if has_torch_function(tensors):
         return handle_torch_function(cartesian_prod, tensors, *tensors)
     return _VF.cartesian_prod(tensors)  # type: ignore[attr-defined]
+
 
 def block_diag(*tensors):
     """Create a block diagonal matrix from provided tensors.
@@ -1197,6 +1197,7 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
     else:
         raise ValueError(f"{compute_mode} is not a valid value for compute_mode")
 
+
 def atleast_1d(*tensors):
     r"""
     Returns a 1-dimensional view of each input tensor with zero dimensions.
@@ -1210,12 +1211,11 @@ def atleast_1d(*tensors):
 
     Example::
 
-        >>> x = torch.randn(2)
+        >>> x = torch.arange(2)
         >>> x
-        >>> # xdoctest: +SKIP
-        tensor([1.4584, 0.7583])
+        tensor([0, 1])
         >>> torch.atleast_1d(x)
-        tensor([1.4584, 0.7583])
+        tensor([0, 1])
         >>> x = torch.tensor(1.)
         >>> x
         tensor(1.)
@@ -1232,6 +1232,7 @@ def atleast_1d(*tensors):
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_1d(tensors)  # type: ignore[attr-defined]
+
 
 def atleast_2d(*tensors):
     r"""
@@ -1251,14 +1252,13 @@ def atleast_2d(*tensors):
         tensor(1.)
         >>> torch.atleast_2d(x)
         tensor([[1.]])
-        >>> x = torch.randn(2,2)
+        >>> x = torch.arange(4).view(2,2)
         >>> x
-        >>> # xdoctest: +SKIP
-        tensor([[2.2086, 2.5165],
-                [0.1757, 0.5194]])
+        tensor([[0, 1],
+                [2, 3]])
         >>> torch.atleast_2d(x)
-        tensor([[2.2086, 2.5165],
-                [0.1757, 0.5194]])
+        tensor([[0, 1],
+                [2, 3]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
         >>> torch.atleast_2d((x,y))
@@ -1270,6 +1270,7 @@ def atleast_2d(*tensors):
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_2d(tensors)  # type: ignore[attr-defined]
+
 
 def atleast_3d(*tensors):
     r"""
@@ -1289,22 +1290,21 @@ def atleast_3d(*tensors):
         tensor(0.5000)
         >>> torch.atleast_3d(x)
         tensor([[[0.5000]]])
-        >>> y = torch.randn(2,2)
+        >>> y = torch.arange(4).view(2,2)
         >>> y
-        >>> # xdoctest: +SKIP
-        tensor([[-0.8079,  0.7460],
-                [-1.1647,  1.4734]])
+        tensor([[0, 1],
+                [2, 3]])
         >>> torch.atleast_3d(y)
-        tensor([[[-0.8079],
-                [ 0.7460]],
+        tensor([[[0],
+                 [1]],
                 <BLANKLINE>
-                [[-1.1647],
-                [ 1.4734]]])
-        >>> x = torch.randn(1,1,1)
+                [[2],
+                 [3]]])
+        >>> x = torch.tensor(1).view(1, 1, 1)
         >>> x
-        tensor([[[-1.5689]]])
+        tensor([[[1]]])
         >>> torch.atleast_3d(x)
-        tensor([[[-1.5689]]])
+        tensor([[[1]]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
         >>> torch.atleast_3d((x,y))
@@ -1426,7 +1426,6 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
         >>> a = torch.arange(9, dtype= torch.float) - 4
         >>> b = a.reshape((3, 3))
         >>> torch.norm(a)
-        >>> # xdoctest: +SKIP
         tensor(7.7460)
         >>> torch.norm(b)
         tensor(7.7460)
@@ -1514,6 +1513,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
+
 def chain_matmul(*matrices, out=None):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
@@ -1537,12 +1537,13 @@ def chain_matmul(*matrices, out=None):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> a = torch.randn(3, 4)
         >>> b = torch.randn(4, 5)
         >>> c = torch.randn(5, 6)
         >>> d = torch.randn(6, 7)
+        >>> # will raise a deprecation warning
         >>> torch.chain_matmul(a, b, c, d)
-        >>> # xdoctest: +SKIP
         tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
                 [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
                 [ -0.9647,  -5.8917,  -2.3213,  -5.2284,  12.8615, -12.2816,  -2.5095]])
@@ -1635,7 +1636,8 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
     Example::
 
-        >>> # xdoctest: +REQUIRES(--lapack)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
+        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU
@@ -1662,12 +1664,14 @@ if TYPE_CHECKING:
 else:
     _ListOrSeq = List[Tensor]
 
+
 def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
         raise TypeError(f"expected tuple of {2 + int(get_infos)} elements but got {out_len}")
     if not isinstance(out, (tuple, list)):
         raise TypeError(f"argument 'out' must be tuple of Tensors, not {type(out).__name__}")
+
 
 def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]
@@ -1682,6 +1686,7 @@ def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
         return out
     else:
         return result  # A_LU, pivots, infos
+
 
 def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
@@ -1709,6 +1714,7 @@ lu = boolean_dispatch(
     module_name=__name__,
     func_name='lu')
 lu.__doc__ = _lu_impl.__doc__
+
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')

@@ -37,8 +37,7 @@ void layer_norm_with_mean_rstd_out(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable warning
+  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
     stat_shape.emplace_back(1);
   }
 
@@ -216,7 +215,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
       at::empty_like(input, c10::TensorOptions().dtype(result_type))
     );
   }
-  at::Tensor input_reshaped = input.view({1, M, -1});
+  at::Tensor input_reshaped = input.reshape({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
   // entire channel/plane with the affine option, Layer Normalization applies
   // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
@@ -239,8 +238,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable
+  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);

@@ -40,6 +40,9 @@ class TORCH_CUDA_CU_API IndexLowering : private OptOutConstDispatch {
 
   void handle(const ViewAsScalar*) final;
   void handle(const UnaryOp*) final;
+  // TODO: use a separate IR node to represent rand like
+  void lowerRandLike(const UnaryOp*);
+
   void handle(const BinaryOp*) final;
   void handle(const TernaryOp*) final;
   void handle(const ReductionOp*) final;
