@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from torch.multiprocessing import Pool
+from torch.multiprocessing import Pool, get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -125,7 +125,6 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
-        "test_deploy",
     ]
 )
 
@@ -374,7 +373,7 @@ def run_test(
     launcher_cmd=None,
     extra_unittest_args=None,
     env=None,
-):
+) -> int:
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -402,9 +401,16 @@ def run_test(
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + ".py"] + unittest_args
 
+    log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
+                                        prefix=test_module.replace("\\", "-").replace("/", "-"))
+    os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
-    return shell(command, test_directory, env=env)
+    with open(log_path, "w") as f:
+        ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
+    print_log_file(test_module, log_path)
+    os.remove(log_path)
+    return ret_code
 
 
 def test_cuda_primary_ctx(test_module, test_directory, options):
@@ -676,6 +682,49 @@ def run_doctests(test_module, test_directory, options):
     return result
 
 
+def print_log_file(test: str, file_path: str) -> None:
+    with open(file_path, "r") as f:
+        print_to_stderr("")
+        print_to_stderr(f"PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr(f"##[group]PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr(f.read())
+        print_to_stderr("##[endgroup]")
+        print_to_stderr(f"FINISHED PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr("")
+
+
+def run_test_ops(test_module, test_directory, options):
+    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
+        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
+        # it's also on periodic so we don't care about TTS as much
+        return run_test(test_module, test_directory, copy.deepcopy(options),
+                        extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
+                        )
+    num_procs = 3
+    return_codes = []
+    os.environ["PARALLEL_TESTING"] = "1"
+    pool = get_context("spawn").Pool(num_procs)
+    for i in range(num_procs):
+        return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
+                                       kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
+                                                                     "-k=not _linalg_cholesky_"],
+                                             })
+        return_codes.append(return_code)
+    pool.close()
+    pool.join()
+    del os.environ['PARALLEL_TESTING']
+
+    for return_code in return_codes:
+        if return_code.get() != 0:
+            return return_code.get()
+    return_code = run_test(test_module, test_directory, copy.deepcopy(options),
+                           extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                "-k=_linalg_cholesky_"],
+                           )
+    return return_code
+
+
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
@@ -695,6 +744,9 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "doctests": run_doctests,
+    "test_ops": run_test_ops,
+    "test_ops_gradients": run_test_ops,
+    "test_ops_jit": run_test_ops,
 }
 
 
@@ -1040,7 +1092,7 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
     return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
-    ), "Return code should be an integer"
+    ), f"While running {test} got non integer return code {return_code}"
     if return_code == 0:
         return None
 
