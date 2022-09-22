@@ -5,7 +5,7 @@
 
 namespace at { namespace native {
 
-bool is_radix_sort_available() { return false; }
+bool inline is_radix_sort_available() { return false; }
 
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
@@ -28,8 +28,6 @@ std::pair<K*, V*> radix_sort_parallel(
 namespace at { namespace native {
 
 namespace {
-
-bool is_radix_sort_available() { return true; }
 
 // `radix_sort_parallel` is primarily used for converting COO to CSR when sorting
 // the indices, which is used in scatter_reduce optimization on CPU.
@@ -137,7 +135,10 @@ void radix_sort_kernel(
     }
   }
 }
+
 } // namespace
+
+bool inline is_radix_sort_available() { return true; }
 
 template <typename K, typename V>
 std::pair<K*, V*> radix_sort_parallel(
@@ -148,8 +149,10 @@ std::pair<K*, V*> radix_sort_parallel(
     int64_t elements_count,
     int64_t max_value) {
   int maxthreads = omp_get_max_threads();
-  alignas(64) int histogram[RDX_HIST_SIZE * maxthreads];
-  alignas(64) int histogram_ps[RDX_HIST_SIZE * maxthreads + 1];
+  std::unique_ptr<int []> histogram_tmp(new int[RDX_HIST_SIZE * maxthreads]);
+  std::unique_ptr<int []> histogram_ps_tmp(new int[RDX_HIST_SIZE * maxthreads + 1]);
+  int* histogram = histogram_tmp.get();
+  int* histogram_ps = histogram_ps_tmp.get();
   if (max_value == 0) {
     return std::make_pair(inp_key_buf, inp_value_buf);
   }
