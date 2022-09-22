@@ -538,10 +538,10 @@ class TestPrims(TestCase):
             return torch.reshape(a, tuple(reversed(a.shape)))
 
         def func5(a):
-            return torch.ops.aten.view(a, tuple(reversed(a.shape)))
+            return torch.ops.aten.view.default(a, tuple(reversed(a.shape)))
 
         def func6(a):
-            return torch.ops.aten.view.default(a, tuple(reversed(a.shape)))
+            return torch.ops.aten._unsafe_view.default(a, tuple(reversed(a.shape)))
 
         for func in (func1, func2, func3, func4, func5, func6):
             with TorchRefsNvfuserCapabilityMode():
