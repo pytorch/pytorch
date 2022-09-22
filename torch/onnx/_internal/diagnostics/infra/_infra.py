@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import enum
 from typing import Any, List, Optional, Sequence, Set, Tuple
 
-from torch.onnx._internal.diagnostics.infra import sarif_om
+from torch.onnx._internal.diagnostics.infra import formatter, sarif_om
 
 
 class Level(enum.Enum):
@@ -29,8 +30,9 @@ class Rule:
         full_description: Optional[str] = None,
         help_uri: Optional[str] = None,
     ) -> None:
-        self._sarif_reporting_descriptor = sarif_om.ReportingDescriptor(id=id)
-        self.name = name
+        self._sarif_reporting_descriptor = sarif_om.ReportingDescriptor(
+            id=id, name=name
+        )
         self.message_default_template = message_default_template
         self.short_description = short_description
         self.full_description = full_description
@@ -67,11 +69,6 @@ class Rule:
     def name(self) -> str:
         """A stable, opaque identifier for the rule."""
         return self._sarif_reporting_descriptor.name
-
-    @name.setter
-    def name(self, new_name: str) -> None:
-        """Sets the name of the rule."""
-        self._sarif_reporting_descriptor.name = new_name
 
     @property
     def message_default_template(self) -> str:
@@ -308,17 +305,58 @@ class Diagnostic:
         return self
 
 
+@dataclasses.dataclass()
+class RuleCollection:
+    _rule_id_name_set: Set[Tuple[str, str]] = dataclasses.field(init=False)
+
+    def __post_init__(self) -> None:
+        self._rule_id_name_set = {
+            (field.default.id, field.default.name)
+            for field in dataclasses.fields(self)
+            if isinstance(field.default, Rule)
+        }
+
+    def __contains__(self, rule: Rule) -> bool:
+        """Checks if the rule is in the collection."""
+        return (rule.id, rule.name) in self._rule_id_name_set
+
+    @classmethod
+    def from_list(cls, new_collection_class_name: str, rules: Sequence[Rule]):
+        """Creates a custom class inherited from RuleCollection with the list of rules."""
+        return dataclasses.make_dataclass(
+            new_collection_class_name,
+            [
+                (
+                    formatter._kebab_case_to_snake_case(rule.name),
+                    type(rule),
+                    dataclasses.field(default=rule),
+                )
+                for rule in rules
+            ],
+            bases=(cls,),
+        )
+
+
 class DiagnosticTool:
     _sarif_tool: sarif_om.Tool
-    _rules: Sequence[Rule]
+    _rules: RuleCollection
     _triggered_rules: Set[Rule]
 
-    def __init__(self, name: str, version: str, rules: Sequence[Rule]) -> None:
+    def __init__(
+        self,
+        name: str,
+        version: str,
+        rules: RuleCollection,
+        diagnostic_type: type = Diagnostic,
+    ) -> None:
         self._sarif_tool = sarif_om.Tool(
             driver=sarif_om.ToolComponent(name=name, version=version)
         )
         self._rules = rules
         self._triggered_rules = set()
+        if not issubclass(diagnostic_type, Diagnostic):
+            raise TypeError("diagnostic_type must be a subclass of Diagnostic")
+        self._diagnostic_type = diagnostic_type
 
     def sarif(self) -> sarif_om.Tool:
         """Returns the SARIF Tool object."""
@@ -336,14 +374,9 @@ class DiagnosticTool:
         return self._sarif_tool.driver.version
 
     @property
-    def rules(self) -> Sequence[Rule]:
+    def rules(self) -> RuleCollection:
         """The rules supported by the tool."""
         return self._rules
-
-    @rules.setter
-    def rules(self, new_rules: Sequence[Rule]) -> None:
-        """Sets the rules supported by the tool."""
-        self._rules = new_rules
 
     def create_diagnostic(
         self,
@@ -369,9 +402,10 @@ class DiagnosticTool:
         if rule not in self._rules:
             raise ValueError(
                 f"Rule '{rule.id}:{rule.name}' is not supported by this tool '{self.name} {self.version}'."
+                f" Supported rules are: {self._rules._rule_id_name_set}"
             )
         self._triggered_rules.add(rule)
-        return Diagnostic(rule, level, message_args, **kwargs)
+        return self._diagnostic_type(rule, level, message_args, **kwargs)
 
 
 class Run:
@@ -385,9 +419,6 @@ class Run:
 
     def sarif(self) -> sarif_om.Run:
         """Returns the SARIF Run object."""
-        self._tool.rules = list(
-            set([diagnostic.rule for diagnostic in self._diagnostics])
-        )
         self._sarif_run = sarif_om.Run(tool=self._tool.sarif())
         self._sarif_run.results = [
             diagnostic.sarif() for diagnostic in self._diagnostics

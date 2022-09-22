@@ -1,6 +1,5 @@
 """Diagnostic components for PyTorch ONNX export."""
 
-import dataclasses
 from typing import Any, Optional, Tuple
 
 import torch
@@ -52,25 +51,16 @@ class ExportDiagnosticTool(infra.DiagnosticTool):
     """Base class for all export diagnostic tools.
 
     This class is used to represent all export diagnostic tools. It is a subclass
-    of infra.DiagnosticTool. By overriding the create_diagnostic() method, it
-    allows the tool to create diagnostics of type ExportDiagnostic."""
+    of infra.DiagnosticTool.
+    """
 
     def __init__(self) -> None:
-        export_rules = list(dataclasses.asdict(diagnostics.rules).values())
         super().__init__(
             name="torch.onnx.export",
             version=torch.__version__,
-            rules=export_rules,
+            rules=diagnostics.rules,
+            diagnostic_type=ExportDiagnostic,
         )
-
-    def create_diagnostic(
-        self,
-        rule: infra.Rule,
-        level: infra.Level,
-        message_args: Optional[Tuple[Any, ...]],
-        **kwargs,
-    ) -> ExportDiagnostic:
-        return ExportDiagnostic(rule, level, message_args, **kwargs)
 
 
 engine = infra.DiagnosticEngine()

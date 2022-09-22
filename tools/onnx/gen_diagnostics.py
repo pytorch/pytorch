@@ -30,7 +30,10 @@ See tools/onnx/gen_diagnostics.py for more information.
 """
 
 _PY_RULE_TEMPLATE = """\
-{0} = infra.Rule.from_sarif(**{1})
+{0}: infra.Rule = dataclasses.field(
+    default=infra.Rule.from_sarif(**{1}),
+    init=False,
+)
 \"\"\"{2}\"\"\"
 """
 
@@ -45,7 +48,7 @@ _RuleType = Mapping[str, Any]
 
 
 def _kebab_case_to_snake_case(name: str) -> str:
-    return "_".join(name.split("-"))
+    return name.replace("-", "_")
 
 
 def _kebab_case_to_pascal_case(name: str) -> str:

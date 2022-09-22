@@ -121,12 +121,13 @@ class DiagnosticEngine:
 
     @contextlib.contextmanager
     def start_new_run(self, tool: infra.DiagnosticTool):
+        previous_run = self._current_run
         self._current_run = infra.Run(tool)
         self._runs.append(self._current_run)
         try:
             yield
         finally:
-            self.end_current_run()
+            self.end_current_run(previous_run)
 
-    def end_current_run(self) -> None:
-        self._current_run = None
+    def end_current_run(self, previous_run=None) -> None:
+        self._current_run = previous_run

@@ -1,6 +1,7 @@
 # Owner(s): ["module: onnx"]
 
 import contextlib
+import dataclasses
 import io
 from typing import Set, Tuple
 
@@ -110,7 +111,7 @@ class TestONNXDiagnostics(common_utils.TestCase):
         engine.reset()
         return super().setUp()
 
-    def test_assert_diagnostic_raise_when_diagnostic_not_found(self):
+    def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
         with self.assertRaises(AssertionError):
             with assertDiagnostic(
                 self,
@@ -164,33 +165,23 @@ class TestONNXDiagnostics(common_utils.TestCase):
             )
 
 
+@dataclasses.dataclass()
+class _RuleCollectionForTest(infra.RuleCollection):
+    rule_without_message_args: infra.Rule = dataclasses.field(
+        default=infra.Rule(
+            "1",
+            "rule-without-message-args",
+            message_default_template="rule message",
+        )
+    )
+
+
 class TestDiagnosticsInfra(common_utils.TestCase):
     """Test cases for diagnostics infra."""
 
     def setUp(self):
         self.engine = infra.DiagnosticEngine()
-        self.rules = [
-            infra.Rule(
-                "1",
-                "rule-none",
-                message_default_template="rule none",
-            ),
-            infra.Rule(
-                "2",
-                "rule-note",
-                message_default_template="rule note",
-            ),
-            infra.Rule(
-                "3",
-                "rule-warning",
-                message_default_template="rule warning",
-            ),
-            infra.Rule(
-                "4",
-                "rule-error",
-                message_default_template="rule error",
-            ),
-        ]
+        self.rules = _RuleCollectionForTest()
         self.diagnostic_tool = infra.DiagnosticTool("test_tool", "1.0.0", self.rules)
         with contextlib.ExitStack() as stack:
             self.default_run_ctx = stack.enter_context(
@@ -199,7 +190,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 
-    def test_diagnose_with_nonexistent_rule(self):
+    def test_diagnose_raises_value_error_with_nonexistent_rule(self):
         rule_id = "0"
         rule_name = "nonexistent-rule"
         with self.assertRaisesRegex(
@@ -212,28 +203,27 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 infra.Level.WARNING,
             )
 
-    def test_diagnostic_run(self):
-        with assertDiagnostic(
-            self,
-            self.engine,
-            self.rules[0],
-            infra.Level.WARNING,
-        ):
-            self.engine.diagnose(self.rules[0], infra.Level.WARNING)
-        self.assertEqual(len(self.engine._runs), 1)
-
-    def test_diagnostic_nested_run(self):
+    def test_diagnostic_records_nested_runs(self):
         with self.engine.start_new_run(self.diagnostic_tool):
-            with assertDiagnostic(
-                self, self.engine, self.rules[0], infra.Level.WARNING
-            ):
-                self.engine.diagnose(self.rules[0], infra.Level.WARNING)
-            self.assertEqual(len(self.engine._runs), 2)
+            self.engine.diagnose(
+                self.rules.rule_without_message_args, infra.Level.WARNING
+            )
+            sarif_log = self.engine.sarif_log
+            self.assertEqual(len(sarif_log.runs), 2)
+            self.assertEqual(len(sarif_log.runs[0].results), 0)
+            self.assertEqual(len(sarif_log.runs[1].results), 1)
+        self.engine.diagnose(self.rules.rule_without_message_args, infra.Level.ERROR)
+        sarif_log = self.engine.sarif_log
+        self.assertEqual(len(sarif_log.runs), 2)
+        self.assertEqual(len(sarif_log.runs[0].results), 1)
+        self.assertEqual(len(sarif_log.runs[1].results), 1)
 
-    def test_diagnose_outside_run_raise_error(self):
+    def test_diagnose_raises_runtime_error_when_outside_of_run(self):
         self.engine.end_current_run()
         with self.assertRaisesRegex(
             RuntimeError,
             "No run is currently active.",
         ):
-            self.engine.diagnose(self.rules[0], infra.Level.WARNING)
+            self.engine.diagnose(
+                self.rules.rule_without_message_args, infra.Level.WARNING
+            )

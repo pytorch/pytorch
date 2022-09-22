@@ -16,8 +16,12 @@ _SarifClass = Union[
 ]
 
 
-def _from_camel_case_to_snake_case(s: str) -> str:
+def _camel_case_to_snake_case(s: str) -> str:
     return re.sub(r"([A-Z])", r"_\1", s).lower()
+
+
+def _kebab_case_to_snake_case(s: str) -> str:
+    return s.replace("-", "_")
 
 
 def _convert_key(
@@ -40,5 +44,5 @@ def _convert_key(
 
 def sarif_to_json(attr_cls_obj: _SarifClass) -> str:
     dict = attr.asdict(attr_cls_obj)
-    dict = _convert_key(dict, _from_camel_case_to_snake_case)
+    dict = _convert_key(dict, _camel_case_to_snake_case)
     return json.dumps(dict, indent=4)

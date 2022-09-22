@@ -8,9 +8,9 @@ import dataclasses
 from torch.onnx._internal.diagnostics import infra
 
 
-@dataclasses.dataclass(frozen=True)
-class _Rules:
+@dataclasses.dataclass()
+class _POERules(infra.RuleCollection):
 ${rules}
 
 
-rules = _Rules()
+rules = _POERules()
