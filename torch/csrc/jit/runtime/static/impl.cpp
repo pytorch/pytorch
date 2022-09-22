@@ -155,6 +155,7 @@ void OptimizeGraph(
   UseVariadicStack(graph);
   EliminateTrivialEquallySplit(graph);
   EliminateExtraPermuteOps(graph);
+  PrepackWeights(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(
