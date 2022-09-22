@@ -206,7 +206,7 @@ def _make_magic(method, func, py_type):
             return PySymFloat(out, self.shape_env)
         else:
             # TODO: relational operators actually technically return a
-            # PysymBool, this is a type error
+            # PySymBool, this is a type error
             return py_type(out, self.shape_env)
 
     # this should be wrapped transparently into torch.SymIntNode
