@@ -3459,11 +3459,15 @@ class FullyShardedDataParallel(nn.Module):
                             f"Device mismatch: p={p.device} "  # type: ignore[attr-defined]
                             f"p._saved_grad_shard={p._saved_grad_shard.device}"
                         )
-                        p.grad = p._saved_grad_shard
-                        if fsdp_module._mixed_precision_keep_low_precision_grads():
-                            p.grad.data = p.grad.to(
-                                fsdp_module.mixed_precision.param_dtype
-                            )
+                        # Check if post-backward was called for this param (FSDP unit).
+                        # TODO: This logic will have to be revisited when non-recursive wrapping
+                        # lands. If it was not called, there is no new gradient to accumulate
+                        if p._post_backward_called:
+                            p.grad = p._saved_grad_shard
+                            if fsdp_module._mixed_precision_keep_low_precision_grads():
+                                p.grad.data = p.grad.to(
+                                    fsdp_module.mixed_precision.param_dtype
+                                )
                     else:
                         p_assert(
                             not handle.uses_sharded_strategy or not p._post_backward_called,
@@ -3482,8 +3486,8 @@ class FullyShardedDataParallel(nn.Module):
 
         # Update root and nested FSDP's hooks and flags.
         for m in self.fsdp_modules(self):  # includes self
-            _catch_all_reshard(m)
             _finalize_params(m)
+            _catch_all_reshard(m)
             m._ran_pre_backward_hook.clear()
             m.training_state = TrainingState_.IDLE
             for handle in m._handles:
