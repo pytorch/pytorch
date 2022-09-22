@@ -18,9 +18,11 @@ def _lerp(low: float, high: float, weight: torch.Tensor) -> torch.Tensor:
     if low == 0 and high == 1:
         return weight
     elif low == 0:
-        return high * weight
+        return weight.mul_(high)
     else:
-        return high * weight + low * (1 - weight)
+        # high * weight + low * (1 - weight)
+        one_m_weight = 1 - weight
+        return weight.mul_(high).add_(one_m_weight, alpha=low)
 
 
 def make_tensor(
@@ -145,9 +147,9 @@ def make_tensor(
         float_dtype = complex_to_corresponding_float_type_map[dtype]
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
         m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        rand_val = torch.rand((2,) + shape, device=device, dtype=float_dtype)
+        rand_val = torch.rand(shape + (2,), device=device, dtype=float_dtype)
         rand_val = _lerp(m_low, m_high, rand_val)
-        result = torch.complex(rand_val[0], rand_val[1])
+        result = torch.view_as_complex(rand_val)
     else:
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
