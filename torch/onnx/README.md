@@ -54,16 +54,14 @@ more robust to different graphs.
 
 ### Extra context for symbolic functions
 
-> TODO(justinchuby): Update this after #84776 is merged.
+The first argument of a symbolic function is always a `GraphContext` object.
+
+`GraphContext` contains all methods defined in a `torch.Graph` object and context
+for the symbolic function.
 
 In general, symbolic functions only require inputs and attributes to
-the original node. In rare circumstances, extra context may be required.
-For example, symbolic function for `prim::Loop` needs access to the sub-block of
-the original node.
-A symbolic function that has a first arg (before the Graph object) with the
-type annotation of torch.onnx.SymbolicContext will be called with that additional context.
-During export, it is populated from `utils._run_symbolic_function`
-to contain the context for each node being converted.
+the original node. An example of a symbolic function needing context is
+`prim::Loop`. It needs access to the sub-block of the original node.
 
 ### Export inplace
 
