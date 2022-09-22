@@ -218,26 +218,40 @@ TEST(AutogradAPITests, AnomalyMode) {
     ASSERT_TRUE(
         warnings.str().find("Traceback of forward") != std::string::npos);
   }
-  {
-    WarningCapture warnings;
-    // Double backward
+  auto double_backward_produce_nan = [](bool should_throw) {
     auto x = torch::tensor({0.0}, torch::requires_grad());
     auto y = x.pow(1.5);
     auto gr =
         // NOLINTNEXTLINE(bugprone-argument-comment)
         grad({y}, {x}, {}, /*retain_graph=*/true, /*create_backward=*/true);
-    ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});
-                       , "returned nan");
-    auto msgs = warnings.messages();
-    ASSERT_EQ(msgs.size(), 2);
-    ASSERT_TRUE(
-        msgs[0].find("Traceback of forward call that caused the error") !=
-        std::string::npos);
-    ASSERT_TRUE(
-        msgs[1].find(
-            "Traceback of forward call that induced the previous calculation") !=
-        std::string::npos);
+    if (should_throw) {
+      WarningCapture warnings;
+      ASSERT_THROWS_WITH(grad({gr[0]}, {x}, {torch::tensor({0.0})});
+                         , "returned nan");
+      auto msgs = warnings.messages();
+      ASSERT_EQ(msgs.size(), 2);
+      ASSERT_TRUE(
+          msgs[0].find("Traceback of forward call that caused the error") !=
+          std::string::npos);
+      ASSERT_TRUE(
+          msgs[1].find(
+              "Traceback of forward call that induced the previous calculation") !=
+          std::string::npos);
+    } else {
+      grad({gr[0]}, {x}, {torch::tensor({0.0})});
+    }
+  };
+
+  double_backward_produce_nan(true);
+  {
+    torch::autograd::DetectAnomalyGuard detect_anomaly(/*check_nan=*/false);
+    double_backward_produce_nan(false);
+    {
+      torch::autograd::DetectAnomalyGuard detect_anomaly(/*check_nan=*/true);
+      double_backward_produce_nan(true);
+    }
   }
+  double_backward_produce_nan(true);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {
@@ -275,6 +289,42 @@ TEST(CustomAutogradTest, CustomFunction) {
 
   ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5, 5}));
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}) * 2);
+}
+
+TEST(CustomAutogradTest, CustomFunctionWithTensorList) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext* ctx, at::TensorList tensors) {
+      torch::autograd::variable_list vars;
+      for (const at::Tensor& tensor : tensors) {
+        vars.push_back(tensor);
+      }
+      ctx->save_for_backward(vars);
+      return tensors[0] + tensors[1] + tensors[0] * tensors[1];
+    }
+
+    static variable_list backward(
+        AutogradContext* ctx,
+        variable_list grad_output) {
+      auto saved = ctx->get_saved_variables();
+      auto var1 = saved[0];
+      auto var2 = saved[1];
+      variable_list output = {
+          grad_output[0] + grad_output[0] * var2,
+          grad_output[0] + grad_output[0] * var1};
+      return output;
+    }
+  };
+
+  at::Tensor x = torch::randn({5, 5}, torch::requires_grad());
+  at::Tensor y = torch::randn({5, 5}, torch::requires_grad());
+  torch::autograd::variable_list variables = {x, y};
+  at::TensorList tensors = variables;
+  auto res = MyFunction::apply(tensors);
+  auto go = torch::ones({}, torch::requires_grad());
+  res.sum().backward(go, false, true);
+
+  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5, 5}));
+  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}));
 }
 
 TEST(CustomAutogradTest, GraphTaskTrimEdges) {
@@ -1200,19 +1250,19 @@ std::tuple<torch::Tensor, torch::Tensor, int64_t> ret_tuple_non_tensor(
 }
 
 torch::Tensor view_op(const torch::Tensor& self) {
-  return self;
+  return self.alias();
 }
 
 torch::Tensor view_op_with_extra_arg(
     const torch::Tensor& self,
     const torch::Tensor& other) {
-  return self;
+  return self.alias();
 }
 
 std::vector<torch::Tensor> ret_tensor_vector_view(
     const torch::Tensor& self,
     const torch::Tensor& other) {
-  return {self, self};
+  return {self.alias(), self.alias()};
 }
 
 std::vector<at::Tensor> ret_tensor_vector(

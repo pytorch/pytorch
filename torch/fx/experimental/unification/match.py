@@ -7,7 +7,7 @@ from .unification_tools import groupby, first  # type: ignore[import]
 class Dispatcher(object):
     def __init__(self, name):
         self.name = name
-        self.funcs = dict()
+        self.funcs = {}
         self.ordering = []
 
     def add(self, signature, func):
@@ -60,7 +60,7 @@ class VarDispatcher(Dispatcher):
 
 
 
-global_namespace = dict()  # type: ignore[var-annotated]
+global_namespace = {}  # type: ignore[var-annotated]
 
 
 def match(*signature, **kwargs):

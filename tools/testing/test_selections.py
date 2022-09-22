@@ -9,7 +9,7 @@ from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 def calculate_shards(
     num_shards: int, tests: List[str], job_times: Dict[str, float]
 ) -> List[Tuple[float, List[str]]]:
-    filtered_job_times: Dict[str, float] = dict()
+    filtered_job_times: Dict[str, float] = {}
     unknown_jobs: List[str] = []
     for test in tests:
         if test in job_times:

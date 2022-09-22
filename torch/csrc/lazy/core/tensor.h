@@ -2,8 +2,8 @@
 
 #include <c10/core/SymIntNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/lazy/backend/backend_data.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
-#include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>

@@ -120,6 +120,16 @@ wrap('wrapped_with_submodule')
 def wrapped_with_submodule(x: torch.Tensor, batchnorm1d: torch.nn.BatchNorm1d):
     return batchnorm1d(x)
 
+def my_decorator(f):
+    @functools.wraps(f)
+    def wrapper_inside_decorator(*args, **kwargs):
+        return f(*args, **kwargs)
+    return wrapper_inside_decorator
+
+@wrap
+@my_decorator
+def wrapped_decorated_fn(x):
+    return x
 
 real_wrapped_via_decorator = wrapped_via_decorator
 real_a_lifed_leaf = a_lifted_leaf
@@ -447,6 +457,14 @@ class TestFX(JitTestCase):
         retraced = symbolic_trace(m)
         self.assertIn('wrapped_via_decorator', retraced.code)
         self.assertEqual(retraced(0), 1)
+
+    def test_wrap_decorated_function(self):
+        def to_trace(y):
+            return wrapped_decorated_fn(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_decorated_fn', m.code)
+        self.assertEqual(m(1), 1)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -4201,7 +4219,11 @@ class TestVisionTracing(JitTestCase):
     def generate_video_tests(cls):
         for k in torchvision_models.list_models(module=torchvision_models.video):
             test_name = 'test_torchvision_models_video_' + k
-            x = torch.rand(1, 3, 4, 112, 112) if k not in {'mvit_v1_b', 'mvit_v2_s'} else torch.rand(1, 3, 16, 224, 224)
+            x = (
+                torch.rand(1, 3, 4, 112, 112)
+                if k not in {"mvit_v1_b", "mvit_v2_s", "s3d"}
+                else torch.rand(1, 3, 16, 224, 224)
+            )
             kwargs = dict(num_classes=50)
             model_test = cls.generate_test_fn(k, x, kwargs)
             setattr(cls, test_name, model_test)

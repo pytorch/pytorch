@@ -22,8 +22,8 @@ bool nested_is_same_size(const Tensor& self, const Tensor& other) {
       "nested. While Other ",
       other.is_nested()? "is " : "is not ",
       "nested.")
-  const auto self_nt_size = get_nested_size_tensor(self);
-  const auto other_nt_size = get_nested_size_tensor(other);
+  const auto self_nt_size = _nested_tensor_size(self);
+  const auto other_nt_size = _nested_tensor_size(other);
   return at::equal(self_nt_size, other_nt_size);
 }
 int64_t size(const Tensor& self, int64_t dim) {

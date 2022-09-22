@@ -236,6 +236,10 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = "NestedTensor input is not supported"
         elif mask is not None:
             why_not_sparsity_fast_path = "src_key_padding_mask and mask were both supplied"
+        elif first_layer.self_attn.num_heads % 2 == 1:
+            why_not_sparsity_fast_path = "num_head is odd"
+        elif torch.is_autocast_enabled():
+            why_not_sparsity_fast_path = "autocast is enabled"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
@@ -258,27 +262,20 @@ class TransformerEncoder(Module):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
             elif not (src.is_cuda or 'cpu' in str(src.device)):
                 why_not_sparsity_fast_path = "src is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
+            elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")
 
             if (not why_not_sparsity_fast_path) and (src_key_padding_mask is not None):
                 convert_to_nested = True
-                # simplify on or after on 8/16/2022 to unconditionally call with mask_check=False
-                # we have established that either (1) the mask is OK with the check above,
-                # or (2) that we don't need a mask check with mask_check=False in the init
-                if not torch.jit.is_scripting():
-                    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
-                else:
-                    # When scripting, make a simpler call until the FC bar passes on 8/16/2022
-                    output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not(), mask_check=False)
                 src_key_padding_mask_for_layers = None
 
         for mod in self.layers:
             output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
 
         if convert_to_nested:
-            output = output.to_padded_tensor(0.)
+            output = torch.nested.to_padded_tensor(output, 0.)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -463,6 +460,10 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "src_mask is not supported for fastpath"
         elif src.is_nested and src_key_padding_mask is not None:
             why_not_sparsity_fast_path = "src_key_padding_mask is not supported with NestedTensor input for fastpath"
+        elif self.self_attn.num_heads % 2 == 1:
+            why_not_sparsity_fast_path = "num_head is odd"
+        elif torch.is_autocast_enabled():
+            why_not_sparsity_fast_path = "autocast is enabled"
 
         if not why_not_sparsity_fast_path:
             tensor_args = (
@@ -485,9 +486,9 @@ class TransformerEncoderLayer(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument has_torch_function"
-            elif not all([(x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+            elif not all((x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args):
                 why_not_sparsity_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([x.requires_grad for x in tensor_args]):
+            elif torch.is_grad_enabled() and any(x.requires_grad for x in tensor_args):
                 why_not_sparsity_fast_path = ("grad is enabled and at least one of query or the "
                                               "input/output projection weights or biases requires_grad")
 
@@ -517,6 +518,7 @@ class TransformerEncoderLayer(Module):
                     0 if src_mask is not None else
                     None,
                 )
+
 
         x = src
         if self.norm_first:
