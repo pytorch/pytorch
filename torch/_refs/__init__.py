@@ -7,7 +7,7 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Callable, cast, List, Optional, overload, Sequence, Tuple, Union
+from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
 
@@ -2748,18 +2748,10 @@ def native_layer_norm(
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
 # test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
 @register_decomposition(torch.ops.aten.permute, disable_meta=True)
-def permute(
-    a: TensorLikeType, *dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]
-) -> TensorLikeType:
-    dims_: DimsSequenceType
-    if dims and isinstance(dims[0], Sequence):
-        assert len(dims) == 1
-        dims = cast(Tuple[DimsSequenceType], dims)
-        dims_ = dims[0]
-    else:
-        dims_ = cast(DimsSequenceType, dims)
-
-    _permutation = utils.canonicalize_dims(a.ndim, dims_)
+def permute(a: TensorLikeType, *dims) -> TensorLikeType:
+    _permutation = utils.canonicalize_dims(
+        a.ndim, utils.extract_dims_from_varargs(dims)
+    )
     return prims.transpose(a, _permutation)
 
 

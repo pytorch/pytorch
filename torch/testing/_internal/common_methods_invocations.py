@@ -12316,6 +12316,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=partial(sample_inputs_permute, is_method=True),
            reference_inputs_func=reference_inputs_permute,
+           # the fx does not support the lambda-defined op in test_normalize_operator_exhaustive
            skips=(DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),)),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
