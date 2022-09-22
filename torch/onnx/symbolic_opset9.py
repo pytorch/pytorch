@@ -448,7 +448,6 @@ def _trunc_divide(g, self, other):
     return out
 
 
-@_onnx_symbolic("aten::_floor_divide")
 @_beartype.beartype
 def _floor_divide(g, self, other):
     if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
@@ -1482,7 +1481,8 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     decorate=[
         _apply_params(
             "max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False
-        )
+        ),
+        _export("max_pool1d"),
     ],
 )
 @_onnx_symbolic(
@@ -1499,7 +1499,8 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     decorate=[
         _apply_params(
             "max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False
-        )
+        ),
+        _export("max_pool3d"),
     ],
 )
 @_beartype.beartype
@@ -1590,7 +1591,10 @@ max_pool3d_with_indices = _onnx_symbolic("aten::max_pool3d_with_indices")(
 
 @_onnx_symbolic(
     "aten::avg_pool1d",
-    decorate=[_apply_params("avg_pool1d", torch.nn.modules.utils._single)],
+    decorate=[
+        _apply_params("avg_pool1d", torch.nn.modules.utils._single),
+        _export("avg_pool1d"),
+    ],
 )
 @_onnx_symbolic(
     "aten::avg_pool2d",
@@ -1601,7 +1605,10 @@ max_pool3d_with_indices = _onnx_symbolic("aten::max_pool3d_with_indices")(
 )
 @_onnx_symbolic(
     "aten::avg_pool3d",
-    decorate=[_apply_params("avg_pool3d", torch.nn.modules.utils._triple)],
+    decorate=[
+        _apply_params("avg_pool3d", torch.nn.modules.utils._triple),
+        _export("avg_pool3d"),
+    ],
 )
 @_beartype.beartype
 def _avg_pool(name, tuple_fn):
@@ -1658,7 +1665,8 @@ def _avg_pool(name, tuple_fn):
     decorate=[
         _apply_params(
             "adaptive_avg_pool1d", "AveragePool", torch.nn.modules.utils._single
-        )
+        ),
+        _export("adaptive_avg_pool1d"),
     ],
 )
 @_onnx_symbolic(
@@ -1666,7 +1674,8 @@ def _avg_pool(name, tuple_fn):
     decorate=[
         _apply_params(
             "adaptive_avg_pool2d", "AveragePool", torch.nn.modules.utils._pair
-        )
+        ),
+        _export("adaptive_avg_pool2d"),
     ],
 )
 @_onnx_symbolic(
@@ -1674,7 +1683,8 @@ def _avg_pool(name, tuple_fn):
     decorate=[
         _apply_params(
             "adaptive_avg_pool3d", "AveragePool", torch.nn.modules.utils._triple
-        )
+        ),
+        _export("adaptive_avg_pool3d"),
     ],
 )
 @_onnx_symbolic(
@@ -1685,7 +1695,8 @@ def _avg_pool(name, tuple_fn):
             "MaxPool",
             torch.nn.modules.utils._single,
             max_pool1d_with_indices,
-        )
+        ),
+        _export("adaptive_max_pool1d"),
     ],
 )
 @_onnx_symbolic(
@@ -1696,7 +1707,8 @@ def _avg_pool(name, tuple_fn):
             "MaxPool",
             torch.nn.modules.utils._pair,
             max_pool2d_with_indices,
-        )
+        ),
+        _export("adaptive_max_pool2d"),
     ],
 )
 @_onnx_symbolic(
@@ -1707,7 +1719,8 @@ def _avg_pool(name, tuple_fn):
             "MaxPool",
             torch.nn.modules.utils._triple,
             max_pool3d_with_indices,
-        )
+        ),
+        _export("adaptive_max_pool3d"),
     ],
 )
 @_beartype.beartype
@@ -1908,7 +1921,10 @@ def pad(g, input, pad, mode, value):
 
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
-    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+    decorate=[
+        _apply_params("upsample_nearest1d", 3, "nearest"),
+        _export("upsample_nearest1d"),
+    ],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
@@ -1919,19 +1935,31 @@ def pad(g, input, pad, mode, value):
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
-    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+    decorate=[
+        _apply_params("upsample_nearest3d", 5, "nearest"),
+        _export("upsample_nearest3d"),
+    ],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
-    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+    decorate=[
+        _apply_params("upsample_linear1d", 3, "linear"),
+        _export("upsample_linear1d"),
+    ],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
-    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+    decorate=[
+        _apply_params("upsample_bilinear2d", 4, "linear"),
+        _export("upsample_bilinear2d"),
+    ],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
-    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+    decorate=[
+        _apply_params("upsample_trilinear3d", 5, "linear"),
+        _export("upsample_trilinear3d"),
+    ],
 )
 @_beartype.beartype
 def _interpolate(name: str, dim: int, interpolate_mode: str):
@@ -4489,9 +4517,13 @@ def lstm_cell(g, self, hidden, w_ih, w_hh, b_ih, b_hh):
     ), symbolic_helper._squeeze_helper(g, c_outs, [0])
 
 
-@_onnx_symbolic("aten::gru", decorate=[_apply_params("GRU")])
-@_onnx_symbolic("aten::rnn_tanh", decorate=[_apply_params("RNN_TANH")])
-@_onnx_symbolic("aten::rnn_relu", decorate=[_apply_params("RNN_RELU")])
+@_onnx_symbolic("aten::gru", decorate=[_apply_params("GRU"), _export("gru")])
+@_onnx_symbolic(
+    "aten::rnn_tanh", decorate=[_apply_params("RNN_TANH"), _export("rnn_tanh")]
+)
+@_onnx_symbolic(
+    "aten::rnn_relu", decorate=[_apply_params("RNN_RELU"), _export("rnn_relu")]
+)
 def _one_hidden_rnn(kind: str):
     @symbolic_helper.parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
     @_beartype.beartype
