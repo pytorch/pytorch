@@ -26,3 +26,6 @@ FullyShardedDataParallel
 
 .. autoclass:: torch.distributed.fsdp.OptimStateKeyType
   :members:
+
+.. autoclass:: torch.distributed.fsdp.default_comm_hooks
+  :members:
