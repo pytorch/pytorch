@@ -403,7 +403,7 @@ def run_test(
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
-                                        prefix=f'{test_module.replace("\\", "-").replace("/", "-")}_')
+                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")))
     os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
