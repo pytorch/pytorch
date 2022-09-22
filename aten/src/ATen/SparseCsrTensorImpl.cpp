@@ -107,7 +107,7 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
 void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
+      "resize_and_clear_ called on tensor with symbolic shape");
   TORCH_CHECK(sparse_dim >= 2, "resize_and_clear_ sparse dimensionality must be at least 2, got ", sparse_dim);
   TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
               sparse_dim, "), got ", size.size());
@@ -145,31 +145,25 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size
   refresh_numel();
 }
 
-void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
+void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
+    const Tensor& src) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
+      "resize_as_sparse_compressed_tensor_ called on tensor with symbolic shape");
   set_layout(src.layout());
   Tensor compressed_indices;
   Tensor plain_indices;
   std::tie(compressed_indices, plain_indices) =
       sparse_csr::getCompressedPlainIndices(src);
 
-  // compressed indices are always crow_indices_ on the impl
-  crow_indices_ = at::empty_like(
-      compressed_indices,
-      compressed_indices.options(),
-      compressed_indices.suggest_memory_format());
+  // NOTE: clone indices as empty_like will produce a tensor which is not valid
+  // under the invariants compressed indices are always crow_indices_ on the
+  // impl
+  crow_indices_ = compressed_indices.to(crow_indices_.options());
   // plain indices are always col_indices_ on the impl
-  col_indices_ = at::empty_like(
-      plain_indices,
-      plain_indices.options(),
-      plain_indices.suggest_memory_format());
-  // Values are values regardless of layout
-  values_ = at::empty_like(
-      src.values(),
-      src.values().options(),
-      src.values().suggest_memory_format());
+  col_indices_ = plain_indices.to(col_indices_.options());
+  // Values are initializd empty
+  values_ = at::empty(src.values().sizes(), values_.options());
   sizes_and_strides_.set_sizes(src.sizes());
   refresh_numel();
 }
