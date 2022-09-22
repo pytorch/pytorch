@@ -2911,6 +2911,9 @@ def noncontiguous_like(t):
     if not t.is_contiguous():
         return t
 
+    # Save requires_grad since the zero_dim case re-assigns t
+    requires_grad = t.requires_grad
+
     # Special-cases 0-dim tensors
     zero_dim = t.ndim == 0
     if zero_dim:
@@ -2934,7 +2937,7 @@ def noncontiguous_like(t):
         strides = list(result.stride())
         strides[-1] *= 2
         result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
-    result.requires_grad_(t.requires_grad)
+    result.requires_grad_(requires_grad)
     return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)

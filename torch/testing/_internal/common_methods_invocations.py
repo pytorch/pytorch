@@ -9455,9 +9455,9 @@ op_db: List[OpInfo] = [
                skipCPUIfNoFFT,
                # gradcheck fails on ROCm (gh-68429)
                # grad is computed improperly (probably for weights tensor)
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_fn_grad'),
                # Pre-existing condition (calls .item); needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCompositeCompliance', 'test_backward'),
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
