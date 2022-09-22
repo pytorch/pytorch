@@ -58,7 +58,7 @@ def _dispatch_qualified_name(
             context.opset,
             None,
         )
-    return symbolic_fn(context, *args, **kwargs)
+    return symbolic_fn(*args, **kwargs)
 
 
 # The dispatcher for the symbolic functions.
