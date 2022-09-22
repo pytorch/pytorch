@@ -586,11 +586,9 @@ def isinf(g, input):
 @_onnx_symbolic("aten::isfinite")
 @_beartype.beartype
 def isfinite(g, input):
-    from torch.onnx.symbolic_opset9 import __not_, __or_
-
     inf_node = isinf(g, input)
     nan_node = opset9.isnan(g, input)
-    return __not_(g, __or_(g, inf_node, nan_node))
+    return opset9.__not_(g, opset9.__or_(g, inf_node, nan_node))
 
 
 @_onnx_symbolic("aten::quantize_per_tensor")
