@@ -78,8 +78,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   void trace_gpu_stream_synchronization(uintptr_t stream) const override {}
   void trace_gpu_event_synchronization(uintptr_t event) const override {}
   void trace_kernel_launch(
-      const c10::OperatorHandle& op,
-      torch::jit::Stack* stack) const override {}
+      const c10::FunctionSchema& schema,
+      std::vector<uintptr_t>& inputs,
+      std::vector<uintptr_t>& outputs) const override {}
 };
 
 void PyInterpreter::disarm() noexcept {
