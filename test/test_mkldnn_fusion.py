@@ -9,8 +9,10 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
 from test_tensorexpr import warmup_and_run_forward
+from test_mkldnn import has_bf16_support
 
 FUSION_GROUP = 'prim::TensorExprGroup'
+LLVM_ENABLED = torch._C._llvm_enabled()
 
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
@@ -93,11 +95,11 @@ class TestMkldnnFusion(JitTestCase):
                     x = torch.randn(batch_size, iC, input_size, input_size).to(memory_format=memory_format)
                     graph = self._check_model(m, x, trace, bf16)
                     conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
-                    if enabled:
+                    if not enabled or (bf16 and (not has_bf16_support() or not LLVM_ENABLED)):
+                        self.assertGraphContains(graph, kind=conv_node_name)
+                    else:
                         self.assertFused(graph, [conv_node_name])
                         self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
-                    else:
-                        self.assertGraphContains(graph, kind=conv_node_name)
 
     def test_conv_eltwise(self):
         class M(nn.Module):
@@ -129,11 +131,11 @@ class TestMkldnnFusion(JitTestCase):
                 dtype_cast = True if bf16 and eltwise_fn.__name__ == "gelu" else False
                 graph = self._check_model(m, x, trace, bf16, dtype_cast)
                 conv_node_name = 'aten::_convolution' if trace else 'aten::conv2d'
-                if enabled:
+                if not enabled or (bf16 and (not has_bf16_support() or not LLVM_ENABLED)):
+                    self.assertGraphContains(graph, kind=conv_node_name)
+                else:
                     self.assertFused(graph, [conv_node_name, 'aten::' + eltwise_fn.__name__])
                     self.assertGraphContainsExactly(graph, FUSION_GROUP, 1)
-                else:
-                    self.assertGraphContains(graph, kind=conv_node_name)
 
     def test_unsupported_conv(self):
         class M(nn.Module):
