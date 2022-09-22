@@ -1,6 +1,7 @@
+import functools
 import sys
 import warnings
-from typing import Sequence
+from typing import Callable, Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -16,7 +17,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_opset9 as opset9,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -27,9 +28,6 @@ from torch.onnx._internal import _beartype
 
 
 __all__ = [
-    "avg_pool1d",
-    "avg_pool2d",
-    "avg_pool3d",
     "dequantize",
     "div",
     "embedding_bag",
@@ -38,27 +36,40 @@ __all__ = [
     "fmod",
     "isfinite",
     "isinf",
-    "max_pool1d_with_indices",
-    "max_pool1d",
-    "max_pool2d_with_indices",
-    "max_pool2d",
-    "max_pool3d_with_indices",
-    "max_pool3d",
     "nan_to_num",
     "quantize_per_tensor",
-    "Quantized",
+    "quantized_add_relu",
+    "quantized_add",
+    "quantized_cat",
+    "quantized_conv2d_relu",
+    "quantized_conv2d",
+    "quantized_group_norm",
+    "quantized_hardswish",
+    "quantized_instance_norm",
+    "quantized_layer_norm",
+    "quantized_leaky_relu",
+    "quantized_linear",
+    "quantized_mul",
+    "quantized_sigmoid",
     "slice",
     "sort",
     "topk",
-    "upsample_bilinear2d",
-    "upsample_linear1d",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_trilinear3d",
 ]
 
 
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=10)
+
+
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
+@_onnx_symbolic("aten::div")
 @_beartype.beartype
 def div(g, self, other, *args):
     if len(args) == 0:
@@ -76,6 +87,7 @@ def _div_rounding_mode(g, self, other, rounding_mode):
         return opset9._div_rounding_mode(g, self, other, rounding_mode)
 
 
+@_onnx_symbolic("aten::_floor_divide")
 @_beartype.beartype
 def _floor_divide(g, self, other):
     if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
@@ -97,12 +109,14 @@ def _floor_divide(g, self, other):
         return g.op("Where", fixup_mask, fixup, div)
 
 
+@_onnx_symbolic("aten::sort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
 @_beartype.beartype
 def sort(g, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
 
+@_onnx_symbolic("aten::topk")
 @symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
 @_beartype.beartype
 def topk(g, self, k, dim, largest, sorted, out=None):
@@ -111,11 +125,67 @@ def topk(g, self, k, dim, largest, sorted, out=None):
     )
 
 
+@_onnx_symbolic(
+    "aten::max_pool1d",
+    decorate=[
+        _apply_params(
+            "max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool2d",
+    decorate=[
+        _apply_params(
+            "max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool3d",
+    decorate=[
+        _apply_params(
+            "max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool1d_with_indices",
+    decorate=[
+        _apply_params(
+            "max_pool1d_with_indices",
+            torch.nn.modules.utils._single,
+            1,
+            return_indices=True,
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool2d_with_indices",
+    decorate=[
+        _apply_params(
+            "max_pool2d_with_indices",
+            torch.nn.modules.utils._pair,
+            2,
+            return_indices=True,
+        )
+    ],
+)
+@_onnx_symbolic(
+    "aten::max_pool3d_with_indices",
+    decorate=[
+        _apply_params(
+            "max_pool3d_with_indices",
+            torch.nn.modules.utils._triple,
+            3,
+            return_indices=True,
+        )
+    ],
+)
 @_beartype.beartype
-def _max_pool(name, tuple_fn, ndims, return_indices):
+def _max_pool(name: str, tuple_fn: Callable, ndims: int, return_indices: bool):
     @symbolic_helper.quantized_args(True, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
-    @_beartype.beartype
     def symbolic_fn(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         if not stride:
             stride = kernel_size
@@ -166,26 +236,18 @@ def _max_pool(name, tuple_fn, ndims, return_indices):
     return symbolic_fn
 
 
-max_pool1d = _max_pool(
-    "max_pool1d", torch.nn.modules.utils._single, 1, return_indices=False
+@_onnx_symbolic(
+    "aten::avg_pool1d",
+    decorate=[_apply_params("avg_pool1d", torch.nn.modules.utils._single)],
 )
-max_pool2d = _max_pool(
-    "max_pool2d", torch.nn.modules.utils._pair, 2, return_indices=False
+@_onnx_symbolic(
+    "aten::avg_pool2d",
+    decorate=[_apply_params("avg_pool2d", torch.nn.modules.utils._pair)],
 )
-max_pool3d = _max_pool(
-    "max_pool3d", torch.nn.modules.utils._triple, 3, return_indices=False
+@_onnx_symbolic(
+    "aten::avg_pool3d",
+    decorate=[_apply_params("avg_pool3d", torch.nn.modules.utils._triple)],
 )
-max_pool1d_with_indices = _max_pool(
-    "max_pool1d_with_indices", torch.nn.modules.utils._single, 1, return_indices=True
-)
-max_pool2d_with_indices = _max_pool(
-    "max_pool2d_with_indices", torch.nn.modules.utils._pair, 2, return_indices=True
-)
-max_pool3d_with_indices = _max_pool(
-    "max_pool3d_with_indices", torch.nn.modules.utils._triple, 3, return_indices=True
-)
-
-
 @_beartype.beartype
 def _avg_pool(name, tuple_fn):
     @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
@@ -208,7 +270,7 @@ def _avg_pool(name, tuple_fn):
         )
         assert isinstance(padding, tuple)
         if count_include_pad:
-            input = opset9.op_with_optional_float_cast(
+            input = opset9._op_with_optional_float_cast(
                 g,
                 "Pad",
                 input,
@@ -231,11 +293,30 @@ def _avg_pool(name, tuple_fn):
     return symbolic_fn
 
 
-avg_pool1d = _avg_pool("avg_pool1d", torch.nn.modules.utils._single)
-avg_pool2d = _avg_pool("avg_pool2d", torch.nn.modules.utils._pair)
-avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
-
-
+@_onnx_symbolic(
+    "aten::upsample_nearest1d",
+    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest2d",
+    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest3d",
+    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_linear1d",
+    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_bilinear2d",
+    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_trilinear3d",
+    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+)
 @_beartype.beartype
 def _interpolate(name, dim, interpolate_mode):
     @symbolic_helper.quantized_args(True, False, False)
@@ -257,14 +338,7 @@ def _interpolate(name, dim, interpolate_mode):
     return symbolic_fn
 
 
-upsample_nearest1d = _interpolate("upsample_nearest1d", 3, "nearest")
-upsample_nearest2d = _interpolate("upsample_nearest2d", 4, "nearest")
-upsample_nearest3d = _interpolate("upsample_nearest3d", 5, "nearest")
-upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
-upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
-upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
-
-
+@_onnx_symbolic("aten::__interpolate")
 @_beartype.beartype
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
@@ -303,6 +377,7 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
+@_onnx_symbolic("aten::slice")
 @_beartype.beartype
 def slice(g, self, *args):
     if len(args) == 4:
@@ -351,6 +426,7 @@ def slice(g, self, *args):
     )
 
 
+@_onnx_symbolic("aten::flip")
 @symbolic_helper.parse_args("v", "is")
 @_beartype.beartype
 def flip(g, input, dims):
@@ -364,11 +440,13 @@ def flip(g, input, dims):
     )
 
 
+@_onnx_symbolic("aten::fmod")
 @_beartype.beartype
 def fmod(g, input, other):
     return g.op("Mod", input, other, fmod_i=1)
 
 
+@_onnx_symbolic("aten::embedding_bag")
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 @_beartype.beartype
 def embedding_bag(
@@ -455,6 +533,7 @@ def embedding_bag(
         )
 
 
+@_onnx_symbolic("aten::fake_quantize_per_tensor_affine")
 @symbolic_helper.parse_args("v", "v", "v", "i", "i")
 @_beartype.beartype
 def fake_quantize_per_tensor_affine(
@@ -498,20 +577,21 @@ def fake_quantize_per_tensor_affine(
     )
 
 
+@_onnx_symbolic("aten::isinf")
 @_beartype.beartype
 def isinf(g, input):
     return g.op("IsInf", opset9._cast_Double(g, input, False))  # type: ignore[attr-defined]
 
 
+@_onnx_symbolic("aten::isfinite")
 @_beartype.beartype
 def isfinite(g, input):
-    from torch.onnx.symbolic_opset9 import __not_, __or_
-
     inf_node = isinf(g, input)
     nan_node = opset9.isnan(g, input)
-    return __not_(g, __or_(g, inf_node, nan_node))
+    return opset9.__not_(g, opset9.__or_(g, inf_node, nan_node))
 
 
+@_onnx_symbolic("aten::quantize_per_tensor")
 @_beartype.beartype
 def quantize_per_tensor(g, input, scale, zero_point, dtype):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -523,11 +603,13 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
     return symbolic_helper.quantize_helper(g, input, scale, zero_point)
 
 
+@_onnx_symbolic("aten::dequantize")
 @_beartype.beartype
 def dequantize(g, input):
     return symbolic_helper.dequantize_helper(g, input)[0]
 
 
+@_onnx_symbolic("aten::nan_to_num")
 @symbolic_helper.parse_args("v", "f", "f", "f")
 @_beartype.beartype
 def nan_to_num(g, input, nan, posinf, neginf):
@@ -580,194 +662,192 @@ def nan_to_num(g, input, nan, posinf, neginf):
     )
 
 
+# Quantized symbolics ---------------------------------------------------------
 # https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
-class Quantized:
-    """
-    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+# Support starts from opset 10 because `DequantizeLinear` and `QuantizeLinear` were
+# introduced in opset version 10.
+@_onnx_symbolic("quantized::linear")
+@_beartype.beartype
+def quantized_linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-    Support starts from opset 10 because `DequantizeLinear` and `QuantizeLinear` were introduced in opset version 10.
-    """
+    output = opset9.linear(g, input, weight, bias)
 
-    domain = "quantized"
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    @_beartype.beartype
-    def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-        output = opset9.linear(g, input, weight, bias)
+@_onnx_symbolic("quantized::add")
+@_beartype.beartype
+def quantized_add(g, x, y, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+    y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    output = opset9.add(g, x, y)
 
-    @staticmethod
-    @_beartype.beartype
-    def add(g, x, y, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
-        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        output = opset9.add(g, x, y)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+@_onnx_symbolic("quantized::add_relu")
+@_beartype.beartype
+def quantized_add_relu(g, x, y, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+    y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
 
-    @staticmethod
-    @_beartype.beartype
-    def add_relu(g, x, y, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
-        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+    output = opset9.add(g, x, y)
+    output = opset9.relu(g, output)
 
-        output = opset9.add(g, x, y)
-        output = opset9.relu(g, output)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    @_beartype.beartype
-    def mul(g, x, y, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
-        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+@_onnx_symbolic("quantized::mul")
+@_beartype.beartype
+def quantized_mul(g, x, y, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+    y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
 
-        output = opset9.mul(g, x, y)
+    output = opset9.mul(g, x, y)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    @_beartype.beartype
-    def hardswish(g, x, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-        output = opset9.hardswish(g, x)
+@_onnx_symbolic("quantized::hardswish")
+@_beartype.beartype
+def quantized_hardswish(g, x, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    output = opset9.hardswish(g, x)
 
-    @staticmethod
-    @_beartype.beartype
-    def sigmoid(g, x, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        output = opset9.sigmoid(g, x)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+@_onnx_symbolic("quantized::sigmoid")
+@_beartype.beartype
+def quantized_sigmoid(g, x, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-    @staticmethod
-    @_beartype.beartype
-    def leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+    output = opset9.sigmoid(g, x)
 
-        output = opset9.leaky_relu(g, x, negative_slope, inplace)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    @_beartype.beartype
-    def layer_norm(g, x, normalized_shape, weight, bias, eps, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+@_onnx_symbolic("quantized::leaky_relu")
+@_beartype.beartype
+def quantized_leaky_relu(g, x, negative_slope, inplace, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-        output = opset9.layer_norm(g, x, normalized_shape, weight, bias, eps, False)
+    output = opset9.leaky_relu(g, x, negative_slope, inplace)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    @_beartype.beartype
-    def group_norm(g, x, num_groups, weight, bias, eps, op_scale, op_zero_point):
-        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-        output = opset9.group_norm(g, x, num_groups, weight, bias, eps, False)
+@_onnx_symbolic("quantized::layer_norm")
+@_beartype.beartype
+def quantized_layer_norm(
+    g, x, normalized_shape, weight, bias, eps, op_scale, op_zero_point
+):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    output = opset9.layer_norm(g, x, normalized_shape, weight, bias, eps, False)
 
-    @staticmethod
-    @symbolic_helper.parse_args("v", "v", "v", "f", "v", "v")
-    @_beartype.beartype
-    def instance_norm(
-        g,
-        q_input,
-        weight,
-        bias,
-        eps,
-        op_scale,
-        op_zero_point,
-    ):
-        input, _, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        output = opset9.instance_norm(
-            g, input, weight, bias, None, None, False, 0.0, eps, False
-        )
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+@_onnx_symbolic("quantized::group_norm")
+@_beartype.beartype
+def quantized_group_norm(g, x, num_groups, weight, bias, eps, op_scale, op_zero_point):
+    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
-    @staticmethod
-    @_beartype.beartype
-    def conv2d_relu(
-        g,
-        q_input,
-        q_weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        groups,
-        op_scale,
-        op_zero_point,
-    ):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+    output = opset9.group_norm(g, x, num_groups, weight, bias, eps, False)
 
-        output = opset9.conv2d(
-            g, input, weight, bias, stride, padding, dilation, groups
-        )
-        output = opset9.relu(g, output)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    @_beartype.beartype
-    def conv2d(
-        g,
-        q_input,
-        q_weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        groups,
-        op_scale,
-        op_zero_point,
-    ):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+@_onnx_symbolic("quantized::instance_norm")
+@symbolic_helper.parse_args("v", "v", "v", "f", "v", "v")
+@_beartype.beartype
+def quantized_instance_norm(
+    g,
+    q_input,
+    weight,
+    bias,
+    eps,
+    op_scale,
+    op_zero_point,
+):
+    input, _, _, _ = symbolic_helper.dequantize_helper(g, q_input)
 
-        output = opset9.conv2d(
-            g, input, weight, bias, stride, padding, dilation, groups
-        )
+    output = opset9.instance_norm(
+        g, input, weight, bias, None, None, False, 0.0, eps, False
+    )
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    @symbolic_helper.parse_args("v", "i", "v", "v")
-    @_beartype.beartype
-    def cat(
-        g,
-        q_inputs: _C.Value,
-        dim: int,
-        op_scale: _C.Value,
-        op_zero_point: _C.Value,
-    ) -> _C.Value:
-        unpacked_inputs = symbolic_helper._unpack_list(q_inputs)
-        dequantized = [
-            symbolic_helper.dequantize_helper(g, input)[0] for input in unpacked_inputs
-        ]
-        concatenated = g.op("Concat", *dequantized, axis_i=dim)
-        return symbolic_helper.quantize_helper(g, concatenated, op_scale, op_zero_point)
+
+@_onnx_symbolic("quantized::conv2d_relu")
+@_beartype.beartype
+def quantized_conv2d_relu(
+    g,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::conv2d")
+@_beartype.beartype
+def quantized_conv2d(
+    g,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, _ = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(g, bias, input_scale, weight_scale)
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+
+@_onnx_symbolic("quantized::cat")
+@symbolic_helper.parse_args("v", "i", "v", "v")
+@_beartype.beartype
+def quantized_cat(
+    g,
+    q_inputs: _C.Value,
+    dim: int,
+    op_scale: _C.Value,
+    op_zero_point: _C.Value,
+) -> _C.Value:
+    unpacked_inputs = symbolic_helper._unpack_list(q_inputs)
+    dequantized = [
+        symbolic_helper.dequantize_helper(g, input)[0] for input in unpacked_inputs
+    ]
+    concatenated = g.op("Concat", *dequantized, axis_i=dim)
+    return symbolic_helper.quantize_helper(g, concatenated, op_scale, op_zero_point)
