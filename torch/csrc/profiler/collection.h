@@ -7,7 +7,8 @@
 #include <utility>
 
 #include <ATen/Context.h>
-#include <c10/core/DeviceType.h>
+#include <c10/core/Device.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/strong_type.h>
@@ -32,6 +33,51 @@ enum class EventType : uint8_t {
   Kineto
 };
 
+// ============================================================================
+// == Value (Tensor, Scalar) summary ==========================================
+// ============================================================================
+
+// We use a Tensor's TensorImpl adress and StorageImpl data start to build the
+// data flow graph. We do not hold a reference so we wrap them in strong types
+// to prevent direct access.
+using TensorImplAddress = strong::type<
+    const c10::TensorImpl*,
+    struct TensorImplAddress_,
+    strong::regular,
+    strong::hashable>;
+
+using StorageImplData = strong::
+    type<void*, struct StorageImplData_, strong::regular, strong::hashable>;
+
+struct TensorMetadata {
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  TensorImplAddress impl_;
+  StorageImplData data_;
+
+  // Device is separated into DeviceType and DeviceIndex as Device
+  // doesn't have a default initializer (which the std::array initializer needs)
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+
+  c10::ScalarType dtype_;
+  c10::Layout layout_;
+  uint32_t dim_;
+};
+
+struct Inputs {
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::vector<int64_t>> strides_;
+  std::vector<c10::IValue> ivalues_;
+  std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
+};
+
+// ============================================================================
+// == ExtraFields =============================================================
+// ============================================================================
 template <EventType>
 struct ExtraFields;
 
@@ -47,27 +93,6 @@ struct TorchOpBasicFields {
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
-};
-
-struct TensorMetadata {
-  void* UNSAFE_impl_ptr_;
-  void* UNSAFE_storage_data_ptr_;
-
-  // Device is separated into DeviceType and DeviceIndex as Device
-  // doesn't have a default initializer (which the std::array initializer needs)
-  c10::DeviceType device_type_;
-  c10::DeviceIndex device_index_;
-  c10::ScalarType dtype_;
-  uint32_t dim_;
-  c10::Layout layout_;
-};
-
-struct Inputs {
-  std::vector<std::vector<int64_t>> shapes_;
-  std::vector<std::vector<int64_t>> strides_;
-  std::vector<c10::IValue> ivalues_;
-  std::vector<std::string> dtypes_;
-  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
