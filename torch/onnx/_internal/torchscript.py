@@ -22,7 +22,7 @@ _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 @runtime_checkable
 class GraphLike(Protocol):
-    """Implements all methods defined in torch.Graph, as well as `op()` and `at()`."""
+    """Protocol for all methods defined in torch.Graph, as well as `op()` and `at()`."""
 
     def op(
         self,

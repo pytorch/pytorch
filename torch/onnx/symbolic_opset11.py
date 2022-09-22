@@ -17,7 +17,7 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, registration, torchscript
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -93,7 +93,9 @@ def _apply_params(*args, **kwargs):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
 @_beartype.beartype
-def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
+def hardtanh(
+    g: torchscript.GraphContext, self: _C.Value, min_val: float, max_val: float
+):
     dtype = self.type().scalarType()
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -114,7 +116,7 @@ def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
 
 @_onnx_symbolic("aten::clamp")
 @_beartype.beartype
-def clamp(g, self, min, max):
+def clamp(g: torchscript.GraphContext, self, min, max):
     dtype = self.type().scalarType()
 
     @_beartype.beartype
@@ -151,7 +153,7 @@ def clamp(g, self, min, max):
 @_onnx_symbolic("aten::clamp_min")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
-def clamp_min(g, self, min):
+def clamp_min(g: torchscript.GraphContext, self, min):
     dtype = self.type().scalarType()
     min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
@@ -166,7 +168,7 @@ def clamp_min(g, self, min):
 @_onnx_symbolic("aten::clamp_max")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
-def clamp_max(g, self, max):
+def clamp_max(g: torchscript.GraphContext, self, max):
     dtype = self.type().scalarType()
     max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_name(dtype).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
@@ -180,7 +182,7 @@ def clamp_max(g, self, max):
 
 @_onnx_symbolic("aten::relu6")
 @_beartype.beartype
-def relu6(g, input):
+def relu6(g: torchscript.GraphContext, input):
     relu_ = opset9._op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     dtype = input.type().scalarType()
     if dtype is None:
@@ -203,13 +205,15 @@ def relu6(g, input):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "v")
 @_beartype.beartype
-def select(g, self, dim, index):
+def select(g: torchscript.GraphContext, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
 @_onnx_symbolic("aten::index_put")
 @_beartype.beartype
-def index_put(g, self, indices_list_value, values, accumulate=False):
+def index_put(
+    g: torchscript.GraphContext, self, indices_list_value, values, accumulate=False
+):
     if symbolic_helper._is_packed_list(indices_list_value):
         indices_list = symbolic_helper._unpack_list(indices_list_value)
     else:
@@ -321,7 +325,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
 @_onnx_symbolic("aten::pixel_shuffle")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def pixel_shuffle(g, self, upscale_factor):
+def pixel_shuffle(g: torchscript.GraphContext, self, upscale_factor):
     rank = symbolic_helper._get_tensor_rank(self)
     if rank is not None and rank != 4:
         return symbolic_helper._unimplemented("pixel_shuffle", "only support 4d input")
@@ -365,7 +369,14 @@ def _interpolate(name: str, dim: int, interpolate_mode: str):
 @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
 @_beartype.beartype
 def __interpolate(
-    g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
+    g: torchscript.GraphContext,
+    input,
+    size,
+    scale_factor,
+    mode,
+    align_corners,
+    recompute_scale_factor,
+    antialias,
 ):
     return symbolic_helper.__interpolate_helper(
         g, input, size, scale_factor, mode, align_corners, recompute_scale_factor
@@ -375,7 +386,7 @@ def __interpolate(
 @_onnx_symbolic("aten::gather")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def gather(g, self, dim, index, sparse_grad=False):
+def gather(g: torchscript.GraphContext, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
         return symbolic_helper._unimplemented("gather", "sparse_grad == True")
     if symbolic_helper.is_caffe2_aten_fallback():
@@ -386,7 +397,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 @_onnx_symbolic("aten::scatter")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def scatter(g, self, dim, index, src):
+def scatter(g: torchscript.GraphContext, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
     src_type = src.type().scalarType()
@@ -412,7 +423,7 @@ def scatter(g, self, dim, index, src):
 @_onnx_symbolic("aten::cumsum")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
-def cumsum(g, self, dim, dtype=None):
+def cumsum(g: torchscript.GraphContext, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -427,14 +438,14 @@ def cumsum(g, self, dim, dtype=None):
 
 @_onnx_symbolic("aten::masked_select")
 @_beartype.beartype
-def masked_select(g, self, mask):
+def masked_select(g: torchscript.GraphContext, self, mask):
     index = opset9.nonzero(g, opset9.expand_as(g, mask, self))
     return g.op("GatherND", self, index)
 
 
 @_onnx_symbolic("aten::masked_scatter")
 @_beartype.beartype
-def masked_scatter(g, self, mask, source):
+def masked_scatter(g: torchscript.GraphContext, self, mask, source):
     index = opset9.nonzero(g, opset9.expand_as(g, mask, self))
     # NOTE: source can have more elements than needed.
     # It could also have arbitrary shape.
@@ -453,7 +464,7 @@ def masked_scatter(g, self, mask, source):
 
 @_onnx_symbolic("aten::len")
 @_beartype.beartype
-def _len(g, self):
+def _len(g: torchscript.GraphContext, self):
     if (
         symbolic_helper._is_tensor_list(self)
         or self.node().kind() == "onnx::SplitToSequence"
@@ -465,7 +476,7 @@ def _len(g, self):
 
 @_onnx_symbolic("aten::__getitem_")
 @_beartype.beartype
-def __getitem_(g, self, i):
+def __getitem_(g: torchscript.GraphContext, self, i):
     if symbolic_helper._is_tensor_list(self):
         # SequenceAt requires that the input be a List of Tensors
         return g.op("SequenceAt", self, i)
@@ -477,20 +488,20 @@ def __getitem_(g, self, i):
 
 @_onnx_symbolic("aten::_set_item")
 @_beartype.beartype
-def _set_item(g, tensor_list, i, v):
+def _set_item(g: torchscript.GraphContext, tensor_list, i, v):
     tensor_list = g.op("SequenceErase", tensor_list, i)
     return g.op("SequenceInsert", tensor_list, v, i)
 
 
 @_onnx_symbolic("aten::append")
 @_beartype.beartype
-def append(g, self, tensor):
+def append(g: torchscript.GraphContext, self, tensor):
     return g.op("SequenceInsert", self, tensor)
 
 
 @_onnx_symbolic("aten::add")
 @_beartype.beartype
-def add(g, self, other, alpha=None):
+def add(g: torchscript.GraphContext, self, other, alpha=None):
     if symbolic_helper._is_value(self) and symbolic_helper._is_tensor_list(self):
         tensor_list_node = other.node()
         if tensor_list_node.kind() != "prim::ListConstruct":
@@ -508,25 +519,25 @@ def add(g, self, other, alpha=None):
 
 @_onnx_symbolic("aten::insert")
 @_beartype.beartype
-def insert(g, self, pos, tensor):
+def insert(g: torchscript.GraphContext, self, pos, tensor):
     return g.op("SequenceInsert", self, tensor, pos)
 
 
 @_onnx_symbolic("aten::pop")
 @_beartype.beartype
-def pop(g, tensor_list, dim):
+def pop(g: torchscript.GraphContext, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
 
 @_onnx_symbolic("aten::Delete")
 @_beartype.beartype
-def Delete(g, tensor_list, dim):
+def Delete(g: torchscript.GraphContext, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
 
 @_onnx_symbolic("aten::cat")
 @_beartype.beartype
-def cat(g, tensor_list, dim):
+def cat(g: torchscript.GraphContext, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):
         return opset9.cat(g, tensor_list, dim)
     else:
@@ -536,7 +547,7 @@ def cat(g, tensor_list, dim):
 
 @_onnx_symbolic("aten::stack")
 @_beartype.beartype
-def stack(g, tensor_list, dim):
+def stack(g: torchscript.GraphContext, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):
         return opset9.stack(g, tensor_list, dim)
     else:
@@ -547,7 +558,7 @@ def stack(g, tensor_list, dim):
 @_onnx_symbolic("aten::_unique2")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
-def _unique2(g, self, sorted, return_inverse, return_counts):
+def _unique2(g: torchscript.GraphContext, self, sorted, return_inverse, return_counts):
     u, indices, inverse_indices, counts = g.op(
         "Unique", self, sorted_i=sorted, outputs=4
     )
@@ -611,7 +622,9 @@ def _avg_pool(name, tuple_fn):
 @_onnx_symbolic("aten::unique_dim")
 @symbolic_helper.parse_args("v", "i", "i", "i", "i")
 @_beartype.beartype
-def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
+def unique_dim(
+    g: torchscript.GraphContext, self, dim, sorted, return_inverse, return_counts
+):
     u, indices, inverse_indices, counts = g.op(
         "Unique", self, axis_i=dim, sorted_i=sorted, outputs=4
     )
@@ -621,7 +634,7 @@ def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
 @_onnx_symbolic("aten::topk")
 @symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
 @_beartype.beartype
-def topk(g, self, k, dim, largest, sorted, out=None):
+def topk(g: torchscript.GraphContext, self, k, dim, largest, sorted, out=None):
     return symbolic_helper._topk_helper(
         g, self, k, dim, largest=largest, sorted=sorted, out=out
     )
@@ -630,14 +643,14 @@ def topk(g, self, k, dim, largest, sorted, out=None):
 @_onnx_symbolic("aten::sort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
 @_beartype.beartype
-def sort(g, self, dim, decending, out=None):
+def sort(g: torchscript.GraphContext, self, dim, decending, out=None):
     return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
 
 
 @_onnx_symbolic("aten::argsort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
 @_beartype.beartype
-def argsort(g, self, dim, decending, out=None):
+def argsort(g: torchscript.GraphContext, self, dim, decending, out=None):
     _, indices = symbolic_helper._sort_helper(
         g, self, dim, decending=decending, out=out
     )
@@ -646,13 +659,13 @@ def argsort(g, self, dim, decending, out=None):
 
 @_onnx_symbolic("aten::round")
 @_beartype.beartype
-def round(g, self):
+def round(g: torchscript.GraphContext, self):
     return g.op("Round", self)
 
 
 @_onnx_symbolic("aten::remainder")
 @_beartype.beartype
-def remainder(g, input, other):
+def remainder(g: torchscript.GraphContext, input, other):
     if symbolic_helper._is_fp(input) or symbolic_helper._is_fp(other):
         return opset9.remainder(g, input, other)
     return g.op("Mod", input, other, fmod_i=0)
@@ -661,7 +674,7 @@ def remainder(g, input, other):
 @_onnx_symbolic("aten::split")
 @symbolic_helper.parse_args("v", "v", "i", "i")
 @_beartype.beartype
-def split(g, self, split_size_or_sizes, dim, _outputs=None):
+def split(g: torchscript.GraphContext, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
@@ -700,14 +713,16 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
 @_onnx_symbolic("aten::split_with_sizes")
 @symbolic_helper.parse_args("v", "v", "i", "i")
 @_beartype.beartype
-def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
+def split_with_sizes(
+    g: torchscript.GraphContext, self, split_sizes, dim, _outputs=None
+):
     return split(g, self, split_sizes, dim, _outputs)
 
 
 @_onnx_symbolic("aten::unbind")
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def unbind(g, self, dim=0, _outputs=None):
+def unbind(g: torchscript.GraphContext, self, dim=0, _outputs=None):
     if _outputs is None:
         return g.op(
             "SplitToSequence",
@@ -721,7 +736,7 @@ def unbind(g, self, dim=0, _outputs=None):
 
 
 @_beartype.beartype
-def _prepare_onnx_paddings(g, input, pad):
+def _prepare_onnx_paddings(g: torchscript.GraphContext, input, pad):
     """Generate paddings in ONNX order based on pad in pytorch.
 
     Args:
@@ -780,7 +795,7 @@ def _prepare_onnx_paddings(g, input, pad):
 
 @_onnx_symbolic("aten::constant_pad_nd")
 @_beartype.beartype
-def constant_pad_nd(g, input, padding, value=None):
+def constant_pad_nd(g: torchscript.GraphContext, input, padding, value=None):
     mode = "constant"
     value = symbolic_helper._maybe_get_scalar(value)
     value = symbolic_helper._if_scalar_type_as(value, input)
@@ -792,7 +807,7 @@ def constant_pad_nd(g, input, padding, value=None):
 @_onnx_symbolic("aten::reflection_pad2d")
 @_onnx_symbolic("aten::reflection_pad3d")
 @_beartype.beartype
-def reflection_pad(g, input, padding):
+def reflection_pad(g: torchscript.GraphContext, input, padding):
     mode = "reflect"
     paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
@@ -802,7 +817,7 @@ def reflection_pad(g, input, padding):
 @_onnx_symbolic("aten::replication_pad2d")
 @_onnx_symbolic("aten::replication_pad3d")
 @_beartype.beartype
-def replication_pad(g, input, padding):
+def replication_pad(g: torchscript.GraphContext, input, padding):
     mode = "edge"
     paddings = _prepare_onnx_paddings(g, input, padding)
     return g.op("Pad", input, paddings, mode_s=mode)
@@ -810,7 +825,7 @@ def replication_pad(g, input, padding):
 
 @_onnx_symbolic("aten::pad")
 @_beartype.beartype
-def pad(g, input, pad, mode, value):
+def pad(g: torchscript.GraphContext, input, pad, mode, value):
     mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)
@@ -826,19 +841,19 @@ def pad(g, input, pad, mode, value):
 
 @_onnx_symbolic("aten::linalg_det")
 @_beartype.beartype
-def linalg_det(g, self):
+def linalg_det(g: torchscript.GraphContext, self):
     return g.op("Det", self)
 
 
 @_onnx_symbolic("aten::logdet")
 @_beartype.beartype
-def logdet(g, input):
+def logdet(g: torchscript.GraphContext, input):
     return opset9.log(g, linalg_det(g, input))
 
 
 @_onnx_symbolic("aten::arange")
 @_beartype.beartype
-def arange(g, *args):
+def arange(g: torchscript.GraphContext, *args):
     def _get_arange_dtype(dtype):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
@@ -893,7 +908,7 @@ def arange(g, *args):
 @_onnx_symbolic("aten::_dim_arange")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def _dim_arange(g, like, dim):
+def _dim_arange(g: torchscript.GraphContext, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op(
         "Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0
@@ -905,7 +920,7 @@ def _dim_arange(g, like, dim):
 
 @_onnx_symbolic("aten::size")
 @_beartype.beartype
-def size(g, self, dim=None):
+def size(g: torchscript.GraphContext, self, dim=None):
     if dim is None:
         return g.op("Shape", self)
     return symbolic_helper._size_helper(g, self, dim)
@@ -913,7 +928,7 @@ def size(g, self, dim=None):
 
 @_onnx_symbolic("aten::squeeze")
 @_beartype.beartype
-def squeeze(g, self, dim=None):
+def squeeze(g: torchscript.GraphContext, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
 
@@ -966,7 +981,7 @@ def squeeze(g, self, dim=None):
 
 @_onnx_symbolic("aten::unsqueeze")
 @_beartype.beartype
-def unsqueeze(g, self, dim):
+def unsqueeze(g: torchscript.GraphContext, self, dim):
     if symbolic_helper._is_constant(dim):
         dim = symbolic_helper._get_const(dim, "i", "dim")
 
@@ -975,13 +990,13 @@ def unsqueeze(g, self, dim):
 
 @_onnx_symbolic("aten::mm")
 @_beartype.beartype
-def mm(g, self, other):
+def mm(g: torchscript.GraphContext, self, other):
     return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)
 
 
 @_onnx_symbolic("aten::index")
 @_beartype.beartype
-def index(g, self, index):
+def index(g: torchscript.GraphContext, self, index):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("index", self, index, overload_name="Tensor")
 
@@ -1003,7 +1018,7 @@ def index(g, self, index):
 
 @_onnx_symbolic("aten::index_fill")
 @_beartype.beartype
-def index_fill(g, self, dim, index, value):
+def index_fill(g: torchscript.GraphContext, self, dim, index, value):
     dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
@@ -1026,7 +1041,7 @@ def index_fill(g, self, dim, index, value):
 
 @_onnx_symbolic("aten::index_copy")
 @_beartype.beartype
-def index_copy(g, self, dim, index, source):
+def index_copy(g: torchscript.GraphContext, self, dim, index, source):
     dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("index_copy", self, index, source, dim_i=dim_value)
@@ -1038,7 +1053,7 @@ def index_copy(g, self, dim, index, source):
 
 @_onnx_symbolic("aten::__rshift_")
 @_beartype.beartype
-def __rshift_(g, self, other):
+def __rshift_(g: torchscript.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     if other.type().scalarType() != self.type().scalarType():
@@ -1069,7 +1084,7 @@ def __rshift_(g, self, other):
 
 @_onnx_symbolic("aten::__lshift_")
 @_beartype.beartype
-def __lshift_(g, self, other):
+def __lshift_(g: torchscript.GraphContext, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     if other.type().scalarType() != self.type().scalarType():
@@ -1100,7 +1115,7 @@ def __lshift_(g, self, other):
 
 @_beartype.beartype
 def _get_im2col_indices_along_dim(
-    g, input_d, kernel_size_d, dilation_d, padding_d, stride_d
+    g: torchscript.GraphContext, input_d, kernel_size_d, dilation_d, padding_d, stride_d
 ):
     # Input is always 4-D (N, C, H, W)
     # Calculate indices of sliding blocks along spatial dimension
@@ -1143,7 +1158,7 @@ def _get_im2col_indices_along_dim(
 
 
 @_beartype.beartype
-def _get_im2col_padded_input(g, input, padding_h, padding_w):
+def _get_im2col_padded_input(g: torchscript.GraphContext, input, padding_h, padding_w):
     # Input is always 4-D tensor (N, C, H, W)
     # Padding tensor has the following format: (padding_h, padding_w)
     # Reshape the padding to follow ONNX format: (dim1_begin, dim2_begin,...,dim1_end, dim2_end,...)
@@ -1152,7 +1167,7 @@ def _get_im2col_padded_input(g, input, padding_h, padding_w):
 
 
 @_beartype.beartype
-def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
+def _get_im2col_output_shape(g: torchscript.GraphContext, input, kernel_h, kernel_w):
     batch_dim = size(g, input, g.op("Constant", value_t=torch.tensor(0)))
     channel_dim = size(g, input, g.op("Constant", value_t=torch.tensor(1)))
     channel_unfolded = g.op(
@@ -1171,7 +1186,7 @@ def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
 @_onnx_symbolic("aten::im2col")
 @symbolic_helper.parse_args("v", "is", "is", "is", "is")
 @_beartype.beartype
-def im2col(g, input, kernel_size, dilation, padding, stride):
+def im2col(g: torchscript.GraphContext, input, kernel_size, dilation, padding, stride):
     # Input is always 4-D tensor (N, C, H, W)
     # All other args are int[2]
 
@@ -1224,7 +1239,7 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
 
 @_onnx_symbolic("aten::narrow")
 @_beartype.beartype
-def narrow(g, input, dim, start, length):
+def narrow(g: torchscript.GraphContext, input, dim, start, length):
     end = g.op("Add", start, length)
     return symbolic_helper._slice_helper(
         g, input, axes=dim, starts=start, ends=end, dynamic_slice=True
@@ -1235,7 +1250,7 @@ def narrow(g, input, dim, start, length):
 @symbolic_helper.quantized_args(True, False, False)
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def flatten(g, input, start_dim, end_dim):
+def flatten(g: torchscript.GraphContext, input, start_dim, end_dim):
     dim = symbolic_helper._get_tensor_rank(input)
     if dim == 1:
         return input
@@ -1263,7 +1278,12 @@ def flatten(g, input, start_dim, end_dim):
 @symbolic_helper.parse_args("v", "f", "is", "b", "v")
 @_beartype.beartype
 def linalg_vector_norm(
-    g, self, ord, dim: Optional[Sequence[int]], keepdim: bool, dtype
+    g: torchscript.GraphContext,
+    self,
+    ord,
+    dim: Optional[Sequence[int]],
+    keepdim: bool,
+    dtype,
 ):
     if ord == 0:
         if dim is None:
@@ -1293,7 +1313,7 @@ def linalg_vector_norm(
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 @_beartype.beartype
 def embedding_bag(
-    g,
+    g: torchscript.GraphContext,
     embedding_matrix,
     indices,
     offsets,
@@ -1381,7 +1401,7 @@ def embedding_bag(
 @_onnx_symbolic("aten::embedding_renorm")
 @symbolic_helper.parse_args("v", "v", "f", "f")
 @_beartype.beartype
-def embedding_renorm(g, weight, indices, max_norm, norm_type):
+def embedding_renorm(g: torchscript.GraphContext, weight, indices, max_norm, norm_type):
     unique_indices = g.op("Unique", indices)
     partial_weight = g.op("Gather", weight, unique_indices)
     norm_type = int(norm_type)
@@ -1420,7 +1440,7 @@ def embedding_renorm(g, weight, indices, max_norm, norm_type):
 
 @_onnx_symbolic("aten::chunk")
 @_beartype.beartype
-def chunk(g, self, chunks, dim):
+def chunk(g: torchscript.GraphContext, self, chunks, dim):
     # Calculate chunk size for dynamic chunk
     dim_size = g.op("Gather", g.op("Shape", self), dim, axis_i=0)
     chunk_size_s = g.op(
@@ -1439,7 +1459,7 @@ def chunk(g, self, chunks, dim):
 @_onnx_symbolic("aten::normal")
 @_beartype.beartype
 def normal(
-    g,
+    g: torchscript.GraphContext,
     mean,
     std,
     sizes=None,
@@ -1462,7 +1482,7 @@ def normal(
 
 @_onnx_symbolic("prim::ConstantChunk")
 @_beartype.beartype
-def prim_constant_chunk(g, self, chunks, dim):
+def prim_constant_chunk(g: torchscript.GraphContext, self, chunks, dim):
     input_shape = g.op("Shape", self)
     axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
     input_shape_dim = g.op("Gather", input_shape, axis, axis_i=0)
