@@ -68,7 +68,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <c10/core/SymFloat.h>
 #include <c10/core/SymIntNodeImpl.h>
+
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -79,10 +81,19 @@
 namespace torch {
 inline bool is_symint_node(py::handle obj) {
   auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
-  // TODO: switch this to `isinstance`
-  if (obj.get_type().equal(tp_symn)) {
+  if (py::isinstance(obj, tp_symn)) {
     TORCH_CHECK(
         !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
+    return true;
+  }
+  return false;
+}
+
+inline bool is_symfloat_node(py::handle obj) {
+  auto static tp_symn = py::type::of<c10::SymFloatNodeImpl>();
+  if (py::isinstance(obj, tp_symn)) {
+    TORCH_CHECK(
+        !jit::tracer::isTracing(), "JIT tracing of SymFloats isn't supported!");
     return true;
   }
   return false;
@@ -115,6 +126,33 @@ struct type_caster<c10::SymInt> {
       handle /* parent */) {
     return si.is_symbolic() ? py::cast(si.toSymIntNodeImpl()).release()
                             : py::cast(si.expect_int()).release();
+  }
+};
+
+template <>
+struct type_caster<c10::SymFloat> {
+ public:
+  PYBIND11_TYPE_CASTER(c10::SymFloat, _("SymFloat"));
+  bool load(py::handle src, bool) {
+    if (torch::is_symfloat_node(src)) {
+      value = src.cast<c10::SymFloatNodeImpl*>()->toSymFloat();
+      return true;
+    }
+
+    auto raw_obj = src.ptr();
+    if (THPUtils_checkDouble(raw_obj)) {
+      value = c10::SymFloat{THPUtils_unpackDouble(raw_obj)};
+      return true;
+    }
+    return false;
+  }
+
+  static py::handle cast(
+      c10::SymFloat si,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return si.is_symbolic() ? py::cast(si.toSymFloatNodeImpl()).release()
+                            : py::cast(si.expect_float()).release();
   }
 };
 } // namespace detail
@@ -278,6 +316,7 @@ struct PythonArgs {
   inline c10::optional<at::ScalarType> scalartypeOptional(int i);
   inline c10::optional<at::Scalar> scalarOptional(int i);
   inline c10::optional<int64_t> toInt64Optional(int i);
+  inline c10::optional<c10::SymInt> toSymIntOptional(int i);
   inline c10::optional<bool> toBoolOptional(int i);
   inline c10::optional<double> toDoubleOptional(int i);
   inline c10::OptionalArray<double> doublelistOptional(int i);
@@ -901,6 +940,12 @@ inline c10::optional<int64_t> PythonArgs::toInt64Optional(int i) {
   if (!args[i])
     return c10::nullopt;
   return toInt64(i);
+}
+
+inline c10::optional<c10::SymInt> PythonArgs::toSymIntOptional(int i) {
+  if (!args[i])
+    return c10::nullopt;
+  return toSymInt(i);
 }
 
 inline c10::optional<bool> PythonArgs::toBoolOptional(int i) {

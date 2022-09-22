@@ -5,9 +5,17 @@ number = Union[int, float]
 
 ###
 # There are generated files that depend on this file
-# To re-generate, please run:
-# cd ~/pytorch && python
-# torchgen/shape_functions/gen_jit_shape_functions.py
+# To re-generate, please run from the root of the repo:
+# python torchgen/shape_functions/gen_jit_shape_functions.py
+
+# How to test:
+# After regenerating files, compile PyTorch.
+# Then run: ./build/bin/test_jit --gtest_filter=TestShapeGraphLinting.Basic
+# If you have enabled opinfo testing for the op, also run:
+# python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
+# to reproduce errors from opinfo tests.
+
+# Example PR: https://github.com/pytorch/pytorch/pull/80860/files
 ####
 
 import torch
@@ -155,10 +163,11 @@ def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool = False
 
 def sum_mean_dim(self: List[int], opt_dims: Optional[List[int]], keep_dim: bool, dt: Any):
     out: List[int] = []
-    if opt_dims is None:
-        dims: List[int] = []
+    if opt_dims is None or len(opt_dims) == 0:
+        dims: List[int] = list(range(len(self)))
     else:
         dims = opt_dims
+
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:
@@ -745,7 +754,7 @@ def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[L
     dim = len(input)
     output_size: List[int] = []
     input_batch_size_dim = 0
-    weight_output_channels_dim = 0
+    weight_output_channels_dim = 1
     output_size.append(input[input_batch_size_dim])
     output_size.append(weight[weight_output_channels_dim])
 
@@ -760,7 +769,7 @@ def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]]
     dim = len(input)
     output_size: List[int] = []
     input_batch_size_dim = 0
-    weight_output_channels_dim = 0
+    weight_output_channels_dim = 1 if transposed else 0
     output_size.append(input[input_batch_size_dim])
     output_size.append(weight[weight_output_channels_dim])
 
@@ -968,14 +977,24 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
         _size = [0]
     return _copy(input), _size, _size
 
-# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
-# def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
-#     assert len(indices) <= len(self), "More indices than dimensions to index"
-#     broadcasted_shape: List[int] = []
-#     for index_tensor_shape in indices:
-#         if index_tensor_shape is not None:
-#             broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
-#     return broadcasted_shape
+"""
+Currently deferring the enabling of this, as part of the propoasal to suspend
+adding ops.
+There are currently cases in the test case where this is being called
+in the SSA opinfo tests with with unexpected values (eg list of two ints, see the first
+opinfo test). The behavoir of index is significantly dependent on the inputs.
+
+This could be an error with how we are matching up shape functions, or that this
+function needs to just implement everything.
+
+def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
+    assert len(indices) <= len(self), "More indices than dimensions to index"
+    broadcasted_shape: List[int] = []
+    for index_tensor_shape in indices:
+        if index_tensor_shape is not None:
+            broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
+    return broadcasted_shape
+"""
 
 ScriptFn = torch._C.ScriptFunction
 shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
@@ -1069,8 +1088,7 @@ add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool large
 add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
 add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
-# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
-#add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
+# add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
 # These are duplicated here so that the functions will be serialiazed

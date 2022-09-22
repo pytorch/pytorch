@@ -38,6 +38,13 @@
 #include <nvfuser_resources/warp.h>
 #include <nvfuser_resources/welford.h>
 
+#ifdef USE_ROCM
+#include <nvfuser_resources/array_rocm.h>
+#include <nvfuser_resources/bf16_support_rocm.h>
+#include <nvfuser_resources/block_sync_default_rocm.h>
+#include <nvfuser_resources/warp_rocm.h>
+#endif
+
 #ifndef USE_ROCM
 #include <cuda_occupancy.h>
 #endif
@@ -53,7 +60,7 @@ namespace executor_utils {
 std::string kernelPreamble() {
   std::stringstream ss;
 
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   ss << nvfuser_resources::fp16_support_cu;
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   ss << nvfuser_resources::bf16_support_cu;
@@ -73,12 +80,18 @@ std::string kernelPreamble() {
 #define __align__(x) __attribute__((aligned(x)))
 #endif
   )";
+  // fp16 support is automatic, bf16 is not
+  ss << nvfuser_resources::bf16_support_rocm_cu;
 #endif
 
   // Base classes and helpers
   ss << nvfuser_resources::tensor_cu;
   ss << nvfuser_resources::type_traits_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::array_cu;
+#else
+  ss << nvfuser_resources::array_rocm_cu;
+#endif
   ss << nvfuser_resources::random_numbers_cu;
   ss << nvfuser_resources::helpers_cu;
   ss << nvfuser_resources::index_utils_cu;
@@ -88,7 +101,11 @@ std::string kernelPreamble() {
   if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
     ss << nvfuser_resources::block_sync_atomic_cu;
   } else {
+#ifndef USE_ROCM
     ss << nvfuser_resources::block_sync_default_cu;
+#else
+    ss << nvfuser_resources::block_sync_default_rocm_cu;
+#endif
   }
   ss << nvfuser_resources::grid_sync_cu;
 
@@ -98,9 +115,13 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::grid_broadcast_cu;
   ss << nvfuser_resources::broadcast_cu;
   ss << nvfuser_resources::welford_cu;
+#ifndef USE_ROCM
   ss << nvfuser_resources::warp_cu;
   ss << nvfuser_resources::tensorcore_cu;
   ss << nvfuser_resources::memory_cu;
+#else
+  ss << nvfuser_resources::warp_rocm_cu;
+#endif
   ss << nvfuser_resources::fused_reduction_cu;
   ss << nvfuser_resources::swizzle_cu;
 
@@ -777,13 +798,34 @@ kir::ExpressionEvaluator bindKernelInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (const auto dim : c10::irange(root_domain.size())) {
-        Val* extent = nullptr;
+        const auto extent = root_domain[dim]->extent();
         if (root_domain[dim]->hasExpandedExtent()) {
-          extent = root_domain[dim]->expandedExtent();
-        } else {
-          extent = root_domain[dim]->extent();
+          TORCH_INTERNAL_ASSERT(
+              aten_tensor.strides()[dim] == 0,
+              "Execting an expanded dimension on ",
+              inputs[i]->toString(),
+              " dimension ",
+              dim,
+              " but found stride ",
+              aten_tensor.strides()[dim]);
+          // Could support dynamic size on expanded dimension, so may not have
+          // an inferable expanded extent here. This check might be better to do
+          // once all values are bound.
+          auto maybe_expanded_size =
+              expr_eval.evaluate(root_domain[dim]->expandedExtent());
+          if (maybe_expanded_size.has_value()) {
+            TORCH_CHECK(
+                *maybe_expanded_size == aten_tensor.sizes()[dim],
+                "Expecting expanded extent of ",
+                *maybe_expanded_size,
+                " but recieved value of ",
+                aten_tensor.sizes()[dim]);
+          }
         }
-        const auto value = aten_tensor.sizes()[dim];
+
+        const auto value = root_domain[dim]->hasExpandedExtent()
+            ? 1
+            : aten_tensor.sizes()[dim];
         if (value == 0 && tensor_input->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
           continue;
@@ -830,7 +872,7 @@ ExpressionEvaluator bindFusionInputs(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs do not match.");
 
-  ExpressionEvaluator evaluator(fusion);
+  ExpressionEvaluator expr_eval(fusion);
   auto inputs = fusion->inputs();
 
   // This should probably move to EvaluationContext as we may want to bind
@@ -844,25 +886,46 @@ ExpressionEvaluator bindFusionInputs(
           "Something went wrong configuring launch. Inputs do not match.");
 
       auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom =
+      auto root_domain =
           TensorDomain::noReductions(cg_tensor->getMaybeRFactorDomain());
       TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == (int64_t)root_dom.size(),
+          aten_tensor.ndimension() == (int64_t)root_domain.size(),
           "Something went wrong configuring launch. Inputs do not match.");
-      for (const auto dim : c10::irange(root_dom.size())) {
-        Val* extent = nullptr;
-        if (root_dom[dim]->hasExpandedExtent()) {
-          extent = root_dom[dim]->expandedExtent();
-        } else {
-          extent = root_dom[dim]->extent();
+      for (const auto dim : c10::irange(root_domain.size())) {
+        const auto extent = root_domain[dim]->extent();
+        if (root_domain[dim]->hasExpandedExtent()) {
+          TORCH_INTERNAL_ASSERT(
+              aten_tensor.strides()[dim] == 0,
+              "Execting an expanded dimension on ",
+              inputs[i]->toString(),
+              " dimension ",
+              dim,
+              " but found stride ",
+              aten_tensor.strides()[dim]);
+          // Could support dynamic size on expanded dimension, so may not have
+          // an inferable expanded extent here. This check might be better to do
+          // once all values are bound.
+          auto maybe_expanded_size =
+              expr_eval.evaluate(root_domain[dim]->expandedExtent());
+          if (maybe_expanded_size.has_value()) {
+            TORCH_CHECK(
+                *maybe_expanded_size == aten_tensor.sizes()[dim],
+                "Expecting expanded extent of ",
+                *maybe_expanded_size,
+                " but recieved value of ",
+                aten_tensor.sizes()[dim]);
+          }
         }
-        const auto value = aten_tensor.sizes()[dim];
+
+        const auto value = root_domain[dim]->hasExpandedExtent()
+            ? 1
+            : aten_tensor.sizes()[dim];
         if (value == 0 && cg_tensor->uses().empty()) {
           // If there's no uses, ignore there's a size-0 dimension.
           continue;
         }
         TORCH_INTERNAL_ASSERT(value != 0, "Cannot handle size-0 dimensions");
-        const auto prev_value = evaluator.evaluate(extent);
+        const auto prev_value = expr_eval.evaluate(extent);
         if (prev_value.has_value()) {
           TORCH_CHECK(
               *prev_value == value,
@@ -870,10 +933,10 @@ ExpressionEvaluator bindFusionInputs(
               extent,
               " to ",
               value,
-              "but it's already set to ",
+              " but it's already set to ",
               *prev_value);
         } else {
-          evaluator.bind(extent, value);
+          expr_eval.bind(extent, value);
         }
       }
     } else if (
@@ -883,10 +946,10 @@ ExpressionEvaluator bindFusionInputs(
           aten_inputs[i].type()->kind() == c10::TypeKind::IntType,
           "fusion expected Scalar Int inputs, but found",
           aten_inputs[i].type()->str());
-      evaluator.bind(inputs[i], aten_inputs[i].toInt());
+      expr_eval.bind(inputs[i], aten_inputs[i].toInt());
     }
   }
-  return evaluator;
+  return expr_eval;
 }
 
 void initializeCudaContext() {
@@ -907,7 +970,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
     int id,
     c10::optional<int> opt_block_size) {
   FUSER_PERF_SCOPE("executor_utils::NVRTC");
-  if (isDisabled(DisableOption::ArchCheck)) {
+  if (isOptionDisabled(DisableOption::ArchCheck)) {
     TORCH_WARN(
         "NVFuser Compile: arch check disabled, should not compile any kernel");
   }
@@ -939,7 +1002,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
   std::vector<const char*> args = {"--std=c++14"};
 #if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
@@ -964,8 +1027,8 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const bool disable_fma = isDisabled(DisableOption::Fma);
-#ifdef __HIP_PLATFORM_HCC__
+  const bool disable_fma = isOptionDisabled(DisableOption::Fma);
+#ifdef USE_ROCM
   if (disable_fma) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
@@ -988,7 +1051,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   args.push_back("-DNDEBUG");
 #endif
 
-  if (isEnabled(EnableOption::KernelProfile)) {
+  if (isOptionEnabled(EnableOption::KernelProfile)) {
     args.push_back("-DPYTORCH_NVFUSER_PROFILE_KERNEL");
   }
 
@@ -1147,7 +1210,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
 
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
   const char* prefix_env = getenv("PYTORCH_NVFUSER_CUBIN");
   if (prefix_env) {
     FUSER_PERF_SCOPE("executor_utils::Nvrtc::LoadCUBIN");
@@ -1253,7 +1316,7 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
       lowered_kernel_name));
 
   TORCH_CHECK(
-      !isDisabled(DisableOption::ArchCheck),
+      !isOptionDisabled(DisableOption::ArchCheck),
       "NVFuser Compile: arch check disabled, should not return any compiled kernel");
 
   return {compiled_kernel_, ptxas_log.str()};

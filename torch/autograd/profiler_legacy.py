@@ -57,7 +57,7 @@ class profile(object):
             self.with_flops,
             self.with_modules,
             # avoid exposing _ExperimentalConfig this in legacy public API
-            torch._C._autograd._ExperimentalConfig(),
+            torch._C._profiler._ExperimentalConfig(),
         )
 
     def __enter__(self):
