@@ -206,7 +206,7 @@ def checkpoint_wrapper(
     )
 
 
-def apply_activation_checkpoint(
+def apply_activation_checkpointing(
     model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=lambda _: True
 ):
     """
@@ -225,7 +225,7 @@ def apply_activation_checkpoint(
             nn.Linear(10, 10), nn.Linear(10, 10), nn.Linear(10, 10)
         )
         check_fn = lambda l: isinstance(l, nn.Linear)
-        apply_activation_checkpoint(model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn)
+        apply_activation_checkpointing(model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn)
     Args:
         model (nn.Module):
             The model whose submodules should be wrapped with activation checkpointing.
