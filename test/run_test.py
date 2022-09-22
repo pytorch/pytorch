@@ -701,14 +701,14 @@ def run_test_ops(test_module, test_directory, options):
         return run_test(test_module, test_directory, copy.deepcopy(options),
                         extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
                         )
-    num_procs = 3
+    NUM_PROCS = 3
     return_codes = []
     os.environ["PARALLEL_TESTING"] = "1"
-    pool = get_context("spawn").Pool(num_procs)
-    for i in range(num_procs):
+    pool = get_context("spawn").Pool(NUM_PROCS)
+    for i in range(NUM_PROCS):
         return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
                                        kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
-                                                                     f'--shard-id={i}', f'--num-shards={num_procs}',
+                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
                                                                      "-k=not _linalg_cholesky_"],
                                              })
         return_codes.append(return_code)

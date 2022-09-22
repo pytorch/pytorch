@@ -18,6 +18,7 @@ import json
 import math
 import operator
 import os
+import pathlib
 import platform
 import random
 import re
@@ -905,7 +906,8 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
 
-if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
+if TEST_CUDA and 'PARALLEL_TESTING' in os.environ:
+    sys.path.append(str(pathlib.Path(__file__).resolve().parent.parent.parent.parent))
     from tools.testing.test_selections import NUM_PROCS
     # other libraries take up about 11% of space per process
     torch.cuda.set_per_process_memory_fraction(round(1 / NUM_PROCS - .11, 2))
