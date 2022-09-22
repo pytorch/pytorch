@@ -93,7 +93,6 @@ _ref_test_ops = tuple(
     )
 )
 _ops_and_refs = op_db + python_ref_db
-_ops_and_refs_with_no_numpy_ref = [op for op in _ops_and_refs if op.ref is None]
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -160,34 +159,6 @@ class TestCommon(TestCase):
                 )
         finally:
             torch.set_default_dtype(cur_default)
-
-    # Tests that the cpu and gpu results are consistent
-    @onlyCUDA
-    @suppress_warnings
-    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_one)
-    def test_compare_cpu(self, device, dtype, op):
-
-        if dtype not in op.dtypes:
-            raise unittest.SkipTest("This test requires both cuda and cpu support")
-        if dtype not in op.dtypesIfCUDA:
-            raise unittest.SkipTest("This test requires both cuda and cpu support")
-
-        def to_cpu(arg):
-            if isinstance(arg, torch.dtype):
-                return arg
-            return arg.to(device='cpu')
-
-        samples = op.sample_inputs(device, dtype)
-
-        for sample in samples:
-            cpu_sample = sample.transform(to_cpu)
-            cuda_results = op(sample.input, *sample.args, **sample.kwargs)
-            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-
-            cuda_results = sample.output_process_fn_grad(cuda_results)
-            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
-
-            self.assertEqual(cuda_results, cpu_results)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
