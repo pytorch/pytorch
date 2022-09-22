@@ -305,7 +305,7 @@ class TestFSDPMixedPrecision(FSDPTest):
             param_dtype=torch.float16,
             reduce_dtype=torch.float16,
             buffer_dtype=torch.float16,
-            keep_casted_gradients=True,
+            keep_low_precision_grads=True,
         )
         m.lin1 = FSDP(m.lin1, mixed_precision=mp)
         m = FSDP(m, mixed_precision=mp)

@@ -797,7 +797,7 @@ class FlatParamHandle:
                     # If we're using mixed precision with keeping grads
                     # casted, gradient here might still be of the reduced
                     # dtype if we didn't clear / set the gradients to None
-                    # after previous forward. In that case, make sure
+                    # after previous backward. In that case, make sure
                     # p._saved_grad_shard is cast to the full precision type
                     # so that we can accumulate in full precision in
                     # _post_backward_hook and assign back in full precision
