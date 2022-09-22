@@ -55,6 +55,9 @@ CUDAStreamSynchronizationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
 CUDAEventSynchronizationCallbacks: "CallbackRegistry[int]" = CallbackRegistry(
     "CUDA event synchronization"
 )
+KernelLaunchCallbacks = CallbackRegistry(
+    "Kernel launch"
+)
 
 
 def register_callback_for_cuda_event_creation(cb: Callable[[int], None]) -> None:
@@ -97,3 +100,6 @@ def register_callback_for_cuda_stream_synchronization(
 
 def register_callback_for_cuda_event_synchronization(cb: Callable[[int], None]) -> None:
     CUDAEventSynchronizationCallbacks.add_callback(cb)
+
+def register_callback_for_kernel_launch(cb):
+    KernelLaunchCallbacks.add_callback(cb)

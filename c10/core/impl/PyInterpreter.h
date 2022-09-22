@@ -169,6 +169,9 @@ struct C10_API PyInterpreterVTable {
   virtual void trace_gpu_device_synchronization() const = 0;
   virtual void trace_gpu_stream_synchronization(uintptr_t stream) const = 0;
   virtual void trace_gpu_event_synchronization(uintptr_t event) const = 0;
+  virtual void trace_kernel_launch(
+      const c10::OperatorHandle& op,
+      torch::jit::Stack* stack) const = 0;
 };
 
 struct C10_API PyInterpreter {
