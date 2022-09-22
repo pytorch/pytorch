@@ -3,9 +3,12 @@
 # TODO(justinchuby): Move more of the symbolic helper functions here and expose
 # them to the user.
 
+import dataclasses
 import numbers
 import re
-from typing import Any, Dict, Iterable, Tuple, Union
+from typing import Any, Dict, Iterable, Iterator, List, Tuple, Union
+
+from typing_extensions import Protocol, runtime_checkable
 
 import torch
 from torch import _C
@@ -17,9 +20,85 @@ from torch.onnx._internal import _beartype
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
-class GraphContext(_C.Graph):
-    """Extra context for symbolic functions with all methods from torch.Graph, as well as `op()` and `at()`.
+@runtime_checkable
+class GraphLike(Protocol):
+    """Implements all methods defined in torch.Graph, as well as `op()` and `at()`."""
 
+    def op(
+        self,
+        opname: str,
+        *raw_args: Union[torch.Tensor, _C.Value],
+        outputs: int = 1,
+        **kwargs,
+    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+        ...
+
+    def at(
+        self, operator: str, *args, overload_name: str = "", **kwargs
+    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+        ...
+
+    def inputs(self) -> List[_C.Value]:
+        ...
+
+    def outputs(self) -> List[_C.Value]:
+        ...
+
+    def nodes(self) -> Iterator[_C.Node]:
+        ...
+
+    def param_node(self) -> _C.Node:
+        ...
+
+    def return_node(self) -> _C.Node:
+        ...
+
+    def addInput(self, name: str) -> _C.Value:
+        ...
+
+    def eraseInput(self, i: int) -> None:
+        ...
+
+    def registerOutput(self, n: _C.Value) -> int:
+        ...
+
+    def eraseOutput(self, i: int) -> None:
+        ...
+
+    def create(self, name: str, args, num_outputs: int) -> _C.Node:
+        ...
+
+    def appendNode(self, n: _C.Node) -> _C.Node:
+        ...
+
+    def prependNode(self, n: _C.Node) -> _C.Node:
+        ...
+
+    def insertNode(self, n: _C.Node) -> _C.Node:
+        ...
+
+    def block(self) -> _C.Block:
+        ...
+
+    def setInsertPoint(self, n: Union[_C.Block, _C.Node]) -> None:
+        ...
+
+    def insert_point_guard(self, n: Union[_C.Block, _C.Node]):
+        ...
+
+    def insertPoint(self) -> _C.Node:
+        ...
+
+    def insertGraph(self, callee: _C.Graph, inputs: List[_C.Value]) -> List[_C.Value]:
+        ...
+
+    def makeMultiOutputIntoTuple(self) -> None:
+        ...
+
+
+@dataclasses.dataclass
+class GraphContext(GraphLike):
+    """Extra context for symbolic functions with all methods from torch.Graph.
     Attributes:
         graph: The graph being constructed.
         opset: The opset version.
@@ -28,22 +107,13 @@ class GraphContext(_C.Graph):
         params_dict: Mapping from graph initializer name to IValue.
     """
 
-    def __init__(
-        self,
-        graph: _C.Graph,
-        opset: int,
-        original_node: _C.Node,
-        onnx_block: _C.Block,
-        params_dict: Dict[str, "_C.IValue"],
-        # FIXME(justinchuby): What should we call env?
-        env: Dict[_C.Value, _C.Value],
-    ):
-        self.graph = graph
-        self.opset = opset
-        self.original_node = original_node
-        self.onnx_block = onnx_block
-        self.params_dict = params_dict
-        self.env = env
+    graph: _C.Graph
+    opset: int
+    original_node: _C.Node
+    onnx_block: _C.Block
+    params_dict: Dict[str, "_C.IValue"]
+    env: Dict[_C.Value, _C.Value]
+    # FIXME(justinchuby): What should we call env?
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
     # a _C.Graph
@@ -56,7 +126,7 @@ class GraphContext(_C.Graph):
         *raw_args: Union[torch.Tensor, _C.Value],
         outputs: int = 1,
         **kwargs,
-    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+    ):
         """Creates an ONNX operator "opname", taking "args" as inputs and attributes "kwargs".
 
         The set of operators and the inputs/attributes they take
@@ -87,11 +157,10 @@ class GraphContext(_C.Graph):
             The node representing the single output of this operator (see the `outputs`
             keyword argument for multi-return nodes).
         """
+        # FIXME(justinchuby): Add the return type back once we know how to handle mypy
         return graph_op(self.graph, opname, *raw_args, outputs=outputs, **kwargs)
 
-    def at(
-        self, operator: str, *args, overload_name: str = "", **kwargs
-    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+    def at(self, operator: str, *args, overload_name: str = "", **kwargs):
         return aten_op(
             self.graph, operator, *args, overload_name=overload_name, **kwargs
         )
@@ -104,7 +173,7 @@ def graph_op(
     *raw_args: Union[torch.Tensor, _C.Value],
     outputs: int = 1,
     **kwargs,
-) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+):
     """Creates an ONNX operator "opname", taking "args" as inputs and attributes "kwargs".
 
     The set of operators and the inputs/attributes they take
@@ -132,6 +201,7 @@ def graph_op(
             that takes a list of integers).
 
     Returns:
+        (Union[_C.Value, Tuple[_C.Value, ...]])
         The node representing the single output of this operator (see the `outputs`
         keyword argument for multi-return nodes).
     """
@@ -173,9 +243,7 @@ def _const_if_tensor(g: _C.Graph, arg):
 
 # Generate an ONNX ATen op node.
 @_beartype.beartype
-def aten_op(
-    g: _C.Graph, operator: str, *args, overload_name: str = "", **kwargs
-) -> Union[_C.Value, Tuple[_C.Value, ...]]:
+def aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwargs):
     return graph_op(
         g,
         "aten::ATen",
