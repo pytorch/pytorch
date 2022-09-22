@@ -920,13 +920,13 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
         return r
 
 # Run PyTorch tests with TorchDynamo
-TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1'
+TEST_WITH_TORCHINDUCTOR = os.getenv('PYTORCH_TEST_WITH_INDUCTOR') == '1'
+TEST_WITH_TORCHDYNAMO = os.getenv('PYTORCH_TEST_WITH_DYNAMO') == '1' or TEST_WITH_TORCHINDUCTOR
+
 if TEST_WITH_TORCHDYNAMO:
     import torchdynamo
     import logging
     torchdynamo.config.log_level = logging.ERROR
-    # TODO - Collect errors with fake tensors
-    torchdynamo.config.fake_tensor_propagation = True
     # Do not spend time on helper functions that are called with different inputs
     torchdynamo.config.cache_size_limit = 8
 
@@ -951,6 +951,27 @@ def skipIfTorchDynamo(msg="test doesn't currently work with torchdynamo"):
 
 
     return decorator
+
+def skipIfTorchInductor(msg="test doesn't currently work with torchinductor"):
+    def decorator(fn):
+        if not isinstance(fn, type):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if TEST_WITH_TORCHINDUCTOR:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+            return wrapper
+
+        assert(isinstance(fn, type))
+        if TEST_WITH_TORCHINDUCTOR:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+    return decorator
+
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -1970,10 +1991,13 @@ class TestCase(expecttest.TestCase):
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
             errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
 
-
         if TEST_WITH_TORCHDYNAMO:
-            with torchdynamo.optimize("eager"):
-                super().run(result=result)
+            # TorchDynamo optimize annotation
+            if TEST_WITH_TORCHINDUCTOR:
+                super_run = torchdynamo.optimize("inductor")(super().run)
+            else:
+                super_run = torchdynamo.optimize("eager")(super().run)
+            super_run(result=result)
 
             # TODO - Reset for each test slows down testing significantly.
             # torchdynamo.reset()
@@ -2672,6 +2696,62 @@ class TestCase(expecttest.TestCase):
 
         self.assertEqual(attrs["operator"], operator)
         self.assertEqual(attrs.get("overload_name", ""), overload_name)
+
+    def check_nondeterministic_alert(self, fn, caller_name, should_alert=True):
+        '''Checks that an operation produces a nondeterministic alert when
+        expected while `torch.use_deterministic_algorithms(True)` is set.
+
+        Args:
+          fn (callable): Function to check for a nondeterministic alert
+
+          caller_name (str): Name of the operation that produces the
+              nondeterministic alert. This name is expected to appear at the
+              beginning of the error/warning message.
+
+          should_alert (bool, optional): If True, then the check will only pass
+              if calling `fn` produces a nondeterministic error/warning with the
+              expected message. If False, then the check will only pass if
+              calling `fn` does not produce an error. Default: `True`.
+        '''
+
+        alert_message = '^' + caller_name + ' does not have a deterministic implementation, but you set'
+
+        # Check that errors are thrown correctly
+        with DeterministicGuard(True):
+            if should_alert:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        alert_message,
+                        msg='expected a non-deterministic error, but it was not raised'):
+                    fn()
+
+            else:
+                # If a nondeterministic error is not expected, make sure
+                # that it is not raised
+                try:
+                    fn()
+                except RuntimeError as e:
+                    if 'does not have a deterministic implementation' in str(e):
+                        self.fail(
+                            'did not expect non-deterministic error message, '
+                            + 'but got one anyway: "' + str(e) + '"')
+                    # Reraise exceptions unrelated to nondeterminism
+                    raise
+
+        # Check that warnings are thrown correctly
+        with DeterministicGuard(True, warn_only=True):
+            if should_alert:
+                with self.assertWarnsRegex(
+                        UserWarning,
+                        alert_message):
+                    fn()
+            else:
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.simplefilter("always")
+                    fn()
+                    for warning in w:
+                        if isinstance(warning, UserWarning):
+                            self.assertTrue(re.search(alert_message, str(warning)) is None)
 
     # run code in subprocess and capture exceptions.
     @staticmethod

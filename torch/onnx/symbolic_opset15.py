@@ -25,14 +25,19 @@ Updated operators:
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
+import functools
+
 import torch
 from torch import _C
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, registration
+
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=15)
 
 
+@_onnx_symbolic("aten::__is_")
 @_beartype.beartype
-def __is_(g, self, other):
+def aten__is_(g, self, other):
     if symbolic_helper._is_none(other):
         if isinstance(self.type(), _C.OptionalType):
             none = g.op("OptionalHasElement", self)
@@ -42,22 +47,20 @@ def __is_(g, self, other):
     return opset9.eq(g, self, other)
 
 
-@opset9.wrap_logical_op_with_negation
+@_onnx_symbolic("aten::__isnot_")
+@opset9.wrap_logical_op_with_negation  # type: ignore[has-type]
 @_beartype.beartype
-def __isnot_(g, self, other):
-    return __is_(g, self, other)
+def aten__isnot_(g, self, other):
+    return aten__is_(g, self, other)
 
 
-class Prim:
-    domain = "prim"
+@_onnx_symbolic("prim::unchecked_cast")
+@_beartype.beartype
+def prim_unchecked_cast(g, self):
+    # exists to refine the type of the Value
+    # if x is Optional[Tensor], unchecked_cast will cast
+    # x to Tensor, so the rest of the graph knows that x is a Tensor.
+    if isinstance(self.type(), _C.OptionalType):
+        return g.op("OptionalGetElement", self)
 
-    @staticmethod
-    @_beartype.beartype
-    def unchecked_cast(g, self):
-        # exists to refine the type of the Value
-        # if x is Optional[Tensor], unchecked_cast will cast
-        # x to Tensor, so the rest of the graph knows that x is a Tensor.
-        if isinstance(self.type(), _C.OptionalType):
-            return g.op("OptionalGetElement", self)
-
-        return self
+    return self

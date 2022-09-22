@@ -105,6 +105,7 @@ class FlattenParamsWrapper(nn.Module):
         )
         if not use_orig_params:
             self._register_flat_param()
+        self._use_orig_params = use_orig_params
         assert getattr(self, FPW_MODULE) is self._fpw_module
         assert getattr(self, FLAT_PARAM) is self.flat_param
 
@@ -187,5 +188,10 @@ class FlattenParamsWrapper(nn.Module):
 
     def forward(self, *inputs: Any, **kwinputs: Any) -> Any:
         if self.flat_param is not None:
-            self._flat_param_handle._use_unsharded_views(as_params=False)
+            # TODO (awgu): For `use_orig_params=True`, I have moved the
+            # `_use_unsharded_views(False)` call to `handle.unshard()`, namely
+            # `_use_unsharded_flat_param()`. When we retire FPW, we should
+            # consolidate `use_orig_params=False` to do the same.
+            if not self._use_orig_params:
+                self._flat_param_handle._use_unsharded_views(as_params=False)
         return self.module(*inputs, **kwinputs)

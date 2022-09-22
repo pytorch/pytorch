@@ -120,7 +120,10 @@ def _free_storage(tensor: torch.Tensor) -> bool:
     if not already_freed:
         p_assert(
             tensor.storage_offset() == 0,
-            "Freeing a tensor's storage is unsafe when it is not the sole occupant",
+            "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
+            f"storage offset: {tensor.storage_offset()}\n"
+            f"storage size: {tensor.storage().size()}\n"
+            f"tensor shape: {tensor.shape}",
         )
         tensor.storage().resize_(0)
     return not already_freed
@@ -141,6 +144,7 @@ def _is_fsdp_flattened(tensor: torch.Tensor) -> bool:
 
 def _same_storage(x: torch.Tensor, y: torch.Tensor) -> bool:
     """Returns if ``x`` and ``y`` share the same storage."""
+    # NOTE: CPU and GPU tensors are ensured to have different data pointers.
     return x.storage().data_ptr() == y.storage().data_ptr()
 
 

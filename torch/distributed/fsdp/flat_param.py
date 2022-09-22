@@ -1,10 +1,12 @@
 import contextlib
+import warnings
 from dataclasses import dataclass
 from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
     cast,
+    Callable,
     Dict,
     Generator,
     Iterator,
@@ -144,6 +146,7 @@ class HandleConfig:
     offload_params: bool
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
+    keep_low_precision_grads: Optional[bool] = False
 
 
 class FlatParameter(nn.Parameter):
@@ -173,7 +176,9 @@ class FlatParameter(nn.Parameter):
             size with padding. This is only set for sharded strategies since
             they require padding for the all-gather.
         _sharded_size (torch.Size): Sharded flattened parameter's size with
-            padding. (We omit "padded" because there is no unpadded one.)
+            padding. This is also set for ``NO_SHARD``, in which case it is the
+            same as the unsharded sizes. (We omit "padded" because there is no
+            analogous unpadded one.)
 
         _param_infos (Tuple[ParamInfo, ...]): Each parameter's parameter info
             entry; see :class:`ParamInfo`.
@@ -270,10 +275,8 @@ class FlatParameter(nn.Parameter):
         assert (params is None) == (shared_params is None)
         if params is not None:
             assert shared_params is not None
-            self._params: Optional[Tuple[nn.Parameter, ...]] = tuple(params)
-            self._shared_params: Optional[Tuple[nn.Parameter, ...]] = tuple(
-                shared_params
-            )
+            self._params: Optional[List[nn.Parameter]] = params
+            self._shared_params: Optional[List[nn.Parameter]] = shared_params
             # Mark the original parameters to avoid flattening them into
             # another `FlatParameter` during recursive construction
             for param in chain(self._params, self._shared_params):
@@ -307,13 +310,6 @@ class FlatParamHandle:
             :class:`FlatParameter`). If ``False``, then FSDP reconstructs the
             parameter every iteration and returns the :class:`FlatParameter` s
             from ``named_parameters()``.
-
-    Attributes:
-        _registered_orig_params (bool): ``True`` if the original module
-            parameters are registered and ``False`` otherwise. If
-            ``use_orig_params=False``, then this is always ``False``. If
-            ``use_orig_params=True``, then this is ``True`` generally when the
-            flattened parameter is sharded and ``False`` when it is unsharded.
     """
 
     ##################
@@ -331,8 +327,8 @@ class FlatParamHandle:
         self.device = device
         self._config = config
         self._use_orig_params = use_orig_params
-        self._registered_orig_params = False
         self._training_state = HandleTrainingState.IDLE
+        self._debug_level = dist.get_debug_level()
         self._init_flat_param(params, module, use_orig_params)
         self._use_unsharded_views(as_params=False)
 
@@ -400,10 +396,7 @@ class FlatParamHandle:
                             f"{dtype} and {param.dtype}"
                         )
                     if dtype is None:
-                        try:
-                            is_floating_point = param.is_floating_point()
-                        except RuntimeError:
-                            is_floating_point = True
+                        is_floating_point = param.is_floating_point()
                         if not is_floating_point:
                             raise ValueError("Integer parameters are unsupported")
                     if (
@@ -491,15 +484,16 @@ class FlatParamHandle:
         makes the process-group-related attributes not necessarily defined.
         """
         flat_param = self.flat_param
+        self.process_group = process_group
+        self.rank = process_group.rank()
+        self.world_size = process_group.size()
         if not self.uses_sharded_strategy:
             self._init_shard_metadata(0, 0, flat_param.numel() - 1)
         else:
-            self.process_group = process_group
-            self.rank = process_group.rank()
-            self.world_size = process_group.size()
-            assert (
-                flat_param.storage_offset() == 0
-            ), "The `FlatParameter` is not the sole occupant of its storage"
+            p_assert(
+                flat_param.storage_offset() == 0,
+                "The `FlatParameter` is not the sole occupant of its storage",
+            )
             orig_storage = flat_param.storage()
             sharded_flat_param, numel_padded = FlatParamHandle._get_shard(
                 flat_param, self.rank, self.world_size
@@ -712,7 +706,7 @@ class FlatParamHandle:
         matches the dtype of the expected unsharded parameter.
         """
         ret = False
-        if self._registered_orig_params:
+        if self._use_orig_params:
             # TODO (awgu): I am not sure if we want to enable this by default
             # for `use_orig_params=True` since there may be some CPU overhead.
             ret = ret or self._writeback_orig_params()
@@ -727,7 +721,7 @@ class FlatParamHandle:
             ret = True
         elif self._config.offload_params and self.flat_param.device != self.device:
             # NOTE: This creates a new tensor distinct from any attributes.
-            self._flat_param_to(self.device, non_blocking=True)
+            self.flat_param_to(self.device, non_blocking=True)
             ret = True
         self._check_on_compute_device(self.flat_param)
         return ret
@@ -751,7 +745,7 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
-    def unshard(self):
+    def unshard(self, gradient_hook: Optional[Callable]):
         """
         Runs the unshard logic. This includes all-gathering the flattened
         parameter and switching to using the unsharded flattened parameter. If
@@ -762,15 +756,18 @@ class FlatParamHandle:
         mixed precision, then the parameter is forced to full precision.
         """
         if not self.needs_unshard():
-            if self.uses_sharded_strategy:
-                # The handle may have been resharded without freeing the padded
-                # unsharded flattened parameter, in which case we need to
-                # switch to using the unsharded parameter
-                unsharded_flat_param = self._get_padded_unsharded_flat_param()
-                self._use_unsharded_flat_param(unsharded_flat_param)
+            # Even when not needing an unshard, we should switch to using
+            # the unsharded flattened parameter
+            unsharded_flat_param = (
+                self._get_padded_unsharded_flat_param()
+                if self.uses_sharded_strategy
+                else self.flat_param
+            )
+            self._use_unsharded_flat_param(unsharded_flat_param)
             return
         unsharded_flat_param = self._alloc_padded_unsharded_flat_param()
-        self._all_gather_flat_param(unsharded_flat_param)
+        padded_unsharded_flat_param = self._all_gather_flat_param(unsharded_flat_param)
+        self._use_unsharded_flat_param(padded_unsharded_flat_param)
 
     def needs_unshard(self) -> bool:
         """Returns if the handle's flattened parameter needs to be unsharded."""
@@ -820,7 +817,7 @@ class FlatParamHandle:
     def _all_gather_flat_param(
         self,
         padded_unsharded_flat_param: Tensor,
-    ) -> None:
+    ) -> Tensor:
         """
         All-gathers the handle's flattened parameter to the destination
         ``padded_unsharded_flat_param``, and switches to using the all-gathered
@@ -841,7 +838,7 @@ class FlatParamHandle:
             sharded_flat_param,
             self.process_group,
         )
-        self._use_unsharded_flat_param(padded_unsharded_flat_param)
+        return padded_unsharded_flat_param
 
     def _use_unsharded_flat_param(
         self,
@@ -854,7 +851,19 @@ class FlatParamHandle:
         unsharded_size = self.flat_param._unpadded_unsharded_size
         self.flat_param.data = padded_unsharded_flat_param[
             : unsharded_size.numel()
-        ].view(unsharded_size)
+        ].view(unsharded_size)  # this `.view()` is not autograd visible
+        # TODO (awgu): For `use_orig_params=True`, we create the unsharded
+        # views here, not through the FPW. This enables a *single* place for
+        # unsharded view creation during runtime. We should coalesce the
+        # `use_orig_params=False` code path to do the same.
+        if self._use_orig_params:
+            if self._training_state != HandleTrainingState.FORWARD:
+                # NOTE: `as_params=True` suffices here because we only need to
+                # restore the tensor *values* for backward computation. It
+                # does not need to be a fresh `Tensor` view.
+                self._use_unsharded_views(as_params=True)
+            else:
+                self._use_unsharded_views(as_params=False)
 
     def post_unshard(self):
         """
@@ -870,7 +879,7 @@ class FlatParamHandle:
         self._check_low_precision_shard()
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
-    def prepare_gradient(self):
+    def prepare_gradient_for_backward(self):
         """
         Prepares the gradient for the backward computation by saving and
         clearing any existing sharded gradient in ``.grad`` to enable computing
@@ -905,6 +914,21 @@ class FlatParamHandle:
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
                     flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
+                    # If we're using mixed precision with keeping grads
+                    # casted, gradient here might still be of the reduced
+                    # dtype if we didn't clear / set the gradients to None
+                    # after previous forward. In that case, make sure
+                    # p._saved_grad_shard is cast to the full precision type
+                    # so that we can accumulate in full precision in
+                    # _post_backward_hook and assign back in full precision
+                    # in _wait_for_post_backward.
+                    if (
+                        self._config.keep_low_precision_grads and
+                        flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                    ):
+                        flat_param._saved_grad_shard = (  # type: ignore[attr-defined]
+                            flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)  # type: ignore[attr-defined]
+                        )
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
@@ -914,6 +938,40 @@ class FlatParamHandle:
                     f"but got size {flat_param.grad.size()}",
                 )
             flat_param.grad = None
+
+    def prepare_gradient_for_optim(self):
+        """
+        Prepares the gradient for optimizer computation by moving the sharded
+        gradient to the ``.grad`` attribute.
+        """
+        flat_param = self.flat_param
+        # TODO (awgu): We should replace these conditional checks to encode
+        # the logical intention more directly.
+        if hasattr(flat_param, "_cpu_grad"):
+            # NOTE: This branch includes `NO_SHARD`.
+            self._check_sharded(flat_param)
+            self._check_on_cpu(flat_param)
+            flat_param.grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+        elif hasattr(flat_param, "_saved_grad_shard"):
+            self._check_sharded(flat_param)
+            self._check_on_compute_device(flat_param)
+            self._check_on_compute_device(flat_param._saved_grad_shard)  # type: ignore[attr-defined]
+            flat_param.grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+            if handle._config.keep_low_precision_grads:
+                flat_param.grad.data = flat_param.grad.to(handle._config.param_dtype)
+
+        else:
+            p_assert(
+                not self.uses_sharded_strategy
+                or not flat_param._post_backward_called,  # type: ignore[attr-defined]
+                "All sharded parameters that received a gradient in the "
+                "post-backward should use `_saved_grad_shard`",
+            )
+        if self._use_orig_params:
+            self._use_sharded_grad_views()
+        # TODO (awgu): I am not sure that deleting this is necessary.
+        if hasattr(flat_param, "_saved_grad_shard"):
+            delattr(flat_param, "_saved_grad_shard")
 
     @contextlib.contextmanager
     def to_cpu(self):
@@ -947,7 +1005,7 @@ class FlatParamHandle:
             unpadded_storage_ptr == padded_storage_ptr,
             "Expects the unpadded parameter to be a view into the padded parameter",
         )
-        self._flat_param_to(torch.device("cpu"))
+        self.flat_param_to(torch.device("cpu"))
         self._free_unsharded_flat_param()
         try:
             yield
@@ -1018,6 +1076,8 @@ class FlatParamHandle:
                 f"Expects the local shard to be on CPU but got {device}",
             )
         flat_param.data = flat_param._local_shard  # type: ignore[attr-defined]
+        if self._use_orig_params:
+            self._use_sharded_views()
 
     #########
     # VIEWS #
@@ -1063,8 +1123,9 @@ class FlatParamHandle:
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
+        # if dist.get_rank() == 0:
+        #     print(f"[Rank {dist.get_rank()}] _use_unsharded_views(as_params={as_params}) {self._training_state}!")
         self._check_unsharded()
-        self._registered_orig_params = False
         views = self._get_unflat_views(self.flat_param)
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
@@ -1141,8 +1202,14 @@ class FlatParamHandle:
         like model printability. Parameters whose data is present must preserve
         their variables to be passable to an optimizer.
         """
+        # if dist.get_rank() == 0:
+        #     print(f"[Rank {dist.get_rank()}] _use_sharded_views()! {self._training_state}")
+        if not self.uses_sharded_strategy:
+            # For `NO_SHARD`, use the *unflattened* unsharded views since we
+            # have the unsharded parameter
+            self._use_unsharded_views(as_params=True)
+            return
         self._check_sharded(self.flat_param)
-        self._registered_orig_params = True
         start, end = self.flat_param._shard_indices  # type: ignore[attr-defined]
         offset = 0
         assert self.flat_param._params is not None
@@ -1157,7 +1224,7 @@ class FlatParamHandle:
                 param.data = self.flat_param[offset : offset + numel_in_shard]
                 offset += numel_in_shard
             else:
-                _free_storage(param)
+                # Allow the original data to be freed via garbage collection
                 param.data = torch.empty(
                     0,
                     dtype=param.dtype,
@@ -1188,6 +1255,8 @@ class FlatParamHandle:
         this method does not manipulate existing ``Tensor`` data directly and
         creates new ``Tensor`` variables instead.
         """
+        # if dist.get_rank() == 0:
+        #     print(f"[Rank 0] _use_sharded_grad_views()!")
         self._check_sharded(self.flat_param)
         if self.flat_param.grad is None:
             return  # no-op
@@ -1201,7 +1270,9 @@ class FlatParamHandle:
                 param_start, param_end = self.flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
                 numel_in_shard = param_end - param_start + 1
                 if param.requires_grad:
-                    param.grad = self.flat_param.grad[offset : offset + numel_in_shard]
+                    param.grad = (
+                        self.flat_param.grad[offset : offset + numel_in_shard].reshape(param.shape)
+                    )
                 else:
                     param.grad = None
                 offset += numel_in_shard
@@ -1218,50 +1289,100 @@ class FlatParamHandle:
             else:
                 param.grad = None
 
+    @torch.no_grad()
     def _writeback_orig_params(self):
         """
         Iterates over the original parameters and writes back any parameters
         that changed storages (due to a non-inplace operator) to the handle's
-        ``FlatParameter``.
+        ``FlatParameter``. This method preserves the ``FlatParameter` 's
+        device even if an original parameter's device changes.
 
         Raises:
             RuntimeError: An original parameter changes storages and no longer
             has the expected flattened shape.
         Returns: ``True`` if some writeback happened, and ``False`` otherwise.
         """
-        self._check_sharded(self.flat_param)
-        self._check_registered_orig_params()
-        start, end = self.flat_param._shard_indices  # type: ignore[attr-defined]
+        if not self.is_sharded(self.flat_param):
+            return False
+        flat_param = self.flat_param
+        start, end = flat_param._shard_indices  # type: ignore[attr-defined]
         offset = 0
-        assert self.flat_param._params is not None
+        assert flat_param._params is not None
         wroteback = False
-        for i, param in enumerate(self.flat_param._params):
+        for i, (param, (param_name, module, _)) in enumerate(
+            zip(flat_param._params, flat_param._param_infos)
+        ):
+            if not hasattr(module, param_name):
+                # Do not writeback if original parameters are deregistered
+                # (e.g. during model checkpointing)
+                continue
             in_sharded_flat_param = i >= start and i <= end
             if in_sharded_flat_param:
-                param_start, param_end = self.flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
+                param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
                 numel_in_shard = param_end - param_start + 1
-                needs_param_writeback = not _same_storage(param, self.flat_param)
+                # Check for parameter writeback
+                param_changed = getattr(module, param_name) is not param
+                needs_param_writeback = (
+                    param_changed  # changed parameter variable itself
+                    or not _same_storage(param, flat_param)  # changed `.data`
+                )
+                if param_changed:
+                    # NOTE: After a parameter change, the gradient is not
+                    # preserved.
+                    param = getattr(module, param_name)
+                    flat_param._params[i] = param
                 if needs_param_writeback:
-                    # TODO (awgu): shall we relax this to just having the same
-                    # numel? then we just flatten and writeback
+                    # TODO (awgu): Should we relax this to just having the same
+                    # numel? Then, we just flatten and writeback.
                     expected_shape = torch.Size([numel_in_shard])
-                    print(
-                        f"[Rank {dist.get_rank()}] needs writeback; "
-                        f"expected shape={expected_shape} shape={param.shape} "
-                        f"expected device={self.flat_param.device} device={param.device}"
-                    )
+                    if self._debug_level == [dist.DebugLevel.INFO, dist.DebugLevel.DETAIL]:
+                        rank = self.rank if hasattr(self, "rank") else dist.get_rank()
+                        print(
+                            f"[Rank {rank}] needs writeback in {self._training_state}; "
+                            f"expected shape={expected_shape} shape={param.shape} "
+                            f"expected device={flat_param.device} device={param.device}"
+                        )
                     if param.shape != expected_shape:
                         raise RuntimeError(
                             "Cannot writeback when the parameter shape changes\n"
                             f"Expects {expected_shape} but got {param.shape}"
                         )
-                    self.flat_param[offset : offset + numel_in_shard].copy_(param)
+                    flat_param[offset : offset + numel_in_shard].copy_(param)
                     wroteback = True
-                # TODO (awgu): writeback gradient
-                # need to handle what if there is no flat param grad but there is param grad
-                # -> allocate memory?
-                # needs_grad_writeback = param.grad is not None and not self._same_storage(param.grad)
+                # Check for gradient writeback
+                # NOTE: Since this method is called in the pre-unshard, which
+                # is only called in the pre-forward or pre-backward, the
+                # sharded gradient should be guaranteed to be in `.grad`, not
+                # in `._saved_grad_shard`.
+                if param.grad is None and flat_param.grad is not None:
+                    warnings.warn(
+                        "Setting an original parameter's `.grad` to `None` "
+                        "does not set the underlying `FlatParameter`'s `.grad` "
+                        "to `None`."
+                    )
+                elif param.grad is not None:
+                    needs_grad_writeback = (
+                        flat_param.grad is None
+                        or not _same_storage(param.grad, flat_param.grad)
+                    )
+                    # TODO (awgu): Allocate a new zeroed sharded gradient for
+                    # `flat_param.grad` if it is `None`, and write the data
+                    # into the appropriate view.
+                    if needs_grad_writeback:
+                        raise NotImplementedError("Gradient writeback is not implemented")
                 offset += numel_in_shard
+        # TODO (awgu): Shared parameters could become no longer shared??
+        assert flat_param._shared_param_infos is not None
+        for i, (param, (param_name, module, _, _, _, _)) in enumerate(
+            zip(flat_param._shared_params, flat_param._shared_param_infos)  # type: ignore[arg-type]
+        ):
+            if not hasattr(module, param_name):
+                # Do not writeback if original parameters are deregistered
+                # (e.g. during model checkpointing)
+                continue
+            param_changed = getattr(module, param_name) is not param
+            if param_changed:
+                flat_param._shared_params[i] = getattr(module, param_name)  # type: ignore[index]
         return wroteback
 
     def _deregister_orig_params(self):
@@ -1275,16 +1396,15 @@ class FlatParamHandle:
     ###########
     # HELPERS #
     ###########
-    def _flat_param_to(self, *args, **kwargs):
+    def flat_param_to(self, *args, **kwargs):
         """Wraps an in-place call to ``.to()`` for ``self.flat_param``."""
         self.flat_param.data = self.flat_param.to(*args, **kwargs)
-        if self._registered_orig_params:
-            flat_param = self.flat_param
-            if (
-                hasattr(flat_param, "_sharded_size")
-                and flat_param.size() == flat_param._sharded_size  # type: ignore[attr-defined]
-            ):
+        if self._use_orig_params:
+            # Refresh the views because their storage may have changed
+            if self.is_sharded(self.flat_param):
                 self._use_sharded_views()
+            else:
+                self._use_unsharded_views(as_params=True)
 
     def _get_modules(self) -> Set[nn.Module]:
         """Returns a :class:`set` of the modules whose parameters are included
@@ -1292,6 +1412,17 @@ class FlatParamHandle:
         return set(pi.module for pi in self.flat_param._param_infos).union(
             set(spi.module for spi in self.flat_param._shared_param_infos)
         )
+
+    def is_sharded(self, tensor: Tensor) -> bool:
+        """
+        Returns if ``tensor`` is *currently* sharded. For ``NO_SHARD``, this
+        always returns ``True`` once :meth:`shard` has been called.
+        """
+        if not hasattr(self.flat_param, "_sharded_size"):
+            # `_sharded_size` is defined iff `handle.shard()` has been called
+            return False
+        sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
+        return tensor.size() == sharded_size
 
     def parameter_module_names(self) -> Iterator[Tuple[str, str]]:
         shared_param_infos = [
@@ -1320,6 +1451,12 @@ class FlatParamHandle:
         p_assert(
             tensor.device == self.device,
             f"Expects tensor to be on the compute device {self.device}",
+        )
+
+    def _check_on_cpu(self, tensor: Tensor):
+        p_assert(
+            tensor.device == torch.device("cpu"),
+            f"Expects tensor to be on CPU but got {tensor.device}",
         )
 
     @staticmethod
@@ -1359,18 +1496,13 @@ class FlatParamHandle:
             msg_prefix + f"with size {unsharded_size} but got {self.flat_param.size()}",
         )
 
-    def _check_sharded(self, tensor: torch.Tensor):
+    def _check_sharded(self, tensor: Tensor):
         msg_prefix = "Expects tensor to be sharded "
         p_assert(tensor is not None, msg_prefix + "but got `None`")
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
         p_assert(
             tensor.size() == sharded_size,
             msg_prefix + f"with size {sharded_size} but got {tensor.size()}",
-        )
-
-    def _check_registered_orig_params(self):
-        p_assert(
-            self._registered_orig_params, "Expects original parameters to be registered"
         )
 
     ##############
