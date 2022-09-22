@@ -203,7 +203,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 infra.Level.WARNING,
             )
 
-    def test_diagnostic_records_nested_runs(self):
+    def test_diagnostics_records_accordingly_in_nested_runs(self):
         with self.engine.start_new_run(self.diagnostic_tool):
             self.engine.diagnose(
                 self.rules.rule_without_message_args, infra.Level.WARNING
@@ -219,7 +219,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
         self.assertEqual(len(sarif_log.runs[1].results), 1)
 
     def test_diagnose_raises_runtime_error_when_outside_of_run(self):
-        self.engine.end_current_run()
+        self.engine._end_current_run()
         with self.assertRaisesRegex(
             RuntimeError,
             "No run is currently active.",
@@ -227,3 +227,40 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             self.engine.diagnose(
                 self.rules.rule_without_message_args, infra.Level.WARNING
             )
+
+    def test_diagnose_with_custom_rules(self):
+        custom_rules = infra.RuleCollection.custom_collection_from_list(
+            "CustomRuleCollection",
+            [
+                infra.Rule(
+                    "1",
+                    "custom-rule",
+                    message_default_template="custom rule message",
+                ),
+                infra.Rule(
+                    "2",
+                    "custom-rule-2",
+                    message_default_template="custom rule message 2",
+                ),
+            ],
+        )
+
+        with self.engine.start_new_run(
+            tool=infra.DiagnosticTool(
+                name="custom_tool", version="1.0", rules=custom_rules
+            )
+        ):
+            with assertAllDiagnostics(
+                self,
+                self.engine,
+                {
+                    (custom_rules.custom_rule, infra.Level.WARNING),  # type: ignore[attr-defined]
+                    (custom_rules.custom_rule_2, infra.Level.ERROR),  # type: ignore[attr-defined]
+                },
+            ):
+                self.engine.diagnose(
+                    custom_rules.custom_rule, infra.Level.WARNING  # type: ignore[attr-defined]
+                )
+                self.engine.diagnose(
+                    custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
+                )

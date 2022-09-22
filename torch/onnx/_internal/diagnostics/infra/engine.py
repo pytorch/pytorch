@@ -127,7 +127,7 @@ class DiagnosticEngine:
         try:
             yield
         finally:
-            self.end_current_run(previous_run)
+            self._end_current_run(previous_run)
 
-    def end_current_run(self, previous_run=None) -> None:
+    def _end_current_run(self, previous_run=None) -> None:
         self._current_run = previous_run

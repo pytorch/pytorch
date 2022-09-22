@@ -323,7 +323,9 @@ class RuleCollection:
         return (rule.id, rule.name) in self._rule_id_name_set
 
     @classmethod
-    def from_list(cls, new_collection_class_name: str, rules: Sequence[Rule]):
+    def custom_collection_from_list(
+        cls, new_collection_class_name: str, rules: Sequence[Rule]
+    ) -> RuleCollection:
         """Creates a custom class inherited from RuleCollection with the list of rules."""
         return dataclasses.make_dataclass(
             new_collection_class_name,
@@ -336,7 +338,7 @@ class RuleCollection:
                 for rule in rules
             ],
             bases=(cls,),
-        )
+        )()
 
 
 class DiagnosticTool:
