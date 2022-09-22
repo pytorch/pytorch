@@ -1260,7 +1260,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.logsigmoid'),  # Forward AD not implemented and no decomposition
         # NYI: Tensor.clone(memory_format) inside vmap is only supported with
         # memory_format torch.preserve_format or torch.contiguous_format (got ChannelsLast)
-        xfail('nn.functional.max_pool2d', device_type='cuda'),  # AssertionError: Tensor-likes are not close!
         xfail('nn.functional.max_unpool2d'),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.multi_margin_loss'),  # Forward AD not implemented and no decomposition
