@@ -47,7 +47,7 @@ plt.style.use('bmh')
 
 
 # Squash the warning spam
-functorch._C._set_vmap_fallback_warning_enabled(False)
+torch._C._functorch._set_vmap_fallback_warning_enabled(False)
 
 
 def main():

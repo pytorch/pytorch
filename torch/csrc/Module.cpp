@@ -48,6 +48,7 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -1019,6 +1020,7 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
+  torch::functorch::impl::initFuncTorchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initReturnTypes(module);
   torch::autograd::initNNFunctions(module);

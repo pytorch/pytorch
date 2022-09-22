@@ -12,7 +12,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, _broadcast_to_and_
 from .pytree_hacks import tree_map_
 from functools import partial
 
-from functorch._C import (
+from torch._C._functorch import (
     _add_batch_dim,
     _remove_batch_dim,
     _vmap_decrement_nesting,
