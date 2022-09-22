@@ -17,6 +17,7 @@
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Writing documentation](#writing-documentation)
+  - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
@@ -447,8 +448,46 @@ If you're interested in adding new developer docs, please read this [page on the
 
 The rest of this section is about user-facing documentation.
 
-PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
+PyTorch uses [Google style](https://www.sphinx-doc.org/en/master/usage/extensions/example_google.html)
 for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
+
+
+### Docstring type formatting
+
+In addition to the standard Google Style docstring formatting rules, the following guidelines should be followed for docstring types (docstring types are the type information contained in the round brackets after the variable name):
+
+* The "`Callable`", "`Any`", "`Iterable`", "`Iterator`", "`Generator`" types should have their first letter capitalized.
+
+* The "`list`" and "`tuple`" types should be completely lowercase.
+
+* Types should not be made plural. For example: `tuple of int` should be used instead of `tuple of ints`.
+
+* The only acceptable delimiter words for types are `or` and `of`. No other non-type words should be used other than `optional`.
+
+* The word `optional` should only be used after the types, and it is only used if the user does not have to specify a value for the variable. Default values are listed after the variable description. Example:
+
+    ```
+    my_var (int, optional): Variable description. Default: 1
+    ```
+
+* Basic Python types should match their type name so that the [Intersphinx](https://www.sphinx-doc.org/en/master/usage/extensions/intersphinx.html) extension can correctly identify them. For example:
+    * Use `str` instead of `string`.
+    * Use `bool` instead of `boolean`.
+    * Use `dict` instead of `dictionary`.
+
+* Square brackets should be used for the dictionary type. For example:
+
+    ```
+    my_var (dict[str, int]): Variable description.
+    ```
+
+* If a variable has two different possible types, then the word `or` should be used without a comma. Otherwise variables with 3 or more types should use commas to separate the types. Example:
+
+    ```
+    x (type1 or type2): Variable description.
+    y (type1, type2, or type3): Variable description.
+    ```
+
 
 ### Building documentation
 
@@ -1206,13 +1245,6 @@ but we haven’t gotten around to it.
 In 2018, we merged Caffe2 into the PyTorch source repository. While the
 steady state aspiration is that Caffe2 and PyTorch share code freely,
 in the meantime there will be some separation.
-
-If you submit a PR to only PyTorch or only Caffe2 code, CI will only
-run for the project you edited. The logic for this is implemented
-in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
-can look at this to see what path prefixes constitute changes.
-This also means if you ADD a new top-level path, or you start
-sharing code between projects, you need to modify these files.
 
 There are a few "unusual" directories which, for historical reasons,
 are Caffe2/PyTorch specific. Here they are:

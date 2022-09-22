@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -25,7 +25,6 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
-from torch.utils._python_dispatch import TorchDispatchMode
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -41,43 +40,25 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
 ) or (not IS_WINDOWS and CUDA11OrLater)
 
-class CrossRefSparseFakeMode(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
+class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
+    def __init__(self):
+        super(CrossRefSparseFakeMode, self).__init__(self.ignore_op, check_strides=False)  # TODO: enable stride checking
 
-        def on_tensor(f):
-            def go(t):
-                if isinstance(t, torch.Tensor):
-                    return f(t)
-                else:
-                    return t
-            return go
-
-        # empty_like excluded for now due to sparse complex
-        # aten._to_dense.default this one is getting called with csc
-        if (
-            func not in [
-                torch.ops.aten.lift_fresh.default,
-                torch.ops.aten.empty_like.default,
-                torch.ops.aten.set_.source_Storage_storage_offset,
-                torch.ops.aten.sspaddmm.out,
-                torch.ops.aten._spdiags.default,
-                torch.ops.aten._to_dense.default
-            ]
-            and torch.Tag.dynamic_output_shape not in func.tags
-            and torch.Tag.inplace_view not in func.tags
-        ):
-            from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
-            from torch.utils._pytree import tree_map
-            try:
-                with FakeTensorMode(allow_meta=True) as fake_mode:
-                    fake_args, fake_kwargs = tree_map(on_tensor(fake_mode.from_tensor), (args, kwargs))
-                    fake_r = func(*fake_args, **fake_kwargs)
-            except UnsupportedFakeTensorException:
-                pass
-
-        r = func(*args, **kwargs)
-        return r
+    # empty_like excluded for now due to sparse complex
+    # aten._to_dense.default this one is getting called with csc
+    @staticmethod
+    def ignore_op(func):
+        return func in (
+            torch.ops.aten.empty_like.default,
+            torch.ops.aten.set_.source_Storage_storage_offset,
+            torch.ops.aten.sspaddmm.out,
+            torch.ops.aten._spdiags.default,
+            torch.ops.aten._to_dense.default,
+            torch.ops.aten.indices.default,
+            torch.ops.aten._indices.default,
+            torch.ops.aten.values.default,
+            torch.ops.aten._values.default,
+        )
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -908,6 +889,7 @@ class TestSparse(TestSparseBase):
         test_shape(10, 20, 0, 0)
         test_shape(10, 20, 0, 20)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1166")
     @dtypes(torch.double, torch.cdouble)
     def test_t_empty(self, device, dtype):
         def test_in_place(x):
@@ -1247,7 +1229,7 @@ class TestSparse(TestSparseBase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and _get_torch_cuda_version() < (10, 1),
+        TEST_CUDA and _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     @coalescedonoff
@@ -1309,7 +1291,7 @@ class TestSparse(TestSparseBase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        _get_torch_cuda_version() < (10, 1),
+        _get_torch_cuda_version() < (10, 1) and not TEST_WITH_ROCM,
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self, device, dtype, coalesced):
@@ -2256,6 +2238,8 @@ class TestSparse(TestSparseBase):
                 device=device,
                 dtype=dtype
             )
+            # empty tensors are coalesced at creation (nnz < 2) we must force the uncoalesced state
+            input_uncoalesced._coalesced_(False)
             self._test_log1p_tensor(input_uncoalesced, coalesced)
 
     def _test_neg_negative(self, sparse_tensor):
@@ -2399,6 +2383,8 @@ class TestSparse(TestSparseBase):
                 dtype=dtype,
                 device=device
             )
+            # empty tensors are coalesced at creation (nnz < 2) we must force the uncoalesced state
+            input_uncoalesced._coalesced_(False)
             self._test_asin_arcsin(input_uncoalesced, coalesced)
 
     @coalescedonoff
@@ -2990,41 +2976,6 @@ class TestSparse(TestSparseBase):
         self.assertFalse(torch.sparse_coo_tensor(([0],), 0. + 0j, (1,), dtype=torch.cdouble, device=device)
                          .is_nonzero())
 
-    def test_allow_tensor_metadata_change(self, device):
-        def do_test(t):
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "raw_resize_ is not allowed on a Tensor created from .data or .detach()"):
-                t.transpose_(0, 1)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
-                t.resize_as_(self.sparse_empty(3, 3))
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
-                t.mul_(t)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "set_coalesced is not allowed on a Tensor created from .data or .detach()"):
-                t._coalesced_(True)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "set_indices_and_values_unsafe is not allowed on a Tensor created from .data or .detach()"):
-                a = self.sparse_tensor(torch.tensor([[0, 1, 1], [2, 0, 2]]), torch.tensor([3., 4., 5.])).data
-                a.add_(a)
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_and_clear_ is not allowed on a Tensor created from .data or .detach()"):
-                a.zero_()
-            with self.assertRaisesRegex(
-                    RuntimeError,
-                    "resize_ is not allowed on a Tensor created from .data or .detach()"):
-                a.copy_(self.sparse_empty(3, 3))
-
-        do_test(self.sparse_empty([3, 0], device=device).data)
-        do_test(self.sparse_empty([3, 0], device=device).detach())
-
     @dtypes(torch.double, torch.cdouble)
     def test_change_tensor_metadata(self, device, dtype):
         i = self.index_tensor([[0], [1]], device=device)
@@ -3360,6 +3311,7 @@ class TestSparse(TestSparseBase):
                 J[i] = g.to_dense() if g.is_sparse else g
             return J
 
+        @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1166")
         def test_op(sparse_dims, nnz, with_size, coalesced):
             if isinstance(with_size, Number):
                 with_size = [with_size] * sparse_dims
@@ -3798,6 +3750,16 @@ class TestSparse(TestSparseBase):
         for case, error_regex in invalid_cases():
             check_invalid(case, error_regex)
 
+    def test_small_nnz_coalesced(self):
+        # creating a coo tensor with nnz == 0 is always coalesced
+        self.assertTrue(torch.sparse_coo_tensor([[], []], [], (2, 2)).is_coalesced())
+        # same for a coo tensor with only 1 nnz
+        self.assertTrue(torch.sparse_coo_tensor([[0], [0]], [1], (2, 2)).is_coalesced())
+        # two or more nnz coalesced is false as it can't be verified without an expensive check
+        self.assertFalse(torch.sparse_coo_tensor([[0, 0], [0, 0]], [1, 2], (2, 2)).is_coalesced())
+        # even if there are no duplicates
+        self.assertFalse(torch.sparse_coo_tensor([[0, 1], [0, 1]], [1, 2], (2, 2)).is_coalesced())
+
 
 
 class TestSparseOneOff(TestCase):
@@ -4013,16 +3975,20 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.dense_dim(), 1)
         self.assertEqual(r._dimV(), 1)
         self.assertEqual(r._nnz(), 0)
-        # TODO: nnz zero sparse tensors should always be coalesced...
-        self.assertEqual(r.is_coalesced(), False)
-        r._coalesced_(True)
+        # nnz zero sparse tensors should always be coalesced at creation
         self.assertEqual(r.is_coalesced(), True)
+        # but we can force them into the uncoalesed state
+        r._coalesced_(False)
+        self.assertEqual(r.is_coalesced(), False)
+        # return the coalesced state for indices/values access
+        r._coalesced_(True)
         # TODO: this sort of aliasing will need to be handled by
         # functionalization
         self.assertEqual(r._indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r._values(), torch.empty(0, 4, device='meta'))
         self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta'))
+
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

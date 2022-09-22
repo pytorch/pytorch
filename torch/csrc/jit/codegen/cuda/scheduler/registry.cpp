@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/transpose.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 
 #include <limits>
@@ -550,7 +551,7 @@ size_t SchedulerRuntimeInfo::getMaxVectorizableWidth(TensorView* tv) {
     }
 
     // Still contiguous
-    numel *= dim_size.value();
+    numel *= dim_size.value().as<int64_t>();
   }
 
   // Assuming intermediate tensors have friendly alignment, and
@@ -1244,10 +1245,75 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 };
 
+class TransposeScheduler : public SchedulerEntry {
+ public:
+  explicit TransposeScheduler(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr)
+      : SchedulerEntry(ScheduleHeuristic::Transpose) {
+    computeHeuristics(fusion, runtime_info, data_cache);
+  }
+
+  static bool canScheduleCompileTime(Fusion* fusion) {
+    // Not enabling this yet. Needs more validation.
+    return false;
+#if 0
+    if (!hasAtLeastTwoValidGroups(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose,
+          "cannot find two mismatching inner most dimensions");
+      return false;
+    }
+
+    // TODO: add support for trivial reduction
+    auto reduction_ops =
+        ir_utils::getReductionOps(fusion, false /* ignore_trivial */);
+
+    if (!reduction_ops.empty()) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose, "no support for reduction ops");
+      return false;
+    }
+
+    if (hasNonUniqueBcast(fusion)) {
+      scheduler_debug_utils::canScheduleRejectReason(
+          ScheduleHeuristic::Transpose,
+          "Broadcasting dimension might be broadcasting to multiple sizes.");
+      return false;
+    }
+
+    return true;
+#endif
+  }
+
+  static bool canScheduleRunTime(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    return true;
+  }
+
+  void schedule(Fusion* fusion) override {
+    FUSER_PERF_SCOPE("Schedule Transpose Fusion");
+    scheduleTranspose(fusion, transposeParams());
+  }
+
+ private:
+  void computeHeuristics(
+      Fusion* fusion,
+      SchedulerRuntimeInfo& runtime_info,
+      HeuristicSummary* data_cache = nullptr) {
+    params_ = getTransposeHeuristics(fusion, runtime_info, data_cache);
+    TORCH_INTERNAL_ASSERT(params_ != nullptr);
+  }
+};
+
 // Schedule Table
 const std::vector<ScheduleHeuristic>& all_heuristics() {
   static const std::vector<ScheduleHeuristic> hlist = {
       ScheduleHeuristic::Reduction,
+      ScheduleHeuristic::Transpose,
       ScheduleHeuristic::PointWise,
       ScheduleHeuristic::Persistent};
   return hlist;
@@ -1294,6 +1360,9 @@ bool SchedulerEntry::canSchedule(
     case ScheduleHeuristic::Persistent:
       return checkCanSchedule<PersistentKernelScheduler>(
           fusion, runtime_info, data_cache);
+    case ScheduleHeuristic::Transpose:
+      return checkCanSchedule<TransposeScheduler>(
+          fusion, runtime_info, data_cache);
     default:
       TORCH_INTERNAL_ASSERT(false, "unreachable");
       return false;
@@ -1318,6 +1387,10 @@ std::unique_ptr<SchedulerEntry> SchedulerEntry::makeEntry(
       break;
     case ScheduleHeuristic::Persistent:
       scheduler_entry = std::make_unique<PersistentKernelScheduler>(
+          fusion, runtime_info, data_cache);
+      break;
+    case ScheduleHeuristic::Transpose:
+      scheduler_entry = std::make_unique<TransposeScheduler>(
           fusion, runtime_info, data_cache);
       break;
     default:
@@ -1353,6 +1426,8 @@ std::string toString(ScheduleHeuristic sh) {
       return "reduction";
     case ScheduleHeuristic::Persistent:
       return "persistent";
+    case ScheduleHeuristic::Transpose:
+      return "transpose";
     default:
       TORCH_INTERNAL_ASSERT(false, "undefined schedule");
   }
@@ -1405,6 +1480,10 @@ HeuristicSummary::HeuristicSummary(
       getPersistentHeuristics(fusion, runtime_info, this);
       PersistentKernelScheduler::canScheduleRunTime(fusion, runtime_info, this);
       break;
+    case ScheduleHeuristic::Transpose:
+      getTransposeHeuristics(fusion, runtime_info, this);
+      TransposeScheduler::canScheduleRunTime(fusion, runtime_info, this);
+      break;
     default:
       TORCH_INTERNAL_ASSERT(false, "unknown heuristic");
   }
@@ -1451,6 +1530,11 @@ void HeuristicSummary::validate() const {
           entry_type_map_.count(EntryType::SCOPE_PERSISTENT_FACTOR_INFO));
       break;
     }
+    case ScheduleHeuristic::Transpose: {
+      TORCH_INTERNAL_ASSERT(entry_type_map_.count(
+          EntryType::INPUTS_AND_OUTPUTS_INNER_DIM_GROUPS));
+      break;
+    }
     default:
       TORCH_INTERNAL_ASSERT(false, "unknown heuristic");
   }
@@ -1490,6 +1574,8 @@ template class HeuristicSummaryEntry<HeuristicCompileTime::DomainMap>;
 template class HeuristicSummaryEntry<HeuristicCompileTime::ReferenceTensors>;
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::VectorizableInputsAndOutputs>;
+template class HeuristicSummaryEntry<
+    HeuristicCompileTime::InputsOutputsInnerDimGroups>;
 template class HeuristicSummaryEntry<
     HeuristicCompileTime::UnrollableInputsAndOutputs>;
 template class HeuristicSummaryEntry<HeuristicCompileTime::ReductionTVs>;

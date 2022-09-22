@@ -224,6 +224,15 @@ inline c10::SymInt IValue::toSymInt() const {
   }
 }
 
+inline c10::SymFloat IValue::toSymFloat() const {
+  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  if (isSymFloat()) {
+    return c10::SymFloat::toSymFloat(toIntrusivePtr<c10::SymFloatNodeImpl>());
+  } else {
+    return c10::SymFloat(payload.u.as_double);
+  }
+}
+
 namespace ivalue {
 
 void TORCH_API
@@ -1594,6 +1603,7 @@ DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
+DEFINE_TO(c10::SymFloat, toSymFloat)
 
 template <class T>
 struct _fake_type {};
@@ -1999,7 +2009,6 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-inline IValue::IValue(c10::SymIntArrayRef v) : IValue(at::ArrayRef<c10::SymInt>(v.data(), v.size())) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();

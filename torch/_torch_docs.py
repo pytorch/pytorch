@@ -2311,12 +2311,24 @@ Alias of :func:`torch.cat`.
 )
 
 add_docstr(
+    torch.concatenate,
+    r"""
+concatenate(tensors, axis=0, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""",
+)
+
+add_docstr(
     torch.ceil,
     r"""
 ceil(input, *, out=None) -> Tensor
 
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. math::
     \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil
@@ -4000,92 +4012,6 @@ Example::
 )
 
 add_docstr(
-    torch.eig,
-    r"""
-eig(input, eigenvectors=False, *, out=None) -> (Tensor, Tensor)
-
-Computes the eigenvalues and eigenvectors of a real square matrix.
-
-.. note::
-    Since eigenvalues and eigenvectors might be complex, backward pass is supported only
-    if eigenvalues and eigenvectors are all real valued.
-
-    When :attr:`input` is on CUDA, :func:`torch.eig() <torch.eig>` causes
-    host-device synchronization.
-
-.. warning::
-
-    :func:`torch.eig` is deprecated in favor of :func:`torch.linalg.eig`
-    and will be removed in a future PyTorch release.
-    :func:`torch.linalg.eig` returns complex tensors of dtype `cfloat` or `cdouble`
-    rather than real tensors mimicking complex tensors.
-
-    ``L, _ = torch.eig(A)`` should be replaced with
-
-    .. code :: python
-
-        L_complex = torch.linalg.eigvals(A)
-
-    ``L, V = torch.eig(A, eigenvectors=True)`` should be replaced with
-
-    .. code :: python
-
-        L_complex, V_complex = torch.linalg.eig(A)
-
-Args:
-    input (Tensor): the square matrix of shape :math:`(n \times n)` for which the eigenvalues and eigenvectors
-        will be computed
-    eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors;
-        otherwise, only eigenvalues will be computed
-
-Keyword args:
-    out (tuple, optional): the output tensors
-
-Returns:
-    (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
-
-        - **eigenvalues** (*Tensor*): Shape :math:`(n \times 2)`. Each row is an eigenvalue of ``input``,
-          where the first element is the real part and the second element is the imaginary part.
-          The eigenvalues are not necessarily ordered.
-        - **eigenvectors** (*Tensor*): If ``eigenvectors=False``, it's an empty tensor.
-          Otherwise, this tensor of shape :math:`(n \times n)` can be used to compute normalized (unit length)
-          eigenvectors of corresponding eigenvalues as follows.
-          If the corresponding `eigenvalues[j]` is a real number, column `eigenvectors[:, j]` is the eigenvector
-          corresponding to `eigenvalues[j]`.
-          If the corresponding `eigenvalues[j]` and `eigenvalues[j + 1]` form a complex conjugate pair, then the
-          true eigenvectors can be computed as
-          :math:`\text{true eigenvector}[j] = eigenvectors[:, j] + i \times eigenvectors[:, j + 1]`,
-          :math:`\text{true eigenvector}[j + 1] = eigenvectors[:, j] - i \times eigenvectors[:, j + 1]`.
-
-Example::
-
-    Trivial example with a diagonal matrix. By default, only eigenvalues are computed:
-
-    >>> a = torch.diag(torch.tensor([1, 2, 3], dtype=torch.double))
-    >>> e, v = torch.eig(a)
-    >>> e
-    tensor([[1., 0.],
-            [2., 0.],
-            [3., 0.]], dtype=torch.float64)
-    >>> v
-    tensor([], dtype=torch.float64)
-
-    Compute also the eigenvectors:
-
-    >>> e, v = torch.eig(a, eigenvectors=True)
-    >>> e
-    tensor([[1., 0.],
-            [2., 0.],
-            [3., 0.]], dtype=torch.float64)
-    >>> v
-    tensor([[1., 0., 0.],
-            [0., 1., 0.],
-            [0., 0., 1.]], dtype=torch.float64)
-
-""",
-)
-
-add_docstr(
     torch.eq,
     r"""
 eq(input, other, *, out=None) -> Tensor
@@ -4240,6 +4166,9 @@ floor(input, *, out=None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. math::
     \text{out}_{i} = \left\lfloor \text{input}_{i} \right\rfloor
@@ -6693,51 +6622,6 @@ Example::
 )
 
 add_docstr(
-    torch.matrix_rank,
-    r"""
-matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor
-
-Returns the numerical rank of a 2-D tensor. The method to compute the
-matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
-then :attr:`input` is assumed to be symmetric, and the computation of the
-rank is done by obtaining the eigenvalues.
-
-:attr:`tol` is the threshold below which the singular values (or the eigenvalues
-when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
-specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
-singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
-is the epsilon value for the datatype of :attr:`input`.
-
-.. warning::
-
-    :func:`torch.matrix_rank` is deprecated in favor of :func:`torch.linalg.matrix_rank`
-    and will be removed in a future PyTorch release. The parameter :attr:`symmetric` was
-    renamed in :func:`torch.linalg.matrix_rank` to :attr:`hermitian`.
-
-Args:
-    input (Tensor): the input 2-D tensor
-    tol (float, optional): the tolerance value. Default: ``None``
-    symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
-                               Default: ``False``
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.eye(10)
-    >>> torch.matrix_rank(a)
-    tensor(10)
-    >>> b = torch.eye(10)
-    >>> b[0, 0] = 0
-    >>> torch.matrix_rank(b)
-    tensor(9)
-""".format(
-        **common_args
-    ),
-)
-
-add_docstr(
     torch.matrix_power,
     r"""
 matrix_power(input, n, *, out=None) -> Tensor
@@ -8158,7 +8042,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (Tensor or int): the starting dimension
     length (int): the distance to the ending dimension
 
 Example::
@@ -8171,6 +8055,52 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+""",
+)
+
+add_docstr(
+    torch.narrow_copy,
+    r"""
+narrow_copy(input, dim, start, length, *, out=None) -> Tensor
+
+Same as :meth:`Tensor.narrow` except this returns a copy rather
+than shared storage. This is primarily for sparse tensors, which
+do not have a shared-storage narrow method.
+
+Args:
+    input (Tensor): the tensor to narrow
+    dim (int): the dimension along which to narrow
+    start (int): the starting offset
+    length (int): the distance to the ending dimension
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> torch.narrow_copy(x, 0, 0, 2)
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
+    >>> torch.narrow_copy(x, 1, 1, 2)
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
+    >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
+    >>> torch.narrow_copy(s, 0, 0, 1)
+    tensor(indices=tensor([[0, 0],
+                        [0, 1]]),
+        values=tensor([[[0, 1],
+                        [2, 3]],
+
+                        [[4, 5],
+                        [6, 7]]]),
+        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+
+.. seealso::
+
+        :func:`torch.narrow` for a non copy variant
+
 """,
 )
 
@@ -9242,8 +9172,11 @@ Keyword args:
 
 add_docstr(
     torch.randn,
-    r"""
-randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+    """
+randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -9265,6 +9198,7 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
@@ -9661,6 +9595,9 @@ add_docstr(
 round(input, *, decimals=0, out=None) -> Tensor
 
 Rounds elements of :attr:`input` to the nearest integer.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. note::
     This function implements the "round half to even" to
@@ -10708,7 +10645,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input, dim=None, *, out=None) -> Tensor
+squeeze(input, dim=None) -> Tensor
 
 Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
 
@@ -10732,9 +10669,6 @@ Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
-
-Keyword args:
-    {out}
 
 Example::
 
@@ -11664,6 +11598,20 @@ If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` then the
 resulting :attr:`out` tensor *does not* share the underlying storage
 with the :attr:`input` tensor.
 
+If :attr:`input` is a :ref:`sparse tensor <sparse-docs>` with compressed
+layout (SparseCSR, SparseBSR, SparseCSC or SparseBSC) the arguments
+:attr:`dim0` and :attr:`dim1` must be both batch dimensions, or must
+both be sparse dimensions. The batch dimensions of a sparse tensor are the
+dimensions preceding the sparse dimensions.
+
+.. note::
+    Transpositions which interchange the sparse dimensions of a `SparseCSR`
+    or `SparseCSC` layout tensor will result in the layout changing between
+    the two options. Transposition of the sparse dimensions of a ` SparseBSR`
+    or `SparseBSC` layout tensor will likewise generate a result with the
+    opposite layout.
+
+
 Args:
     {input}
     dim0 (int): the first dimension to be transposed
@@ -12026,6 +11974,9 @@ trunc(input, *, out=None) -> Tensor
 
 Returns a new tensor with the truncated integer values of
 the elements of :attr:`input`.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 Args:
     {input}
@@ -13523,6 +13474,7 @@ Returns:
 
 Example::
 
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
     >>> g_cpu = torch.Generator()
     >>> g_cuda = torch.Generator(device='cuda')
 """,

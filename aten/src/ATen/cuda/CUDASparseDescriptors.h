@@ -40,6 +40,11 @@ class CuSparseDescriptor {
 #if defined(USE_ROCM)
 // hipSPARSE doesn't define this
 using cusparseMatDescr = std::remove_pointer<cusparseMatDescr_t>::type;
+using cusparseDnMatDescr = std::remove_pointer<cusparseDnMatDescr_t>::type;
+using cusparseDnVecDescr = std::remove_pointer<cusparseDnVecDescr_t>::type;
+using cusparseSpMatDescr = std::remove_pointer<cusparseSpMatDescr_t>::type;
+using cusparseSpMatDescr = std::remove_pointer<cusparseSpMatDescr_t>::type;
+using cusparseSpGEMMDescr = std::remove_pointer<cusparseSpGEMMDescr_t>::type;
 #if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 using bsrsv2Info = std::remove_pointer<bsrsv2Info_t>::type;
 using bsrsm2Info = std::remove_pointer<bsrsm2Info_t>::type;
@@ -92,15 +97,17 @@ class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
 
 #endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
-#if AT_USE_CUSPARSE_GENERIC_API()
+#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
+#if AT_USE_HIPSPARSE_GENERIC_52_API() || AT_USE_CUSPARSE_GENERIC_API()
 class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
  public:
   explicit CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
 };
+#endif //AT_USE_HIPSPARSE_GENERIC_52_API() || AT_USE_CUSPARSE_GENERIC_API()
 
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
     : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {
@@ -116,7 +123,7 @@ class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
  public:
   explicit CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset = -1);
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if defined(USE_ROCM) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
   std::tuple<int64_t, int64_t, int64_t> get_size() {
     int64_t rows, cols, nnz;
     TORCH_CUDASPARSE_CHECK(cusparseSpMatGetSize(
@@ -190,7 +197,7 @@ class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
 };
 #endif
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if (defined(USE_ROCM) && ROCM_VERSION >= 50200) || (defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
 class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
     : public CuSparseDescriptor<cusparseSpGEMMDescr, &cusparseSpGEMM_destroyDescr> {
  public:
@@ -202,7 +209,7 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
 };
 #endif
 
-#endif // AT_USE_CUSPARSE_GENERIC_API()
+#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace sparse
 } // namespace cuda
