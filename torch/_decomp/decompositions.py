@@ -2254,4 +2254,3 @@ def upsample_bicubic2d_vec(
     scale_h = scale_factors[0] if scale_factors else None
     scale_w = scale_factors[1] if scale_factors else None
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
-
