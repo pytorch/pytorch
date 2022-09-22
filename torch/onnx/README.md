@@ -35,7 +35,10 @@ Checkout topk in symbolic_opset10.py, and upsample_nearest2d in symbolic_opset8.
   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
   transparently dispatched to their non inplace versions in
   "run_symbolic_function". See Note [Export inplace](#export-inplace)
-- Required: Annotate new symbolic functions with type annotations and decorate with `@_beartype.beartype` to enable runtime type checking.
+- Required: Annotate new symbolic functions with type annotations and decorate
+  with `@_beartype.beartype` to enable runtime type checking.
+  `@_beartype.beartype` should typically be the closest to the function to
+  ensure proper type checking.
 
 ### A note on Tensor types
 
@@ -75,14 +78,14 @@ inplace annotations, but we are losing information this way.
 What happens if you add a tensor with a constant (e.g., x + 2)?  There are
 some moving parts to implementing the ONNX translation in this case:
 
-- By the time we get the scalar in a symbolic function here, it is no longer
-    a Python long/float, but a PyTorch tensor with `numel == 1` (eventually, we
-    want it to be a zero dim tensor but this change has not happened yet.)
-    However, the type of this scalar is *exactly* what the user wrote in
-    Python, which may not match the tensor it is being added to.  PyTorch
-    will do implicit conversions on scalars; however, ONNX will not, so
-    we must do the conversion ourselves.  This is what `symbolic_helper._if_scalar_type_as()`
-    does.
+- By the time we get the scalar in a symbolic function here, it is no longer a
+  Python long/float, but a PyTorch tensor with `numel == 1` (eventually, we want
+  it to be a zero dim tensor but this change has not happened yet.) However, the
+  type of this scalar is *exactly* what the user wrote in Python, which may not
+  match the tensor it is being added to. PyTorch will do implicit conversions on
+  scalars; however, ONNX will not, so we must do the conversion ourselves. This
+  is what `symbolic_helper._if_scalar_type_as()` and
+  `_jit_pass_onnx_scalar_type_analysis` does.
 
 - Dispatch to these functions takes advantage an outrageous coincidence
     between the tensor and scalar name.  When we add two tensors together,
