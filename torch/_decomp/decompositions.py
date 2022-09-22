@@ -1065,7 +1065,7 @@ def native_layer_norm_backward(
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
     grad_out_cast, input_cast, weight_cast, bias_cast = [
-        x.to(computation_dtype).contiguous() if x is not None else x
+        x.to(computation_dtype) if x is not None else x
         for x in (grad_out, input, weight, bias)
     ]
     assert grad_out_cast is not None
@@ -1085,9 +1085,9 @@ def native_layer_norm_backward(
     M = prod(outer_dims)  # type: ignore[arg-type]
     if M <= 0 or N <= 0:
         return (
-            input.new_zeros(input_shape) if output_mask[0] else None,
-            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
-            input.new_zeros(input_shape[axis:]) if output_mask[2] else None,
+            input.new_zeros(input_shape),
+            input.new_zeros(input_shape[axis:]),
+            input.new_zeros(input_shape[axis:]),
         )
 
     x_hat = (input_cast - mean) * rstd
@@ -1118,7 +1118,7 @@ def native_layer_norm_backward(
         if len(outer_dim_indices) > 0:
             d_bias = torch.sum(grad_out_cast, outer_dim_indices, False)
         else:
-            d_bias = grad_out_cast.clone()
+            d_bias = grad_out_cast
 
     return (
         _maybe_cast(d_input, input.dtype),
