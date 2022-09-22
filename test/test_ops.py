@@ -1828,6 +1828,7 @@ fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfai
     xfail("segment_reduce", "lengths"),
     xfail("norm", "nuc"),
     xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
+    skip('nn.functional.ctc_loss'),
 }
 
 fake_autocast_backward_xfails = {
