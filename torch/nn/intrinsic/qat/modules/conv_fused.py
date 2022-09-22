@@ -20,7 +20,7 @@ __all__ = [
     'ConvBnReLU3d',
     'ConvReLU3d',
     # Utilities
-    'freeze_bn_stats'
+    'freeze_bn_stats',
     'update_bn_stats',
 ]
 

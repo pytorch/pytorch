@@ -230,6 +230,9 @@ struct C10_API ExtraMeta {
   SymDimVector strides_ = {1};
   SymInt numel_ = 1;
   SymInt storage_offset_ = 0;
+  bool is_contiguous_ = true;
+  bool is_channels_last_contiguous_ = false;
+  bool is_channels_last_3d_contiguous_ = false;
   // TODO:
   // SymBool is_contiguous_;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
@@ -241,11 +244,17 @@ struct C10_API ExtraMeta {
       SymDimVector strides,
       SymInt numel,
       SymInt storage_offset,
+      bool is_contiguous,
+      bool is_channels_last_contiguous,
+      bool is_channels_last_3d_contiguous,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
       : sizes_(std::move(sizes)),
         strides_(std::move(strides)),
         numel_(std::move(numel)),
         storage_offset_(std::move(storage_offset)),
+        is_contiguous_(is_contiguous),
+        is_channels_last_contiguous_(is_channels_last_contiguous),
+        is_channels_last_3d_contiguous_(is_channels_last_3d_contiguous),
         named_tensor_meta_(std::move(named_tensor_meta)) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
@@ -254,6 +263,9 @@ struct C10_API ExtraMeta {
         strides_,
         numel_,
         storage_offset_,
+        is_contiguous_,
+        is_channels_last_contiguous_,
+        is_channels_last_3d_contiguous_,
         named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr);
   }
 };
@@ -603,7 +615,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return sym_sizes_custom();
     }
     // Sizes guaranteed to be non-negative, so unchecked cast is OK
-    return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
+    return c10::fromIntArrayRefKnownNonNegative(
         sizes_and_strides_.sizes_arrayref());
   }
 
@@ -620,8 +632,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return extra_meta_->sizes_;
     } else {
       // Sizes guaranteed to be non-negative, so unchecked cast is OK
-      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
-          sizes_default());
+      return c10::fromIntArrayRefKnownNonNegative(sizes_default());
     }
   }
 
@@ -733,8 +744,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {
       return sym_strides_custom();
     }
-    // strides guaranteed to be non-negative, so unchecked cast is OK
-    return c10::SymIntArrayRef::fromIntArrayRefUnchecked(strides_default());
+    return c10::fromIntArrayRefKnownNonNegative(strides_default());
   }
 
   IntArrayRef strides_default() const {
@@ -748,8 +758,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (has_symbolic_sizes_strides_) {
       return extra_meta_->strides_;
     } else {
-      return c10::SymIntArrayRef::fromIntArrayRefKnownNonNegative(
-          strides_default());
+      return c10::fromIntArrayRefKnownNonNegative(strides_default());
     }
   }
 
@@ -771,8 +780,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // These are factored into separate functions in case subclasses
   // want to use them
   bool is_contiguous_default(at::MemoryFormat memory_format) const {
-    // TODO: handle symbolic shapes correctly
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
+    if (has_symbolic_sizes_strides_) {
+      if (memory_format == at::MemoryFormat::ChannelsLast) {
+        return extra_meta_->is_channels_last_contiguous_;
+      } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
+        return extra_meta_->is_channels_last_3d_contiguous_;
+      }
+      return extra_meta_->is_contiguous_;
+    }
+
     if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
     } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
@@ -1490,6 +1506,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return numel() == 0;
   }
 
+  // if we are going to use sym sizes, we should be setting sym strides at the
+  // same time, otherwise it's very easy to misuse this API
   void set_sizes_and_strides(
       c10::SymIntArrayRef sizes,
       c10::SymIntArrayRef strides,
