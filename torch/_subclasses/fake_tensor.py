@@ -667,10 +667,11 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return args[0].fake_device
 
-        flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
+        flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+            any([i.has_sym_ints for i in flat_arg_fake_tensors])
+            or len(flat_symints) > 0
         )
 
         converter = self.fake_tensor_converter
@@ -684,6 +685,36 @@ class FakeTensorMode(TorchDispatchMode):
                 with no_dispatch():
                     return converter(self, out.clone(), make_constant=True)
 
+        with no_dispatch():
+            flat_arg_tensors = tree_flatten_only(torch.Tensor, (args, kwargs))
+            # See [subclass inputs] below
+            # NB: If you're seeing a mysterious infinite loop involving fake
+            # tensor, it might be related to this line.  Though I'm not sure
+            # how you'll know to read this comment, as this line won't show up
+            # in the stack trace.
+            if self.check_for_subclass(flat_arg_tensors):
+                return NotImplemented
+
+            # if we are in the dispatch mode, we will enter this function even if the inputs
+            # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
+            # and just support constructors.
+
+            # this is generated from torch.tensor(), which does not use the
+            # dispatcher, to allow wrapper subclasses to wrap the new tensor
+            if func in self.lift_fns:
+                assert (
+                    len(kwargs) == 0
+                    and len(args) == 1
+                    and type(args[0]) is torch.Tensor
+                ), f"{args} {kwargs}"
+                return converter(self, args[0])
+
+            if self.check_for_non_fake(flat_arg_tensors):
+                raise Exception(
+                    "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
+                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
+                )
+
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
         # Because each operation is run in order, we can trace out and support
@@ -694,12 +725,12 @@ class FakeTensorMode(TorchDispatchMode):
         # objects on an FX Graph.
 
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
-        all_constant = all(e.constant is not None for e in flat_arg_tensors)
+        all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
             and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
             and all_constant
-            and len(flat_arg_tensors) != 0
+            and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
         ):
             with no_dispatch():
@@ -726,7 +757,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
-        self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
+        self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
@@ -766,7 +797,7 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO - we should be use the prim aten impl
         if (
             "prims::" in func._schema.name
-            and len(flat_arg_tensors) != 0
+            and len(flat_arg_fake_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
             with self.restore():
@@ -779,34 +810,6 @@ class FakeTensorMode(TorchDispatchMode):
                 )
 
         with no_dispatch():
-            # See [subclass inputs] below
-            # NB: If you're seeing a mysterious infinite loop involving fake
-            # tensor, it might be related to this line.  Though I'm not sure
-            # how you'll know to read this comment, as this line won't show up
-            # in the stack trace.
-            if self.check_for_subclass(flat_arg_tensors):
-                return NotImplemented
-
-            # if we are in the dispatch mode, we will enter this function even if the inputs
-            # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
-            # and just support constructors.
-
-            # this is generated from torch.tensor(), which does not use the
-            # dispatcher, to allow wrapper subclasses to wrap the new tensor
-            if func in self.lift_fns:
-                assert (
-                    len(kwargs) == 0
-                    and len(args) == 1
-                    and type(args[0]) is torch.Tensor
-                ), f"{args} {kwargs}"
-                return converter(self, args[0])
-
-            if self.check_for_non_fake(flat_arg_tensors):
-                raise Exception(
-                    "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
-                )
-
             # special handling for funcs registered through `register_op_impl`,
             # e.g., manipulating args on constructor calls to construct meta tensors
             # and then afterwards wrapping them to a FakeTensor
@@ -903,8 +906,10 @@ class FakeTensorMode(TorchDispatchMode):
             and not isinstance(t, FakeTensor)
         )
 
-    def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
-        any_constant = any(e.constant is not None for e in flat_arg_tensors)
+    def invalidate_written_to_constants(
+        self, func, flat_arg_fake_tensors, args, kwargs
+    ):
+        any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         if any_constant and get_schema_info(func).is_mutable():
             schema_info = get_schema_info(func)
             _, new_kwargs = normalize_function(
