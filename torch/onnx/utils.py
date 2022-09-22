@@ -38,6 +38,7 @@ import torch.serialization
 from torch import _C
 from torch.onnx import (  # noqa: F401
     _constants,
+    _deprecation,
     _exporter_states,
     _patch_torch,
     errors,
@@ -45,7 +46,6 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx import _deprecation
 from torch.onnx._internal import _beartype, registration, torchscript
 
 __all__ = [
@@ -1722,6 +1722,7 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
             "and use context information from the object instead.",
             category=FutureWarning,
         )
+
         def wrapper(graph_context: torchscript.GraphContext, *args, **kwargs):
             symbolic_context = _exporter_states.SymbolicContext(
                 params_dict=graph_context.params_dict,
