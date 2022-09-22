@@ -21,7 +21,7 @@ def _assert_has_diagnostics(
     actual_results = []
     for run in sarif_log.runs:
         for result in run.results:
-            id_level_pair = (result.rule_id, result.level.value)
+            id_level_pair = (result.rule_id, result.level)
             unseen_pairs.discard(id_level_pair)
             actual_results.append(id_level_pair)
 
