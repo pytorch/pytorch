@@ -1062,6 +1062,49 @@ symbolic_tensor_failures = {
     # extra slow
     skip('nn.functional.max_pool2d'),
 
+    # more missing decomps (sorry i didn't mergesort these into the list below)
+    xfail('linalg_det'),  # couldn't find symbolic meta function/decomposition
+    xfail('linalg_det_singular'),  # couldn't find symbolic meta function/decomposition
+    xfail('linalg_solve'),  # couldn't find symbolic meta function/decomposition
+    xfail('linalg_svdvals'),  # couldn't find symbolic meta function/decomposition
+    xfail('bernoulli'),  # couldn't find symbolic meta function/decomposition
+    xfail('deg2rad'),  # couldn't find symbolic meta function/decomposition
+    xfail('atanh'),  # couldn't find symbolic meta function/decomposition
+    xfail('nn_functional_binary_cross_entropy'),  # couldn't find symbolic meta function/decomposition
+    xfail('nn_functional_mish'),  # couldn't find symbolic meta function/decomposition
+    xfail('nn_functional_silu'),  # couldn't find symbolic meta function/decomposition
+    xfail('i0'),  # couldn't find symbolic meta function/decomposition
+    xfail('special_i1'),  # couldn't find symbolic meta function/decomposition
+    xfail('cross'),  # couldn't find symbolic meta function/decomposition
+    xfail('linalg_cross'),  # couldn't find symbolic meta function/decomposition
+    xfail('linalg_eigvals'),  # couldn't find symbolic meta function/decomposition
+    xfail('linalg_householder_product'),  # couldn't find symbolic meta function/decomposition
+    xfail('linalg_inv'),  # couldn't find symbolic meta function/decomposition
+    xfail('matrix_exp'),  # couldn't find symbolic meta function/decomposition
+    xfail('pinverse'),  # couldn't find symbolic meta function/decomposition
+    xfail('logaddexp'),  # couldn't find symbolic meta function/decomposition
+    xfail('logaddexp2'),  # couldn't find symbolic meta function/decomposition
+    xfail('fmax'),  # couldn't find symbolic meta function/decomposition
+    xfail('fmin'),  # couldn't find symbolic meta function/decomposition
+    xfail('max_reduction_no_dim'),  # couldn't find symbolic meta function/decomposition
+    xfail('min_reduction_no_dim'),  # couldn't find symbolic meta function/decomposition
+    xfail('digamma'),  # couldn't find symbolic meta function/decomposition
+    xfail('rad2deg'),  # couldn't find symbolic meta function/decomposition
+    xfail('round'),  # couldn't find symbolic meta function/decomposition
+    xfail('special_entr'),  # couldn't find symbolic meta function/decomposition
+    xfail('special_erfcx'),  # couldn't find symbolic meta function/decomposition
+    xfail('special_log_ndtr'),  # couldn't find symbolic meta function/decomposition
+    xfail('special_ndtri'),  # couldn't find symbolic meta function/decomposition
+    xfail('special_xlog1py'),  # couldn't find symbolic meta function/decomposition
+    xfail('view_as_complex'),  # couldn't find symbolic meta function/decomposition
+    xfail('complex'),  # couldn't find symbolic meta function/decomposition
+    xfail('angle'),  # couldn't find symbolic meta function/decomposition
+    xfail('ceil'),  # couldn't find symbolic meta function/decomposition
+    xfail('floor'),  # couldn't find symbolic meta function/decomposition
+    xfail('sign'),  # couldn't find symbolic meta function/decomposition
+    xfail('trunc'),  # couldn't find symbolic meta function/decomposition
+    xfail('zero_'),  # couldn't find symbolic meta function/decomposition
+
     # Needs complex-value support
     xfail('polar'),
     xfail('linalg.eig'),
