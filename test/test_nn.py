@@ -15497,8 +15497,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
-    @largeTensorTest("90GB", "cpu")
-    @precisionOverride({torch.half: 0.001})
+    @largeTensorTest("64GB", "cpu")
     def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
@@ -15508,8 +15507,12 @@ class TestNNDeviceType(NNTestCase):
                 xx = x.cpu().requires_grad_()
             yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
             yy.backward(yy)
-            self.assertEqual(y, yy)
-            self.assertEqual(x.grad, xx.grad)
+            # workaround to reduce memory usage vs. self.assertEqual, see #84944
+            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
+            self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
+            # x is half
+            rtol, _ = torch.testing._comparison.get_tolerances(torch.half, rtol=None, atol=None)
+            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
@@ -15517,7 +15520,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest("20GB")
-    @largeTensorTest("90GB", "cpu")
+    @largeTensorTest("2GB", "cpu")
     @precisionOverride({torch.half: 0.001})
     def test_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
