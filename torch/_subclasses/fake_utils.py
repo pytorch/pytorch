@@ -19,18 +19,18 @@ aten = torch.ops.aten
 def outputs_alias_inputs(outputs, inputs):
     input_storages = {
         inp.storage()._cdata
-        for inp in tree_flatten_only(inputs, torch.Tensor)
+        for inp in tree_flatten_only(torch.Tensor, inputs)
         if torch._C._has_storage(inp)
     }
     return any(
         torch._C._has_storage(out) and out.storage()._cdata in input_storages
-        for out in tree_flatten_only(outputs, torch.Tensor)
+        for out in tree_flatten_only(torch.Tensor, outputs)
     )
 
 
 def outputs_are_inputs(outputs, inputs):
-    input_ids = {id(inp) for inp in tree_flatten_only(inputs, torch.Tensor)}
-    return any(id(out) in input_ids for out in tree_flatten_only(outputs, torch.Tensor))
+    input_ids = {id(inp) for inp in tree_flatten_only(torch.Tensor, inputs)}
+    return any(id(out) in input_ids for out in tree_flatten_only(torch.Tensor, outputs))
 
 
 class CrossRefFakeMode(TorchDispatchMode):
