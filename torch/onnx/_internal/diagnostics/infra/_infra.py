@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import Any, List, Optional, Sequence, Set, Tuple
+from typing import Any, FrozenSet, List, Optional, Sequence, Set, Tuple
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif_om
 
@@ -307,14 +307,16 @@ class Diagnostic:
 
 @dataclasses.dataclass()
 class RuleCollection:
-    _rule_id_name_set: Set[Tuple[str, str]] = dataclasses.field(init=False)
+    _rule_id_name_set: FrozenSet[Tuple[str, str]] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        self._rule_id_name_set = {
-            (field.default.id, field.default.name)
-            for field in dataclasses.fields(self)
-            if isinstance(field.default, Rule)
-        }
+        self._rule_id_name_set = frozenset(
+            {
+                (field.default.id, field.default.name)
+                for field in dataclasses.fields(self)
+                if isinstance(field.default, Rule)
+            }
+        )
 
     def __contains__(self, rule: Rule) -> bool:
         """Checks if the rule is in the collection."""

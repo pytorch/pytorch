@@ -3,7 +3,7 @@
 import contextlib
 import dataclasses
 import io
-from typing import Set, Tuple
+from typing import AbstractSet, Tuple
 
 import torch
 from torch.onnx import errors
@@ -14,16 +14,16 @@ from torch.testing._internal import common_utils
 
 def _assert_has_diagnostics(
     engine: infra.DiagnosticEngine,
-    rule_level_pairs: Set[Tuple[infra.Rule, infra.Level]],
+    rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
     sarif_log = engine.sarif_log
-    unseen_pairs = set({(rule.id, level.value) for rule, level in rule_level_pairs})
+    unseen_pairs = {(rule.id, level.value) for rule, level in rule_level_pairs}
     actual_results = []
     for run in sarif_log.runs:
         for result in run.results:
-            if (result.rule_id, result.level) in unseen_pairs:
-                unseen_pairs.remove((result.rule_id, result.level))
-            actual_results.append((result.rule_id, result.level))
+            id_level_pair = (result.rule_id, result.level.value)
+            unseen_pairs.discard(id_level_pair)
+            actual_results.append(id_level_pair)
 
     if unseen_pairs:
         raise AssertionError(
@@ -36,7 +36,7 @@ def _assert_has_diagnostics(
 def assertAllDiagnostics(
     test_suite: common_utils.TestCase,
     engine: infra.DiagnosticEngine,
-    rule_level_pairs: Set[Tuple[infra.Rule, infra.Level]],
+    rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
     """
     Context manager to assert that all diagnostics are emitted.
