@@ -199,7 +199,17 @@ class TestCommon(TestCase):
                         self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False, skip_bfloat=False):
+    def _ref_test_helper(
+        self,
+        ctx,
+        device,
+        dtype,
+        op,
+        skip_zero_numel=False,
+        skip_zero_dim=False,
+        skip_bfloat=False,
+        skip_view_consistency=False,
+    ):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
@@ -234,8 +244,10 @@ class TestCommon(TestCase):
             for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
                 if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                     prims.utils.compare_tensor_meta(a, b)
-                    if getattr(op, 'validate_view_consistency', True):
-                        self.assertEqual(a._is_view(), b._is_view())
+                    if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
+                        msg = (f"The torch implementation {'returns' if b._is_view() else 'does not return'} "
+                               f"a view, while the reference {'does' if a._is_view() else 'does not'}")
+                        self.assertEqual(a._is_view(), b._is_view(), msg)
 
             # Computes the dtype the more precise computatino would occur in
             precise_dtype = torch.bool
@@ -362,7 +374,7 @@ class TestCommon(TestCase):
             skip_zero_dim = True
 
         # skip zero-dim tensors for some composites of reduction operations
-        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax"]
+        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax", "_refs.sum_to_size"]
         if executor == "nvfuser" and op.name in normalization_ops:
             skip_zero_dim = True
 
@@ -379,6 +391,9 @@ class TestCommon(TestCase):
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
             skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
+            # # nvfuser doesn't support view consistency
+            # https://github.com/pytorch/pytorch/issues/84863
+            skip_view_consistency=("nvfuser" in executor),
         )
 
     @skipMeta
@@ -1585,6 +1600,10 @@ class TestRefsOpsInfo(TestCase):
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
+        # These should be tested with their out-of-place counterparts
+        '_refs.index_add_',
+        '_refs.index_copy_',
+        '_refs.index_fill_',
     }
 
     not_in_decomp_table = {
@@ -1593,6 +1612,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.mse_loss',
         '_refs.var',
         '_refs.rsub',
+        # duplicated due to efficiency concerns of the ref vs the decomp
+        '_refs.index_add_',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
@@ -1620,6 +1641,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.isreal',
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
@@ -1639,22 +1661,18 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
+        '_refs.sum_to_size',
         # ref implementation missing kwargs
-        '_refs.empty',  # missing "pin_memory"
-        '_refs.empty_like',  # missing "layout"
         '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
-        '_refs.ones',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
-        '_refs.zeros',  # missing "layout"
         '_refs.zeros_like',  # missing "layout"
         # other
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
-        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
         '_refs.real',
@@ -1675,11 +1693,11 @@ class TestRefsOpsInfo(TestCase):
         op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
 
         if op in self.not_in_decomp_table:
-            self.assertFalse(op_impl in torch._decomp.decomposition_table.values(),
+            self.assertNotIn(op_impl, torch._decomp.decomposition_table.values(),
                              f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
         else:
-            self.assertTrue(op_impl in torch._decomp.decomposition_table.values(),
-                            f"Did not find {op} in torch._decomp.decomposition_table.values()")
+            self.assertIn(op_impl, torch._decomp.decomposition_table.values(),
+                          f"Did not find {op} in torch._decomp.decomposition_table.values()")
 
 
 fake_skips = (
@@ -1779,7 +1797,6 @@ fake_striding_skips = (
     "fft.rfftn",
     "svd",
     "linalg.svd",
-    "nn.functional.conv_transpose2d",
 )
 
 

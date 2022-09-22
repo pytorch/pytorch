@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.ao.nn.quantized as nnq
-import torch.ao.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
@@ -2584,6 +2584,7 @@ class TestQuantizeFx(QuantizationTestCase):
             @classmethod
             def from_observed(cls, observed_module):
                 assert hasattr(observed_module, 'qconfig')
+                observed_module.linear.qconfig = observed_module.qconfig
                 quantized = cls(nnqd.Linear.from_float(observed_module.linear))
                 return quantized
 
@@ -2658,7 +2659,7 @@ class TestQuantizeFx(QuantizationTestCase):
             example_inputs = (torch.randn(3, 3),)
             # check prepared model
             m = prepare_fx(
-                original_m,
+                copy.deepcopy(original_m),
                 qconfig_dict,
                 example_inputs=example_inputs,
                 prepare_custom_config=prepare_custom_config_dict)
@@ -2685,7 +2686,8 @@ class TestQuantizeFx(QuantizationTestCase):
             res = m(*example_inputs)
 
             # quantize the reference model
-            ref_m = prepare_fx(original_ref_m, qconfig_dict, example_inputs=example_inputs)
+            ref_m = prepare_fx(
+                copy.deepcopy(original_ref_m), qconfig_dict, example_inputs=example_inputs)
             ref_m(*example_inputs)
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(*example_inputs)
@@ -6224,6 +6226,31 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModeFxOp(
             M(), data, quant_type, custom_qconfig_dict=qconfig_mapping,
             expected_node_occurrence=node_occurrence, is_reference=True)
+
+    def test_fixed_qparams_ops_qconfig_error(self):
+        """ Test that a proper error message is shown when user don't specify the correct
+        qconfig for fixed qaprams ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                x = x.sigmoid()
+                x = self.tanh(x)
+                x = torch.tanh(x)
+                x = x.tanh()
+                return x
+
+        data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
+        qconfig_mapping = QConfigMapping().set_global(default_qconfig)
+        m = M().eval()
+        with self.assertRaisesRegex(ValueError, "get_default_qconfig_mapping"):
+            m = prepare_fx(m, qconfig_mapping, data)
 
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):
