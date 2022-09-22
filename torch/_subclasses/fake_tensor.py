@@ -410,6 +410,11 @@ def index_put_(fake_mode, func, *args, **kwargs):
     return new_kwargs["input"]
 
 
+@register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
+def nyi(fake_mode, func, *args, **kwargs):
+    assert func not in _device_not_kwarg_ops, f"NYI: {func}"
+
+
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
 # Because the device is `meta`, meta tensors do not model device propagation.
@@ -673,7 +678,7 @@ class FakeTensorMode(TorchDispatchMode):
         # If this is a lift, the input tensor is guaranteed to be a
         # constant, so we keep a copy of the original argument along so
         # we can query it if we're asked to item() it at some later point
-        if func in (torch.ops.aten.lift_fresh.default, aten.lift_fresh_copy.default):
+        if func in self.lift_fns:
             out = func(*args, **kwargs)
             if self.may_turn_const(out):
                 with no_dispatch():
@@ -821,10 +826,7 @@ class FakeTensorMode(TorchDispatchMode):
             # this is generated from torch.tensor(), which does not use the
             # dispatcher, to allow wrapper subclasses to wrap the new tensor
             # we need to handle before error checking
-            if func in [
-                aten.lift_fresh.default,
-                aten.lift_fresh_copy.default,
-            ]:
+            if func in self.lift_fns:
                 assert (
                     len(kwargs) == 0
                     and len(args) == 1
@@ -855,28 +857,39 @@ class FakeTensorMode(TorchDispatchMode):
                     self, func, args, kwargs, not_implemented_error
                 )
 
-            # TODO: handle non-kwarg devices
-            assert func not in _device_not_kwarg_ops, f"NYI: {func}"
+            return self.wrap_meta_outputs_with_default_device_logic(
+                r, func, args, kwargs
+            )
 
-            # Lazily initialized, in case there are no tensor returns
-            common_device = None
+    def wrap_meta_outputs_with_default_device_logic(self, r, func, args, kwargs):
+        wrap = self.gen_wrap_fn(func, args, kwargs)
 
-            def wrap(e, device=None):
-                nonlocal common_device
-                if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-                    if common_device is None:
-                        common_device = FakeTensor._find_common_device(
-                            func, args, kwargs
-                        )
-                    return converter(self, e, device or common_device)
-                else:
-                    return e
+        # if device is specified, use that
+        if kwargs.get("device", None):
+            return tree_map(partial(wrap, device=kwargs["device"]), r)
 
-            # if device is specified, use that
-            if kwargs.get("device", None):
-                return tree_map(partial(wrap, device=kwargs["device"]), r)
+        return tree_map(partial(wrap), r)
 
-            return tree_map(partial(wrap), r)
+    def gen_wrap_fn(self, func, args, kwargs):
+        converter = self.fake_tensor_converter
+
+        # Lazily initialized, in case there are no tensor returns
+        common_device = None
+
+        def wrap(e, device=None):
+            nonlocal common_device
+            if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+                if common_device is None:
+                    common_device = FakeTensor._find_common_device(func, args, kwargs)
+                return converter(self, e, device or common_device)
+            else:
+                return e
+
+        return wrap
+
+    @property
+    def lift_fns(self):
+        return (aten.lift_fresh.default, aten.lift_fresh_copy.default)
 
     def may_turn_const(self, t):
         return (
