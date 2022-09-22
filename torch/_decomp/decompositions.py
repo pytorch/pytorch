@@ -611,24 +611,33 @@ def diagonal_backward(
     return torch.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
 
+def _cast_grad_to_half(grad_output: Tensor, grad_input: Tensor, input_dtype: int):
+    dtype_mismatch = grad_output.dtype != input_dtype
+    half_to_float = (grad_output.dtype == torch.float) and (input_dtype == torch.half)
+    if dtype_mismatch and half_to_float:
+        grad_input = grad_input.to(torch.half)
+    return grad_input
+
+
 @register_decomposition(aten._softmax_backward_data)
-@pw_cast_for_opmath
 def _softmax_backward_data(
     grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
 ):
-    new_grad = grad_output * output
-    return new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
+    new_grad_output = grad_output * output
+    grad_input = new_grad_output - output * torch.sum(
+        new_grad_output, dim=dim, keepdim=True
+    )
+    return _cast_grad_to_half(grad_output, grad_input, input_dtype)
 
 
 @register_decomposition(aten._log_softmax_backward_data)
-@pw_cast_for_opmath
 def _log_softmax_backward_data(
     grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
 ):
     grad_input = grad_output - torch.exp(output) * torch.sum(
         grad_output, dim=dim, keepdim=True
     )
-    return grad_input
+    return _cast_grad_to_half(grad_output, grad_input, input_dtype)
 
 
 @register_decomposition(aten.im2col)
