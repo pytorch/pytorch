@@ -3,6 +3,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/GPUTrace.h>
+#include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
 #include <pybind11/pytypes.h>
@@ -235,6 +236,10 @@ struct ConcretePyInterpreterVTable final
 
   void dispatch(const c10::OperatorHandle& op, torch::jit::Stack* stack)
       const override;
+  void python_dispatcher(
+      const c10::OperatorHandle& op,
+      c10::DispatchKeySet,
+      torch::jit::Stack* stack) const override;
 
   bool is_contiguous(const TensorImpl* self) const override;
   c10::Device device(const TensorImpl* self) const override;
@@ -701,6 +706,7 @@ static PyObject* THPVariable_make_subclass(
         "cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
   torch_dispatch_mode::StashTorchDispatchModeGuard td_g;
+  c10::impl::DisablePythonDispatcher dpd_g;
   auto data =
       r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we
@@ -2189,23 +2195,36 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
+py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
+  return op.getPythonOp(getPyInterpreter(), [&]() -> PyObject* {
+    // Parse the name into namespace and name (no overload_name)
+    // TODO: put this into the library
+    const auto& schema = op.schema();
+    const auto& qualified_name = op.operator_name().name;
+    const auto& overload_name = schema.overload_name();
+    auto pos = qualified_name.find("::");
+    TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
+    // Make me some null terminated strings
+    std::string ns_str = qualified_name.substr(0, pos);
+    const char* ns = ns_str.c_str();
+    const char* func_name = qualified_name.c_str() + pos + strlen("::");
+
+    py::handle torch_api_function =
+        py::module::import("torch").attr("ops").attr(ns).attr(func_name);
+    if (overload_name == "") {
+      return torch_api_function.attr("default").ptr();
+    } else {
+      return torch_api_function.attr(overload_name.c_str()).ptr();
+    }
+  });
+}
+
 void ConcretePyInterpreterVTable::dispatch(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack) const {
   const auto& schema = op.schema();
   const auto num_arguments = schema.arguments().size();
   auto arguments = torch::jit::pop(*stack, num_arguments);
-
-  // Parse the name into namespace and name (no overload_name)
-  // TODO: put this into the library
-  const auto& qualified_name = op.operator_name().name;
-  const auto& overload_name = schema.overload_name();
-  auto pos = qualified_name.find("::");
-  TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
-  // Make me some null terminated strings
-  std::string ns_str = qualified_name.substr(0, pos);
-  const char* ns = ns_str.c_str();
-  const char* func_name = qualified_name.c_str() + pos + strlen("::");
 
   // The plan: convert all the arguments back into PyObjects,
   // extracting out the tensor handles, then call
@@ -2216,16 +2235,7 @@ void ConcretePyInterpreterVTable::dispatch(
   py::gil_scoped_acquire g;
 
   std::vector<py::handle> overloaded_args;
-  py::handle torch_api_function =
-      py::module::import("torch").attr("ops").attr(ns).attr(func_name);
-  py::handle torch_api_function_overload;
-  if (overload_name == "") {
-    torch_api_function_overload = torch_api_function.attr("default");
-  } else {
-    torch_api_function_overload =
-        torch_api_function.attr(overload_name.c_str());
-  }
-  std::string module_name_str = "torch.ops." + ns_str;
+  py::handle torch_api_function_overload = getTorchApiFunction(op);
 
   // Find overloaded tensors
   for (const auto idx : c10::irange(arguments.size())) {
@@ -2257,12 +2267,49 @@ void ConcretePyInterpreterVTable::dispatch(
       overloaded_args,
       args.ptr(),
       kwargs.ptr(),
-      func_name,
+      nullptr,
       torch_api_function_overload.ptr(),
-      module_name_str.c_str(),
+      nullptr,
       TorchFunctionName::TorchDispatch);
   pushPyOutToStack(
       op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
+}
+
+void ConcretePyInterpreterVTable::python_dispatcher(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet ks,
+    torch::jit::Stack* stack) const {
+  py::gil_scoped_acquire g;
+  py::handle torch_api_function_overload = getTorchApiFunction(op);
+
+  c10::DispatchKey k = ks.highestPriorityTypeId();
+  auto handler = torch_api_function_overload.attr(toString(k));
+  if (handler.ptr() == nullptr) {
+    throw python_error();
+  }
+  if (py::isinstance<c10::DispatchKey>(handler)) {
+    // NB: not redispatch, as that will permanently remove the python
+    // dispatcher for subsequent redispatches
+    op.callBoxedForDispatchKey(py::cast<c10::DispatchKey>(handler), *stack);
+    return;
+  }
+
+  const auto& schema = op.schema();
+  const auto num_arguments = schema.arguments().size();
+  auto arguments = torch::jit::pop(*stack, num_arguments);
+
+  auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
+  auto args = std::move(args_kwargs.first);
+  auto kwargs = std::move(args_kwargs.second);
+
+  py::object obj = py::reinterpret_steal<py::object>(
+      PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
+
+  if (obj == nullptr) {
+    throw python_error();
+  }
+
+  pushPyOutToStack(op, stack, std::move(obj), "Python dispatcher");
 }
 
 c10::intrusive_ptr<TensorImpl> ConcretePyInterpreterVTable::detach(
@@ -2377,7 +2424,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
   if (out == Py_None) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
-        "Cannot call sizes on a tensor with symbolic shapes/strides");
+        "Cannot call strides on a tensor with symbolic shapes/strides");
     return self->strides_default();
   }
 

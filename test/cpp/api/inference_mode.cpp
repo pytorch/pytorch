@@ -344,11 +344,15 @@ TEST(InferenceModeTest, TestMixInferenceAndNormalTensorFunctionalOp) {
           c.mul(s), "Inference tensors cannot be saved for backward.");
 
       // Inference tensor in TensorList input
+      // stack does not capture anymore, so disabled
+      // TODO: find alternative Function that captures a list (maybe custom fn)
+      /*
       std::vector<torch::Tensor> inputs = {s, c};
       ASSERT_THROWS_WITH(
           torch::stack(inputs), // go through kernels: VariableType(ERROR)!,
                                 // ADInplaceOrView(fallthrough), CPU
           "Inference tensors cannot be saved for backward.")
+      */
     }
   }
 }

@@ -207,6 +207,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.init.kaiming_normal,
         torch.nn.init.orthogonal,
         torch.nn.init.sparse,
+        torch.nested.to_padded_tensor,
         has_torch_function,
         handle_torch_function,
         torch.set_autocast_enabled,
@@ -282,7 +283,6 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
-        Tensor.to_padded_tensor,
     }
 
 
@@ -412,6 +412,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
         torch.concat: lambda tensors, dim=0, out=None: -1,  # alias for torch.cat
+        torch.concatenate: lambda tensors, dim=0, out=None: -1,  # alias for torch.concatenate
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
