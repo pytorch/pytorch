@@ -15548,14 +15548,11 @@ class TestNNDeviceType(NNTestCase):
             yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
             yy.backward(yy)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol, atol = torch.testing._comparison.get_tolerances(dtype)
-            if dtype == torch.half:
-                atol = 1e-3
+            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
             self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
             # x is half
-            rtol, atol = torch.testing._comparison.get_tolerances(torch.half)
-            atol = 1e-3
-            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=atol))
+            rtol, _ = torch.testing._comparison.get_tolerances(torch.half, rtol=None, atol=None)
+            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716

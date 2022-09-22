@@ -82,7 +82,7 @@ def default_tolerances(*inputs: Union[torch.Tensor, torch.dtype]) -> Tuple[float
 
 
 def get_tolerances(
-    *inputs: Union[torch.Tensor, torch.dtype], rtol: Optional[float] = None, atol: Optional[float] = None, id: Tuple[Any, ...] = ()
+    *inputs: Union[torch.Tensor, torch.dtype], rtol: Optional[float], atol: Optional[float], id: Tuple[Any, ...] = ()
 ) -> Tuple[float, float]:
     """Gets absolute and relative to be used for numeric comparisons.
 
