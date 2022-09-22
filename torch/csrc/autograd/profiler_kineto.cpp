@@ -57,10 +57,13 @@ inline int64_t getTimeUs() {
 #endif // USE_KINETO
 }
 
+using torch::profiler::impl::ActivityType;
 using torch::profiler::impl::ActiveProfilerType;
 using torch::profiler::impl::dtypesToStr;
 using torch::profiler::impl::EventType;
 using torch::profiler::impl::ExtraFields;
+using torch::profiler::impl::ProfilerConfig;
+using torch::profiler::impl::ProfilerState;
 using torch::profiler::impl::ProfilerStateBase;
 using torch::profiler::impl::PyExtraFieldsBase;
 using torch::profiler::impl::Result;

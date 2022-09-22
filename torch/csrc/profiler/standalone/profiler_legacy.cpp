@@ -1,4 +1,4 @@
-#include <torch/csrc/autograd/profiler_legacy.h>
+#include <torch/csrc/profiler/standalone/profiler_legacy.h>
 
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/frontend/tracer.h>
@@ -24,8 +24,7 @@
 #include <iostream>
 
 namespace torch {
-namespace autograd {
-namespace profiler {
+namespace profiler_legacy {
 
 // We decompose the profiler logic into the following components:
 //
@@ -679,6 +678,5 @@ void RecordProfile::processEvents(const std::vector<LegacyEvent*>& events) {
   writeProfilerEventsToStream(out_, events);
 }
 
-} // namespace profiler
-} // namespace autograd
+} // namespace profiler_legacy
 } // namespace torch

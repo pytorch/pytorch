@@ -111,7 +111,7 @@ struct ActivityTraceWrapper {
   bool saved_ = false; // Kineto's save is destructive
 };
 
-using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
+using ActivitySet = std::set<torch::profiler::impl::ActivityType>;
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
