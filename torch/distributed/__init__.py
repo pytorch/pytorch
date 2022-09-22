@@ -82,5 +82,5 @@ else:
     #   python test/test_public_bindings.py -k test_correct_module_names
     # working even when USE_DISTRIBUTED=0.  Feel free to add more
     # stubs as necessary.
-    class ProcessGroup:
+    class ProcessGroup:  # type: ignore[no-redef]
         pass
