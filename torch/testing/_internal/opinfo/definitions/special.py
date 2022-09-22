@@ -68,7 +68,12 @@ def sample_inputs_polygamma(op_info, device, dtype, requires_grad, **kwargs):
     ns = (1, 2, 3, 4, 5)
 
     for shape, n in product(tensor_shapes, ns):
-        yield SampleInput(make_arg(shape), args=(n,))
+        yield SampleInput(
+            make_arg(shape),
+            kwargs=dict(
+                n=n,
+            ),
+        )
 
 
 def reference_polygamma(x, n):

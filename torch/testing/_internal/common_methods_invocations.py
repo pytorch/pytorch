@@ -464,11 +464,11 @@ def sample_inputs_prelu(op_info, device, dtype, requires_grad, **kwargs):
     for shape in cases:
         for weight in [-1., 0., 0.8, 1.]:
             weight_tensor = torch.tensor(weight, device=device, dtype=dtype, requires_grad=requires_grad)
-            yield SampleInput(make_arg(shape), args=(weight_tensor,))
+            yield SampleInput(make_arg(shape), kwargs=dict(weight=weight_tensor,))
 
         if len(shape) >= 2:
             channel_size = shape[1]
-            yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
+            yield SampleInput(make_arg(shape), kwargs=dict(weight=make_arg((channel_size,)),))
     weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
 
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
@@ -2800,7 +2800,8 @@ def sample_inputs_threshold(op_info, device, dtype, requires_grad, **kwargs):
     samples = []
     for x_size in sizes:
         # threshold and values args must be numbers
-        samples.append(SampleInput(make_arg(x_size), args=(make_arg(()).item(), make_arg(()).item())))
+        samples.append(SampleInput(make_arg(x_size), kwargs=dict(
+            threshold=make_arg(()).item(), value=make_arg(()).item())))
     return samples
 
 def sample_inputs_argsort(*args, **kwargs):
@@ -5632,7 +5633,7 @@ def sample_inputs_meshgrid(op_info: OpInfo, device: torch.device, dtype: torch.d
 def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     tensor_shapes = ((S, S), ())
-    ns = (1, 2, 3, 4, 5)
+    ps = (1, 2, 3, 4, 5)
 
     # Since the accepted lower bound for input
     # to mvlgamma depends on `p` argument,
@@ -5641,14 +5642,14 @@ def sample_inputs_mvlgamma(op_info, device, dtype, requires_grad, **kwargs):
     def compute_min_val(p):
         return (p - 1.) / 2
 
-    for shape, n in product(tensor_shapes, ns):
-        min_val = compute_min_val(n)
+    for shape, p in product(tensor_shapes, ps):
+        min_val = compute_min_val(p)
         if not dtype.is_floating_point:
             # Round-up minimum value for integral dtypes
             min_val += 1
         else:
             min_val += 2 * torch.finfo(dtype).eps
-        yield SampleInput(make_arg(shape, low=min_val), args=(n,))
+        yield SampleInput(make_arg(shape, low=min_val), kwargs=dict(p=p,))
 
 
 # Since `mvlgamma` has multiple entries,

@@ -2320,7 +2320,10 @@ class UnaryUfuncInfo(OpInfo):
 
         def map_fn(sample):
             torch_kwargs, _ = self.sample_kwargs(device, dtype, sample.input)
-            sample.kwargs = torch_kwargs
+            for k, v in torch_kwargs.items():
+                if k not in sample.kwargs:
+                    sample.kwargs[k] = v
+
             return sample
 
         return map(map_fn, samples)
