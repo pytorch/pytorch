@@ -19,51 +19,6 @@ from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
 from torch.types import Number
 
-# Note [Edit Symbolic Files]
-# EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
-#
-# - Module-level functions are called to convert the corresponding op in the `aten` domain.
-#   E.g. symbolic_opset9.foo is called to convert aten::foo.
-#   Symbolic functions for other domains are staticmethods in classes named after the domain.
-#   E.g. symbolic_opset9.Prim.ConstantChunk is called to convert prim::ConstantChunk.
-# - Parameter names must *exactly* match the names in
-#   aten/src/ATen/native/native_functions.yaml, because
-#   dispatch is done with keyword arguments.
-# - Looking for inplace ops?  They're detected by
-#   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
-#   transparently dispatched to their non inplace versions in
-#   "run_symbolic_function".   See Note [Export inplace]
-# - REQUIRED: Annotate new symbolic functions with type annotations and decorate with
-#   _beartype.beartype to enable runtime type checking.
-#
-# ----------------------------------------------------------------------------------
-# A note on Tensor types
-# ----------------------------------------------------------------------------------
-#
-# In general, we should avoid depending on the type of Tensor Values contained
-# within the trace graph. However, this is sometimes unavoidable (due to ONNX
-# spec requirements, etc). The TensorType object has accessors for these properties
-# that return the property if it is statically known and return nullopt otherwise.
-#
-# In general, we should prefer to rely on the least specific information possible.
-# For example, not relying on tensor properties at all is better than relying
-# on the number of dimensions which is better than relying on
-# concrete shapes. Doing so will make the export symbolics
-# more robust to different graphs.
-#
-# ----------------------------------------------------------------------------------
-# Extra context for symbolic functions
-# ----------------------------------------------------------------------------------
-#
-# In general, symbolic functions only require inputs and attributes to
-# the original node. In rare circumstances, extra context may be required.
-# For example, symbolic function for `prim::Loop` needs access to the subblock of
-# the original node.
-# A symbolic function that has a first arg (before the Graph object) with the
-# type annotation of torch.onnx.SymbolicContext will be called with that additional context.
-# During export, it is populated from `utils._run_symbolic_function`
-# to contain the context for each node being converted.
-
 __all__ = [
     "args_have_same_dtype",
     "cast_pytorch_to_onnx",
