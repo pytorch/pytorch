@@ -436,7 +436,7 @@ def register_view():
     def _view_no_original_shape_overload_impl(a, shape):
         if list(a.shape) == list(shape):
             return torch.ops.nvprims.view_of(a)
-        return prim(a, a.shape, shape)
+        return torch.ops.nvprims.view.default(a, a.shape, shape)
 
     nvprim_implicit_impl.impl("view.shape", _view_no_original_shape_overload_impl)
     nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
