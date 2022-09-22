@@ -282,7 +282,7 @@ class TestGradTransform(TestCase):
             return y
 
         grad(foo)(x)
-        self.assertEqual(functorch._C.dlevel(escaped[0]), -1)
+        self.assertEqual(torch._C._functorch.dlevel(escaped[0]), -1)
 
     def test_escaped_wrappers_are_ignored(self, device):
         x = torch.randn([], device=device)
@@ -296,7 +296,7 @@ class TestGradTransform(TestCase):
         grad(foo)(x)
 
         something = escaped[0].sum()
-        self.assertEqual(functorch._C.dlevel(something), 0)
+        self.assertEqual(torch._C._functorch.dlevel(something), 0)
         self.assertEqual(something, x.sin().sum())
 
     def test_vjp(self, device):
@@ -1881,17 +1881,17 @@ class TestJvp(TestCase):
 
     def test_fwd_grad_enabled(self, device):
         # Tests some private helper functions to enable/disable fwd grad mode
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
     def test_autograd_function_disables_fwd_grad(self, device):
@@ -1900,7 +1900,7 @@ class TestJvp(TestCase):
         class MySquare(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertFalse(enabled)
                 return x * x
 
@@ -1914,18 +1914,18 @@ class TestJvp(TestCase):
     def test_enable_fwd_grad(self, device):
         # Tests a private helper function
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
 
             with enable_fwd_grad():
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertTrue(enabled)
 
-            enabled = functorch._C.get_fwd_grad_enabled()
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)

@@ -1,5 +1,5 @@
 import torch
-import functorch._C as _C
+import torch._C._functorch as _C
 import functools
 
 # Monkeypatch tensor printing in pytorch

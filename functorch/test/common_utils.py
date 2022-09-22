@@ -6,7 +6,6 @@
 
 import itertools
 import torch
-import functorch
 from functorch import vmap
 import torch.utils._pytree as pytree
 from functorch_additional_op_db import additional_op_db
@@ -378,11 +377,11 @@ def opsToleranceOverride(test_case_name, base_test_name, overrides):
 
 class DisableVmapFallback:
     def __enter__(self):
-        self.prev_state = functorch._C._is_vmap_fallback_enabled()
-        functorch._C._set_vmap_fallback_enabled(False)
+        self.prev_state = torch._C._functorch._is_vmap_fallback_enabled()
+        torch._C._functorch._set_vmap_fallback_enabled(False)
 
     def __exit__(self, *ignored):
-        functorch._C._set_vmap_fallback_enabled(self.prev_state)
+        torch._C._functorch._set_vmap_fallback_enabled(self.prev_state)
 
 
 def check_vmap_fallback(test_case, thunk, opinfo, dry_run=False):
