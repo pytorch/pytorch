@@ -45,6 +45,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
+from torch.onnx import _deprecation
 from torch.onnx._internal import _beartype, registration, torchscript
 
 __all__ = [
@@ -1714,6 +1715,13 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
     """Decorator that provides the symbolic context to the symbolic function if needed."""
     if _need_symbolic_context(symbolic_fn):
 
+        # TODO(justinchuby): Update the module name of GraphContext when it is public
+        warnings.warn(
+            "The first argument to symbolic functions is deprecated in 1.13 and will be "
+            "removed in 1.14. Please annotate the first argument as GraphContext "
+            "and use context information from the object instead.",
+            category=FutureWarning,
+        )
         def wrapper(graph_context: torchscript.GraphContext, *args, **kwargs):
             symbolic_context = _exporter_states.SymbolicContext(
                 params_dict=graph_context.params_dict,
