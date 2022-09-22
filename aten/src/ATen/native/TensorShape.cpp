@@ -2136,6 +2136,7 @@ Tensor slice(
     c10::optional<int64_t> end,
     int64_t step) {
   int64_t ndim = self.dim();
+  TORCH_CHECK(!self.is_vulkan(), "A Vulkan tensor detected!!!");
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
   }
