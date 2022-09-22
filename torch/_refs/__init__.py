@@ -2748,7 +2748,9 @@ def native_layer_norm(
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
 # test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
 @register_decomposition(torch.ops.aten.permute, disable_meta=True)
-def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
+def permute(a: TensorLikeType, *dims: Union[DimsSequenceType, List[DimsSequenceType]]) -> TensorLikeType:
+    if len(dims) == 1 and isinstance(dims[0], Sequence):
+        dims = dims[0]
     _permutation = utils.canonicalize_dims(a.ndim, dims)
     return prims.transpose(a, _permutation)
 
