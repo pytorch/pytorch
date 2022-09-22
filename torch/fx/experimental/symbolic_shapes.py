@@ -223,6 +223,9 @@ for method, func in magic_methods.items():
         continue
     _make_magic(method, func, PySymFloat)
 
+del method
+del func
+
 def _lru_cache(fn, maxsize=None):
     """
     Wrapper around lru_cache that clears when new info about shapes has been
