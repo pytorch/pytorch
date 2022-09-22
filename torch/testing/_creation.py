@@ -24,6 +24,7 @@ def _lerp(low: float, high: float, weight: torch.Tensor) -> torch.Tensor:
     else:
         return high * weight + low * (1 - weight)
 
+
 def make_tensor(
     *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
     dtype: torch.dtype,
