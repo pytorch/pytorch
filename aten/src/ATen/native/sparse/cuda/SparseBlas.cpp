@@ -57,6 +57,7 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
 
   // there's a segfault when calling cuSPARSE on 0-sized matrices
   if (mat1.numel() == 0 || mat2.numel() == 0) {
+    result.mul_(beta);
     return result;
   }
 
