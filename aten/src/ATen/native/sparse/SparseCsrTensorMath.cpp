@@ -522,14 +522,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
 #if !AT_USE_MKL_SPARSE()
   // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
   // strided -> strided
-  // TORCH_CHECK(
-  //     (mat1.is_sparse_csr() ||
-  //      (mat2.is_sparse_csr() && result.is_sparse_csr())),
-  //     "Calling addmm on sparse CPU tensors requires Linux platform. ",
-  //     "Please use PyTorch built with MKL on Linux.");
-  // TORCH_CHECK(
-  //     result.layout() == kStrided,
-  //     "Calling addmm on CPU with sparse output requires MKL.");
   if (mat1.layout() == kStrided) {
     if (mat2.layout() == kSparseCsr) {
       if (result.layout() == kStrided) {
