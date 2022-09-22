@@ -9,4 +9,3 @@ using spmm_sum_fn = void(*)(const Tensor&, const Tensor&, const Tensor&, const c
 DECLARE_DISPATCH(spmm_sum_fn, spmm_sum_stub);
 
 }} // at::native
-
