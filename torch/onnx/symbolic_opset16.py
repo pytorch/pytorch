@@ -25,16 +25,21 @@ Updated operators:
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
+import functools
+
 from torch.nn.functional import (
     GRID_SAMPLE_INTERPOLATION_MODES,
     GRID_SAMPLE_PADDING_MODES,
 )
 from torch.onnx import _type_utils, symbolic_helper
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, registration
+
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 
 
 # note (mkozuki): Why `grid_sampler` instead of `grid_sample`?
 # Because `torch.nn.functional.grid_sample` calls `torch.grid_sampler`.
+@_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
 @_beartype.beartype
 def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
@@ -50,6 +55,7 @@ def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
     )
 
 
+@_onnx_symbolic("aten::scatter_add")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
 def scatter_add(g, self, dim, index, src):
