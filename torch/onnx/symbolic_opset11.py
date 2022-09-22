@@ -618,22 +618,6 @@ def unique_dim(g, self, dim, sorted, return_inverse, return_counts):
     return u, inverse_indices, counts
 
 
-@_onnx_symbolic("aten::topk")
-@symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
-@_beartype.beartype
-def topk(g, self, k, dim, largest, sorted, out=None):
-    return symbolic_helper._topk_helper(
-        g, self, k, dim, largest=largest, sorted=sorted, out=out
-    )
-
-
-@_onnx_symbolic("aten::sort")
-@symbolic_helper.parse_args("v", "i", "i", "none")
-@_beartype.beartype
-def sort(g, self, dim, decending, out=None):
-    return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
-
-
 @_onnx_symbolic("aten::argsort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
 @_beartype.beartype

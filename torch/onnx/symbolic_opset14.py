@@ -18,7 +18,7 @@ Updated operators:
 import functools
 
 import torch
-from torch.onnx import symbolic_helper
+from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration
 
@@ -52,9 +52,8 @@ def triu(g, self, diagonal, out=None):
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
 def reshape(g, self, shape):
-    # NOTE: Due to bug in ORT https://github.com/microsoft/onnxruntime/issues/10664
-    #       Reshape export cannot utilize the new allowzero attribute introduced in opset 14.
-    return symbolic_helper._reshape_helper(g, self, shape, allowzero=0)
+    # FIXME(justinchuby): Support allowzero
+    return opset9.reshape(g, self, shape)
 
 
 @_onnx_symbolic("aten::batch_norm")

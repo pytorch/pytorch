@@ -331,7 +331,9 @@ def _reshape_from_tensor(g, input, shape):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def reshape(g, self, shape):
-    return symbolic_helper._reshape_helper(g, self, shape)
+    if not symbolic_helper._is_value(shape):
+        shape = g.op("Constant", value_t=torch.LongTensor(shape))
+    return g.op("Reshape", input, shape)
 
 
 @_onnx_symbolic("aten::reshape_as")
@@ -3791,7 +3793,8 @@ def unsqueeze(g, self, dim):
                 + "Axis is converted to "
                 + str(dim + rank + 1)
                 + " based on input shape at export time. "
-                + "Passing an tensor of different rank in execution will be incorrect."
+                + "Passing an tensor of different rank in execution will be incorrect.",
+                errors.OnnxExporterWarning,
             )
             dim = dim + rank + 1
         else:
@@ -5201,7 +5204,7 @@ def index(g, self, index):
         if not symbolic_helper._is_none(index) and (
             index.type().scalarType() == "Byte" or symbolic_helper._is_bool(index)
         ):
-            if GLOBALS.export_onnx_opset_version < 9:
+            if g.opset < 9:
                 raise errors.SymbolicValueError(
                     "Exporting masked indices are only supported after ONNX opset 9.",
                     self,

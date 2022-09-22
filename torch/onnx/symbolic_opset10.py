@@ -17,7 +17,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_opset9 as opset9,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, registration, torchscript
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -110,18 +110,46 @@ def _floor_divide(g, self, other):
 
 
 @_onnx_symbolic("aten::sort")
-@symbolic_helper.parse_args("v", "i", "i", "none")
+@symbolic_helper.parse_args("v", "i", "b", "none")
 @_beartype.beartype
-def sort(g, self, dim, decending, out=None):
-    return symbolic_helper._sort_helper(g, self, dim, decending=decending, out=out)
+def sort(g: torchscript.GraphContext, self, dim: int, decending: bool, out=None):
+    if out is not None:
+        symbolic_helper._unimplemented("Sort", "Out parameter is not supported", self)
+    shape_ = g.op("Shape", self)
+    dim_size_ = g.op(
+        "Gather",
+        shape_,
+        g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)),
+    )
+    if g.opset <= 10:
+        if not decending:
+            symbolic_helper._unimplemented("Sort", "Ascending is not supported", self)
+        return g.op("TopK", self, dim_size_, axis_i=dim, outputs=2)
+
+    return g.op("TopK", self, dim_size_, axis_i=dim, largest_i=decending, outputs=2)
 
 
 @_onnx_symbolic("aten::topk")
 @symbolic_helper.parse_args("v", "v", "i", "i", "i", "none")
 @_beartype.beartype
 def topk(g, self, k, dim, largest, sorted, out=None):
-    return symbolic_helper._topk_helper(
-        g, self, k, dim, largest=largest, sorted=sorted, out=out
+    if out is not None:
+        symbolic_helper._unimplemented("TopK", "Out parameter is not supported")
+    if not symbolic_helper._is_value(k):
+        k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
+    else:
+        k = symbolic_helper._reshape_helper(
+            g, k, g.op("Constant", value_t=torch.tensor([1]))
+        )
+        if symbolic_helper._try_get_scalar_type(k) != "Long":
+            k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
+    if g.opset <= 10:
+        if not largest:
+            symbolic_helper._unimplemented("TopK", "Ascending is not supported")
+        return g.op("TopK", input, k, axis_i=dim, outputs=2)
+
+    return g.op(
+        "TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2
     )
 
 

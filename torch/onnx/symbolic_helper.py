@@ -23,6 +23,7 @@ from torch.onnx import (  # noqa: F401
 )
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
+from torch.onnx._internal.dispatch import symbolics
 from torch.types import Number
 
 __all__ = [
@@ -665,7 +666,8 @@ def _select_helper(g, self, dim, index, apply_reshape=True):
 @quantized_args(True)
 @_beartype.beartype
 def _slice_helper(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
-    if GLOBALS.export_onnx_opset_version <= 9:
+    # TODO(justinchuby): Use the dispatcher
+    if g.opset <= 9:
         from torch.onnx.symbolic_opset9 import _slice as _slice9
 
         return _slice9(g, input, axes, starts, ends)
@@ -738,46 +740,6 @@ def _generate_wrapped_number(g, scalar):
 
 
 @_beartype.beartype
-def _sort_helper(g, input, dim, decending=True, out=None):
-    if out is not None:
-        _unimplemented("Sort", "Out parameter is not supported")
-    shape_ = g.op("Shape", input)
-    dim_size_ = g.op(
-        "Gather",
-        shape_,
-        g.op("Constant", value_t=torch.tensor([dim], dtype=torch.int64)),
-    )
-    if GLOBALS.export_onnx_opset_version <= 10:
-        if not decending:
-            _unimplemented("Sort", "Ascending is not supported")
-        return g.op("TopK", input, dim_size_, axis_i=dim, outputs=2)
-    else:
-        return g.op(
-            "TopK", input, dim_size_, axis_i=dim, largest_i=decending, outputs=2
-        )
-
-
-@_beartype.beartype
-def _topk_helper(g, input, k, dim, largest=True, sorted=False, out=None):
-    if out is not None:
-        _unimplemented("TopK", "Out parameter is not supported")
-    if not _is_value(k):
-        k = g.op("Constant", value_t=torch.tensor([k], dtype=torch.int64))
-    else:
-        k = _reshape_helper(g, k, g.op("Constant", value_t=torch.tensor([1])))
-        if _try_get_scalar_type(k) != "Long":
-            k = g.op("Cast", k, to_i=_C_onnx.TensorProtoDataType.INT64)
-    if GLOBALS.export_onnx_opset_version <= 10:
-        if not largest:
-            _unimplemented("TopK", "Ascending is not supported")
-        return g.op("TopK", input, k, axis_i=dim, outputs=2)
-    else:
-        return g.op(
-            "TopK", input, k, axis_i=dim, largest_i=largest, sorted_i=sorted, outputs=2
-        )
-
-
-@_beartype.beartype
 def _lt_helper(g, input, other):
     if GLOBALS.export_onnx_opset_version <= 8:
         from torch.onnx.symbolic_opset8 import lt as _lt8
@@ -810,12 +772,12 @@ def _interpolate_warning(interpolate_mode):
 @_beartype.beartype
 def _unsqueeze_helper(g, input, axes_i):
     if _is_constant(axes_i[0]):
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
         return g.op("Unsqueeze", input, axes_i=axes_i)
     # Tensor type
-    if GLOBALS.export_onnx_opset_version < 13:
+    if g.opset < 13:
         raise errors.SymbolicValueError(
             "Opset version must be >= 13 for Unsqueeze with dynamic axes.", input
         )
@@ -825,12 +787,12 @@ def _unsqueeze_helper(g, input, axes_i):
 @_beartype.beartype
 def _squeeze_helper(g, input, axes_i):
     if _is_constant(axes_i[0]):
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Squeeze", input, axes)
         return g.op("Squeeze", input, axes_i=axes_i)
     # Tensor type
-    if GLOBALS.export_onnx_opset_version < 13:
+    if g.opset < 13:
         raise errors.SymbolicValueError(
             "Opset version must be >= 13 for Squeeze with dynamic axes.", input
         )
@@ -851,7 +813,7 @@ def _squeeze_helper(g, input, axes_i):
 @_beartype.beartype
 def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_i=0):
     keepdims_i = _maybe_get_const(keepdims_i, "i")
-    if GLOBALS.export_onnx_opset_version >= 13:
+    if g.opset >= 13:
         if axes_i:
             if not _is_value(axes_i):
                 axes_i = g.op(
@@ -987,7 +949,7 @@ def _argmin_argmax_helper(
     g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool, op_name: str
 ):
     def op_wrapper(input, axis_i, keepdims_i):
-        if GLOBALS.export_onnx_opset_version >= 12:
+        if g.opset >= 12:
             return g.op(
                 op_name,
                 input,
@@ -1041,7 +1003,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
             )
             output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
-            if GLOBALS.export_onnx_opset_version >= 13:
+            if g.opset >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
                 empty_scales = _optional_input_placeholder_tensor(g)
             else:
@@ -1064,7 +1026,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
                 nearest_mode_s="floor",
             )  # only valid when mode="nearest"
         else:
-            if GLOBALS.export_onnx_opset_version >= 13:
+            if g.opset >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
             else:
                 empty_roi = g.op(
@@ -1136,7 +1098,7 @@ def __interpolate_helper(
         size = g.op("Cast", size, to_i=_C_onnx.TensorProtoDataType.INT64)
         size = g.op("Concat", input_size, size, axis_i=0)
 
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
             empty_scales = _optional_input_placeholder_tensor(g)
         else:
@@ -1161,7 +1123,7 @@ def __interpolate_helper(
         if rank is None:
             return _unimplemented("interpolate (with scales)", "missing input shape")
 
-        if GLOBALS.export_onnx_opset_version >= 13:
+        if g.opset >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
         else:
             empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
@@ -1181,9 +1143,9 @@ def __interpolate_helper(
 
 @_beartype.beartype
 def _unbind_helper(g, self, dim, _outputs):
-    if GLOBALS.export_onnx_opset_version < 11:
+    if g.opset < 11:
         from torch.onnx.symbolic_opset9 import unbind
-    elif GLOBALS.export_onnx_opset_version <= 12:
+    elif g.opset <= 12:
         from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
     else:
         from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
@@ -1192,7 +1154,7 @@ def _unbind_helper(g, self, dim, _outputs):
 
 @_beartype.beartype
 def _scatter_helper(g, self, dim, index, src):
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
@@ -1202,7 +1164,7 @@ def _scatter_helper(g, self, dim, index, src):
 
 @_beartype.beartype
 def _repeat_interleave_split_helper(g, self, reps, dim):
-    if GLOBALS.export_onnx_opset_version <= 12:
+    if g.opset <= 12:
         split_out = g.op("Split", self, split_i=[1] * reps, axis_i=dim, outputs=reps)
     else:
         from torch.onnx.symbolic_opset13 import split
@@ -1256,7 +1218,7 @@ def _arange_cast_helper(
 
 @_beartype.beartype
 def _arange_helper(g, *args):
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import arange
     else:
         from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
@@ -1280,7 +1242,7 @@ def _index_fill_reshape_helper(g, self, dim, index):
 
     from torch.onnx.symbolic_opset9 import expand
 
-    if GLOBALS.export_onnx_opset_version <= 10:
+    if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
@@ -1298,26 +1260,6 @@ def _index_fill_reshape_helper(g, self, dim, index):
     )
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
-
-
-# By default, when any value in the 'shape' input is equal to zero
-# the corresponding dimension value is copied from the input tensor dynamically.
-# allowzero=1 indicates that if any value in the 'shape' input is set to zero,
-# the zero value is honored, similar to NumPy.
-# allowzero=1 is only supported for opset version >= 14.
-@_beartype.beartype
-def _reshape_helper(g, input, shape, allowzero=0):
-    shape = _maybe_get_const(shape, "is")
-    if not _is_value(shape):
-        shape = g.op("Constant", value_t=torch.LongTensor(shape))
-    if GLOBALS.export_onnx_opset_version <= 13:
-        if allowzero == 1:
-            _onnx_opset_unsupported(
-                "Reshape with allowzero=1", GLOBALS.export_onnx_opset_version, 14, input
-            )
-        return g.op("Reshape", input, shape)
-    else:
-        return g.op("Reshape", input, shape, allowzero_i=allowzero)
 
 
 @_beartype.beartype
@@ -1361,7 +1303,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
         or _is_none(running_var)
     ):
         assert batch_size is not None and channel_size is not None
-        reshape_in = _reshape_helper(
+        reshape_in = symbolics.aten.reshape(
             g,
             input,
             g.op(
@@ -1506,10 +1448,10 @@ def dequantize_helper(
     scale = g.op("Cast", scale, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     zero_point = g.op("Cast", zero_point, to_i=qdtype)
 
-    if axis_i is not None and GLOBALS.export_onnx_opset_version < 13:
+    if axis_i is not None and g.opset < 13:
         _onnx_opset_unsupported_detailed(
             "DequantizeLinear",
-            GLOBALS.export_onnx_opset_version,
+            g.opset,
             13,
             "Attribute axis is not supported.",
             qtensor,
@@ -1544,14 +1486,10 @@ def quantize_helper(
     Returns:
         A TupleConstruct storing information of the quantized tensor.
     """
-    if (
-        axis is not None
-        and not _is_none(axis)
-        and GLOBALS.export_onnx_opset_version < 13
-    ):
+    if axis is not None and not _is_none(axis) and g.opset < 13:
         _onnx_opset_unsupported_detailed(
             "QuantizeLinear",
-            GLOBALS.export_onnx_opset_version,
+            g.opset,
             13,
             "Attribute axis is not supported.",
             tensor,
