@@ -3067,7 +3067,7 @@ class FullyShardedDataParallel(nn.Module):
             _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
             # Only run the pre-backward hook once per group of handles involved
             # in the same module forward computation
-            if _handles_key and self._ran_pre_backward_hook[_handles_key]:
+            if _handles_key and self._ran_pre_backward_hook.get(_handles_key, False):
                 return
 
             with torch.autograd.profiler.record_function(
