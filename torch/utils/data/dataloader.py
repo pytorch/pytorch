@@ -482,7 +482,7 @@ class DataLoader(Generic[T_co]):
                 from math import ceil
                 if self.drop_last:
                     if self.batch_size > length:
-                        raise ValueError('Batch_size must be lower than dataset lenght.'
+                        raise ValueError('Batch_size must be lower than dataset length.'
                                          'But got batch_size={} dataset length={}'.format(self.batch_size, length))
                     length = length // self.batch_size
                 else:
