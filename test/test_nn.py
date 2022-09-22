@@ -17869,15 +17869,13 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
-    # TODO(crcrpar): double check cpu mem
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
-    @largeTensorTest("40GB", "cuda")
-    @dtypes(torch.float32)
-    def test_nll_loss_large_tensor(self, device, dtype):
+    @largeTensorTest("45GB", "cuda")
+    def test_nll_loss_large_tensor(self, device):
 
         def run_test(shape):
-            input = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
+            input = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
             labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
 
             out = F.nll_loss(input, labels)
@@ -17887,7 +17885,7 @@ class TestNNDeviceType(NNTestCase):
                 labels_cpu = labels.cpu()
             out_cpu = F.nll_loss(input_cpu, labels_cpu)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
+            rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
             with torch.no_grad():
                 self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
 
@@ -17896,6 +17894,7 @@ class TestNNDeviceType(NNTestCase):
             with torch.no_grad():
                 self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
+        # Ref: https://github.com/pytorch/pytorch/issue/85005
         run_test([int(2 ** 16), int(2 ** 16) + 1])
 
     def _nll_loss_helper(self, input_size, reduction, expected, device):
@@ -18204,6 +18203,26 @@ class TestNNDeviceType(NNTestCase):
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
+    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    @onlyCUDA
+    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("45GB", "cuda")
+    def test_cross_entropy_large_tensor(self, device):
+        logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
+        labels = torch.zeros(logits.size(0), dtype=torch.long, device='cuda')
+        loss = F.cross_entropy(logits, labels)
+        loss.backward()
+
+        with torch.no_grad():
+            logits_cpu = logits.cpu().detach().requires_grad_()
+            labels_cpu = labels.cpu().detach()
+        loss_cpu = F.cross_entropy(logits_cpu, labels_cpu)
+        loss_cpu.backward()
+
+        # workaround to reduce memory usage vs. self.assertEqual, see #84944
+        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
+        self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
