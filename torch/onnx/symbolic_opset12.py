@@ -1,3 +1,4 @@
+import functools
 import sys
 from typing import Optional, Tuple
 
@@ -10,7 +11,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import _beartype
+from torch.onnx._internal import _beartype, registration
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -38,6 +39,8 @@ __all__ = [
     "unfold",
 ]
 
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=12)
+
 
 @_beartype.beartype
 def _einsum_helper(g, equation, tensors):
@@ -58,6 +61,7 @@ def _einsum_helper(g, equation, tensors):
         return g.op("Einsum", *tensors, equation_s=equation)
 
 
+@_onnx_symbolic("aten::einsum")
 @symbolic_helper.parse_args("s", "v")
 @_beartype.beartype
 def einsum(g, equation, tensor_list):
@@ -65,6 +69,7 @@ def einsum(g, equation, tensor_list):
     return _einsum_helper(g, equation, tensors)
 
 
+@_onnx_symbolic("aten::outer")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
 def outer(g, input, other):
@@ -95,6 +100,7 @@ def _dropout_returns_masked_input_and_mask(
     return r, mask
 
 
+@_onnx_symbolic("aten::dropout")
 @symbolic_helper.parse_args("v", "f", "b")
 @_beartype.beartype
 def dropout(g, input, p, train):
@@ -102,12 +108,14 @@ def dropout(g, input, p, train):
     return masked
 
 
+@_onnx_symbolic("aten::native_dropout")
 @symbolic_helper.parse_args("v", "f", "b")
 @_beartype.beartype
 def native_dropout(g, input, p, train):
     return _dropout_returns_masked_input_and_mask(g, input, p, train)
 
 
+@_onnx_symbolic("aten::nll_loss")
 @_beartype.beartype
 def nll_loss(g, self, target, weight, reduction, ignore_index):
     # none reduction : onnx::Constant[value={0}]
@@ -141,16 +149,19 @@ def nll_loss(g, self, target, weight, reduction, ignore_index):
     return nllloss
 
 
+@_onnx_symbolic("aten::nll_loss2d")
 @_beartype.beartype
 def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
 
+@_onnx_symbolic("aten::nll_loss_nd")
 @_beartype.beartype
 def nll_loss_nd(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
 
+@_onnx_symbolic("aten::cross_entropy_loss")
 @_beartype.beartype
 def cross_entropy_loss(
     g, self, target, weight, reduction, ignore_index, label_smoothing
@@ -192,6 +203,7 @@ def cross_entropy_loss(
     return celoss
 
 
+@_onnx_symbolic("aten::binary_cross_entropy_with_logits")
 @symbolic_helper.parse_args("v", "v", "v", "v", "i")
 @_beartype.beartype
 def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduction):
@@ -235,6 +247,7 @@ def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduc
         )
 
 
+@_onnx_symbolic("aten::celu")
 @_beartype.beartype
 def celu(g, self, alpha):
     alpha = symbolic_helper._maybe_get_const(alpha, "f")
@@ -247,33 +260,39 @@ def celu(g, self, alpha):
     return g.op("Celu", self, alpha_f=alpha)
 
 
+@_onnx_symbolic("aten::argmax")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
 def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
+@_onnx_symbolic("aten::argmin")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
 def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 
+@_onnx_symbolic("aten::pow")
 @_beartype.beartype
 def pow(g, self, exponent):
     return g.op("Pow", self, exponent)
 
 
+@_onnx_symbolic("aten::ge")
 @_beartype.beartype
 def ge(g, input, other):
     return g.op("GreaterOrEqual", input, other)
 
 
+@_onnx_symbolic("aten::le")
 @_beartype.beartype
 def le(g, input, other):
     return g.op("LessOrEqual", input, other)
 
 
+@_onnx_symbolic("aten::unfold")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
 def unfold(g, input, dimension, size, step):
@@ -344,6 +363,7 @@ def unfold(g, input, dimension, size, step):
         return symbolic_helper._unimplemented("Unfold", "input size not accessible")
 
 
+@_onnx_symbolic("aten::tensordot")
 @symbolic_helper.parse_args("v", "v", "is", "is", "v")
 @_beartype.beartype
 def tensordot(g, input_a, input_b, dims_a, dims_b, out=None):
