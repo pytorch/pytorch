@@ -543,7 +543,10 @@ class TestPrims(TestCase):
         def func6(a):
             return torch.ops.aten._unsafe_view.default(a, tuple(reversed(a.shape)))
 
-        for func in (func1, func2, func3, func4, func5, func6):
+        def func7(a):
+            return torch.ops.aten.view_copy.default(a, tuple(reversed(a.shape)))
+
+        for func in (func1, func2, func3, func4, func5, func6, func7):
             with TorchRefsNvfuserCapabilityMode():
                 gm = make_fx(func)(a)
 

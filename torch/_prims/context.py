@@ -239,6 +239,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             or "torch.reshape" == torch.overrides.resolve_name(func)
             or func == torch.ops.aten.view.default
             or func == torch.ops.aten._unsafe_view.default
+            or func == torch.ops.aten.view_copy.default
         )
 
     def __torch_function__(
