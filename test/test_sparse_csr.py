@@ -2019,8 +2019,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.to_dense(), expected)
 
         mnk = list(itertools.product([2, 5], repeat=3))
-        
-        # Add a test case for size 0 a and b tensors 
+
+        # Add a test case for size 0 a and b tensors
         mnk = mnk + [(5, 5, 0)]
 
         batch_shapes = [(), (2,), (2, 3)] if self.device_type == 'cuda' else [(), ]
