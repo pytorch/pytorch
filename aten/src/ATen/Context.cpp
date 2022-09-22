@@ -309,12 +309,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 #ifdef USE_FBGEMM
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kFBGEMM);
-    }
-#endif
-
-// The X86 qengine is available if and only if FBGEMM is available
-#ifdef USE_FBGEMM
-    if (fbgemm::fbgemmSupportedCPU()) {
+      // The X86 qengine is available if and only if FBGEMM is available
       engines.push_back(at::kX86);
     }
 #endif
