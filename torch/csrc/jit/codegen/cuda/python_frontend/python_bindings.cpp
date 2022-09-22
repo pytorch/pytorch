@@ -1223,7 +1223,8 @@ void initNvFuserPythonBindings(PyObject* module) {
         self.fusion_definition->defineRecord(new nvfuser::ViewOpRecord(
             {fd->recordingState(arg())},
             {fd->recordingState(output())},
-            original_sizes, new_sizes));
+            original_sizes,
+            new_sizes));
         return output;
       },
       py::return_value_policy::reference);

@@ -328,7 +328,8 @@ struct ViewOpRecord : RecordFunctor {
   }
 
   void operator()(FusionDefinition& fd) final {
-    auto arg = fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
+    auto arg =
+        fd.getFusionState(args_.at(0).index)->template as<Nvf::TensorView>();
     auto output =
         torch::jit::fuser::cuda::view(arg, original_shape_, new_shape_);
     fd.setFusionState(outputs_.at(0).index, output);
