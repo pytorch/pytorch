@@ -33,6 +33,18 @@ def outputs_are_inputs(outputs, inputs):
     return any(id(out) in input_ids for out in tree_flatten_only(torch.Tensor, outputs))
 
 
+def output_alias_each_other(outputs):
+    storages = set()
+    for out in tree_flatten_only(torch.Tensor, outputs):
+        if not torch._C._has_storage(out):
+            continue
+        stor = out.storage()._cdata
+        if stor in storages:
+            return true
+        storages.add(stor)
+    return False
+
+
 class CrossRefFakeMode(TorchDispatchMode):
     def __init__(
         self,
@@ -96,6 +108,12 @@ class CrossRefFakeMode(TorchDispatchMode):
                 assert (
                     r_identity_eq == f_identity_eq
                 ), f"Mismatch on {func}: {r_identity_eq} != {f_identity_eq}"
+
+                r_output_alias_each_other = output_alias_each_other(r)
+                f_output_alias_each_other = output_alias_each_other(fake_r)
+                assert (
+                    r_output_alias_each_other == f_output_alias_each_other
+                ), f"Mismatch on {func}: {r_output_alias_each_other} != {f_output_alias_each_other}"
 
             for r_out, fake_out in zip(tree_flatten(r)[0], tree_flatten(fake_r)[0]):
                 r_is_ten = isinstance(r_out, torch.Tensor)
