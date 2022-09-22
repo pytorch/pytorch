@@ -17872,7 +17872,7 @@ class TestNNDeviceType(NNTestCase):
     # TODO(crcrpar): double check cpu mem
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
-    @largeTensorTest("18GB", "cuda")
+    @largeTensorTest("40GB", "cuda")
     @dtypes(torch.float32)
     def test_nll_loss_large_tensor(self, device, dtype):
 
