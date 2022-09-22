@@ -4913,7 +4913,7 @@ def error_inputs_cov(op_info, device, **kwargs):
     return error_inputs
 
 
-def sample_inputs_permute(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_permute(op_info, device, dtype, requires_grad, is_method=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     cases = [((1, 2, 3, 4), (0, 2, 3, 1)),
@@ -4923,6 +4923,8 @@ def sample_inputs_permute(op_info, device, dtype, requires_grad, **kwargs):
 
     for shape, args in cases:
         yield SampleInput(make_arg(shape), args=(args,))
+        if is_method and shape:
+            yield SampleInput(make_arg(shape), args=args)
 
 def reference_inputs_permute(op, device, dtype, requires_grad, **kwargs):
     yield from sample_inputs_permute(op, device, dtype, requires_grad, **kwargs)
@@ -12298,7 +12300,21 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_permute,
+           sample_inputs_func=partial(sample_inputs_permute, is_method=False),
+           reference_inputs_func=reference_inputs_permute),
+    OpInfo('permute',
+           op=lambda x, *dims: x.permute(*dims),
+           variant_test_name='tensor_method',
+           ref=np.transpose,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=False,
+           assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
+           assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=partial(sample_inputs_permute, is_method=True),
            reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
