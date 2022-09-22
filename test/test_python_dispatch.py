@@ -841,6 +841,21 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             with BMode():
                 a + b
 
+    def test_mode_with_make_subclass(self):
+        class SubTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+
+        class BasicMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        x = torch.randn(3)
+        with BasicMode():
+            y = SubTensor(x)
+        self.assertIsInstance(y, SubTensor)
+
     def test_torch_dispatch_mode_respects_no_dispatch(self) -> None:
         with capture_logs(is_mode=True) as logs1:
             with LoggingTensorMode():

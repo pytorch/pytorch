@@ -32,6 +32,15 @@ void TorchDispatchModeTLS::reset_mode() {
 }
 
 void TorchDispatchModeTLS::swap_mode(std::shared_ptr<SafePyObject>& mode) {
+  if (mode) {
+    c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, true);
+    c10::impl::tls_set_dispatch_key_included(
+        DispatchKey::PythonTLSSnapshot, true);
+  } else {
+    c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
+    c10::impl::tls_set_dispatch_key_included(
+        DispatchKey::PythonTLSSnapshot, false);
+  }
   torchDispatchModeState.mode_.swap(mode);
 }
 
