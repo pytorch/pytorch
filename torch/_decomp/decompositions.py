@@ -1161,9 +1161,13 @@ def native_layer_norm_backward(
     M = prod(outer_dims)  # type: ignore[arg-type]
     if M <= 0 or N <= 0:
         return (
-            input.new_zeros(input_shape),
-            input.new_zeros(input_shape[axis:]),
-            input.new_zeros(input_shape[axis:]),
+            input.new_zeros(input_shape) if output_mask[0] else None,
+            input.new_zeros(input_shape[axis:])
+            if output_mask[1] and weight_cast
+            else None,
+            input.new_zeros(input_shape[axis:])
+            if output_mask[2] and bias_cast
+            else None,
         )
 
     x_hat = (input_cast - mean) * rstd
