@@ -65,6 +65,8 @@ ALLOW_LIST = [
     ("aten::eig.e", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
+    ("aten::matrix_rank", datetime.date(9999, 1, 1)),
+    ("aten::matrix_rank.tol", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
     ("aten::linalg_solve", datetime.date(2022, 8, 31)),
     ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
@@ -279,6 +281,7 @@ ALLOW_LIST = [
     ("c10d::.*", datetime.date(2022, 10, 31)),
     ("c10d::allgather_", datetime.date(2022, 10, 1)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
+    ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
