@@ -40,7 +40,7 @@ def output_alias_each_other(outputs):
             continue
         stor = out.storage()._cdata
         if stor in storages:
-            return true
+            return True
         storages.add(stor)
     return False
 
