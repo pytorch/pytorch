@@ -100,6 +100,13 @@ class CUDAGraph(torch._C._CUDAGraph):
         """
         return super(CUDAGraph, self).pool()
 
+    def debug_dump(self):
+        r"""
+        Calls a debugging function to dump the graph if the dump path has been
+        set via torch._C._cuda_setCudaGraphsDebugPath()
+        """
+        return super(CUDAGraph, self).debug_dump()
+
 
 class graph(object):
     r"""

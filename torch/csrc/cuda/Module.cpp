@@ -1103,6 +1103,11 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
   return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
 }
 
+PyObject* THCPModule_setGraphsDebugPath(PyObject* _unused, PyObject* arg) {
+  at::cuda::setCUDAGraphsDebugPath(THPUtils_unpackString(arg));
+  Py_RETURN_NONE;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,
 // cppcoreguidelines-avoid-non-const-global-variables,
 // cppcoreguidelines-avoid-c-arrays)
@@ -1212,6 +1217,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_set_cudnn_benchmark_limit",
      THCPModule_setBenchmarkLimitCuDNN,
+     METH_O,
+     nullptr},
+    {"_cuda_set_graphs_debug_path",
+     THCPModule_setGraphsDebugPath,
      METH_O,
      nullptr},
 #ifdef USE_NCCL

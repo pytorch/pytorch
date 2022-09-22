@@ -78,5 +78,7 @@ TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif
 
+TORCH_CUDA_CPP_API void setCUDAGraphsDebugPath(const std::string& path);
+
 } // namespace cuda
 } // namespace at

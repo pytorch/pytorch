@@ -49,4 +49,8 @@ void THCPGraph_init(PyObject* module) {
           "pool",
           torch::wrap_pybind_function(&at::cuda::CUDAGraph::pool),
           py::call_guard<py::gil_scoped_release>());
+      .def(
+         "debug_dump",
+         torch::wrap_pybind_function(&::at::cuda::CUDAGraph::debug_dump),
+         py::call_guard<py::gil_scoped_release>());
 }

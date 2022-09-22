@@ -24,6 +24,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void replay();
   void reset();
   MempoolId_t pool();
+  void debug_dump();
 
   protected:
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000

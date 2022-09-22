@@ -8,6 +8,12 @@
 namespace at {
 namespace cuda {
 
+static std::string _cuda_graphs_debug_path;
+
+TORCH_CUDA_CPP_API void setCUDAGraphsDebugPath(const std::string& path) {
+  _cuda_graphs_debug_path = path;
+}
+
 MempoolId_t graph_pool_handle() {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // uuid count starts at 1. 0 is reserved to mean "wasn't set by graph_pool_handle".
@@ -186,10 +192,15 @@ void CUDAGraph::capture_end() {
                  "attempted to be captured on wrong device or stream.");
   }
 
-  // Now that we've instantiated graph_ into graph_exec_,
-  // we don't need graph_ anymore.
-  AT_CUDA_CHECK(cudaGraphDestroy(graph_));
-  has_graph_ = false;
+  // check if debug path is set
+  if (_cuda_graphs_debug_path == "") {
+    // Now that we've instantiated graph_ into graph_exec_,
+    // we don't need graph_ anymore.
+    AT_CUDA_CHECK(cudaGraphDestroy(graph_));
+    has_graph_ = false;
+  } else {
+    TORCH_WARN("DEBUG: TORCH_CUDAGRAPHS_DEBUG_PATH detected. graph_ will not be freed");
+  }
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
@@ -228,6 +239,18 @@ void CUDAGraph::replay() {
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
 #endif
+}
+
+void CUDAGraph::debug_dump() {
+  if (_cuda_graphs_debug_path != "") {
+    TORCH_WARN("DEBUG: calling debug_dump()");
+    if (has_graph_) {
+      TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", _cuda_graphs_debug_path);
+      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, _cuda_graphs_debug_path.c_str(), 1<<10)); // most verbose output
+    }
+  } else {
+    TORCH_WARN("CUDA Graphs debug path not set, set with torch._C._cuda_set_graphs_debug_path");
+  }
 }
 
 void CUDAGraph::reset() {
