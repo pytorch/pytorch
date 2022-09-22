@@ -602,7 +602,7 @@ class MultipleOutputsHorizontalPattern:
 class QuantizationFp8Pattern:
     @classmethod
     def setup(cls):
-        cls.quantization = torch.library.Library("quantization", "DEF")
+        cls.quantization = torch.library.Library("fp8_quantization", "DEF")
         cls.quantization.define("quantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
         cls.quantization.define("dequantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
 
@@ -612,7 +612,7 @@ class QuantizationFp8Pattern:
 
     @staticmethod
     def forward(self, arg0_1, arg1_1):
-        qt = torch.ops.quantization
+        qt = torch.ops.fp8_quantization
         _scale_0 = self._scale_0
         quantize_per_tensor_affine_fp8 = qt.quantize_per_tensor_affine_fp8(arg0_1, 0, _scale_0)
         dequantize_per_tensor_affine_fp8 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8, 0, _scale_0)
@@ -627,7 +627,7 @@ class QuantizationFp8Pattern:
 
     @staticmethod
     def pattern(a, a_dtype, a_scale, b, b_dtype, b_scale, out_scale):
-        qt = torch.ops.quantization
+        qt = torch.ops.fp8_quantization
         a = qt.dequantize_per_tensor_affine_fp8(a, a_dtype, a_scale)
         b = qt.dequantize_per_tensor_affine_fp8(b, b_dtype, b_scale)
         output = torch.ops.aten.add.Tensor(a, b)
