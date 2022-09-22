@@ -239,7 +239,6 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_2d(
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       scalar_t cur_weight =
           weights != nullptr ? weights[t] : static_cast<scalar_t>(1);
-      // CUDA_KERNEL_ASSERT(threadIdx.x < NLL_LOSS_THREADS);
       sh_inputs[threadIdx.x] -= input[i * ndim + t] * cur_weight;
       acc_weight[threadIdx.x] += cur_weight;
     }
