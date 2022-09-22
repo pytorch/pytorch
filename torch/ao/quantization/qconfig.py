@@ -228,8 +228,8 @@ def get_default_qconfig(backend='fbgemm', version=0):
     Returns the default PTQ qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports
-        `x86` (default), `fbgemm`, `qnnpack` and `onednn`.
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
+        `qnnpack`, `onednn` and `x86`.
 
     Return:
         qconfig
@@ -303,8 +303,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
     Returns the default QAT qconfig for the specified backend.
 
     Args:
-      * `backend`: a string representing the target backend. Currently supports
-        `x86`(default), `fbgemm`, `qnnpack` and `onednn`.
+      * `backend`: a string representing the target backend. Currently supports `fbgemm`,
+        `qnnpack`, `onednn` and `x86`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:

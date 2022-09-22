@@ -180,7 +180,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         quantize_op = torch.quantize_per_tensor_dynamic
         # TODO: get reduce range from observer
         # reduce_range = activation_post_process.reduce_range
-        reduce_range = torch.backends.quantized.engine in ("fbgemm", "x86")
+        reduce_range = torch.backends.quantized.engine == "fbgemm"
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
