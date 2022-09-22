@@ -126,7 +126,7 @@ def get_default_qconfig_mapping(backend="x86", version=0) -> QConfigMapping:
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86" (default), "fbgemm", "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     # TODO: add assert for backend choices
@@ -138,7 +138,7 @@ def get_default_qat_qconfig_mapping(backend="x86", version=1) -> QConfigMapping:
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86" (default), "fbgemm", "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)
