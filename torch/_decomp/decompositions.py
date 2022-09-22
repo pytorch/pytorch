@@ -624,17 +624,17 @@ def diagonal_backward(
 
 
 def _cast_grad_to_input_dtype(
-    grad_output: Tensor, grad_input: Tensor, input_dtype: int
+    grad_output: Tensor, grad_input: Tensor, input_dtype: torch.dtype
 ):
     if grad_output.dtype != input_dtype:
-        grad_input = grad_input.to(utils.get_dtype(input_dtype))
+        grad_input = grad_input.to(input_dtype)
     return grad_input
 
 
 @register_decomposition(aten._softmax_backward_data)
 @compute_only_pw_cast_for_opmath
 def _softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
 ):
     new_grad_output = grad_output * output
     grad_input = new_grad_output - output * torch.sum(
@@ -646,7 +646,7 @@ def _softmax_backward_data(
 @register_decomposition(aten._log_softmax_backward_data)
 @compute_only_pw_cast_for_opmath
 def _log_softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
 ):
     grad_input = grad_output - torch.exp(output) * torch.sum(
         grad_output, dim=dim, keepdim=True
