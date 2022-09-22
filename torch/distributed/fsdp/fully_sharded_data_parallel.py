@@ -42,10 +42,7 @@ from torch.distributed._shard.sharded_tensor import (
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
-from torch.distributed.algorithms._comm_hooks import (
-    LOW_PRECISION_HOOKS,
-    default_hooks,
-)
+from .comm import LOW_PRECISION_HOOKS, default_hooks
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.utils import (
     _replace_by_prefix,
