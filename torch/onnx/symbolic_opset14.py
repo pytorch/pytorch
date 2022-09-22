@@ -20,7 +20,7 @@ import functools
 import torch
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, registration, torchscript
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=14)
 
@@ -28,14 +28,14 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=14)
 @_onnx_symbolic("aten::hardswish")
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def hardswish(g, self):
+def hardswish(g: torchscript.GraphContext, self):
     return g.op("HardSwish", self)
 
 
 @_onnx_symbolic("aten::tril")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def tril(g, self, diagonal, out=None):
+def tril(g: torchscript.GraphContext, self, diagonal, out=None):
     k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
     return g.op("Trilu", self, k, upper_i=0)
 
@@ -43,7 +43,7 @@ def tril(g, self, diagonal, out=None):
 @_onnx_symbolic("aten::triu")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def triu(g, self, diagonal, out=None):
+def triu(g: torchscript.GraphContext, self, diagonal, out=None):
     k = g.op("Constant", value_t=torch.tensor(diagonal, dtype=torch.int64))
     return g.op("Trilu", self, k, upper_i=1)
 
@@ -51,7 +51,7 @@ def triu(g, self, diagonal, out=None):
 @_onnx_symbolic("aten::reshape")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
-def reshape(g, self, shape):
+def reshape(g: torchscript.GraphContext, self, shape):
     # FIXME(justinchuby): Support allowzero
     return opset9.reshape(g, self, shape)
 
@@ -60,7 +60,7 @@ def reshape(g, self, shape):
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 @_beartype.beartype
 def batch_norm(
-    g,
+    g: torchscript.GraphContext,
     input,
     weight,
     bias,
@@ -115,7 +115,7 @@ def batch_norm(
 
 @_onnx_symbolic("quantized::hardswish")
 @_beartype.beartype
-def quantized_hardswish(g, x, op_scale, op_zero_point):
+def quantized_hardswish(g: torchscript.GraphContext, x, op_scale, op_zero_point):
     x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
 
     output = hardswish(g, x)
