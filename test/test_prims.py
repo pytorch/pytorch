@@ -15,6 +15,13 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocm,
     dtypes,
 )
+from torch.testing._internal.common_methods_invocations import (
+    op_db,
+)
+from torch.testing._internal.common_device_type import (
+    ops,
+)
+
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
@@ -752,6 +759,29 @@ class TestDecomp(TestCase):
             )
             self.assertFalse(includes_aten_to_copy)
 
+    @ops([op for op in op_db if op.name in {"permute"}], allowed_dtypes=(torch.float,))
+    def test_decomposition_method_vararg(self, device, dtype, op):
+        # some ops have vararg variants for the methods. this tests it.
+        # we don't have tests for varargs in OpInfo, so we need to
+        # improvise this a bit.
+        # The rule for general functions (the special cases being e.g. tensor
+        # creation functions taking shapes) is that things can be vararg
+        # if the method has only one argument of sequence type.
+        # we might need to adjust things for the factory functions or
+        # have them do their own test
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+
+        sample_inputs = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in sample_inputs:
+            a = sample_input.input
+            if not sample_input.args[-1]:  # empty tuple cannot be varargs
+                continue
+
+            def f(a, b, c):
+                return getattr(a, op.name)(*b, *c)
+            with TorchRefsMode():
+                gm = make_fx(f)(a, sample_input.args[:-1], sample_input.args[-1])
 
 instantiate_device_type_tests(TestDecomp, globals())
 

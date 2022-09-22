@@ -634,6 +634,8 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     return shape if shape is not None else scalar_shape
 
 
+# Extracts dimensions that might be passed either as a list/tuple or as varags.
+# A typical case is Tensor.premute .
 def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
     if dims and isinstance(dims[0], Sequence):
         assert len(dims) == 1
