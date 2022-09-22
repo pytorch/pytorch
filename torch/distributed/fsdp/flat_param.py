@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
-    cast,
     Any,
+    cast,
     Dict,
     Generator,
     Iterator,
@@ -44,11 +44,15 @@ class TensorFlattener:
     :class:`TensorFlattener` that implements the two transforms.
     """
 
-    def pre_flatten_transform(self, tensor: torch.Tensor) -> Tuple[Optional[Any], torch.Tensor]:
+    def pre_flatten_transform(
+        self, tensor: torch.Tensor
+    ) -> Tuple[Optional[Any], torch.Tensor]:
         # E.g. Converting `ShardedTensor` to local tensor
         ...
 
-    def post_unflatten_transform(self, tensor: torch.Tensor, param_extension: Any) -> torch.Tensor:
+    def post_unflatten_transform(
+        self, tensor: torch.Tensor, param_extension: Any
+    ) -> torch.Tensor:
         # E.g. Converting local tensor to `ShardedTensor`
         ...
 
@@ -133,6 +137,7 @@ class HandleConfig:
     offload_params: bool
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
+    keep_low_precision_grads: Optional[bool] = False
 
 
 class FlatParameter(nn.Parameter):
@@ -351,10 +356,7 @@ class FlatParamHandle:
                             f"{dtype} and {param.dtype}"
                         )
                     if dtype is None:
-                        try:
-                            is_floating_point = param.is_floating_point()
-                        except RuntimeError:
-                            is_floating_point = True
+                        is_floating_point = param.is_floating_point()
                         if not is_floating_point:
                             raise ValueError("Integer parameters are unsupported")
                     if (
@@ -837,6 +839,21 @@ class FlatParamHandle:
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
                     flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
+                    # If we're using mixed precision with keeping grads
+                    # casted, gradient here might still be of the reduced
+                    # dtype if we didn't clear / set the gradients to None
+                    # after previous forward. In that case, make sure
+                    # p._saved_grad_shard is cast to the full precision type
+                    # so that we can accumulate in full precision in
+                    # _post_backward_hook and assign back in full precision
+                    # in _wait_for_post_backward.
+                    if (
+                        self._config.keep_low_precision_grads and
+                        flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                    ):
+                        flat_param._saved_grad_shard = (  # type: ignore[attr-defined]
+                            flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)  # type: ignore[attr-defined]
+                        )
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
@@ -996,7 +1013,9 @@ class FlatParamHandle:
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
         views = self._get_unflat_views(self.flat_param)
-        for i, (view, (param_name, module, _)) in enumerate(zip(views, self.flat_param._param_infos)):
+        for i, (view, (param_name, module, _)) in enumerate(
+            zip(views, self.flat_param._param_infos)
+        ):
             if _flattener is not None:
                 param_extension = self.flat_param._param_extensions[i]
                 if param_extension is not None:

@@ -25,8 +25,18 @@ std::vector<int64_t> pool_output_sizes(
 };
 
 inline bool mkldnn_bf16_device_check() {
-  return cpuinfo_initialize() && cpuinfo_has_x86_avx512bw()
-      && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq();
+  return cpuinfo_initialize() && ((cpuinfo_has_x86_avx512bw()
+     && cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512dq()) || (cpuinfo_has_arm_bf16()));
 }
+
+#if defined(__aarch64__)
+inline bool mkldnn_bf16_device_check_arm() {
+  return (cpuinfo_initialize() && cpuinfo_has_arm_bf16());
+}
+#else
+constexpr bool mkldnn_bf16_device_check_arm() {
+  return false;
+}
+#endif
 
 }
