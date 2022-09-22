@@ -46,11 +46,11 @@ __all__ = [
 ]
 
 
-class TensorFlattener:
+class _TensorFlattener:
     """
     This enables a pre-flatten and post-unflatten transform to be applied per
     parameter. To do so, use :func:`_set_tensor_flattener` to set a custom
-    :class:`TensorFlattener` that implements the two transforms.
+    :class:`_TensorFlattener` that implements the two transforms.
     """
 
     def pre_flatten_transform(
@@ -66,10 +66,10 @@ class TensorFlattener:
         ...
 
 
-_flattener: Optional[TensorFlattener] = None
+_flattener: Optional[_TensorFlattener] = None
 
 
-def _set_tensor_flattener(flattener: TensorFlattener) -> None:
+def _set_tensor_flattener(flattener: _TensorFlattener) -> None:
     global _flattener
     _flattener = flattener
 
