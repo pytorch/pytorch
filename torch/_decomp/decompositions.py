@@ -1,4 +1,5 @@
 import functools
+import operator
 from enum import Enum
 from itertools import product
 from typing import Callable, Iterable, List, Optional, Tuple
@@ -11,6 +12,8 @@ from torch._decomp import register_decomposition
 from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
+
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -1082,9 +1085,13 @@ def native_layer_norm_backward(
     M = prod(outer_dims)  # type: ignore[arg-type]
     if M <= 0 or N <= 0:
         return (
-            input.new_zeros(input_shape),
-            input.new_zeros(input_shape[axis:]),
-            input.new_zeros(input_shape[axis:]),
+            input.new_zeros(input_shape) if output_mask[0] else None,
+            input.new_zeros(input_shape[axis:])
+            if output_mask[1] and weight_cast
+            else None,
+            input.new_zeros(input_shape[axis:])
+            if output_mask[2] and bias_cast
+            else None,
         )
 
     x_hat = (input_cast - mean) * rstd
@@ -1579,7 +1586,7 @@ def index_add_(
             utils.is_weakly_lesser_type(type(alpha), python_type),
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
-        tensor = torch._prims.mul(tensor, alpha)
+        tensor = tensor * alpha
     idx = (slice(None),) * dim + (index,)
     torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
     return x
@@ -2030,3 +2037,218 @@ def binary_cross_entropy_with_logits(
         loss = loss * weight
 
     return apply_loss_reduction(loss, reduction)
+
+
+def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
+    dim_tensor1 = tensor1.ndim
+    if dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
+        t1_sizes_ptr = tensor1.shape
+        t1_strides = tensor1.stride()
+        if (
+            dim_tensor1 == 3
+            and dim_tensor2 == 2
+            and t1_strides[-1] != 1
+            and t1_strides[0] == t1_sizes_ptr[1] * t1_sizes_ptr[2]
+        ):
+            # First dim is slowest moving, and then the following two dims are
+            # transposed. This can happen for example by permute(0, 2, 1).
+            # First 2 dims could be folded to use mm but would require permutation
+            # with actual data movement, which can be instead handled by BMM with each
+            # GEMM transposed.
+            # This can be generalized to a tensor with dim X + Y + Z where X, Y, and Z
+            # dims are contiguous, Y dims and Z dims are transposed, and X, Y, Z > 0.
+            # For example, this can happen by permute(0, 1, 5, 2, 3, 4), where X = 2,
+            # Y = 3, and Z = 1.
+            return False
+        else:
+            return True
+    else:
+        return False
+
+
+@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def matmul(tensor1, tensor2):
+    dim_tensor1 = tensor1.dim()
+    dim_tensor2 = tensor2.dim()
+    assert dim_tensor1 != 0 and dim_tensor2 != 0
+    if dim_tensor1 == 1 and dim_tensor2 == 1:
+        return torch.dot(tensor1, tensor2)
+    elif dim_tensor1 == 2 and dim_tensor2 == 1:
+        return torch.mv(tensor1, tensor2)
+    elif dim_tensor1 == 1 and dim_tensor2 == 2:
+        return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
+    elif dim_tensor1 == 2 and dim_tensor2 == 2:
+        # if tensor1.shape[1] != tensor2.shape[0]:
+        #     breakpoint()
+        return torch.mm(tensor1, tensor2)
+    elif should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1):
+        # NB: Much of this was written with Copilot! (although still had to fix a bunch of issues)
+
+        # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
+        # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
+        # and some condition on the strides is fulfilled
+
+        # optimization: use mm instead of bmm by folding the batch of the larger tensor
+        # into its leading matrix dimension
+        transpose = dim_tensor2 > dim_tensor1
+        t1 = tensor2.mT if transpose else tensor1
+        t2 = (
+            tensor2 if not transpose else (tensor1.t() if dim_tensor1 == 2 else tensor1)
+        )
+        # Invariant: t1.dim() >= 3 && (t2.dim() == 1 || t2.dim() == 2)
+        #            and t1 and t2 are matmul-compatible
+
+        # Why not t1.view(-1, sizes_1[-1])?
+        # If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+        # This can happen in e.g. [3, 5, 0] @ [0, 0].
+        sizes_1 = t1.shape
+        output_shape = list(sizes_1[:-1])
+        folded_dim1 = functools.reduce(operator.mul, output_shape)
+
+        # Readjust output_shape if we are multiplying by a matrix
+        t2_is_matrix = t2.dim() == 2
+        if t2_is_matrix:
+            output_shape.append(t2.shape[1])
+        # HACK: We need reshape with symint support
+        t1 = t1.contiguous()
+        t1_folded = t1.view(folded_dim1, sizes_1[-1])
+        if t2_is_matrix:
+            # FIXME This path always does an unnecessary copy when transpose == True as the returned
+            # result from BLAS is already C-transposed
+            output = t1_folded.mm(t2).view(output_shape)
+            return output.mT.contiguous() if transpose else output
+        else:
+            return t1_folded.mv(t2).view(output_shape)
+
+    elif dim_tensor1 >= 1 and dim_tensor2 >= 1:
+        # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
+        # we track m1 vs m2 separately even though they must match for nicer error messages
+        n = tensor1.size(-2) if dim_tensor1 > 1 else 1
+        m1 = tensor1.size(-1)
+        batch_tensor1 = tensor1.shape[:-2]
+        m2 = tensor2.size(-2) if dim_tensor2 > 1 else tensor2.size(-1)
+        p = tensor2.size(-1) if dim_tensor2 > 1 else 1
+        batch_tensor2: List[int] = []
+        # TODO: handling of slice
+        for i in range(dim_tensor2 - 2):
+            batch_tensor2.append(tensor2.size(i))
+
+        # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
+        expand_batch_portion = list(
+            torch.broadcast_shapes(batch_tensor1, batch_tensor2)
+        )
+
+        tensor1_expand_size = expand_batch_portion + [n, m1]
+        tensor2_expand_size = expand_batch_portion + [m2, p]
+
+        expand_batch_product = prod(expand_batch_portion)
+
+        # HACK: We need reshape with symint support
+        tensor1_expanded = (
+            tensor1.expand(tensor1_expand_size)
+            .contiguous()
+            .view(expand_batch_product, n, m1)
+        )
+        tensor2_expanded = (
+            tensor2.expand(tensor2_expand_size)
+            .contiguous()
+            .view(expand_batch_product, m2, p)
+        )
+
+        output_shape = expand_batch_portion
+        if dim_tensor1 > 1:
+            output_shape.append(n)
+
+        if dim_tensor2 > 1:
+            output_shape.append(p)
+
+        return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
+    else:
+        utils.check(False, lambda: "both arguments to matmul need to be at least 1D")
+
+
+@register_decomposition(aten.upsample_bicubic2d.default)
+@out_wrapper()
+@pw_cast_for_opmath
+def upsample_bicubic2d_default(
+    a: Tensor,
+    output_size: Tuple[int, int],
+    align_corners: bool,
+    scale_h: Optional[float] = None,
+    scale_w: Optional[float] = None,
+) -> Tensor:
+    N, C, iH, iW = a.shape
+    oH, oW = output_size
+
+    def compute_scale(in_size, out_size, align_corners, scale=None):
+        if align_corners:
+            return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
+        else:
+            return 1 / scale if scale is not None and scale > 0 else in_size / out_size
+
+    def compute_source_index(scale, dst_index, align_corners):
+        if align_corners:
+            return scale * dst_index
+        else:
+            return scale * (dst_index + 0.5) - 0.5
+
+    height_scale = compute_scale(iH, oH, align_corners, scale_h)
+    width_scale = compute_scale(iW, oW, align_corners, scale_w)
+
+    N_idx = torch.arange(N, device=a.device).view(N, 1, 1, 1)
+    C_idx = torch.arange(C, device=a.device).view(1, C, 1, 1)
+    out_y = torch.arange(oH, device=a.device).view((1, 1, oH, 1))
+    out_x = torch.arange(oW, device=a.device).view((1, 1, 1, oW))
+
+    real_x = compute_source_index(width_scale, out_x, align_corners)
+    in_x = real_x.floor()
+    t_x = real_x - in_x
+    ix = in_x.to(dtype=torch.int64)
+
+    real_y = compute_source_index(height_scale, out_y, align_corners)
+    in_y = real_y.floor()
+    t_y = real_y - in_y
+    iy = in_y.to(dtype=torch.int64)
+
+    iys_ofs = (iy - 1, iy, iy + 1, iy + 2)
+    ixs_ofs = (ix - 1, ix, ix + 1, ix + 2)
+
+    def load_bounded(ys, xs):
+        y_idx = torch.clamp(ys, 0, iH - 1)
+        x_idx = torch.clamp(xs, 0, iW - 1)
+        return a[N_idx, C_idx, y_idx, x_idx]
+
+    def get_x_interp(y):
+        coeffs_x = tuple((load_bounded(y, x_ofs) for x_ofs in ixs_ofs))
+        return _upsample_cubic_interp1d(coeffs_x, t_x)
+
+    coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
+    return _upsample_cubic_interp1d(coeffs_y, t_y)
+
+
+@register_decomposition(aten.upsample_bicubic2d.vec)
+@out_wrapper()
+@pw_cast_for_opmath
+def upsample_bicubic2d_vec(
+    a: Tensor,
+    output_size: Optional[Tuple[int, int]],
+    align_corners: bool,
+    scale_factors: Optional[Tuple[float, float]] = None,
+) -> Tensor:
+    def compute_output_size(input_size, output_size=None, scale_factors=None):
+        utils.check(
+            bool(output_size) + bool(scale_factors) == 1,
+            lambda: "Must specify exactly one of output_size and scale_factors.",
+        )
+        if output_size:
+            return output_size
+        else:
+            return tuple(
+                int(w * scale) for w, scale in zip(input_size[2:], scale_factors)
+            )
+
+    output_size = compute_output_size(a.shape, output_size, scale_factors)
+    scale_h = scale_factors[0] if scale_factors else None
+    scale_w = scale_factors[1] if scale_factors else None
+    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
+
