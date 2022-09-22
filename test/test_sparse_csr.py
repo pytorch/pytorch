@@ -2018,7 +2018,11 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.to_dense(), out.to_dense())
             self.assertEqual(actual.to_dense(), expected)
 
-        mnk = itertools.product([2, 5], repeat=3)
+        mnk = list(itertools.product([2, 5], repeat=3))
+
+        # Add a test case for size 0 a and b tensors
+        mnk = mnk + [(5, 5, 0)]
+
         batch_shapes = [(), (2,), (2, 3)] if self.device_type == 'cuda' else [(), ]
         tf = [True, False]
         for index_dtype in [torch.int32, torch.int64]:
