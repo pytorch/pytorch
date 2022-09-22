@@ -2590,6 +2590,7 @@ class TestQuantizeFx(QuantizationTestCase):
             @classmethod
             def from_observed(cls, observed_module):
                 assert hasattr(observed_module, 'qconfig')
+                observed_module.linear.qconfig = observed_module.qconfig
                 quantized = cls(nnqd.Linear.from_float(observed_module.linear))
                 return quantized
 
@@ -2664,7 +2665,7 @@ class TestQuantizeFx(QuantizationTestCase):
             example_inputs = (torch.randn(3, 3),)
             # check prepared model
             m = prepare_fx(
-                original_m,
+                copy.deepcopy(original_m),
                 qconfig_dict,
                 example_inputs=example_inputs,
                 prepare_custom_config=prepare_custom_config_dict)
@@ -2691,7 +2692,8 @@ class TestQuantizeFx(QuantizationTestCase):
             res = m(*example_inputs)
 
             # quantize the reference model
-            ref_m = prepare_fx(original_ref_m, qconfig_dict, example_inputs=example_inputs)
+            ref_m = prepare_fx(
+                copy.deepcopy(original_ref_m), qconfig_dict, example_inputs=example_inputs)
             ref_m(*example_inputs)
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(*example_inputs)
@@ -4793,18 +4795,18 @@ class TestQuantizeFx(QuantizationTestCase):
         dtype_config = DTypeConfig(
             input_dtype=DTypeWithConstraints(
                 dtype=torch.quint8,
-                quant_min=0,
-                quant_max=31,
+                quant_min_lower_bound=0,
+                quant_max_upper_bound=31,
             ),
             output_dtype=DTypeWithConstraints(
                 dtype=torch.quint8,
-                quant_min=0,
-                quant_max=31,
+                quant_min_lower_bound=0,
+                quant_max_upper_bound=31,
             ),
             weight_dtype=DTypeWithConstraints(
                 dtype=torch.qint8,
-                quant_min=-64,
-                quant_max=63,
+                quant_min_lower_bound=-64,
+                quant_max_upper_bound=63,
             ),
             bias_dtype=torch.float,
         )
@@ -4860,9 +4862,9 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.linear(x)
 
         dtype_config = DTypeConfig(
-            input_dtype=DTypeWithConstraints(dtype=torch.quint8, scale_min=2 ** -12),
-            output_dtype=DTypeWithConstraints(dtype=torch.quint8, scale_min=2 ** -12),
-            weight_dtype=DTypeWithConstraints(dtype=torch.qint8, scale_min=2 ** -12),
+            input_dtype=DTypeWithConstraints(dtype=torch.quint8, scale_min_lower_bound=2 ** -12),
+            output_dtype=DTypeWithConstraints(dtype=torch.quint8, scale_min_lower_bound=2 ** -12),
+            weight_dtype=DTypeWithConstraints(dtype=torch.qint8, scale_min_lower_bound=2 ** -12),
             bias_dtype=torch.float,
         )
 
@@ -4883,27 +4885,27 @@ class TestQuantizeFx(QuantizationTestCase):
             else:
                 prepare_fx(MyModel(), qconfig_mapping, example_inputs, backend_config=backend_config)
 
-        # Case 1: QConfig eps == backend min scale value, OK
+        # Case 1: QConfig min scale value == backend min scale value, OK
         qconfig1 = default_symmetric_qnnpack_qconfig
         validate_qconfig(qconfig1)
 
-        # Case 2: QConfig eps < backend min scale value, OK
+        # Case 2: QConfig min scale value > backend min scale value, OK
         qconfig2 = QConfig(
-            activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=2 ** -14),
-            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=2 ** -14))
+            activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=2 ** -10),
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=2 ** -10))
         validate_qconfig(qconfig2)
 
-        # Case 3: QConfig activation eps > backend min scale value, should fail
+        # Case 3: QConfig activation min scale value < backend min scale value, should fail
         qconfig3 = QConfig(
-            activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=123),
+            activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=2 ** -14),
             weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
-        validate_qconfig(qconfig3, "QConfig eps .* must be less than or equal to the backend's min scale value")
+        validate_qconfig(qconfig3, "QConfig eps .* must be greater than or equal to the backend's min scale value")
 
-        # Case 4: QConfig weight eps > backend min scale value, should fail
+        # Case 3: QConfig weight min scale value < backend min scale value, should fail
         qconfig4 = QConfig(
             activation=MinMaxObserver.with_args(dtype=torch.quint8),
-            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=234))
-        validate_qconfig(qconfig4, "QConfig eps .* must be less than or equal to the backend's min scale value")
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=2 ** -14))
+        validate_qconfig(qconfig4, "QConfig eps .* must be greater than or equal to the backend's min scale value")
 
         # Case 5: QConfig doesn't specify eps, should fail
         qconfig5 = QConfig(

@@ -40,16 +40,16 @@ class TestBackendConfig(QuantizationTestCase):
 
     activation_dtype_with_constraints = DTypeWithConstraints(
         dtype=torch.quint8,
-        quant_min=0,
-        quant_max=127,
-        scale_min=2 ** -12,
+        quant_min_lower_bound=0,
+        quant_max_upper_bound=127,
+        scale_min_lower_bound=2 ** -12,
     )
 
     weight_dtype_with_constraints = DTypeWithConstraints(
         dtype=torch.qint8,
-        quant_min=-128,
-        quant_max=127,
-        scale_min=2 ** -12,
+        quant_min_lower_bound=-128,
+        quant_max_upper_bound=127,
+        scale_min_lower_bound=2 ** -12,
     )
 
     dtype_config3 = DTypeConfig(

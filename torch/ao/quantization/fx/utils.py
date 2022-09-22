@@ -169,7 +169,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     if hasattr(activation_post_process, "compute_dtype"):
         compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
-    if dtype in [torch.quint8, torch.qint8]:
+    if dtype in [torch.quint8, torch.qint8] and \
+            not hasattr(activation_post_process, 'compute_dtype'):
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
@@ -181,11 +182,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             quantize_op = torch.quantize_per_tensor
-    elif dtype == torch.float16:
-        node_type = "call_method"
-        quantize_op = "to"
-        qparams = {"_dtype_": dtype}
-    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # TODO(future PR): switch compute_dtype to is_dynamic
         # dynamic quantization
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic
@@ -193,6 +191,10 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         # reduce_range = activation_post_process.reduce_range
         reduce_range = torch.backends.quantized.engine == "fbgemm"
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
+    elif dtype == torch.float16:
+        node_type = "call_method"
+        quantize_op = "to"
+        qparams = {"_dtype_": dtype}
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
         return None
@@ -659,36 +661,38 @@ def _validate_qconfig_against_dtype_config(
     """
     Validate whether the QConfig satisfies all of the following constraints from the backend:
         1. QConfig specified a quantization range that falls within the backend's, if any
-        2. QConfig specified an eps value that is <= the backend's min scale value, if any
+        2. QConfig specified a min scale value that is >= the backend's min scale value, if any
     """
     def validate_activation_post_process(
             activation_post_process_ctr: Union[_PartialWrapper, Type[ObserverBase]],
             dtype_with_constraints: DTypeWithConstraints,
             debug_string: str):
         activation_post_process = activation_post_process_ctr()  # type: ignore[call-arg]
-        qconfig_qmin = getattr(activation_post_process, "quant_min", None)
-        qconfig_qmax = getattr(activation_post_process, "quant_max", None)
-        qconfig_eps = getattr(activation_post_process, "eps", None)
-        backend_qmin = dtype_with_constraints.quant_min
-        backend_qmax = dtype_with_constraints.quant_max
-        backend_scale_min = dtype_with_constraints.scale_min
+        qconfig_quant_min = getattr(activation_post_process, "quant_min", None)
+        qconfig_quant_max = getattr(activation_post_process, "quant_max", None)
+        # TODO: for now, just use the existing eps value as scale_min. In the future, we should
+        # resolve the differences between the two, either by renaming eps or some other way
+        qconfig_scale_min = getattr(activation_post_process, "eps", None)
+        backend_quant_min = dtype_with_constraints.quant_min_lower_bound
+        backend_quant_max = dtype_with_constraints.quant_max_upper_bound
+        backend_scale_min = dtype_with_constraints.scale_min_lower_bound
         # validate quantization ranges
-        if backend_qmin is not None and backend_qmax is not None:
-            if qconfig_qmin is None or qconfig_qmax is None:
+        if backend_quant_min is not None and backend_quant_max is not None:
+            if qconfig_quant_min is None or qconfig_quant_max is None:
                 raise ValueError("QConfig must specify 'quant_min' and 'quant_max' for '%s' %s:\n%s" %
                                  (pattern, debug_string, qconfig))
-            elif qconfig_qmin < backend_qmin or qconfig_qmax > backend_qmax:
+            elif qconfig_quant_min < backend_quant_min or qconfig_quant_max > backend_quant_max:
                 raise ValueError(("QConfig quantization range for '%s' %s must fall within the backend's:\n"
                                  "QConfig = (%s, %s), BackendConfig = (%s, %s)\n%s") % (pattern, debug_string,
-                                 qconfig_qmin, qconfig_qmax, backend_qmin, backend_qmax, qconfig))
+                                 qconfig_quant_min, qconfig_quant_max, backend_quant_min, backend_quant_max, qconfig))
         # validate scale min
         if backend_scale_min is not None:
-            if qconfig_eps is None:
+            if qconfig_scale_min is None:
                 raise ValueError("QConfig must specify 'eps' for '%s' %s:\n%s" % (pattern, debug_string, qconfig))
-            elif qconfig_eps > backend_scale_min:
-                raise ValueError(("QConfig eps for '%s' %s (%s) must be less than or equal to "
+            elif qconfig_scale_min < backend_scale_min:
+                raise ValueError(("QConfig eps for '%s' %s (%s) must be greater than or equal to "
                                  "the backend's min scale value (%s):\n%s") %
-                                 (pattern, debug_string, qconfig_eps, backend_scale_min, qconfig))
+                                 (pattern, debug_string, qconfig_scale_min, backend_scale_min, qconfig))
 
     if dtype_config.input_dtype is not None:
         validate_activation_post_process(qconfig.activation, dtype_config.input_dtype, "activation")

@@ -17,13 +17,6 @@ __all__ = [
 ]
 
 
-# DTypeWithConstraints dict keys
-DTYPE_DICT_KEY = "dtype"
-QUANT_MIN_DICT_KEY = "quant_min"
-QUANT_MAX_DICT_KEY = "quant_max"
-SCALE_MIN_DICT_KEY = "scale_min"
-SCALE_MAX_DICT_KEY = "scale_max"
-
 # DTypeConfig dict keys
 INPUT_DTYPE_DICT_KEY = "input_dtype"
 OUTPUT_DTYPE_DICT_KEY = "output_dtype"
@@ -80,10 +73,10 @@ class DTypeWithConstraints:
     ranges and scale value ranges, to be used in :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
     """
     dtype: torch.dtype
-    quant_min: Optional[float] = None
-    quant_max: Optional[float] = None
-    scale_min: Optional[float] = None
-    scale_max: Optional[float] = None
+    quant_min_lower_bound: Optional[Union[int, float]] = None
+    quant_max_upper_bound: Optional[Union[int, float]] = None
+    scale_min_lower_bound: Optional[Union[int, float]] = None
+    scale_max_upper_bound: Optional[Union[int, float]] = None
 
 
 @dataclass
