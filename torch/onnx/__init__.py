@@ -28,6 +28,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset17,
     utils,
 )
+# TODO(After 1.13 release): Remove the deprecated SymbolicContext
 from ._exporter_states import ExportTypes, SymbolicContext
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
@@ -67,8 +68,6 @@ __all__ = [
     "TrainingMode",
     "TensorProtoDataType",
     "JitScalarType",
-    # Classes
-    "SymbolicContext",
     # Public functions
     "export",
     "export_to_pretty_string",
@@ -87,7 +86,6 @@ __all__ = [
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
-SymbolicContext.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
