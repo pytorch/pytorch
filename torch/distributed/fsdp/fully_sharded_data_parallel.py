@@ -226,7 +226,8 @@ class MixedPrecision:
 class CPUOffload:
     """
     CPU offloading config. Currently, only parameter and gradient CPU
-    offload are supported.
+    offload are supported. In the future, this may be enhanced to support
+    offload to other destinations, such as NVME-backed SSD.
     offload_params: Offloading parameters to CPUs when these parameters are
                     not used for computation on GPUs. This implicitly enables
                     gradient offloading to CPUs in order for parameters and
@@ -368,6 +369,10 @@ _state_dict_type_to_config = {
 }
 
 class OptimStateKeyType(Enum):
+    """
+    An enum specifying whether to rekey optimizer state dict
+    with parameter names or parameter IDs.
+    """
     PARAM_NAME = auto()
     PARAM_ID = auto()
 
