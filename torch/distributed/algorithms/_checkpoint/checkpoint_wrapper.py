@@ -206,7 +206,7 @@ def checkpoint_wrapper(
     )
 
 
-def apply_activation_checkpointing_wrapper(
+def apply_activation_checkpointing(
     model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=lambda _: True
 ):
     """
