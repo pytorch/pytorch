@@ -115,7 +115,7 @@ def create_symbolic_tensor(name, arg, shape_env):
     return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
 
 
-CPP_SYMINT_CLASS = type(torch._C.SymIntNode.new_symint(1))
+CPP_SYMINT_CLASS = type(torch.SymIntNode.new_symint(1))
 
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
@@ -300,13 +300,26 @@ class TestPySymInt(TestCase):
         # tuple of ints, not tuple
         torch.fx.symbolic_trace(m)
 
-
     @skipIfNoSympy
     def test_meta_symint(self):
         shape_env = ShapeEnv()
         a0 = shape_env.create_symint("a0", 2)
         r = torch.empty(a0, device='meta')
         self.assertIsInstance(r.shape[0], CPP_SYMINT_CLASS)
+
+    @skipIfNoSympy
+    def test_guard_int(self):
+        shape_env = ShapeEnv()
+        a0 = shape_env.create_symint("a0", 2)
+        self.assertEqual(a0.guard_int(), 2)
+        self.assertEqual(str(shape_env.guards[0][0]), "a0")
+        self.assertEqual(shape_env.guards[0][1], 2)
+
+    @skipIfNoSympy
+    def test_int_conversion(self):
+        shape_env = ShapeEnv()
+        a0 = shape_env.create_symint("a0", 2)
+        self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
 
 
 if __name__ == '__main__':

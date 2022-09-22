@@ -2114,7 +2114,7 @@ struct MemoryFormatType;
 using MemoryFormatTypePtr = SingletonTypePtr<MemoryFormatType>;
 struct TORCH_API MemoryFormatType : public EnumerationType<TypeKind::MemoryFormatType> {
 std::string str() const override {
-return "MemoryFormatType";
+return "MemoryFormat";
 }
 static const TypeKind Kind = TypeKind::MemoryFormatType;
 // global singleton
@@ -2128,7 +2128,7 @@ struct LayoutType;
 using LayoutTypePtr = SingletonTypePtr<LayoutType>;
 struct TORCH_API LayoutType : public EnumerationType<TypeKind::LayoutType> {
 std::string str() const override {
-return "LayoutType";
+return "Layout";
 }
 static const TypeKind Kind = TypeKind::LayoutType;
 // global singleton
