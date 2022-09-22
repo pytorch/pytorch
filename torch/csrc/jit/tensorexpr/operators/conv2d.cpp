@@ -4,6 +4,9 @@
 #include <torch/csrc/jit/tensorexpr/operators/conv2d.h>
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/Utils.h>
+#endif
 
 namespace torch {
 namespace jit {
@@ -328,6 +331,11 @@ bool mkldnnPrepackedConvIsSupported(
   if (!is_fp32 && !is_bf16) {
     GRAPH_DEBUG(
         "mkldnnPrepackedConvIsSupported: only float32 of bfloat16 allowed");
+    return false;
+  }
+  if (is_bf16 && !at::mkldnn_bf16_device_check()) {
+    GRAPH_DEBUG(
+        "mkldnnPrepackedConvIsSupported: mkldnn bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
     return false;
   }
   if (input.dims.size() != 4 || weight.dims.size() != 4) {
