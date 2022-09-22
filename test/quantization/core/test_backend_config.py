@@ -81,6 +81,7 @@ class TestBackendConfig(QuantizationTestCase):
     dtype_config_dict2 = {
         "input_dtype": DTypeWithConstraints(dtype=torch.float16),
         "output_dtype": DTypeWithConstraints(dtype=torch.float),
+        "weight_dtype": DTypeWithConstraints(),
         "is_dynamic": True,
     }
 
@@ -101,20 +102,6 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(self.dtype_config1.to_dict(), self.dtype_config_dict1)
         self.assertEqual(self.dtype_config2.to_dict(), self.dtype_config_dict2)
         self.assertEqual(self.dtype_config3.to_dict(), self.dtype_config_dict3)
-
-    def test_get_dtype(self):
-        self.assertEqual(self.dtype_config1.get_input_dtype(), torch.quint8)
-        self.assertEqual(self.dtype_config1.get_output_dtype(), torch.quint8)
-        self.assertEqual(self.dtype_config1.get_weight_dtype(), torch.qint8)
-        self.assertEqual(self.dtype_config1.get_bias_dtype(), torch.float)
-        self.assertEqual(self.dtype_config2.get_input_dtype(), torch.float16)
-        self.assertEqual(self.dtype_config2.get_output_dtype(), torch.float)
-        self.assertEqual(self.dtype_config2.get_weight_dtype(), None)
-        self.assertEqual(self.dtype_config2.get_bias_dtype(), None)
-        self.assertEqual(self.dtype_config3.get_input_dtype(), torch.quint8)
-        self.assertEqual(self.dtype_config3.get_output_dtype(), torch.quint8)
-        self.assertEqual(self.dtype_config3.get_weight_dtype(), torch.qint8)
-        self.assertEqual(self.dtype_config3.get_bias_dtype(), None)
 
     # ======================
     #  BackendPatternConfig

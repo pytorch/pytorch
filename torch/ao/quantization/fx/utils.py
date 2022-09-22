@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.ao.quantization import (
     QuantType,
-    QConfig,
+    QConfigAny,
 )
 from torch.ao.quantization.backend_config import (
     BackendConfig,
@@ -655,7 +655,7 @@ def get_skipped_module_name_and_classes(
     return skipped_module_names, skipped_module_classes
 
 def _validate_qconfig_against_dtype_config(
-        qconfig: QConfig,
+        qconfig: QConfigAny,
         dtype_config: DTypeConfig,
         pattern: Pattern):
     """
@@ -693,7 +693,8 @@ def _validate_qconfig_against_dtype_config(
                 raise ValueError(("QConfig eps for '%s' %s (%s) must be greater than or equal to "
                                  "the backend's min scale value (%s):\n%s") %
                                  (pattern, debug_string, qconfig_scale_min, backend_scale_min, qconfig))
-
+    if qconfig is None:
+        return
     if dtype_config.input_dtype is not None:
         validate_activation_post_process(qconfig.activation, dtype_config.input_dtype, "activation")
     if dtype_config.output_dtype is not None:

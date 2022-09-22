@@ -182,15 +182,15 @@ def is_input_arg_dtype_supported_by_backend(
             qconfig_dtype, qconfig_is_dynamic = None, None
         # TODO(future PR): remove the cast to bool below after figuring
         # out why backend_config has is_dynamic set to None in some cases.
-        return (dtype_config.get_input_dtype() is None) or \
-            (dtype_config.get_input_dtype() == qconfig_dtype and
+        return (dtype_config.input_dtype.dtype is None) or \
+            (dtype_config.input_dtype.dtype == qconfig_dtype and
              bool(dtype_config.is_dynamic) == bool(qconfig_is_dynamic))
     elif is_weight:
-        weight_dtype = dtype_config.get_weight_dtype()
+        weight_dtype = dtype_config.weight_dtype.dtype
         return weight_dtype is None or \
             node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
     else:  # bias
-        bias_dtype = dtype_config.get_bias_dtype()
+        bias_dtype = dtype_config.bias_dtype
         return bias_dtype is None or \
             node_name_to_target_dtype[node.name]["bias_dtype"][0] == bias_dtype  # type: ignore[index]
 
@@ -202,7 +202,7 @@ def is_output_dtype_supported_by_backend(
     """ Check if the configured qconfig for the output
     is supported by the backend or not
     """
-    output_dtype = dtype_config.get_output_dtype()
+    output_dtype = dtype_config.output_dtype.dtype
     return output_dtype is None or \
         output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"][0]  # type: ignore[index]
 
@@ -218,16 +218,20 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
             return False
     return True
 
-def _get_supported_pattern_dtype_config(
+def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     pattern: Pattern,
+    qconfig: QConfigAny,
     matched_node_pattern: List[Node],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
     backend_config: BackendConfig,
-) -> Optional[DTypeConfig]:
-    """ Check if the dtype configuration of a pattern is supported by
-    the backend or not, and, if so, return the supported `DTypeConfig`.
+) -> bool:
+    """ Check is the dtype configuration of a pattern is supported by
+    the backend or not. If so, also validate whether the qconfig satisfies
+    constraints in the supported dtype config, if any.
     """
-    assert len(matched_node_pattern) >= 1
+    if backend_config is None or pattern is None:
+        return True
+    assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs: List[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
 
@@ -246,8 +250,9 @@ def _get_supported_pattern_dtype_config(
         supported = supported and is_output_dtype_supported_by_backend(
             output_node, node_name_to_target_dtype, dtype_config)
         if supported:
-            return dtype_config
-    return None
+            _validate_qconfig_against_dtype_config(qconfig, dtype_config, pattern)
+            return True
+    return False
 
 def get_standalone_module_configs(
     node: Node,
@@ -1228,17 +1233,8 @@ def insert_observers_for_model(
                 not node.op == 'output'
             )
 
-            # Check whether this pattern's dtype is supported by the backend
-            if pattern is not None and matched_node_pattern is not None and backend_config is not None:
-                supported_dtype_config = _get_supported_pattern_dtype_config(
-                    pattern, matched_node_pattern, node_name_to_target_dtype, backend_config)
-                is_supported_by_backend = supported_dtype_config is not None
-            else:
-                supported_dtype_config = None
-                is_supported_by_backend = True
-
-            if qconfig is not None and supported_dtype_config is not None:
-                _validate_qconfig_against_dtype_config(qconfig, supported_dtype_config, pattern)
+            is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
+                pattern, qconfig, matched_node_pattern, node_name_to_target_dtype, backend_config)
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
