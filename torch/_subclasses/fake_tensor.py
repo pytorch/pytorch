@@ -728,16 +728,10 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
 
-        functions_with_cpp_meta_impl_that_support_symint = [
-            aten.empty_strided.default,
-            aten.as_strided.default,
-            aten.zeros.default,
-            aten.detach.default,
-        ]
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
-            and func not in functions_with_cpp_meta_impl_that_support_symint
+            and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
             # TODO: Find better approach for this
             # Avoid circular import
@@ -779,78 +773,56 @@ class FakeTensorMode(TorchDispatchMode):
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            if func not in functions_with_cpp_meta_impl_that_support_symint:
+            if func not in self.functions_with_cpp_meta_impl_that_support_symint:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
 
         with no_dispatch():
-            # if we are in the dispatch mode, we will enter this function even if the inputs
-            # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
-            # and just support constructors. TODO: extend more broadly
-            conversion_made = False
-            subclass_seen = False
-
-            def check_non_fake_tensor(x):
-                nonlocal conversion_made, subclass_seen
-                conversion_made = conversion_made or (
-                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
-                )
-                subclass_seen = subclass_seen or (
-                    isinstance(x, torch.Tensor)
-                    and not isinstance(x, FakeTensor)
-                    and type(x) is not torch.Tensor
-                    and type(x) is not torch.nn.Parameter
-                )
-
-            tree_map(check_non_fake_tensor, args)
-            tree_map(check_non_fake_tensor, kwargs)
-
-            # Suppose we enable fake tensor mode.  This means that fake tensor
-            # mode will run first.  But what if we do an operation that
-            # involves a tensor subclass that will desugar into normal tensor
-            # operations?  Without this line, fake tensor mode will run first,
-            # decide that a conversion was made (since there was a non fake
-            # tensor argument), and report an error that converting non
-            # fake tensor is not supported.  What we actually wanted to happen
-            # was to give the subclass a chance to figure out what it wants to
-            # before erroring out.  Returning NotImplemented here allows this.
-            #
+            # See [subclass inputs] below
             # NB: If you're seeing a mysterious infinite loop involving fake
             # tensor, it might be related to this line.  Though I'm not sure
             # how you'll know to read this comment, as this line won't show up
             # in the stack trace.
-            if subclass_seen:
+            if self.check_for_subclass(flat_arg_tensors):
                 return NotImplemented
+
+            # if we are in the dispatch mode, we will enter this function even if the inputs
+            # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
+            # and just support constructors.
 
             # this is generated from torch.tensor(), which does not use the
             # dispatcher, to allow wrapper subclasses to wrap the new tensor
-            # we need to handle before error checking
             if func in self.lift_fns:
                 assert (
                     len(kwargs) == 0
                     and len(args) == 1
                     and type(args[0]) is torch.Tensor
                 ), f"{args} {kwargs}"
-                with no_dispatch():
-                    return converter(self, args[0])
+                return converter(self, args[0])
 
-            if conversion_made:
+            if self.check_for_non_fake(flat_arg_tensors):
                 raise Exception(
                     "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
                     f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
                 )
 
+            # special handling for funcs registered through `register_op_impl`,
+            # e.g., manipulating args on constructor calls to construct meta tensors
+            # and then afterwards wrapping them to a FakeTensor
             for run_impl_check, op_impl in op_implementations:
                 if run_impl_check(func):
                     op_impl_out = op_impl(self, func, *args, **kwargs)
                     if op_impl_out != NotImplemented:
                         return op_impl_out
 
+            # run kernel registered to meta for func, which include
+            # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
             try:
                 with in_kernel_invocation_manager(self):
                     r = func(*args, **kwargs)
             except NotImplementedError as not_implemented_error:
+                # no meta kernel registered, fallback to kernel for the device
                 if not self.allow_fallback_kernels:
                     raise not_implemented_error
                 return run_fallback_kernel(
@@ -860,6 +832,30 @@ class FakeTensorMode(TorchDispatchMode):
             return self.wrap_meta_outputs_with_default_device_logic(
                 r, func, args, kwargs
             )
+
+    # [subclass inputs]
+    # Suppose we enable fake tensor mode.  This means that fake tensor
+    # mode will run first.  But what if we do an operation that
+    # involves a tensor subclass that will desugar into normal tensor
+    # operations?  Without returning NotImplemented, fake tensor mode will run first,
+    # decide that a conversion was made (since there was a non fake
+    # tensor argument), and report an error that converting non
+    # fake tensor is not supported.  What we actually wanted to happen
+    # was to give the subclass a chance to figure out what it wants to
+    # before erroring out. Returning NotImplemented here allows this.
+    def check_for_subclass(self, flat_arg_tensors):
+        return any(
+            not isinstance(x, FakeTensor)
+            and type(x) is not torch.Tensor
+            and type(x) is not torch.nn.Parameter
+            for x in flat_arg_tensors
+        )
+
+    def check_for_non_fake(self, flat_arg_tensors):
+        return any(
+            isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+            for x in flat_arg_tensors
+        )
 
     def wrap_meta_outputs_with_default_device_logic(self, r, func, args, kwargs):
         wrap = self.gen_wrap_fn(func, args, kwargs)
@@ -886,6 +882,15 @@ class FakeTensorMode(TorchDispatchMode):
                 return e
 
         return wrap
+
+    @property
+    def functions_with_cpp_meta_impl_that_support_symint(self):
+        return [
+            aten.empty_strided.default,
+            aten.as_strided.default,
+            aten.zeros.default,
+            aten.detach.default,
+        ]
 
     @property
     def lift_fns(self):
