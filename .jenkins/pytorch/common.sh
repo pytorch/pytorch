@@ -44,3 +44,7 @@ if [[ "${TEST_CONFIG:-}" == *xla* ]] || \
     sudo yum -y remove cmake3 || true
   fi
 fi
+
+retry () {
+  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+}
