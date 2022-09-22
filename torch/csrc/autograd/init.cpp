@@ -661,6 +661,15 @@ static PyObject* len_torch_function_stack(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* get_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_mode();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS;
+}
+
 static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
@@ -790,6 +799,7 @@ static PyMethodDef methods[] = { // NOLINT
      len_torch_function_stack,
      METH_NOARGS,
      nullptr},
+    {"_get_torch_dispatch_mode", get_torch_dispatch_mode, METH_NOARGS, nullptr},
     {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
     {"_push_on_torch_dispatch_stack",
      push_on_torch_dispatch_stack,
