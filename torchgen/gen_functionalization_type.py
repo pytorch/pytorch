@@ -89,7 +89,7 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
   if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
     return self.reshape(size);
   } else {
-    auto output = at::_ops::view::call(self, c10::SymIntArrayRef::fromIntArrayRef(size));
+    auto output = at::_ops::view::call(self, c10::fromIntArrayRef(size));
     return output.clone();
   }
 }

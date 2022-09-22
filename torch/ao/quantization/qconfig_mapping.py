@@ -12,6 +12,7 @@ from .observer import (
     _PartialWrapper,
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
+    default_placeholder_observer,
     default_weight_observer,
 )
 from .qconfig import (
@@ -73,6 +74,10 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     else:
         qconfig_transpose = qconfig
 
+    # currently layernorm only supports float weights
+    # we have to add this because otherwise there will be a extra quantize-dequantize pair
+    qconfig_layernorm = QConfig(activation=qconfig.activation, weight=default_placeholder_observer)
+
     qconfig_mapping = QConfigMapping() \
         .set_global(qconfig) \
         .set_object_type("reshape", default_reuse_input_qconfig) \
@@ -95,7 +100,9 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
         .set_object_type(torch.relu, qconfig) \
         .set_object_type(torch.nn.BatchNorm1d, qconfig) \
         .set_object_type(torch.nn.BatchNorm2d, qconfig) \
-        .set_object_type(torch.nn.BatchNorm3d, qconfig)
+        .set_object_type(torch.nn.BatchNorm3d, qconfig) \
+        .set_object_type(torch.nn.functional.layer_norm, qconfig_layernorm) \
+        .set_object_type(torch.nn.LayerNorm, qconfig_layernorm) \
 
     # Use special observers for ops with fixed qparams
     fixed_qparams_observer_to_qconfig: Dict[Any, QConfigAny] = {}
@@ -144,9 +151,13 @@ class QConfigMapping:
     The user can specify QConfigs using the following methods (in increasing match priority):
 
         ``set_global`` : sets the global (default) QConfig
+
         ``set_object_type`` : sets the QConfig for a given module type, function, or method name
+
         ``set_module_name_regex`` : sets the QConfig for modules matching the given regex string
+
         ``set_module_name`` : sets the QConfig for modules matching the given module name
+
         ``set_module_name_object_type_order`` : sets the QConfig for modules matching a combination
         of the given module name, object type, and the index at which the module appears
 
