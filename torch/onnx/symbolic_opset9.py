@@ -5348,7 +5348,7 @@ def index(g: torchscript.GraphContext, self, index):
         if not symbolic_helper._is_none(index) and (
             index.type().scalarType() == "Byte" or symbolic_helper._is_bool(index)
         ):
-            if GLOBALS.export_onnx_opset_version < 9:
+            if g.opset < 9:
                 raise errors.SymbolicValueError(
                     "Exporting masked indices are only supported after ONNX opset 9.",
                     self,
