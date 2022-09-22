@@ -149,11 +149,6 @@ pytest-xdist
 #Pinned versions:
 #test that import:
 
-pytest-shard
-#Description: plugin spliting up tests in pytest
-#Pinned versions:
-#test that import:
-
 pytest-rerunfailures
 #Description: plugin for rerunning tests in pytest
 #Pinned versions:

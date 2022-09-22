@@ -97,6 +97,29 @@ static std::pair<Tensor, int64_t> remove_existing_batch_dim(
   return std::make_pair(batched->value(), batched->bdim());
 }
 
+// Poor man's version of np.moveaxis. Moves the dimension at `dst` to `src`
+// while preserving the order of other existing dimensions.
+// We should probably add np.moveaxis (it is more general) to PyTorch. (#36048)
+// When we do, replace the following with it.
+static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
+  auto logical_dim = self.dim();
+  src = at::maybe_wrap_dim(src, logical_dim);
+  dst = at::maybe_wrap_dim(dst, logical_dim);
+  if (src == dst) {
+    return self;
+  }
+  VmapDimVector permutation;
+  permutation.reserve(logical_dim);
+  for (int64_t dim = 0; dim < logical_dim; dim++) {
+    if (dim == src) {
+      continue;
+    }
+    permutation.push_back(dim);
+  }
+  permutation.insert(permutation.begin() + dst, src);
+  return self.permute(permutation);
+}
+
 // Removes the batch dim with level `level` from `self`. If this causes the
 // last batch dim to be removed from a BatchedTensor, then this returns a
 // regular Tensor.
@@ -136,7 +159,7 @@ Tensor _remove_batch_dim(
   int64_t newly_exposed_logical_dim;
   std::tie(self_without_bdim, newly_exposed_logical_dim) =
       remove_existing_batch_dim(batched, level);
-  auto result = self_without_bdim.movedim(newly_exposed_logical_dim, out_dim);
+  auto result = _movedim(self_without_bdim, newly_exposed_logical_dim, out_dim);
   return result;
 }
 
