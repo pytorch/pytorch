@@ -184,7 +184,7 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
 }
 
-for method, _func in magic_methods.items():
+for method, func in magic_methods.items():
     def _create_magic_impl(func):
         method_name = method
 
@@ -201,12 +201,12 @@ for method, _func in magic_methods.items():
             return PySymInt(out, self.shape_env)
         return magic_impl
 
-    _func = lru_cache(256)(_func)
+    func = lru_cache(256)(func)
     # this should be wrapped transparently into torch.SymIntNode
-    setattr(PySymInt, method, _create_magic_impl(_func))
-    setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
+    setattr(PySymInt, method, _create_magic_impl(func))
+    setattr(PySymInt, f"__{method}__", _create_magic_impl(func))
     if method in reflectable_magic_methods:
-        setattr(PySymInt, f"__r{method}__", _create_magic_impl(_func))
+        setattr(PySymInt, f"__r{method}__", _create_magic_impl(func))
 
 def _lru_cache(fn, maxsize=None):
     """
