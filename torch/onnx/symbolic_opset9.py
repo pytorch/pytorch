@@ -25,8 +25,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration
-from torch.onnx._internal.torchscript import GraphContext
+from torch.onnx._internal import _beartype, registration, torchscript
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -6300,7 +6299,7 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(g: GraphContext, *inputs, **kwargs) -> None:
+def prim_device(g: torchscript.GraphContext, *inputs, **kwargs) -> None:
     output_type = g.original_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None
@@ -6314,7 +6313,7 @@ def prim_device(g: GraphContext, *inputs, **kwargs) -> None:
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
+def prim_loop(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     node = g.original_node
     env = g.env
     params_dict = g.params_dict
@@ -6365,7 +6364,7 @@ def prim_loop(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
 
 @_onnx_symbolic("prim::If")
 @_beartype.beartype
-def prim_if(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
+def prim_if(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     n = g.original_node
     block = g.onnx_block
     env = g.env
@@ -6457,7 +6456,7 @@ def prim_if(g: GraphContext, *inputs, **attrs) -> List[_C.Value]:
 
 @_onnx_symbolic("prim::Constant")
 @_beartype.beartype
-def prim_constant(g: GraphContext, *inputs, **attrs):
+def prim_constant(g: torchscript.GraphContext, *inputs, **attrs):
     node = g.original_node
 
     if node.mustBeNone():
@@ -6487,7 +6486,7 @@ def prim_constant(g: GraphContext, *inputs, **attrs):
 
 @_onnx_symbolic("onnx::Placeholder")
 @_beartype.beartype
-def onnx_placeholder(g: GraphContext, *inputs, **attrs):
+def onnx_placeholder(g: torchscript.GraphContext, *inputs, **attrs):
     node = g.original_node
     block = g.onnx_block
     env = g.env
