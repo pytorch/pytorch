@@ -44,6 +44,10 @@ jobs:
           if [ -n "${REBASE}" ]; then
             python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"
             git checkout master
+            git fetch -p
+            # give github some time between the push and start workflows so that Github's messages
+            # on the PR appear in chronological order (timing issues can shuffle them around)
+            sleep 60
           fi
           if [ -n "${FORCE}" ]; then
             if [ -n "${COMMENT_ID}" ]; then
