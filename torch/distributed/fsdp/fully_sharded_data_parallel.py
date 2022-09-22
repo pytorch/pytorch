@@ -3426,9 +3426,8 @@ class FullyShardedDataParallel(nn.Module):
                 p = handle.flat_param
                 if p.requires_grad:
                     if hasattr(p, "_post_backward_hook_state"):
-                        assert len(p._post_backward_hook_state) == 2 and len(  # type: ignore[attr-defined]
-                            p._post_backward_hook_state  # type: ignore[attr-defined]
-                        ), (  # type: ignore[attr-defined]
+                        p_assert(
+                            len(p._post_backward_hook_state) == 2,  # type: ignore[attr-defined]
                             "p._post_backward_hook_state fields are not valid."
                         )
                         p._post_backward_hook_state[1].remove()  # type: ignore[attr-defined]
