@@ -18,12 +18,13 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64)
+     freeze_rng_state, IS_ARM64, parametrize)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS)
+     onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver, dtypesIfMPS,
+     tol as xtol, toleranceOverride)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
@@ -139,6 +140,11 @@ class TestLinalg(TestCase):
         zero_strided = torch.randn(1).to(device=device, dtype=dtype).expand(50)
         run_test_case(zero_strided, b)
         run_test_case(a, zero_strided)
+
+    def test_matrix_rank_removed_error(self, device):
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+        with self.assertRaisesRegex(RuntimeError, "This function was deprecated since version 1.9 and is now removed"):
+            torch.matrix_rank(a)
 
     def test_solve_removed_error(self, device):
         a = make_tensor(5, 5, device=device, dtype=torch.float32)
@@ -3418,37 +3424,6 @@ class TestLinalg(TestCase):
         a[5, 5] = 0
         self.assertEqual(matrix_rank(a).item(), 9)
         self.assertEqual(matrix_rank(a, hermitian=True).item(), 9)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_matrix_rank(self, device, dtype):
-        a = torch.eye(10, dtype=dtype, device=device)
-        self.assertEqual(torch.matrix_rank(a).item(), 10)
-        self.assertEqual(torch.matrix_rank(a, True).item(), 10)
-
-        a[5, 5] = 0
-        self.assertEqual(torch.matrix_rank(a).item(), 9)
-        self.assertEqual(torch.matrix_rank(a, True).item(), 9)
-
-        a = torch.randn(24, 42, dtype=dtype, device=device)
-        self.assertEqual(torch.matrix_rank(a), torch.matrix_rank(a.t()))
-        aaT = torch.mm(a, a.conj().t())
-        self.assertEqual(torch.matrix_rank(aaT), torch.matrix_rank(aaT, True))
-        aTa = torch.mm(a.conj().t(), a)
-        self.assertEqual(torch.matrix_rank(aTa), torch.matrix_rank(aTa, True))
-
-        a = torch.randn(35, 75, dtype=dtype, device=device)
-        self.assertEqual(torch.matrix_rank(a), np.linalg.matrix_rank(a.cpu().numpy()))
-        self.assertEqual(torch.matrix_rank(a, 0.01), np.linalg.matrix_rank(a.cpu().numpy(), 0.01))
-
-        aaT = torch.mm(a, a.conj().t())
-        self.assertEqual(torch.matrix_rank(aaT), np.linalg.matrix_rank(aaT.cpu().numpy()))
-        self.assertEqual(torch.matrix_rank(aaT, 0.01), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01))
-
-        if np.lib.NumpyVersion(np.__version__) >= '1.14.0':
-            self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
-            self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
@@ -7453,6 +7428,60 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(out_ref, out1.cpu())
         self.assertEqual(out1, out2)
 
+    @onlyCUDA
+    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    # imported 'tol' as 'xtol' to avoid aliasing in code above
+    @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
+                        torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
+                        torch.float32: xtol(atol=1e-1, rtol=1e-1)})
+    @dtypes(torch.float16, torch.bfloat16, torch.float32)
+    @parametrize("size", [100, 1000, 10000])
+    def test_cublas_addmm(self, size: int, dtype: torch.dtype):
+        #
+        # Check for catastrophic cuBLAS inaccuracy by measuring the deviation between
+        # results from the CUDA invocation of torch.addmm and the CPU invocation
+        # (which does not use CUDA backend).
+        #
+        # Get dims
+        n, m, p = (size + 1, size, size + 2)
+        # Make random tensors on CPU (seed set on common_utils.py import)
+        # (Not using numpy because it does not support bfloat16)
+        make_arg = partial(make_tensor, dtype=dtype, device="cpu")
+        m_beta = make_arg(1)
+        m_input = make_arg((n, p))
+        m_1 = make_arg((n, m))
+        m_2 = make_arg((m, p))
+        # *(B)FLOAT16 Special Handling*
+        # Backend does not tensorize float16 on CPU,
+        # and bloat16 may present accuracy issues,
+        # so convert to float32 for these cases
+        # (but keep same for other types, e.g. float32 and int*)
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            m_beta = m_beta.to(dtype=torch.float32)
+            m_input = m_input.to(dtype=torch.float32)
+            m_1 = m_1.to(dtype=torch.float32)
+            m_2 = m_2.to(dtype=torch.float32)
+        # Get CPU result
+        res_cpu = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
+        # *(B)FLOAT16 Special Handling*``
+        # Convert back to (b)float16
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            m_beta = m_beta.to(dtype=dtype)
+            m_input = m_input.to(dtype=dtype)
+            m_1 = m_1.to(dtype=dtype)
+            m_2 = m_2.to(dtype=dtype)
+            res_cpu = res_cpu.to(dtype=dtype)
+        # Move arg tensors to CUDA
+        m_beta = m_beta.to("cuda")
+        m_input = m_input.to("cuda")
+        m_1 = m_1.to("cuda")
+        m_2 = m_2.to("cuda")
+        # Get CUDA result
+        res_cuda = torch.addmm(m_input, m_1, m_2, beta=m_beta.item())
+        # Move to CPU for comparison
+        res_cuda = res_cuda.to("cpu")
+        # Compare
+        self.assertEqual(res_cpu, res_cuda)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

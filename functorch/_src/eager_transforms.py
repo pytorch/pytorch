@@ -15,7 +15,7 @@ import torch.autograd.forward_ad as fwAD
 from .vmap import vmap
 from torch._decomp import decomposition_table
 
-from functorch._C import (
+from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
     _grad_increment_nesting,
