@@ -913,7 +913,6 @@ from torch._classes import classes
 #     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
 if (os.environ.get("PYTORCH_JIT", "1") == "1" and
         __debug__ and
-        not torch._C._is_deploy_enabled() and
         os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0"):
     from torch._decomp import decompositions_for_jvp
     del decompositions_for_jvp

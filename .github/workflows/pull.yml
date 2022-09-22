@@ -302,26 +302,6 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
       build-generates-artifacts: false
 
-  linux-bionic-cuda11_6-py3_10-gcc7-deploy-build:
-    name: linux-bionic-cuda11_6-py3_10-gcc7-deploy
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-deploy
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-      test-matrix: |
-        { include: [
-          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
-
-  deploy-linux-bionic-cuda11_6-py3_10-gcc7-test:
-    name: linux-bionic-cuda11_6-py3_10-gcc7-deploy
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_10-gcc7-deploy-build
-    with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-deploy
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-deploy-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-deploy-build.outputs.test-matrix }}
-
   linux-focal-rocm5_2-py3_7-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
