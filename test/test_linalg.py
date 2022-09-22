@@ -7509,7 +7509,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # Compare
         self.assertEqual(res_cpu, res_cuda)
 
-    def test_permute_matmual(self):
+    def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
         b = torch.ones([3, 2, 5, 24, 24])
         c = a.permute(0, 1, 3, 2).matmul(b)
