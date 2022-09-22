@@ -1,1 +1,1 @@
-from dispatch import symbolics
+from .dispatch import symbolics
