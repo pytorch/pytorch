@@ -409,6 +409,11 @@ def index_put_(fake_mode, func, *args, **kwargs):
     return new_kwargs["input"]
 
 
+@register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
+def nyi(fake_mode, func, *args, **kwargs):
+    assert func not in _device_not_kwarg_ops, f"NYI: {func}"
+
+
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
 # Because the device is `meta`, meta tensors do not model device propagation.
@@ -659,10 +664,11 @@ class FakeTensorMode(TorchDispatchMode):
             else:
                 return args[0].fake_device
 
-        flat_arg_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
-        flat_symints = tree_flatten_only(torch._C.SymIntNode, (args, kwargs))
+        flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
+        flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_tensors]) or len(flat_symints) > 0
+            any([i.has_sym_ints for i in flat_arg_fake_tensors])
+            or len(flat_symints) > 0
         )
 
         converter = self.fake_tensor_converter
@@ -670,11 +676,41 @@ class FakeTensorMode(TorchDispatchMode):
         # If this is a lift, the input tensor is guaranteed to be a
         # constant, so we keep a copy of the original argument along so
         # we can query it if we're asked to item() it at some later point
-        if func in (torch.ops.aten.lift_fresh.default, aten.lift_fresh_copy.default):
+        if func in self.lift_fns:
             out = func(*args, **kwargs)
             if self.may_turn_const(out):
                 with no_dispatch():
                     return converter(self, out.clone(), make_constant=True)
+
+        with no_dispatch():
+            flat_arg_tensors = tree_flatten_only(torch.Tensor, (args, kwargs))
+            # See [subclass inputs] below
+            # NB: If you're seeing a mysterious infinite loop involving fake
+            # tensor, it might be related to this line.  Though I'm not sure
+            # how you'll know to read this comment, as this line won't show up
+            # in the stack trace.
+            if self.check_for_subclass(flat_arg_tensors):
+                return NotImplemented
+
+            # if we are in the dispatch mode, we will enter this function even if the inputs
+            # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
+            # and just support constructors.
+
+            # this is generated from torch.tensor(), which does not use the
+            # dispatcher, to allow wrapper subclasses to wrap the new tensor
+            if func in self.lift_fns:
+                assert (
+                    len(kwargs) == 0
+                    and len(args) == 1
+                    and type(args[0]) is torch.Tensor
+                ), f"{args} {kwargs}"
+                return converter(self, args[0])
+
+            if self.check_for_non_fake(flat_arg_tensors):
+                raise Exception(
+                    "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
+                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
+                )
 
         # The current constant handling only support tracing systems
         # (aot autograd, torchdynamo) where each operation is run consecutively.
@@ -686,12 +722,12 @@ class FakeTensorMode(TorchDispatchMode):
         # objects on an FX Graph.
 
         # We dispatch size/stride/numel on the FakeTensor not its constant, so bail on inplace_view
-        all_constant = all(e.constant is not None for e in flat_arg_tensors)
+        all_constant = all(e.constant is not None for e in flat_arg_fake_tensors)
         if (
             torch.Tag.nondeterministic_seeded not in func.tags  # type: ignore[attr-defined]
             and torch.Tag.inplace_view not in func.tags  # type: ignore[attr-defined]
             and all_constant
-            and len(flat_arg_tensors) != 0
+            and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
         ):
             with no_dispatch():
@@ -718,18 +754,12 @@ class FakeTensorMode(TorchDispatchMode):
 
         # we are falling through to running non constant tensors, any input constant that
         # is written to must be invalidated
-        self.invalidate_written_to_constants(func, flat_arg_tensors, args, kwargs)
+        self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        functions_with_cpp_meta_impl_that_support_symint = [
-            aten.empty_strided.default,
-            aten.as_strided.default,
-            aten.zeros.default,
-            aten.detach.default,
-        ]
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
-            and func not in functions_with_cpp_meta_impl_that_support_symint
+            and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
             # TODO: Find better approach for this
             # Avoid circular import
@@ -762,116 +792,107 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO - we should be use the prim aten impl
         if (
             "prims::" in func._schema.name
-            and len(flat_arg_tensors) != 0
+            and len(flat_arg_fake_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
             with self.restore():
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
-            if func not in functions_with_cpp_meta_impl_that_support_symint:
+            if func not in self.functions_with_cpp_meta_impl_that_support_symint:
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
 
         with no_dispatch():
-            # if we are in the dispatch mode, we will enter this function even if the inputs
-            # are not FakeTensors. For now, throw if any non-Fake Tensor inputs
-            # and just support constructors. TODO: extend more broadly
-            conversion_made = False
-            subclass_seen = False
-
-            def check_non_fake_tensor(x):
-                nonlocal conversion_made, subclass_seen
-                conversion_made = conversion_made or (
-                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
-                )
-                subclass_seen = subclass_seen or (
-                    isinstance(x, torch.Tensor)
-                    and not isinstance(x, FakeTensor)
-                    and type(x) is not torch.Tensor
-                    and type(x) is not torch.nn.Parameter
-                )
-
-            tree_map(check_non_fake_tensor, args)
-            tree_map(check_non_fake_tensor, kwargs)
-
-            # Suppose we enable fake tensor mode.  This means that fake tensor
-            # mode will run first.  But what if we do an operation that
-            # involves a tensor subclass that will desugar into normal tensor
-            # operations?  Without this line, fake tensor mode will run first,
-            # decide that a conversion was made (since there was a non fake
-            # tensor argument), and report an error that converting non
-            # fake tensor is not supported.  What we actually wanted to happen
-            # was to give the subclass a chance to figure out what it wants to
-            # before erroring out.  Returning NotImplemented here allows this.
-            #
-            # NB: If you're seeing a mysterious infinite loop involving fake
-            # tensor, it might be related to this line.  Though I'm not sure
-            # how you'll know to read this comment, as this line won't show up
-            # in the stack trace.
-            if subclass_seen:
-                return NotImplemented
-
-            # this is generated from torch.tensor(), which does not use the
-            # dispatcher, to allow wrapper subclasses to wrap the new tensor
-            # we need to handle before error checking
-            if func in [
-                aten.lift_fresh.default,
-                aten.lift_fresh_copy.default,
-            ]:
-                assert (
-                    len(kwargs) == 0
-                    and len(args) == 1
-                    and type(args[0]) is torch.Tensor
-                ), f"{args} {kwargs}"
-                with no_dispatch():
-                    return converter(self, args[0])
-
-            if conversion_made:
-                raise Exception(
-                    "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
-                    f"Please convert all Tensors to FakeTensors first. Found in {func}(*{args}, **{kwargs})"
-                )
-
+            # special handling for funcs registered through `register_op_impl`,
+            # e.g., manipulating args on constructor calls to construct meta tensors
+            # and then afterwards wrapping them to a FakeTensor
             for run_impl_check, op_impl in op_implementations:
                 if run_impl_check(func):
                     op_impl_out = op_impl(self, func, *args, **kwargs)
                     if op_impl_out != NotImplemented:
                         return op_impl_out
 
+            # run kernel registered to meta for func, which include
+            # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
             try:
                 with in_kernel_invocation_manager(self):
                     r = func(*args, **kwargs)
             except NotImplementedError as not_implemented_error:
+                # no meta kernel registered, fallback to kernel for the device
                 if not self.allow_fallback_kernels:
                     raise not_implemented_error
                 return run_fallback_kernel(
                     self, func, args, kwargs, not_implemented_error
                 )
 
-            # TODO: handle non-kwarg devices
-            assert func not in _device_not_kwarg_ops, f"NYI: {func}"
+            return self.wrap_meta_outputs_with_default_device_logic(
+                r, func, args, kwargs
+            )
 
-            # Lazily initialized, in case there are no tensor returns
-            common_device = None
+    # [subclass inputs]
+    # Suppose we enable fake tensor mode.  This means that fake tensor
+    # mode will run first.  But what if we do an operation that
+    # involves a tensor subclass that will desugar into normal tensor
+    # operations?  Without returning NotImplemented, fake tensor mode will run first,
+    # decide that a conversion was made (since there was a non fake
+    # tensor argument), and report an error that converting non
+    # fake tensor is not supported.  What we actually wanted to happen
+    # was to give the subclass a chance to figure out what it wants to
+    # before erroring out. Returning NotImplemented here allows this.
+    def check_for_subclass(self, flat_arg_tensors):
+        return any(
+            not isinstance(x, FakeTensor)
+            and type(x) is not torch.Tensor
+            and type(x) is not torch.nn.Parameter
+            for x in flat_arg_tensors
+        )
 
-            def wrap(e, device=None):
-                nonlocal common_device
-                if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
-                    if common_device is None:
-                        common_device = FakeTensor._find_common_device(
-                            func, args, kwargs
-                        )
-                    return converter(self, e, device or common_device)
-                else:
-                    return e
+    def check_for_non_fake(self, flat_arg_tensors):
+        return any(
+            isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+            for x in flat_arg_tensors
+        )
 
-            # if device is specified, use that
-            if kwargs.get("device", None):
-                return tree_map(partial(wrap, device=kwargs["device"]), r)
+    def wrap_meta_outputs_with_default_device_logic(self, r, func, args, kwargs):
+        wrap = self.gen_wrap_fn(func, args, kwargs)
 
-            return tree_map(partial(wrap), r)
+        # if device is specified, use that
+        if kwargs.get("device", None):
+            return tree_map(partial(wrap, device=kwargs["device"]), r)
+
+        return tree_map(partial(wrap), r)
+
+    def gen_wrap_fn(self, func, args, kwargs):
+        converter = self.fake_tensor_converter
+
+        # Lazily initialized, in case there are no tensor returns
+        common_device = None
+
+        def wrap(e, device=None):
+            nonlocal common_device
+            if isinstance(e, torch.Tensor) and not isinstance(e, FakeTensor):
+                if common_device is None:
+                    common_device = FakeTensor._find_common_device(func, args, kwargs)
+                return converter(self, e, device or common_device)
+            else:
+                return e
+
+        return wrap
+
+    @property
+    def functions_with_cpp_meta_impl_that_support_symint(self):
+        return [
+            aten.empty_strided.default,
+            aten.as_strided.default,
+            aten.zeros.default,
+            aten.detach.default,
+        ]
+
+    @property
+    def lift_fns(self):
+        return (aten.lift_fresh.default, aten.lift_fresh_copy.default)
 
     def may_turn_const(self, t):
         return (
@@ -880,8 +901,10 @@ class FakeTensorMode(TorchDispatchMode):
             and not isinstance(t, FakeTensor)
         )
 
-    def invalidate_written_to_constants(self, func, flat_arg_tensors, args, kwargs):
-        any_constant = any(e.constant is not None for e in flat_arg_tensors)
+    def invalidate_written_to_constants(
+        self, func, flat_arg_fake_tensors, args, kwargs
+    ):
+        any_constant = any(e.constant is not None for e in flat_arg_fake_tensors)
         if any_constant and get_schema_info(func).is_mutable():
             schema_info = get_schema_info(func)
             _, new_kwargs = normalize_function(
