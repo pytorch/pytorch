@@ -708,7 +708,7 @@ def run_test_ops(test_module, test_directory, options):
     for i in range(num_procs):
         return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
                                        kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
-                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
+                                                                     f'--shard-id={i}', f'--num-shards={num_procs}',
                                                                      "-k=not _linalg_cholesky_"],
                                              })
         return_codes.append(return_code)
