@@ -3237,10 +3237,6 @@
     CompositeImplicitAutograd: matmul_out
     NestedTensorCPU, NestedTensorCUDA: matmul_out_nested
 
-- func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
-
-- func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
-
 # Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
   variants: function, method
