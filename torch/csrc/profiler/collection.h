@@ -67,9 +67,6 @@ struct TensorMetadata {
   uint32_t dim_;
 };
 
-// 8 + 8 + 1 + 1 + 1 + 1 + 4
-STATIC_ASSERT_MAXIMUM_SIZE(TensorMetadata, 24);
-
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::vector<int64_t>> strides_;

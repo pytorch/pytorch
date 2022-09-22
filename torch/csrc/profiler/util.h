@@ -205,16 +205,6 @@ class TORCH_API GlobalStateManager {
   std::shared_ptr<T> state_;
 };
 
-// This is the only way to display the actual size in the error message.
-// https://stackoverflow.com/questions/11526526/how-to-combine-static-assert-with-sizeof-and-stringify
-template <typename T, size_t max_size, size_t actual_size = sizeof(T)>
-struct _StaticAssertMaxSize {
-  static_assert(actual_size <= max_size, "Type exceeds allowed size.");
-};
-
-#define STATIC_ASSERT_MAXIMUM_SIZE(T, max_size) \
-  template struct _StaticAssertMaxSize<T, max_size>
-
 } // namespace impl
 } // namespace profiler
 } // namespace torch
