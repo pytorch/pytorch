@@ -23,20 +23,6 @@ on:
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
 
-    secrets:
-      IOS_CERT_KEY_2022:
-        required: true
-        description: ios cert
-      IOS_CERT_SECRET:
-        required: true
-        description: ios cert
-      IOS_DEV_TEAM_ID:
-        required: true
-        description: ios cert
-      IOS_SIGN_KEY_2022:
-        required: true
-        description: ios cert
-
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
@@ -50,11 +36,6 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: macos-12
     timeout-minutes: 240
-    env:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET }}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -66,6 +47,7 @@ jobs:
           # build the lite interpreter this env variable should get over-written
           # in the following case statement
           echo "BUILD_LITE_INTERPRETER=1" >> "${GITHUB_ENV}"
+          echo "USE_COREML_DELEGATE=1" >> "${GITHUB_ENV}"
 
           case ${BUILD_ENVIRONMENT} in
             *metal*)
@@ -76,9 +58,6 @@ jobs:
               ;;
             *custom*)
               echo "SELECTED_OP_LIST=${GITHUB_WORKSPACE}/ios/TestApp/custom_build/mobilenetv2.yaml" >> "${GITHUB_ENV}"
-              ;;
-            *coreml*)
-              echo "USE_COREML_DELEGATE=1" >> "${GITHUB_ENV}"
               ;;
           esac
 
@@ -108,27 +87,13 @@ jobs:
             setuptools \
             typing_extensions
 
-      - name: Run Fastlane
+      - name: Setup Fastlane
         run: |
           set -x
           cd ios/TestApp
           # install fastlane
           sudo gem install bundler && bundle install
           bundle update fastlane
-          # install certificates
-          echo "${IOS_CERT_KEY_2022}" >> cert.txt
-          base64 --decode cert.txt -o Certificates.p12
-          rm cert.txt
-          bundle exec fastlane install_root_cert
-          bundle exec fastlane install_dev_cert
-          # install the provisioning profile
-          PROFILE=PyTorch_CI_2022.mobileprovision
-          PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
-          mkdir -pv "${PROVISIONING_PROFILES}"
-          cd "${PROVISIONING_PROFILES}"
-          echo "${IOS_SIGN_KEY_2022}" >> cert.txt
-          base64 --decode cert.txt -o ${PROFILE}
-          rm cert.txt
 
       - name: Build
         run: |
@@ -142,17 +107,12 @@ jobs:
       - name: Run Build Test
         timeout-minutes: 5
         run: |
-          PROFILE=PyTorch_CI_2022
           # run the ruby build script
           if ! [ -x "$(command -v xcodebuild)" ]; then
             echo 'Error: xcodebuild is not installed.'
             exit 1
           fi
-          if [ "${IOS_PLATFORM}" != "SIMULATOR" ]; then
-            ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}" -c "${PROFILE}" -t "${IOS_DEV_TEAM_ID}"
-          else
-            ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
-          fi
+          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
 
       - name: Run Simulator Tests
         if: inputs.ios-platform == 'SIMULATOR'
@@ -164,33 +124,15 @@ jobs:
           # generate models for differnet backends
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
           mkdir -p ../models
-          if [ "${USE_COREML_DELEGATE}" == 1 ]; then
-            pip install coremltools==5.0b5 protobuf==3.20.1
-            pip install six==1.16.0
-            python coreml_backend.py
-          else
-            cd "${GITHUB_WORKSPACE}"
-            python test/mobile/model_test/gen_test_model.py ios-test
-          fi
+          pip install coremltools==5.0b5 protobuf==3.20.1
+          pip install six==1.16.0
+          python coreml_backend.py
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
-          if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
-            echo "Setting up the TestApp for LiteInterpreter"
-            ruby setup.rb --lite 1
-          else
-            echo "Setting up the TestApp for Full JIT"
-            ruby setup.rb
-          fi
+          ruby setup.rb --lite 1
           cd "${GITHUB_WORKSPACE}/ios/TestApp"
           # instruments -s -devices
-          if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
-            if [ "${USE_COREML_DELEGATE}" == 1 ]; then
-              bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
-            else
-              bundle exec fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
-            fi
-          else
-            bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
-          fi
+          bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+
       - name: Dump Simulator Tests On a Failure
         if: |
           failure() && inputs.ios-platform == 'SIMULATOR'
