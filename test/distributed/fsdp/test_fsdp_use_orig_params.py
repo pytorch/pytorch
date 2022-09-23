@@ -2,7 +2,7 @@
 
 import functools
 import sys
-from typing import Optional, Tuple, Type
+from typing import Callable, Optional, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -711,9 +711,57 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
                 ...
 
 
+class TestFSDPUseOrigParamsFQNs(FSDPTest):
+    @skip_if_lt_x_gpu(2)
+    def test_param_and_buffer_names(self):
+        """
+        Tests that, for ``use_orig_params=True``, the parameter and buffer
+        names match those of a local model even when sharded, meaning that they
+        do not include FSDP-specific prefixes.
+        """
+        self.run_subtests(
+            {"auto_wrap_policy": [None, always_wrap_policy]},
+            self._test_param_and_buffer_names,
+        )
+
+    def _test_param_and_buffer_names(self, auto_wrap_policy: Optional[Callable]):
+        class Container(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = nn.Parameter(torch.randn((5, 5)))
+                self.register_buffer("buf", torch.randn((5, 5)))
+
+            def forward(self, x):
+                return x @ self.param + self.buf
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = nn.Parameter(torch.randn((5, 5)))
+                self.lin = nn.Linear(5, 5)
+                self.container = Container()
+                self.register_buffer("buf", torch.randn((5, 5)))
+
+            def forward(self, x):
+                z = self.container(x)
+                z = z @ self.param + self.buf
+                z = self.lin(z)
+                return z
+
+        model = Model()
+        fsdp_model = FSDP(Model(), auto_wrap_policy=auto_wrap_policy, use_orig_params=True)
+        param_names = [n for n, _ in model.named_parameters()]
+        fsdp_param_names = [n for n, _ in fsdp_model.named_parameters()]
+        self.assertEqual(param_names, fsdp_param_names)
+        buffer_names = [n for n, _ in model.named_buffers()]
+        fsdp_buffer_names = [n for n, _ in fsdp_model.named_buffers()]
+        self.assertEqual(buffer_names, fsdp_buffer_names)
+
+
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)
 instantiate_parametrized_tests(TestFSDPUseOrigParamsUnshardReshard)
 instantiate_parametrized_tests(TestFSDPUseOrigParamsParamAccess)
+instantiate_parametrized_tests(TestFSDPUseOrigParamsFQNs)
 
 if __name__ == "__main__":
     run_tests()

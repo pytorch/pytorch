@@ -1180,7 +1180,10 @@ class FlatParamHandle:
             zip(self.flat_param._params, self.flat_param._param_infos)
         ):
             setattr(module, param_name, param)
-            in_sharded_flat_param = i >= start and i <= end
+            in_sharded_flat_param = (
+                i >= start and i <= end
+                and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
+            )
             if in_sharded_flat_param:
                 param_start, param_end = self.flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
                 numel_in_shard = param_end - param_start + 1
@@ -1218,8 +1221,6 @@ class FlatParamHandle:
         this method does not manipulate existing ``Tensor`` data directly and
         creates new ``Tensor`` variables instead.
         """
-        # if dist.get_rank() == 0:
-        #     print(f"[Rank 0] _use_sharded_grad_views()!")
         self._check_sharded(self.flat_param)
         if self.flat_param.grad is None:
             return  # no-op
@@ -1228,7 +1229,10 @@ class FlatParamHandle:
         offset = 0
         assert self.flat_param._params is not None
         for i, param in enumerate(self.flat_param._params):
-            in_sharded_flat_param = i >= start and i <= end
+            in_sharded_flat_param = (
+                i >= start and i <= end
+                and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
+            )
             if in_sharded_flat_param:
                 param_start, param_end = self.flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
                 numel_in_shard = param_end - param_start + 1
@@ -1279,7 +1283,10 @@ class FlatParamHandle:
                 # Do not writeback if original parameters are deregistered
                 # (e.g. during model checkpointing)
                 continue
-            in_sharded_flat_param = i >= start and i <= end
+            in_sharded_flat_param = (
+                i >= start and i <= end
+                and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
+            )
             if not in_sharded_flat_param:
                 continue
             param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]

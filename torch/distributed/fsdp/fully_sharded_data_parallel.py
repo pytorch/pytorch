@@ -3137,9 +3137,12 @@ class FullyShardedDataParallel(nn.Module):
         remove all occurrences of the FSDP-specific flattened buffer prefix
         when inside the :meth:`summon_full_params` context manager.
         """
-        in_summon_full_params = self.training_state == TrainingState_.SUMMON_FULL_PARAMS
+        should_clean_name = (
+            self.training_state == TrainingState_.SUMMON_FULL_PARAMS
+            or self._use_orig_params
+        )
         for buffer_name, buffer in super().named_buffers(*args, **kwargs):
-            if in_summon_full_params:
+            if should_clean_name:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules
                 buffer_name = buffer_name.replace(FSDP_PREFIX, "")
@@ -3155,10 +3158,12 @@ class FullyShardedDataParallel(nn.Module):
         remove all occurrences of the FSDP-specific flattened parameter prefix
         when inside the :meth:`summon_full_params` context manager.
         """
-        # Determine which logic to use based on the context at call time
-        in_summon_full_params = self.training_state == TrainingState_.SUMMON_FULL_PARAMS
+        should_clean_name = (
+            self.training_state == TrainingState_.SUMMON_FULL_PARAMS
+            or self._use_orig_params
+        )
         for param_name, param in super().named_parameters(*args, **kwargs):
-            if in_summon_full_params:
+            if should_clean_name:
                 # Remove any instances of the FSDP-specific prefix; there can
                 # be multiple in the case of nested FSDP modules
                 param_name = param_name.replace(FSDP_PREFIX, "")
