@@ -191,7 +191,6 @@ class TestPrims(TestCase):
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a)
 
-        # Should pass with partitioned executor
         out = execute(gm, a, executor="strictly_nvfuser")
         self.assertEqual(out.size(), a.size())
 
