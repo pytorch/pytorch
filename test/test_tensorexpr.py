@@ -998,9 +998,11 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_cat(self):
         for device in self.devices:
+            _dim = 1
+
             def foo(*args):
                 args_2 = [v + i for i, v in enumerate(args)]
-                v = torch.cat(args_2, dim=1)
+                v = torch.cat(args_2, dim=_dim)
                 return v * v
 
             M = 16
@@ -1012,6 +1014,17 @@ class TestTensorExprFuser(BaseTestClass):
             self.assertLastGraphAllFused()
             ref = foo(*values)
             np.testing.assert_allclose(ref.cpu().numpy(), x.cpu().numpy())
+
+            # Test channels-last
+            for _cur_dim in range(4):
+                _dim = _cur_dim
+                values = [torch.randn((2, 3, 4, 5), device=device).to(memory_format=torch.channels_last) for _ in range(10)]
+                traced = torch.jit.trace(foo, values)
+
+                x = warmup_and_run_forward(traced, *values)
+                self.assertLastGraphAllFused()
+                ref = foo(*values)
+                self.assertEqual(ref, x)
 
     # This test checks that we correctly handle fusion group with just aten::cat in it.
     # Note that the test only makes sense with min_fusion_group=1, otherwise no
