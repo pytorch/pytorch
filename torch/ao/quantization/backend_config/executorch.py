@@ -1,10 +1,13 @@
+import operator
+from typing import List
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
-from .backend_config import BackendConfig, DTypeConfig, ObservationType
+from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig, ObservationType
 from ._common_operator_config_utils import _Conv2dMetadata
+from ..fuser_method_mappings import reverse_sequential_wrapper2
 
 
 # ===================
@@ -77,6 +80,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
     """
     observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
     dtype_configs = [executorch_weighted_op_int8_dtype_config]
+    conv_configs = []
     for convs in [_Conv2dMetadata]:
         # conv module
         conv_configs.append(
@@ -122,6 +126,7 @@ def _get_conv_configs() -> List[BackendPatternConfig]:
             BackendPatternConfig((F.relu, convs.func))
                 .set_observation_type(observation_type)  # noqa: E131
                 .set_dtype_configs(dtype_configs))
+    return conv_configs
 
 def _get_binary_ops_configs() -> List[BackendPatternConfig]:
     """
@@ -169,7 +174,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         "squeeze",
         "squeeze_",
     ]
-    share_qparams_op_configs = []
+    share_qparams_op_configs: List[BackendPatternConfig] = []
     for op in share_qparams_ops:
         share_qparams_ops.append(
             BackendPatternConfig(op)
