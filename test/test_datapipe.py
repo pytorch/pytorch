@@ -2371,15 +2371,25 @@ class TestGraph(TestCase):
 
     def test_simple_traverse(self):
         numbers_dp = NumbersDataset(size=50)
-        mapped_dp = numbers_dp.map(lambda x: x * 10)
+        shuffled_dp = numbers_dp.shuffle()
+        sharded_dp = shuffled_dp.sharding_filter()
+        mapped_dp = sharded_dp.map(lambda x: x * 10)
         graph = torch.utils.data.graph.traverse(mapped_dp, only_datapipe=True)
-        expected: Dict[Any, Any] = {id(mapped_dp): (mapped_dp, {id(numbers_dp): (numbers_dp, {})})}
+        expected: Dict[Any, Any] = {
+            id(mapped_dp): (mapped_dp, {
+                id(sharded_dp): (sharded_dp, {
+                    id(shuffled_dp): (shuffled_dp, {
+                        id(numbers_dp): (numbers_dp, {})
+                    })
+                })
+            })
+        }
         self.assertEqual(expected, graph)
 
         dps = torch.utils.data.graph_settings.get_all_graph_pipes(graph)
-        self.assertEqual(len(dps), 2)
-        self.assertTrue(numbers_dp in dps)
-        self.assertTrue(mapped_dp in dps)
+        self.assertEqual(len(dps), 4)
+        for datapipe in (numbers_dp, shuffled_dp, sharded_dp, mapped_dp):
+            self.assertTrue(datapipe in dps)
 
     def test_traverse_forked(self):
         numbers_dp = NumbersDataset(size=50)
