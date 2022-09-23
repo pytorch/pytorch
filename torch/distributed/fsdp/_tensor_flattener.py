@@ -71,7 +71,7 @@ def _tf_pre_flatten_transform(
 def _tf_post_unflatten_transform(
     tensor: torch.Tensor,
     param_extension: Any,
-) -> torch.Tensor
+) -> torch.Tensor:
     if _flattener is not None and param_extension is not None:
         return _flattener.post_unflatten_transform(tensor, param_extension)
     return tensor
