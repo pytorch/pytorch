@@ -277,7 +277,7 @@ class TestScatterGather(TestCase):
             # for each row in input will be mapped to rowptrs in a CSR format.
             # Create some empty rows by masking:
             if (dtype.is_floating_point):
-                mask = (idx >1) * (idx < 4)
+                mask = (idx > 1) * (idx < 4)
                 idx[mask] = 0
 
             idx = idx.expand(-1, slice_size)
