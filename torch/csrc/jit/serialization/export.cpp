@@ -426,11 +426,7 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
     case at::kBFloat16:
       return onnx::TensorProto_DataType_BFLOAT16;
     default:
-      TORCH_CHECK(
-          false,
-          "ScalarType ",
-          toString(at_type),
-          " is an unexpected tensor scalar type");
+      AT_ERROR("unexpected tensor scalar type");
   }
 }
 

@@ -27,7 +27,6 @@ PASSTHROUGH_FNS = [
     torch.ops.aten._unsafe_view,
     torch.ops.aten._reshape_alias,
     torch.ops.aten.cat,
-    torch.ops.aten.unsqueeze,
 ]
 
 

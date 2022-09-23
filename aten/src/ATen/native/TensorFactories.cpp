@@ -214,9 +214,12 @@ Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<Sca
   return at::detail::empty_strided_cpu(size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
-Tensor& empty_out(IntArrayRef size,
+Tensor& empty_out(SymIntArrayRef sym_size,
     c10::optional<c10::MemoryFormat> optional_memory_format,
     Tensor& result) {
+  // TODO: support empty_out properly (I was forced to change this immediately
+  // with empty so that empty/empty.out had the same type signature)
+  auto size = c10::asIntArrayRefSlow(sym_size);
   // Preferably, this argument would not be accepted by _out, but the code
   // generator requires the out and non-out overloads to match exactly
   TORCH_CHECK(
@@ -383,7 +386,7 @@ Tensor empty_like_quantized(
   }
 }
 
-Tensor new_empty_symint(
+Tensor new_empty(
     const Tensor& self,
     SymIntArrayRef size,
     c10::optional<ScalarType> dtype_opt,
@@ -398,10 +401,10 @@ Tensor new_empty_symint(
   return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
-Tensor new_empty_strided_symint(
+Tensor new_empty_strided(
     const Tensor& self,
-    c10::SymIntArrayRef size,
-    c10::SymIntArrayRef stride,
+    IntArrayRef size,
+    IntArrayRef stride,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -410,7 +413,7 @@ Tensor new_empty_strided_symint(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::empty_strided_symint(size, stride, self.options().merge_in(options));
+  return at::empty_strided(size, stride, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1074,7 +1077,7 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros_symint(SymIntArrayRef size,
+Tensor zeros(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1104,7 +1107,8 @@ Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
   return result;
 }
 
-Tensor& zeros_out(IntArrayRef size, Tensor& result) {
+Tensor& zeros_out(SymIntArrayRef sym_size, Tensor& result) {
+  auto size = c10::asIntArrayRefSlow(sym_size);
   if (result.is_sparse()) {
     // TODO: I think this branch should be dead, but we don't have an easy
     // way to cover all sparse kernels with zeros_sparse_out, so retain this
@@ -1479,7 +1483,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides, this is marginally faster than calling empty_like
-      self = at::empty_strided_symint(src.sym_sizes(), src.sym_strides(), src.options());
+      self = at::empty_strided(src.sizes(), src.strides(), src.options());
     } else {
       self = at::empty_like(src);
     }

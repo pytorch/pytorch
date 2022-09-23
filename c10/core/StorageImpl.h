@@ -42,8 +42,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       at::Allocator* allocator,
       bool resizable)
       : data_ptr_(std::move(data_ptr)),
-        size_bytes_(std::move(size_bytes)),
-        size_bytes_is_symbolic_(size_bytes_.is_symbolic()),
+        size_bytes_(size_bytes),
         resizable_(resizable),
         received_cuda_(false),
         allocator_(allocator) {
@@ -77,7 +76,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   void reset() {
     data_ptr_.clear();
     size_bytes_ = 0;
-    size_bytes_is_symbolic_ = false;
   }
 
   template <typename T>
@@ -97,8 +95,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   size_t nbytes() const {
-    TORCH_CHECK(!size_bytes_is_symbolic_);
-    return size_bytes_.as_int_unchecked();
+    return size_bytes_.expect_int();
   }
 
   SymInt sym_nbytes() const {
@@ -107,11 +104,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   // TODO: remove later
   void set_nbytes(size_t size_bytes) {
-    size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
-  }
-
-  void set_nbytes(c10::SymInt size_bytes) {
     size_bytes_ = size_bytes;
   }
 
@@ -198,7 +190,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
       size_t size_bytes) {
     data_ptr_ = std::move(data_ptr);
     size_bytes_ = size_bytes;
-    size_bytes_is_symbolic_ = false;
     allocator_ = nullptr;
     resizable_ = false;
   }
@@ -216,7 +207,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
  private:
   DataPtr data_ptr_;
   SymInt size_bytes_;
-  bool size_bytes_is_symbolic_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation

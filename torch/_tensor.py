@@ -28,6 +28,8 @@ from torch.overrides import (
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
+    # functools.wraps doesn't work well with methods in python 2
+    method_assignments = ("__name__", "__doc__")
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
@@ -636,11 +638,6 @@ class Tensor(torch._C._TensorBase):
 
         return solve(self, other)
 
-    def eig(self, eigenvectors=False):
-        from ._linalg_utils import eig
-
-        return eig(self, eigenvectors=eigenvectors)
-
     def lu(self, pivot=True, get_infos=False):
         r"""See :func:`torch.lu`"""
         # If get_infos is True, then we don't need to check for errors and vice versa
@@ -1025,7 +1022,7 @@ class Tensor(torch._C._TensorBase):
             torch.int64: "<i8",
         }[self.dtype]
 
-        itemsize = self.element_size()
+        itemsize = self.storage().element_size()
 
         shape = tuple(self.shape)
         if self.is_contiguous():
@@ -1314,10 +1311,9 @@ class Tensor(torch._C._TensorBase):
             if self.device.type == "cuda":
                 stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
-                sync_stream = torch.cuda.current_stream()
-                if stream != sync_stream:
+                if stream != torch.cuda.current_stream:
                     event = torch.cuda.Event()
-                    event.record(sync_stream)
+                    event.record(torch.cuda.current_stream())
                     stream.wait_event(event)
         return torch.to_dlpack(self)
 

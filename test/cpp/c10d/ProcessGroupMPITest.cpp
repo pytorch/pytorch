@@ -15,7 +15,7 @@
 // Wait for work to complete
 std::vector<std::vector<at::Tensor>> waitWork(
     c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
-    std::vector<c10::intrusive_ptr<c10d::Work>> works) {
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     try {
@@ -32,7 +32,7 @@ std::vector<std::vector<at::Tensor>> waitWork(
 // Wait using Futures
 std::vector<std::vector<at::Tensor>> waitFuture(
     c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
-    std::vector<c10::intrusive_ptr<c10d::Work>> works) {
+    std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> works) {
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     auto fut = work->getFuture();
@@ -58,13 +58,14 @@ void testAllreduce(int iter = 1000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
 
   // Generate inputs
-  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (const auto i : c10::irange(iter)) {
     auto tensor = at::ones({16, 16}) * i;
     std::vector<at::Tensor> tensors = {tensor};
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->allreduce(tensors);
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+        pg->allreduce(tensors);
     works.push_back(std::move(work));
   }
 
@@ -87,7 +88,7 @@ void testAllreduce(int iter = 1000) {
 
 void testBroadcast(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (const auto i : c10::irange(iter)) {
     auto tensors = std::vector<at::Tensor>();
     if (pg->getRank() == 0) {
@@ -99,7 +100,8 @@ void testBroadcast(int iter = 10000) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->broadcast(tensors);
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+        pg->broadcast(tensors);
     works.push_back(std::move(work));
   }
 
@@ -119,13 +121,13 @@ void testBroadcast(int iter = 10000) {
 
 void testReduce(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
   for (const auto i : c10::irange(iter)) {
     auto tensor = at::ones({16, 16}) * i;
     auto tensors = std::vector<at::Tensor>({tensor});
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->reduce(tensors);
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work = pg->reduce(tensors);
     works.push_back(std::move(work));
   }
 
@@ -150,7 +152,7 @@ void testReduce(int iter = 10000) {
 
 void testAllgather(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -167,7 +169,8 @@ void testAllgather(int iter = 10000) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->allgather(outputs, tensors);
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+        pg->allgather(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -189,7 +192,7 @@ void testAllgather(int iter = 10000) {
 
 void testGather(int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -209,7 +212,8 @@ void testGather(int iter = 10000) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->gather(outputs, tensors);
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+        pg->gather(outputs, tensors);
     works.push_back(std::move(work));
   }
 
@@ -239,7 +243,7 @@ void testGather(int iter = 10000) {
 
 void testScatter(int iter = 1) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
   // Get the world size
   auto worldSize = pg->getSize();
@@ -259,7 +263,8 @@ void testScatter(int iter = 1) {
     }
 
     // Queue the work.
-    c10::intrusive_ptr<::c10d::Work> work = pg->scatter(tensors, inputs);
+    c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+        pg->scatter(tensors, inputs);
     works.push_back(std::move(work));
   }
 
@@ -282,7 +287,7 @@ void testScatter(int iter = 1) {
 void testSendRecv(bool recvAnysource, int iter = 10000) {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
   // Generate inputs
-  std::vector<c10::intrusive_ptr<::c10d::Work>> works;
+  std::vector<c10::intrusive_ptr<::c10d::ProcessGroup::Work>> works;
 
   // pg->send does not keep sent tensors alive, so we need to.
   std::vector<std::vector<at::Tensor>> sendTensors(iter);
@@ -293,7 +298,8 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       sendTensors[i] = std::vector<at::Tensor>({tensor});
 
       // Queue the work.
-      c10::intrusive_ptr<::c10d::Work> work = pg->send(sendTensors[i], 1, 0);
+      c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+          pg->send(sendTensors[i], 1, 0);
       works.push_back(std::move(work));
     } else {
       auto tensor = at::zeros({16, 16});
@@ -301,10 +307,11 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
 
       // Queue the work.
       if (!recvAnysource) {
-        c10::intrusive_ptr<::c10d::Work> work = pg->recv(recvTensors, 0, 0);
+        c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
+            pg->recv(recvTensors, 0, 0);
         works.push_back(std::move(work));
       } else {
-        c10::intrusive_ptr<::c10d::Work> work =
+        c10::intrusive_ptr<::c10d::ProcessGroup::Work> work =
             pg->recvAnysource(recvTensors, 0);
         works.push_back(std::move(work));
       }

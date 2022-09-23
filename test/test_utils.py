@@ -423,7 +423,6 @@ class TestCheckpoint(TestCase):
 
 class TestDataLoaderUtils(TestCase):
     def setUp(self):
-        super().setUp()
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
 

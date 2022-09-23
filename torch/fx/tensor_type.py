@@ -28,9 +28,7 @@ class TensorType:
 
     @staticmethod
     def __class_getitem__(*args):
-        if len(args) == 1 and isinstance(args[0], tuple):
-            args = args[0]
-        return TensorType(tuple(args))
+        return TensorType(args[0])
 
 
 class _DynType:

@@ -6,7 +6,6 @@
 #include <c10/util/intrusive_ptr.h>
 
 #include <memory>
-#include <numeric>
 
 namespace c10 {
 
@@ -38,20 +37,17 @@ namespace c10 {
 #endif
 
 class C10_API SymInt {
- public:
   enum Unchecked {
     UNCHECKED,
   };
 
+ public:
   /*implicit*/ SymInt(int64_t d) : data_(d) {
     SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
   };
   SymInt() : data_(0) {}
 
   // unchecked c-tor accepting raw `data_`
-  // One appropriate use for this is when you are constructing a symint
-  // in a situation where you know it is non-negative (or, if it is negative,
-  // the negative value is -1; i.e., not user controlled)
   SymInt(Unchecked, int64_t d) : data_(d) {}
 
   // TODO: these implementations are not optimal because they allocate a
@@ -68,22 +64,18 @@ class C10_API SymInt {
   }
 
   SymInt& operator=(const SymInt& s) {
-    if (this != &s) {
-      if (s.is_symbolic()) {
-        *this = SymInt::toSymInt(s.toSymIntNodeImpl());
-      } else {
-        data_ = s.data_;
-      }
+    if (s.is_symbolic()) {
+      *this = SymInt::toSymInt(s.toSymIntNodeImpl());
+    } else {
+      data_ = s.data_;
     }
     return *this;
   }
   SymInt& operator=(SymInt&& s) {
-    if (this != &s) {
-      release_(); // release the current SymIntNode if any
-      data_ = s.data_;
-      if (s.is_symbolic())
-        s.data_ = 0;
-    };
+    release_(); // release the current SymIntNode if any
+    data_ = s.data_;
+    if (s.is_symbolic())
+      s.data_ = 0;
     return *this;
   }
 
@@ -113,25 +105,10 @@ class C10_API SymInt {
     release_();
   }
 
-  // Require the int to be non-symbolic, and if it is symbolic raise an
-  // error.  This is safe to use for C++ code that doesn't work for symbolic
-  // shapes, and you don't have time to fix it immediately, as if we
-  // try to trigger the path in C++ you'll appropriately get an error
   int64_t expect_int() const {
     SKIP_IS_SYMBOLIC_ON_MOBILE(!is_symbolic());
     return data_;
   }
-
-  // Insert a guard for the int to be its concrete value, and then return
-  // that value.  This operation always works, even if the int is symbolic,
-  // so long as we know what the underlying value is (e.g., this won't work
-  // if you call it on the size of nonzero output).  Don't blindly put this
-  // everywhere; you can cause overspecialization of PyTorch programs with
-  // this method.
-  //
-  // It should be called as guard_int(__FILE__, __LINE__).  The file and line
-  // number can be used to diagnose overspecialization.
-  int64_t guard_int(const char* file, int64_t line) const;
 
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
@@ -156,7 +133,6 @@ class C10_API SymInt {
   bool operator>(SymInt sci) const;
   bool operator>=(SymInt sci) const;
   void operator*=(SymInt sci);
-  void operator+=(SymInt sci);
 
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
@@ -201,20 +177,6 @@ class C10_API SymInt {
 };
 
 #undef SKIP_IS_SYMBOLIC_ON_MOBILE
-
-/// Sum of a list of SymInt; accumulates into the c10::SymInt expression
-template <
-    typename C,
-    typename std::enable_if<
-        std::is_same<typename C::value_type, c10::SymInt>::value,
-        int>::type = 0>
-inline c10::SymInt multiply_integers(const C& container) {
-  return std::accumulate(
-      container.begin(),
-      container.end(),
-      c10::SymInt(1),
-      [](c10::SymInt a, c10::SymInt b) { return a * b; });
-}
 
 C10_API std::ostream& operator<<(std::ostream& os, SymInt s);
 } // namespace c10

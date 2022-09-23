@@ -1,9 +1,5 @@
-import threading
-
 import torch._C._lazy
 from torch.utils._pytree import tree_flatten, tree_unflatten
-
-from .closure import add_step_closure, run_step_closures
 
 
 def mark_step(device: str = "", wait=False):
@@ -15,8 +11,6 @@ def mark_step(device: str = "", wait=False):
     """
     # TODO(whc) expand this to include backend hooks and align with XLA backend needs
     torch._C._lazy._mark_step(device, [], wait=wait)
-
-    run_step_closures()
 
 
 def wait_device_ops(devices=None):

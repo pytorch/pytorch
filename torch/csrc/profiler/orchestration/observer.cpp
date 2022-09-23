@@ -13,11 +13,9 @@ using GlobalManager = GlobalStateManager<ProfilerStateBase>;
 // ----------------------------------------------------------------------------
 ExperimentalConfig::ExperimentalConfig(
     std::vector<std::string> profiler_metrics,
-    bool profiler_measure_per_kernel,
-    bool verbose)
+    bool profiler_measure_per_kernel)
     : profiler_metrics{profiler_metrics},
-      profiler_measure_per_kernel{profiler_measure_per_kernel},
-      verbose{verbose} {}
+      profiler_measure_per_kernel{profiler_measure_per_kernel} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
   return !profiler_metrics.empty();

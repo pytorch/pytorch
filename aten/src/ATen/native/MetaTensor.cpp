@@ -12,7 +12,7 @@
 namespace at {
 namespace native {
 
-Tensor empty_meta_symint(
+Tensor empty_meta(
   SymIntArrayRef size,
   c10::optional<ScalarType> dtype_opt,
   c10::optional<Layout> layout_opt,
@@ -29,7 +29,6 @@ Tensor empty_meta_symint(
       size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-// Kept only for BC with XLA
 Tensor empty_strided_meta(
   IntArrayRef size,
   IntArrayRef stride,
@@ -38,18 +37,7 @@ Tensor empty_strided_meta(
   c10::optional<Device> device_opt,
   c10::optional<bool> pin_memory_opt
 ) {
-  return empty_strided_meta_symint(c10::fromIntArrayRef(size), c10::fromIntArrayRef(stride), dtype_opt, layout_opt, device_opt, pin_memory_opt);
-}
-
-Tensor empty_strided_meta_symint(
-  SymIntArrayRef size,
-  SymIntArrayRef stride,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt
-) {
-  return at::detail::empty_strided_symint_meta(
+  return at::detail::empty_strided_meta(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 

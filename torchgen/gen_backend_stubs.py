@@ -3,7 +3,7 @@ import os
 import pathlib
 import re
 from collections import Counter, defaultdict, namedtuple
-from typing import Dict, List, Optional, Sequence, Set, Union
+from typing import Dict, List, Optional, Sequence, Union
 
 import yaml
 
@@ -68,7 +68,6 @@ def parse_backend_yaml(
         "full_codegen",
         "non_native",
         "ir_gen",
-        "symint",
     ]
 
     backend = yaml_values.pop("backend", None)
@@ -97,14 +96,6 @@ def parse_backend_yaml(
         supported, list
     ), f'expected "supported" to be a list, but got: {supported} (of type {type(supported)})'
 
-    symint = yaml_values.pop("symint", [])
-    if symint is None:
-        symint = []  # Allow an empty list of symint ops
-    assert isinstance(
-        symint, list
-    ), f'expected "symint" to be a list, but got: {supported} (of type {type(supported)})'
-    symint_set = set(symint)
-
     supported_autograd = yaml_values.pop("autograd", [])
     assert isinstance(
         supported_autograd, list
@@ -127,7 +118,6 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
     def create_backend_index(
         backend_ops: List[str],
-        symint_ops: Set[str],
         dispatch_key: DispatchKey,
         *,
         use_out_as_primary: bool,
@@ -141,8 +131,6 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             ), f"Found an invalid operator name: {op_name}"
             # See Note [External Backends Follow Dispatcher API]
             kernel_name = dispatcher.name(native_functions_map[op_name].func)
-            if op in symint_ops:
-                kernel_name += "_symint"
             # TODO: allow structured external backends later.
             m = BackendMetadata(
                 kernel=kernel_name, structured=False, cpp_namespace=cpp_namespace
@@ -152,6 +140,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             dispatch_key=dispatch_key,
             use_out_as_primary=use_out_as_primary,
             external=True,
+            symint=True,  # TODO: make this configurable
             device_guard=use_device_guard,
             index=metadata,
         )
@@ -165,7 +154,6 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 
         backend_idx = create_backend_index(
             supported,
-            symint_set,
             backend_key,
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
@@ -183,7 +171,6 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
 
         autograd_idx = create_backend_index(
             supported_autograd,
-            symint_set,
             autograd_key,
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
@@ -270,49 +257,30 @@ def error_on_missing_kernels(
     if full_codegen is None:
         full_codegen = []
 
-    indices = [backend_indices[backend_key].index] + (
-        [] if autograd_key is None else [backend_indices[autograd_key].index]
-    )
-    # Quick mapping from each OperatorName used by the external backend
-    # to its backend kernel name
-    expected_backend_op_names: Dict[OperatorName, str] = dict(
-        list(
-            concatMap(
-                lambda index: [
-                    (op_name, metadata.kernel) for op_name, metadata in index.items()
-                ],
-                indices,
-            )
-        )
+    expected_backend_op_names: List[OperatorName] = (
+        list(backend_indices[backend_key].index.keys()) + []
+        if autograd_key is None
+        else list(backend_indices[autograd_key].index.keys())
     )
     expected_backend_native_funcs: List[NativeFunction] = [
         f
         for f in native_functions
-        if f.func.name in expected_backend_op_names.keys()
-        and f.func.name not in full_codegen
+        if f.func.name in expected_backend_op_names and f.func.name not in full_codegen
     ]
     expected_backend_kernel_name_counts: Dict[str, List[NativeFunction]] = defaultdict(
         list
     )
     for native_f in expected_backend_native_funcs:
-        expected_backend_kernel_name_counts[
-            expected_backend_op_names[native_f.func.name]
-        ].append(native_f)
+        expected_backend_kernel_name_counts[dispatcher.name(native_f.func)].append(
+            native_f
+        )
 
     # This just looks for lines containing "foo(", and assumes that the kernel foo has been implemented.
     # It might cause false negatives (we won't catch all cases), but that's ok - if we catch a missing kernel
     # here, then we get a nicer error message. If we miss it, you get a linker error.
-    kernel_defn_regex = rf"(.*){class_name}::\s*([\w\d]*)\("
+    kernel_defn_regex = rf"{class_name}::\s*([\w\d]*)\("
     actual_backend_kernel_name_counts = Counter(
-        # A bit unwieldy (this could probably be moved into regex),
-        # but we don't want to include kernel names that come from function calls,
-        # like "return torch_xla::XLANativeFunctions::empty_strided_symint(...)".
-        # Easy check is to ignore any lines with colons before the class name.
-        [
-            y
-            for (x, y) in re.findall(kernel_defn_regex, backend_defns)
-            if not x.endswith(":")
-        ]
+        re.findall(kernel_defn_regex, backend_defns)
     )
 
     missing_kernels_err_msg = ""

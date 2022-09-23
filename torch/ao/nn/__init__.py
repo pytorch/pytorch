@@ -6,7 +6,6 @@
 import importlib
 
 __all__ = [
-    "qat",
     "quantizable",
     "quantized",
     "sparse",

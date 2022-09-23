@@ -167,14 +167,9 @@ def load_derivatives(
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 
-# TODO: Why is this going through CppSignatureGroup, that doesn't make sense...
 @with_native_function
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    sigs = CppSignatureGroup.from_native_function(f, method=False)
-    if sigs.symint_signature is not None:
-        return sigs.symint_signature.arguments()
-    else:
-        return sigs.signature.arguments()
+    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
 
 
 def create_derivative(
@@ -861,15 +856,6 @@ def saved_variables(
             {
                 "suffix": "_strides",
                 "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
-                "expr": stride_expr,
-            },
-        ),
-        # replace self.sym_strides() with self_sym_strides
-        (
-            r"{}.sym_strides\(\)",
-            {
-                "suffix": "_sym_strides",
-                "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
                 "expr": stride_expr,
             },
         ),

@@ -69,7 +69,8 @@ static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 
 template <typename F>
 static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (const auto j C10_UNUSED : c10::irange(n)) {
+  for (const auto j : c10::irange(n)) {
+    (void)j; //Suppress unused variable warning
     f();
     data[0] += strides[0];
     data[1] += strides[1];

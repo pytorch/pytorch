@@ -6,8 +6,6 @@ from .utils import transitive_get as walk
 from .variable import isvar
 from .dispatch import dispatch
 
-__all__ = ["reify", "unify"]
-
 ################
 # Reificiation #
 ################
