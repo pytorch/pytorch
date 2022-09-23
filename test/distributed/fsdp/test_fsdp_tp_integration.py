@@ -14,8 +14,11 @@ from torch.distributed._shard.sharded_optim import (
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_plan import ShardingPlan
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
+from torch.distributed.fsdp._tensor_flattener import (
+    _set_tensor_flattener,
+    TensorFlattener,
+)
 from torch.distributed.fsdp._utils import _set_fsdp_flattened
-from torch.distributed.fsdp.flat_param import _set_tensor_flattener, _TensorFlattener
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
@@ -59,22 +62,21 @@ class STShardingInfo(NamedTuple):
     process_group: dist.ProcessGroup
 
 
-class ShardedTensorFlattener(_TensorFlattener):
+class ShardedTensorFlattener(TensorFlattener):
     def pre_flatten_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[Optional[Any], torch.Tensor]:
+    ) -> Tuple[torch.Tensor, Optional[Any]]:
         if type(tensor) is ShardedTensor:
             sharding_info = STShardingInfo(
                 tensor.sharding_spec(), tensor.size(), tensor._process_group
             )
             local_tensor = tensor.local_tensor()
-            return sharding_info, local_tensor
-        return None, tensor
+            return local_tensor, sharding_info
+        return tensor, None
 
     def post_unflatten_transform(
-        self,
-        tensor: torch.Tensor, sharding_info: STShardingInfo
+        self, tensor: torch.Tensor, sharding_info: STShardingInfo
     ) -> torch.Tensor:
         sharded_tensor = ShardedTensor._init_from_local_tensor(
             tensor,
@@ -132,7 +134,6 @@ class SimpleModel(torch.nn.Module):
 
 
 class TestTpFsdpIntegration(FSDPTest):
-
     def _params_fsdp_flat_order(self, m, params_sharded, tp_world_size):
         params = {}
         sharding_info = {}

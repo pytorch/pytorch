@@ -23,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from ._tensor_flattener import _tf_post_unflatten_transform, _tf_pre_flatten_transform
 from ._utils import _alloc_storage, _free_storage, _set_fsdp_flattened, p_assert
 
 __all__ = [
@@ -37,11 +38,11 @@ __all__ = [
 ]
 
 
-class _TensorFlattener:
+class TensorFlattener:
     """
     This enables a pre-flatten and post-unflatten transform to be applied per
     parameter. To do so, use :func:`_set_tensor_flattener` to set a custom
-    :class:`_TensorFlattener` that implements the two transforms.
+    :class:`TensorFlattener` that implements the two transforms.
     """
 
     def pre_flatten_transform(
@@ -56,11 +57,21 @@ class _TensorFlattener:
         # E.g. Converting local tensor to `ShardedTensor`
         ...
 
+    def chunk_tensor(
+        self,
+        tensor: torch.Tensor,
+        rank: int,
+        world_size: int,
+        num_devices_per_node: int,
+        process_group: dist.ProcessGroup,
+    ):
+        ...
 
-_flattener: Optional[_TensorFlattener] = None
+
+_flattener: Optional[TensorFlattener] = None
 
 
-def _set_tensor_flattener(flattener: _TensorFlattener) -> None:
+def _set_tensor_flattener(flattener: TensorFlattener) -> None:
     global _flattener
     _flattener = flattener
 
@@ -355,10 +366,8 @@ class FlatParamHandle:
                             "`FlatParameter` requires uniform dtype but got "
                             f"{dtype} and {param.dtype}"
                         )
-                    if dtype is None:
-                        is_floating_point = param.is_floating_point()
-                        if not is_floating_point:
-                            raise ValueError("Integer parameters are unsupported")
+                    if dtype is None and not param.is_floating_point():
+                        raise ValueError("Integer parameters are unsupported")
                     if (
                         requires_grad is not None
                         and param.requires_grad != requires_grad
@@ -366,11 +375,7 @@ class FlatParamHandle:
                         raise ValueError(
                             "`FlatParameter` requires uniform `requires_grad`"
                         )
-                    extension = None
-                    if _flattener is not None:
-                        extension, new_param = _flattener.pre_flatten_transform(param)
-                        if extension is not None:
-                            param = new_param
+                    param, extension = _tf_pre_flatten_transform(param)
                     param_extensions.append(extension)
                     dtype = param.dtype
                     requires_grad = param.requires_grad
@@ -848,12 +853,13 @@ class FlatParamHandle:
                     # _post_backward_hook and assign back in full precision
                     # in _wait_for_post_backward.
                     if (
-                        self._config.keep_low_precision_grads and
-                        flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                        self._config.keep_low_precision_grads
+                        and flat_param._saved_grad_shard.dtype
+                        != flat_param._local_shard.dtype  # type: ignore[attr-defined]
                     ):
-                        flat_param._saved_grad_shard = (  # type: ignore[attr-defined]
-                            flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)  # type: ignore[attr-defined]
-                        )
+                        flat_param._saved_grad_shard = flat_param._saved_grad_shard.to(  # type: ignore[attr-defined]
+                            flat_param._local_shard.dtype
+                        )  # type: ignore[attr-defined]
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
@@ -1016,10 +1022,8 @@ class FlatParamHandle:
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
-            if _flattener is not None:
-                param_extension = self.flat_param._param_extensions[i]
-                if param_extension is not None:
-                    view = _flattener.post_unflatten_transform(view, param_extension)
+            param_extension = self.flat_param._param_extensions[i]
+            view = _tf_post_unflatten_transform(view, param_extension)
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if as_params:
