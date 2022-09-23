@@ -1,5 +1,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/mkldnn/ConvPrepack.h>
+#include <ATen/native/mkldnn/LinearPrepack.h>
 #include <ATen/native/mkldnn/OpContext.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -11,6 +12,7 @@ namespace native {
 namespace mkldnn {
 
 using namespace internal::convolution;
+using namespace internal::linear;
 
 TORCH_LIBRARY(mkldnn, m) {
   m.class_<ConvOpContext>(TORCH_SELECTIVE_CLASS("ConvOpContext"))
@@ -42,6 +44,9 @@ TORCH_LIBRARY(mkldnn_prepacked, m) {
 
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn_prepacked::conv2d_run(Tensor X, __torch__.torch.classes.mkldnn.ConvOpContext W_prepack) -> Tensor Y"));
+
+  m.def(TORCH_SELECTIVE_SCHEMA(
+    "mkldnn_prepacked::linear_eltwise(Tensor X, Tensor W, Tensor? B, str attr, Scalar?[] scalars, str? algorithm) -> Tensor Y"));
 }
 
 TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
@@ -51,6 +56,9 @@ TORCH_LIBRARY_IMPL(mkldnn_prepacked, CPU, m) {
 
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn_prepacked::conv2d_run"), TORCH_FN(conv_run));
+
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn_prepacked::linear_eltwise"), TORCH_FN(linear_eltwise_run));
 }
 
 } // namespace mkldnn
