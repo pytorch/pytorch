@@ -425,8 +425,8 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_1d(
   int64_t n_classes,
   int64_t ignore_index
 ) {
-  int64_t t = static_cast<int64_t>(*target);
-  if (t != static_cast<int64_t>(ignore_index)) {
+  const int64_t t = *target;
+  if (t != ignore_index) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     const auto grad = -(size_average ? *grad_output / *total_weight : *grad_output);
     grad_input[t] = weights != nullptr ? weights[t] * grad : grad;
@@ -449,10 +449,10 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
                                    : *grad_output);
 
   for (int i = threadIdx.x; i < nframe; i += NLL_LOSS_THREADS) {
-    const int64_t t = static_cast<int64_t>(target[i]);
+    const int64_t t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-      const uint64_t index = static_cast<uint64_t>(i) * ndim + t;
+      const auto index = i * ndim + t;
       CUDA_KERNEL_ASSERT(index >= 0);
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;
     }

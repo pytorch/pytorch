@@ -98,11 +98,13 @@ __global__ void nll_loss2d_forward_kernel(
   for (int i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    int t = target[toffset + i];
+    int64_t t = target[toffset + i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       cur_weight = weight != nullptr ? weight[t] : static_cast<scalar_t>(1);
-      input_sum -= input[ioffset + i + map_nelem * t] * cur_weight;
+      const auto input_index = ioffset + i + map_nelem * t;
+      CUDA_KERNEL_ASSERT(input_index >= 0);
+      input_sum -= input[input_index] * cur_weight;
       acc_weight += cur_weight;
     }
   }
@@ -185,9 +187,11 @@ __global__ void nll_loss2d_backward_kernel(
   for (int i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    int t = (int)target_thread[i];
+    int64_t t = target_thread[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
+      const auto grad_input_index = i + map_nelem * t;
+      CUDA_KERNEL_ASSERT(grad_input_index >= 0);
       grad_input_thread[i + map_nelem * t] = weights != nullptr ? weights[t] * grad
                                                                 : grad;
     }
