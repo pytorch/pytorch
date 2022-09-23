@@ -605,9 +605,6 @@ if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   endif()
 endif()
 
-# INTERN_BUILD_ATEN_OPS is used to control whether to build ATen/TH operators.
-set(INTERN_BUILD_ATEN_OPS ON)
-
 if(NOT DEFINED USE_BLAS)
   set(USE_BLAS ON)
 endif()

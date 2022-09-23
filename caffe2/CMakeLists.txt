@@ -56,56 +56,54 @@ endif()
 # ---[ Declare source file lists
 
 # ---[ ATen build
-if(INTERN_BUILD_ATEN_OPS)
-  set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
-  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-  add_subdirectory(../aten aten)
-  set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+add_subdirectory(../aten aten)
+set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
-  # Generate the headers wrapped by our operator
-  file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
-  COMMAND
-  "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-    --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
-    --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
-    --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
-    --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
-  DEPENDS
-  ${torchgen_python}
-  ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
-  ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
+# Generate the headers wrapped by our operator
+file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
+COMMAND
+"${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+  --aten_root=${CMAKE_CURRENT_SOURCE_DIR}/../aten
+  --template_dir=${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten
+  --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
+  --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
+DEPENDS
+${torchgen_python}
+${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
+${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
+${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
 
-  add_custom_target(__aten_op_header_gen
-    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
-  add_library(aten_op_header_gen INTERFACE)
-  add_dependencies(aten_op_header_gen __aten_op_header_gen)
+add_custom_target(__aten_op_header_gen
+  DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h)
+add_library(aten_op_header_gen INTERFACE)
+add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
-  # Add source, includes, and libs to lists
-  list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
-  list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
-  list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
-  list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
-  list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
-  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
-  list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
-  list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
-  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
-  list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
-  list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
-  list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
-  list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
-  list(APPEND Caffe2_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS})
-  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
-  list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
-  list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
-  list(APPEND Caffe2_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
-  list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
-  list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
-  list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-endif()
+# Add source, includes, and libs to lists
+list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
+list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
+list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
+list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
+list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
+list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
+list(APPEND Caffe2_MPS_SRCS ${ATen_MPS_SRCS})
+list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
+list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
+list(APPEND Caffe2_MPS_TEST_SRCS ${ATen_MPS_TEST_SRCS})
+list(APPEND Caffe2_GPU_TEST_SRCS ${ATen_CUDA_TEST_SRCS})
+list(APPEND Caffe2_HIP_TEST_SRCS ${ATen_HIP_TEST_SRCS})
+list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
+list(APPEND Caffe2_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS})
+list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
+list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
+list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
+list(APPEND Caffe2_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE})
+list(APPEND Caffe2_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS})
+list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
+list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
+list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
 
 # ---[ Caffe2 build
 # Note: the folders that are being commented out have not been properly

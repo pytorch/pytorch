@@ -1,7 +1,3 @@
-if(NOT INTERN_BUILD_ATEN_OPS)
-  return()
-endif()
-
 # Find modules
 if(NOT INTERN_BUILD_MOBILE)
   list(APPEND CMAKE_MODULE_PATH /usr/lib/x86_64-linux-gnu/)
