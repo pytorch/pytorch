@@ -968,10 +968,6 @@
   self: logsumexp_backward(grad, self, result, dim, keepdim)
   result: logsumexp_jvp(self_p, self_t, dim, keepdim)
 
-- name: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  self: not_implemented("lstsq")
-  A: not_implemented("lstsq")
-
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   self, b: linalg_lstsq_backward(grad, self, b, rcond, driver, grad_input_mask)
   solution: linalg_lstsq_jvp(self_p, b_p, self_t, b_t)
