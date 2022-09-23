@@ -438,8 +438,12 @@ op_db: List[OpInfo] = [
         ),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-03, rtol=5e-2),
-                                   torch.float16: tol(atol=1e-03, rtol=5e-3)}),
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1e-03, rtol=5e-2),
+                        torch.float16: tol(atol=1e-03, rtol=5e-3),
+                    }
+                ),
                 "TestReductions",
                 "test_reference_masked",
             ),
@@ -768,8 +772,12 @@ op_db: List[OpInfo] = [
         ),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-03, rtol=0.05),
-                                   torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1e-03, rtol=0.05),
+                        torch.float16: tol(atol=1e-03, rtol=1e-03),
+                    }
+                ),
                 "TestReductions",
                 "test_reference_masked",
             ),
@@ -952,8 +960,12 @@ op_db: List[OpInfo] = [
         ),
         decorators=[
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1e-02),
-                                   torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=1e-02, rtol=1e-02),
+                        torch.float16: tol(atol=1e-02, rtol=1e-02),
+                    }
+                ),
                 "TestReductions",
                 "test_reference_masked",
             ),
