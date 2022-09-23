@@ -1,4 +1,5 @@
 import torch
+import contextlib
 from typing import Callable, Any
 
 
@@ -132,3 +133,16 @@ class save_on_cpu(saved_tensors_hooks):
             return tensor.to(device, non_blocking=pin_memory)
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks(maybe_error_message=None):
+    try:
+        prev_state = torch._C._autograd._saved_tensors_hooks_is_disabled()
+        prev_message = torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        torch._C._autograd._saved_tensors_hooks_set_disabled_error_message(maybe_error_message)
+        torch._C._autograd._saved_tensors_hooks_set_disabled(True)
+        yield
+    finally:
+        torch._C._autograd._saved_tensors_hooks_set_disabled_error_message(prev_message)
+        torch._C._autograd._saved_tensors_hooks_set_disabled(prev_state)

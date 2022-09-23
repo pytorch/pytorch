@@ -28,6 +28,7 @@
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <ATen/SavedTensorHooks.cpp>
 
 #include <set>
 #include <unordered_set>
@@ -309,6 +310,18 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     }
   });
   m.def("_clear_callbacks", []() { at::clearCallbacks(); });
+  m.def(
+      "_saved_tensors_hooks_is_disabled",
+      at::SavedTensorDefaultHooks::is_disabled);
+  m.def(
+      "_saved_tensors_hooks_set_disabled",
+      at::SavedTensorDefaultHooks::set_disabled);
+  m.def(
+      "_saved_tensors_hooks_set_disabled_error_message",
+      at::SavedTensorDefaultHooks::set_disabled_error_message);
+  m.def(
+      "_saved_tensors_hooks_get_disabled_error_message",
+      at::SavedTensorDefaultHooks::get_disabled_error_message);
   m.def(
       "_push_saved_tensors_default_hooks",
       [](py::function& pack_hook, py::function& unpack_hook) {
