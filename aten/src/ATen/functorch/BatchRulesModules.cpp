@@ -388,7 +388,6 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM(im2col);
-  EXISTING_BDIM(im2col_backward);
 
   VMAP_SUPPORT(embedding, embedding_batch_rule);
   VMAP_SUPPORT(embedding_dense_backward, embedding_dense_backward_batch_rule);
