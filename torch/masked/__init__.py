@@ -29,4 +29,9 @@ from ._ops import (
     normalize,
 )
 
-__all__ = []  # type: ignore[var-annotated]
+__all__ = [
+    "as_masked_tensor",
+    "is_masked_tensor",
+    "masked_tensor",
+    "MaskedTensor",
+]
