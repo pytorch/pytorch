@@ -231,6 +231,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             and "aten.var_mean" in str(func)
         )
 
+    def _is_native_batch_norm(self, func):
+        return "torch.native_batch_norm" == torch.overrides.resolve_name(func) or (
+            func == torch.ops.aten.native_batch_norm.default
+            or func == torch.ops.aten.native_batch_norm
+        )
+
     def __torch_function__(
         self,
         orig_func: Callable,
@@ -243,5 +249,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
+        if self._is_native_batch_norm(orig_func):
+            return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)
