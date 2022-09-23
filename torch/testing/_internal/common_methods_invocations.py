@@ -14534,9 +14534,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            ),
     OpInfo('unfold',
-           op=lambda x, *args: x.unfold(*args),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           backward_dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,

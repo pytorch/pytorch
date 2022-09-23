@@ -327,7 +327,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "index_copy",
     "lu",
     "unfold",
-    "unfold_backward",
     "index",
     "masked_fill",
     "linalg_cross",

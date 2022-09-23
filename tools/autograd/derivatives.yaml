@@ -1665,14 +1665,6 @@
 - name: to_mkldnn(Tensor self, ScalarType? dtype=None) -> Tensor
   self: to_mkldnn_backward(grad, self)
 
-- name: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
-  self: unfold_backward(grad, self.sizes(), dimension, size, step)
-  result: auto_linear
-
-- name: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
-  grad_in: grad.unfold(dim, size, step)
-  result: auto_linear
-
 - name: uniform_(Tensor(a!) self, float from=0, float to=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()

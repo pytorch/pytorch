@@ -8878,18 +8878,9 @@
   structured_delegate: renorm.out
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
-  variants: method
+  variants: method, function
   device_check: NoCheck
   device_guard: False
-  dispatch:
-    CPU, CUDA, Meta: unfold
-    QuantizedCPU, QuantizedCUDA: unfold
-
-- func: unfold_backward(Tensor grad_in, int[] input_sizes, int dim, int size, int step) -> Tensor
-  variants: function
-  dispatch:
-    CPU, CUDA: unfold_backward
-  autogen: unfold_backward.out
 
 - func: equal(Tensor self, Tensor other) -> bool
   tags: data_dependent_output
