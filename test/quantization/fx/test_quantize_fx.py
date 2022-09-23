@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 from collections import OrderedDict
-import os
 import contextlib
 import torch
 import torch.nn.functional as F
