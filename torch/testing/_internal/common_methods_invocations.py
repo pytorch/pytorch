@@ -17409,9 +17409,9 @@ python_ref_db = [
         "_refs.native_layer_norm",
         torch_opinfo_name="native_layer_norm",
         skips=(
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref",
+            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_python_ref",
                          device_type="cpu", dtypes=(torch.float32,)),
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_python_ref_torch_fallback",
+            DecorateInfo(unittest.skip("Skipped!"), "TestCommon", "test_python_ref_torch_fallback",
                          device_type="cpu", dtypes=(torch.float32,)),
         ),
     ),
