@@ -2533,7 +2533,9 @@ class FullyShardedDataParallel(nn.Module):
 
             # All-gather the param (ShardedTensor)
             param, shards = _tf_pre_load_state_dict_transform(param)
-            assert len(shards) < 2, f"Expects 0 or 1 shard per rank but got {len(shards)} shards"
+            assert len(shards) < 2, (
+                f"Expects 0 or 1 shard per rank but got {len(shards)} shards on rank {self.rank}"
+            )
             if shards:
                 local_tensor = shards[0].flatten()
             else:

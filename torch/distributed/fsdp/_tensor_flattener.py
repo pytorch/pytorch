@@ -2,7 +2,6 @@ from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
-import torch.nn as nn
 
 from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
 
@@ -41,6 +40,7 @@ class TensorFlattener:
         ...
 
     def pre_load_state_dict_transform(
+        self,
         tensor: torch.Tensor,
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         """
@@ -71,7 +71,7 @@ def _tf_pre_flatten_transform(
 def _tf_post_unflatten_transform(
     tensor: torch.Tensor,
     param_extension: Any,
-) -> ...:
+) -> torch.Tensor
     if _flattener is not None and param_extension is not None:
         return _flattener.post_unflatten_transform(tensor, param_extension)
     return tensor
@@ -83,7 +83,7 @@ def _tf_chunk_tensor(
     world_size: int,
     num_devices_per_node: int,
     pg: dist.ProcessGroup,
-):
+) -> torch.Tensor:
     chunk_tensor_fn = (
         _flattener.chunk_tensor
         if _flattener is not None
@@ -103,5 +103,5 @@ def _tf_pre_load_state_dict_transform(
 ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
     if _flattener is not None:
         return _flattener.pre_load_state_dict_transform(tensor)
-    shards = tensor.local_shards()
+    shards = tensor.local_shards()  # type: ignore[attr-defined]
     return (tensor, [shards[0].tensor] if shards else [])
