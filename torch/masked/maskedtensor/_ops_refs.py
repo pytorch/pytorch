@@ -26,7 +26,7 @@ from .unary import (
 )
 
 
-__all__ = []
+__all__ = []  # type: ignore[var-annotated]
 
 
 def _check_args_kwargs_length(args, kwargs, error_prefix, len_args=None, len_kwargs=None):
@@ -393,7 +393,7 @@ def to_sparse_csr(func, *args, **kwargs):
         return mt
     new_mask = func(_maybe_get_mask(args[0]))
     new_data = _get_data(args[0]).sparse_mask(new_mask)
-    return MaskedTensor(new_data, new_mask)	
+    return MaskedTensor(new_data, new_mask)
 
 
 @register_dispatch_func([torch.ops.aten._to_dense])
