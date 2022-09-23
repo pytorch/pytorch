@@ -22,7 +22,6 @@ from common_utils import (
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
     get_exhaustive_batched_inputs_batch_norm_is_training,
-    expectedFailureIf,
     decorate,
     xfail,
     skip,
@@ -766,7 +765,7 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
+        decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64)),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean'),  # silent incorrectness (nan difference)
 
