@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/SymFloatNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -33,8 +34,8 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymIntNode mul(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
-  virtual SymIntNode truediv(const SymIntNode& other) {
-    TORCH_CHECK(false, "FP division isn't support for SymInts");
+  virtual SymFloatNode truediv(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode floordiv(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");

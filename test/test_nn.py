@@ -5370,7 +5370,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mask[i, end:] = False
 
         nt = torch._nested_tensor_from_mask(input, mask)
-        input_convert = torch.nested.to_padded_tensor(nt, 0.)
+        input_convert = nt.to_padded_tensor(0.)
         input.masked_fill_(mask.reshape(N, L, 1).logical_not(), 0.)
 
         self.assertEqual(input, input_convert)
@@ -15548,11 +15548,11 @@ class TestNNDeviceType(NNTestCase):
             yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
             yy.backward(yy)
             # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol, atol = torch.testing._comparison.get_tolerances(dtype, atol=1e-3 if dtype is torch.half else None)
+            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
             self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
             # x is half
-            rtol, atol = torch.testing._comparison.get_tolerances(torch.half, atol=1e-3)
-            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=atol))
+            rtol, _ = torch.testing._comparison.get_tolerances(torch.half, rtol=None, atol=None)
+            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
@@ -18751,7 +18751,7 @@ class TestNNDeviceType(NNTestCase):
                     ],
                     device=device, dtype=dtype
                 )
-                result = torch.nested.to_padded_tensor(result, 0)
+                result = result.to_padded_tensor(0)
                 ref_output[0][-1] = torch.zeros_like(
                     ref_output[0][-1], device=device, dtype=dtype
                 )
