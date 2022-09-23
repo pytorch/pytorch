@@ -296,7 +296,7 @@ struct ConcretePyInterpreterVTable final
     py::dict kwargs = std::move(args_kwargs.second);
     std::vector<py::object> output_objects;
 
-    for (auto& ivalue : ou tputs) {
+    for (auto& ivalue : outputs) {
       output_objects.push_back(torch::jit::toPyObject(ivalue));
     }
 
