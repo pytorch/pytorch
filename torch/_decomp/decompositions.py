@@ -1,7 +1,7 @@
 import functools
-from functools import partial, reduce
 import operator
 from enum import Enum
+from functools import partial, reduce
 from itertools import product
 from typing import Callable, Iterable, List, Optional, Tuple
 
@@ -635,7 +635,7 @@ def _log_softmax_backward_data(
 def _im2col_col2im_indices_along_dim(
     input_d, kernel_d, dilation_d, padding_d, stride_d, device
 ):
-    """ Utility function to implement im2col and col2im """
+    """Utility function to implement im2col and col2im"""
     blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
 
     arange_kw = partial(torch.arange, dtype=torch.int64, device=device)
@@ -667,8 +667,9 @@ def im2col(
 
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
-        utils.check(cond,
-                    lambda: "{param_name} should be greater {'than' zero, but got {param}")
+        utils.check(
+            cond, lambda: "{param_name} should be greater {'than' zero, but got {param}"
+        )
 
     check_positive(kernel_size, "kernel_size")
     check_positive(dilation, "dilation")
@@ -677,17 +678,25 @@ def im2col(
 
     shape = input.shape
     ndim = len(shape)
-    utils.check(ndim in (3, 4) and all(d != 0 for d in shape[-3:]),
-                lambda: "Expected 3D or 4D (batch mode) tensor for input with possible 0 batch size "
-                        f"and non-zero dimensions, but got: {tuple(shape)}")
-    output_size = tuple(1 + (out + 2 * pad - dil * (ker - 1) - 1) // st for out, pad, dil, ker, st in
-                        zip(shape[-2:], padding, dilation, kernel_size, stride))
-    utils.check(all(c > 0 for c in output_size),
-                lambda: f"Given an input with spacial size {tuple(shape[-2:])}, "
-                        f"kernel_size={kernel_size}, dilation={dilation}, "
-                        f"padding={padding}, stride={stride}, "
-                        "the calculated shape of the array of sliding blocks "
-                        f"is {output_size}, but its components must be at least one.")
+    utils.check(
+        ndim in (3, 4) and all(d != 0 for d in shape[-3:]),
+        lambda: "Expected 3D or 4D (batch mode) tensor for input with possible 0 batch size "
+        f"and non-zero dimensions, but got: {tuple(shape)}",
+    )
+    output_size = tuple(
+        1 + (out + 2 * pad - dil * (ker - 1) - 1) // st
+        for out, pad, dil, ker, st in zip(
+            shape[-2:], padding, dilation, kernel_size, stride
+        )
+    )
+    utils.check(
+        all(c > 0 for c in output_size),
+        lambda: f"Given an input with spacial size {tuple(shape[-2:])}, "
+        f"kernel_size={kernel_size}, dilation={dilation}, "
+        f"padding={padding}, stride={stride}, "
+        "the calculated shape of the array of sliding blocks "
+        f"is {output_size}, but its components must be at least one.",
+    )
     batched_input = ndim == 4
     if not batched_input:
         input = input.unsqueeze(0)
@@ -698,7 +707,6 @@ def im2col(
     padding_h, padding_w = padding
     dilation_h, dilation_w = dilation
     kernel_h, kernel_w = kernel_size
-
 
     blocks_row_indices = _im2col_col2im_indices_along_dim(
         input_h, kernel_h, dilation_h, padding_h, stride_h, input.device
@@ -731,7 +739,7 @@ def col2im(
     kernel_size: List[int],
     dilation: List[int],
     padding: List[int],
-    stride: List[int]
+    stride: List[int],
 ) -> Tensor:
     utils.check(len(output_size) == 2, lambda: "only 2D output_size supported")
     utils.check(len(kernel_size) == 2, lambda: "only 2D kernel supported")
@@ -741,8 +749,9 @@ def col2im(
 
     def check_positive(param, param_name, strict=True):
         cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
-        utils.check(cond,
-                    lambda: "{param_name} should be greater than zero, but got {param}")
+        utils.check(
+            cond, lambda: "{param_name} should be greater than zero, but got {param}"
+        )
 
     check_positive(kernel_size, "kernel_size")
     check_positive(dilation, "dilation")
@@ -752,23 +761,37 @@ def col2im(
 
     shape = input.shape
     ndim = len(shape)
-    utils.check(ndim in (2, 3) and all(d != 0 for d in shape[-2:]),
-                lambda: "Expected 2D or 3D (batch mode) tensor for input with possible 0 batch size "
-                        f"and non-zero dimensions, but got: {tuple(shape)}")
+    utils.check(
+        ndim in (2, 3) and all(d != 0 for d in shape[-2:]),
+        lambda: "Expected 2D or 3D (batch mode) tensor for input with possible 0 batch size "
+        f"and non-zero dimensions, but got: {tuple(shape)}",
+    )
     prod_kernel_size = kernel_size[0] * kernel_size[1]
-    utils.check(shape[-2] % prod_kernel_size == 0,
-                lambda: "Expected size of input's first non-batch dimension to be divisible by the "
-                        f"product of kernel_size, but got input.shape[-2] = {shape[-2]} and "
-                        f"kernel_size={kernel_size}")
-    col = [1 + (out + 2 * pad - dil * (ker - 1) - 1) // st for out, pad, dil, ker, st in
-           zip(output_size, padding, dilation, kernel_size, stride)]
+    utils.check(
+        shape[-2] % prod_kernel_size == 0,
+        lambda: "Expected size of input's first non-batch dimension to be divisible by the "
+        f"product of kernel_size, but got input.shape[-2] = {shape[-2]} and "
+        f"kernel_size={kernel_size}",
+    )
+    col = [
+        1 + (out + 2 * pad - dil * (ker - 1) - 1) // st
+        for out, pad, dil, ker, st in zip(
+            output_size, padding, dilation, kernel_size, stride
+        )
+    ]
     L = col[0] * col[1]
-    utils.check(shape[-1] == L, lambda: f"Given output_size={output_size}, kernel_size={kernel_size}, "
-                                        f"dilation={dilation}, padding={padding}, stride={stride}, "
-                                        f"expected input.size(-1) to be {L} but got {shape[-1]}.")
-    utils.check(L > 0, lambda: f"Given output_size={output_size}, kernel_size={kernel_size}, "
-                               f"dilation={dilation}, padding={padding}, stride={stride}, "
-                               f"expected input.size(-1) to be {L} but got {shape[-1]}.")
+    utils.check(
+        shape[-1] == L,
+        lambda: f"Given output_size={output_size}, kernel_size={kernel_size}, "
+        f"dilation={dilation}, padding={padding}, stride={stride}, "
+        f"expected input.size(-1) to be {L} but got {shape[-1]}.",
+    )
+    utils.check(
+        L > 0,
+        lambda: f"Given output_size={output_size}, kernel_size={kernel_size}, "
+        f"dilation={dilation}, padding={padding}, stride={stride}, "
+        f"expected input.size(-1) to be {L} but got {shape[-1]}.",
+    )
     batched_input = ndim == 3
     if not batched_input:
         input = input.unsqueeze(0)
