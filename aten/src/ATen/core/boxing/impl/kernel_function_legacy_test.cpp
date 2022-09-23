@@ -508,8 +508,8 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithStringLi
   auto output = std::move(outputs[0]).toList();
 
   EXPECT_EQ(2, output.size());
-  EXPECT_EQ("value1", output.get(0).toString()->string());
-  EXPECT_EQ("value2", output.get(1).toString()->string());
+  EXPECT_EQ("value1", output.get(0).toStringRef());
+  EXPECT_EQ("value2", output.get(1).toStringRef());
 }
 
 int captured_dict_size = 0;
@@ -550,7 +550,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithDictInpu
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("value2", outputs[0].toString()->string());
+  EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
 Dict<string, string> kernelWithDictOutput(Dict<string, string> input) {
@@ -612,7 +612,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithUnordere
   dict.insert("key2", "value2");
   auto outputs = callOp(*op, dict);
   EXPECT_EQ(1, outputs.size());
-  EXPECT_EQ("value2", outputs[0].toString()->string());
+  EXPECT_EQ("value2", outputs[0].toStringRef());
 }
 
 std::unordered_map<string, string> kernelWithUnorderedMapOutput(std::unordered_map<string, string> input) {
@@ -897,7 +897,7 @@ TEST(OperatorRegistrationTest_LegacyFunctionBasedKernel, givenKernelWithOptional
   EXPECT_EQ(3, outputs.size());
   EXPECT_EQ(DispatchKey::CUDA, extractDispatchKey(outputs[0].toTensor()));
   EXPECT_TRUE(outputs[1].isNone());
-  EXPECT_EQ("text", outputs[2].toString()->string());
+  EXPECT_EQ("text", outputs[2].toStringRef());
 
   outputs = callOp(*op, dummyTensor(DispatchKey::CPU), c10::IValue(), 4, c10::IValue());
   EXPECT_EQ(3, outputs.size());
