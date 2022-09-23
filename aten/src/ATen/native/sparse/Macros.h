@@ -10,7 +10,10 @@
 #endif
 
 #if defined(_WIN32) || defined(_WIN64)
-#define RESTRICT __restrict
+// Temporarily disable __restrict on Windows,
+// as it turns out not all MSVC versions are aware of it.
+// #define RESTRICT __restrict
+#define RESTRICT
 #else
 #define RESTRICT __restrict__
 #endif
