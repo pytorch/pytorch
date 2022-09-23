@@ -8,7 +8,7 @@
 
 import itertools
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64
 import torch
 from torch import Tensor
 import functools
@@ -22,11 +22,13 @@ from common_utils import (
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
     get_exhaustive_batched_inputs_batch_norm_is_training,
+    expectedFailureIf,
+    decorate,
     xfail,
     skip,
     skipOps,
     tol1,
-    # tol2,
+    tol2,
     opsToleranceOverride,
     check_vmap_fallback,
     is_batch_norm_training,
@@ -484,6 +486,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('prod',
              {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
+        tol2('linalg.det', 'singular',
+             {torch.float32: tol(atol=2e-05, rtol=2e-05)}),
     ))
     def test_vjpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -762,6 +766,7 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
+        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean'),  # silent incorrectness (nan difference)
 
