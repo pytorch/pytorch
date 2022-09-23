@@ -32,12 +32,13 @@ using namespace at::native::metal;
 }
 
 - (void)endSynchronization:(NSError*)error {
+  // if something went wrong during command buffer execution
   if (error) {
     if (_imageWrapper) {
       _imageWrapper->release();
     }
-    // throw exceptions if we failed to flush the command buffer
-    TORCH_CHECK(error);
+    // throw an exception with error details
+    METAL_THROW_IF_ERROR(error, "Command buffer execution failed!");
   }
 }
 

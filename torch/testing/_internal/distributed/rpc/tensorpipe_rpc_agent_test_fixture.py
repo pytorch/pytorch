@@ -2,6 +2,9 @@ import torch.distributed.rpc as rpc
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+from torch.testing._internal.common_distributed import (
+    tp_transports,
+)
 
 
 class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
@@ -16,6 +19,7 @@ class TensorPipeRpcAgentTestFixture(RpcAgentTestFixture):
         return rpc.backend_registry.construct_rpc_backend_options(
             self.rpc_backend,
             init_method=self.init_method,
+            _transports=tp_transports()
         )
 
     def get_shutdown_error_regex(self):

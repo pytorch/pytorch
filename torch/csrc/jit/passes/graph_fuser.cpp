@@ -733,7 +733,7 @@ struct GraphFuser {
     Value* producer_for_chunk = *it;
     size_t producer_index = it - chunk->inputs().begin();
 
-    // all uses of the chunk must be in in this consumer
+    // all uses of the chunk must be in this consumer
     for (auto s : chunk->outputs()) {
       for (auto u : s->uses()) {
         if (u.user != consumer)

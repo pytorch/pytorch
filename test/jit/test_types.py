@@ -39,7 +39,7 @@ class TestTypesAndAnnotation(JitTestCase):
         expected = fn(x)
         scripted = torch.jit.script(fn)(x)
 
-        self.assertEquals(expected, scripted)
+        self.assertEqual(expected, scripted)
 
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:
@@ -306,3 +306,13 @@ class TestTypesAndAnnotation(JitTestCase):
 
             def set(self, val: int):
                 self.x = val
+
+    def test_inferred_type_error_message(self):
+        inferred_type = torch._C.InferredType("ErrorReason")
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Tried to get the type from an InferredType but the type is null."):
+            t = inferred_type.type()
+
+        with self.assertRaisesRegex(RuntimeError, "ErrorReason"):
+            t = inferred_type.type()

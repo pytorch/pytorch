@@ -1,27 +1,17 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Utils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/SpectralOpsUtils.h>
-#include <ATen/native/cuda/CuFFTUtils.h>
-#include <ATen/native/cuda/CuFFTPlanCache.h>
-#include <c10/util/accumulate.h>
-
 
 #include <cmath>
 #include <vector>
 
 
 namespace at { namespace native {
-
-using namespace at::native::detail;
 
 // Offset calculator for indexing in Hermitian mirrored order.
 // In mirrored dims, maps linear index i to (n - i) % n
@@ -116,17 +106,17 @@ void _fft_fill_with_conjugate_symmetry_cuda_(
       signal_half_sizes, out_strides, mirror_dims, element_size);
 
   const auto numel = c10::multiply_integers(signal_half_sizes);
-  AT_DISPATCH_COMPLEX_TYPES(dtype, "_fft_fill_with_conjugate_symmetry", [&] {
-        using namespace cuda::detail;
-        _fft_conjugate_copy_kernel<<<
-          GET_BLOCKS(numel), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-              numel,
-              static_cast<scalar_t*>(out_data),
-              static_cast<const scalar_t*>(in_data),
-              input_offset_calculator,
-              output_offset_calculator);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      });
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "_fft_fill_with_conjugate_symmetry", [&] {
+      using namespace cuda::detail;
+      _fft_conjugate_copy_kernel<<<
+        GET_BLOCKS(numel), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            numel,
+            static_cast<scalar_t*>(out_data),
+            static_cast<const scalar_t*>(in_data),
+            input_offset_calculator,
+            output_offset_calculator);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
 }
 
 REGISTER_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cuda_);

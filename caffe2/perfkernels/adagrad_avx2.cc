@@ -18,7 +18,7 @@ void adagrad_update__avx2_fma(
     float decay,
     float lr,
     float weight_decay = 0.f) {
-  constexpr size_t kSize = 8;
+  constexpr int kSize = 8;
   auto i = 0;
   for (; i + kSize <= N; i += kSize) {
     __m256 gi = _mm256_loadu_ps(g + i);

@@ -4,6 +4,8 @@
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 
+#include <ATen/NumericUtils.h>
+
 template <typename T>
 struct AtomicFPOp;
 
@@ -69,97 +71,124 @@ struct AtomicFPOp<double> {
   }
 };
 
-template <typename T, size_t n>
-struct AtomicAddIntegerImpl;
-
-template<typename T>
-struct AtomicAddIntegerImpl<T, 1> {
-  inline __device__ void operator()(T *address, T val) {
-    size_t offset = (size_t)address & 3;
-    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
-    uint32_t old = *address_as_ui;
-    uint32_t shift = offset * 8;
-    uint32_t old_byte;
-    uint32_t newval;
-    uint32_t assumed;
-
-    do {
-      assumed = old;
-      old_byte = (old >> shift) & 0xff;
-      // preserve size in initial cast. Casting directly to uint32_t pads
-      // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
-      newval = static_cast<uint8_t>(val + static_cast<T>(old_byte));
-      newval = (old & ~(0x000000ff << shift)) | (newval << shift);
-      old = atomicCAS(address_as_ui, assumed, newval);
-    } while (assumed != old);
-  }
+#define ATOMIC_INTEGER_IMPL(NAME)                                                                                      \
+template <typename T, size_t n>                                                                                        \
+struct Atomic##NAME##IntegerImpl;                                                                                      \
+                                                                                                                       \
+template<typename T>                                                                                                   \
+struct Atomic##NAME##IntegerImpl<T, 1> {                                                                               \
+  template <typename func_t>                                                                                           \
+  inline __device__ void operator()(T *address, T val, const func_t& func) {                                           \
+    size_t offset = (size_t)address & 3;                                                                               \
+    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);                                                 \
+    uint32_t old = *address_as_ui;                                                                                     \
+    uint32_t shift = offset * 8;                                                                                       \
+    uint32_t old_byte;                                                                                                 \
+    uint32_t newval;                                                                                                   \
+    uint32_t assumed;                                                                                                  \
+                                                                                                                       \
+    do {                                                                                                               \
+      assumed = old;                                                                                                   \
+      old_byte = (old >> shift) & 0xff;                                                                                \
+      newval = static_cast<uint8_t>(func(val, static_cast<T>(old_byte)));                                              \
+      newval = (old & ~(0x000000ff << shift)) | (newval << shift);                                                     \
+      old = atomicCAS(address_as_ui, assumed, newval);                                                                 \
+    } while (assumed != old);                                                                                          \
+  }                                                                                                                    \
+};                                                                                                                     \
+                                                                                                                       \
+template<typename T>                                                                                                   \
+struct Atomic##NAME##IntegerImpl<T, 2> {                                                                               \
+  template <typename func_t>                                                                                           \
+  inline __device__ void operator()(T *address, T val, const func_t& func) {                                           \
+    size_t offset = (size_t)address & 2;                                                                               \
+    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);                                                 \
+    bool is_32_align = offset;                                                                                         \
+    uint32_t old = *address_as_ui;                                                                                     \
+    uint32_t old_bytes;                                                                                                \
+    uint32_t newval;                                                                                                   \
+    uint32_t assumed;                                                                                                  \
+                                                                                                                       \
+    do {                                                                                                               \
+      assumed = old;                                                                                                   \
+      old_bytes = is_32_align ? old >> 16 : old & 0xffff;                                                              \
+      newval = static_cast<uint16_t>(func(val, static_cast<T>(old_bytes)));                                            \
+      newval = is_32_align ? (old & 0xffff) | (newval << 16) : (old & 0xffff0000) | newval;                            \
+      old = atomicCAS(address_as_ui, assumed, newval);                                                                 \
+    } while (assumed != old);                                                                                          \
+  }                                                                                                                    \
+};                                                                                                                     \
+                                                                                                                       \
+template<typename T>                                                                                                   \
+struct Atomic##NAME##IntegerImpl<T, 4> {                                                                               \
+  template <typename func_t>                                                                                           \
+  inline __device__ void operator()(T *address, T val, const func_t& func) {                                           \
+    uint32_t * address_as_ui = (uint32_t *) (address);                                                                 \
+    uint32_t old = *address_as_ui;                                                                                     \
+    uint32_t newval;                                                                                                   \
+    uint32_t assumed;                                                                                                  \
+                                                                                                                       \
+    do {                                                                                                               \
+      assumed = old;                                                                                                   \
+      newval = static_cast<uint32_t>(func(val, static_cast<T>(old)));                                                  \
+      old = atomicCAS(address_as_ui, assumed, newval);                                                                 \
+    } while (assumed != old);                                                                                          \
+  }                                                                                                                    \
+};                                                                                                                     \
+                                                                                                                       \
+template<typename T>                                                                                                   \
+struct Atomic##NAME##IntegerImpl<T, 8> {                                                                               \
+  template <typename func_t>                                                                                           \
+  inline __device__ void operator()(T *address, T val, const func_t& func) {                                           \
+    unsigned long long * address_as_ui = (unsigned long long *) (address);                                             \
+    unsigned long long old = *address_as_ui;                                                                           \
+    unsigned long long newval;                                                                                         \
+    unsigned long long assumed;                                                                                        \
+                                                                                                                       \
+    do {                                                                                                               \
+      assumed = old;                                                                                                   \
+      newval = static_cast<uint64_t>(func(val, static_cast<T>(old)));                                                  \
+      old = atomicCAS(address_as_ui, assumed, newval);                                                                 \
+    } while (assumed != old);                                                                                          \
+  }                                                                                                                    \
 };
 
-template<typename T>
-struct AtomicAddIntegerImpl<T, 2> {
-  inline __device__ void operator()(T *address, T val) {
-    size_t offset = (size_t)address & 2;
-    uint32_t * address_as_ui = (uint32_t *)((char *)address - offset);
-    bool is_32_align = offset;
-    uint32_t old = *address_as_ui;
-    uint32_t old_bytes;
-    uint32_t newval;
-    uint32_t assumed;
 
-    do {
-      assumed = old;
-      old_bytes = is_32_align ? old >> 16 : old & 0xffff;
-      // preserve size in initial cast. Casting directly to uint32_t pads
-      // negative signed values with 1's (e.g. signed -1 = unsigned ~0).
-      newval = static_cast<uint16_t>(val + static_cast<T>(old_bytes));
-      newval = is_32_align ? (old & 0xffff) | (newval << 16) : (old & 0xffff0000) | newval;
-      old = atomicCAS(address_as_ui, assumed, newval);
-    } while (assumed != old);
-  }
-};
+# define GPU_ATOMIC_INTEGER(NAME, OP, DTYPE)                                                                           \
+static inline __device__ void gpuAtomic##NAME(DTYPE *address, DTYPE val) {                                             \
+Atomic##NAME##IntegerImpl<DTYPE, sizeof(DTYPE)>()(address,                                                             \
+                                                      val,                                                             \
+                                                      [](DTYPE a, DTYPE b) {                                           \
+                                                          return OP;                                                   \
+                                                      });                                                              \
+}                                                                                                                      \
 
-template<typename T>
-struct AtomicAddIntegerImpl<T, 4> {
-  inline __device__ void operator()(T *address, T val) {
-    uint32_t * address_as_ui = (uint32_t *) (address);
-    uint32_t old = *address_as_ui;
-    uint32_t newval;
-    uint32_t assumed;
+ATOMIC_INTEGER_IMPL(Add)
+GPU_ATOMIC_INTEGER(Add, a || b, bool)
 
-    do {
-      assumed = old;
-      newval = static_cast<uint32_t>(val + static_cast<T>(old));
-      old = atomicCAS(address_as_ui, assumed, newval);
-    } while (assumed != old);
-  }
-};
-
-template<typename T>
-struct AtomicAddIntegerImpl<T, 8> {
-  inline __device__ void operator()(T *address, T val) {
-    unsigned long long * address_as_ui = (unsigned long long *) (address);
-    unsigned long long old = *address_as_ui;
-    unsigned long long newval;
-    unsigned long long assumed;
-
-    do {
-      assumed = old;
-      newval = static_cast<uint64_t>(val + static_cast<T>(old));
-      old = atomicCAS(address_as_ui, assumed, newval);
-    } while (assumed != old);
-  }
-};
-
+// Don't instantiate gpuAtomicAdd with the macro as it seems non-standard (see int32, int64)
 static inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
-  AtomicAddIntegerImpl<uint8_t, sizeof(uint8_t)>()(address, val);
+  AtomicAddIntegerImpl<uint8_t, sizeof(uint8_t)>()(address,
+                                                   val,
+                                                   [](uint8_t a, uint8_t b) {
+                                                      return a + b;
+                                                   });
 }
 
 static inline  __device__ void gpuAtomicAdd(int8_t *address, int8_t val) {
-  AtomicAddIntegerImpl<int8_t, sizeof(int8_t)>()(address, val);
+  AtomicAddIntegerImpl<int8_t, sizeof(int8_t)>()(address,
+                                                 val,
+                                                 [](int8_t a, int8_t b) {
+                                                   return a + b;
+                                                 });
 }
 
 static inline  __device__ void gpuAtomicAdd(int16_t *address, int16_t val) {
-  AtomicAddIntegerImpl<int16_t, sizeof(int16_t)>()(address, val);
+  AtomicAddIntegerImpl<int16_t, sizeof(int16_t)>()(address,
+                                                   val,
+                                                   [](int16_t a, int16_t b) {
+                                                     return a + b;
+                                                   });
 }
 
 static inline __device__ int32_t gpuAtomicAdd(int32_t *address, int32_t val) {
@@ -170,12 +199,12 @@ static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
 #if defined(USE_ROCM)
   __atomic_fetch_add(address, val, __ATOMIC_RELAXED);
 #else
-  AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address, val);
+  AtomicAddIntegerImpl<int64_t, sizeof(int64_t)>()(address,
+                                                   val,
+                                                   [](int64_t a, int64_t b) {
+                                                      return a + b;
+                                                   });
 #endif
-}
-
-static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
-  *address = address && val;
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
@@ -224,7 +253,7 @@ static inline __device__ double atomicAdd(double* address, double val)
  * minimal.
  */
 
-#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312 && !__HIP__
+#if defined(USE_ROCM) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
   static inline  __device__  double atomicAdd(double *address, double val) { }
 #endif
@@ -298,13 +327,20 @@ static inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BF
 static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
 
 /* Special case fp32 atomic. */
-#if defined(USE_ROCM) && defined(__gfx908__)
+#if defined(USE_ROCM)
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
 #else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
 #endif
 
 // Atomic multiplication implementation.
+
+ATOMIC_INTEGER_IMPL(Mul)
+GPU_ATOMIC_INTEGER(Mul, a * b, uint8_t)
+GPU_ATOMIC_INTEGER(Mul, a * b, int8_t)
+GPU_ATOMIC_INTEGER(Mul, a * b, int16_t)
+GPU_ATOMIC_INTEGER(Mul, a * b, int32_t)
+GPU_ATOMIC_INTEGER(Mul, a * b, int64_t)
 
 inline __device__ at::Half gpuAtomicMul(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
@@ -338,6 +374,126 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
     old = atomicCAS(address_as_ull, assumed,
                     __float_as_int(val *
                                    __int_as_float(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+  } while (assumed != old);
+
+  return __int_as_float(old);
+}
+
+// Atomic maximum implementation.
+
+template <typename T>
+__host__ __device__ T safe_max(T a, T b) {
+  #if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+    T max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max<T>(a, b));
+  #else
+    T max = at::_isnan(b) ? b : std::max<T>(a, b);
+  #endif
+
+  return max;
+}
+
+ATOMIC_INTEGER_IMPL(Max)
+GPU_ATOMIC_INTEGER(Max, safe_max(a, b), uint8_t)
+GPU_ATOMIC_INTEGER(Max, safe_max(a, b), int8_t)
+GPU_ATOMIC_INTEGER(Max, safe_max(a, b), int16_t)
+GPU_ATOMIC_INTEGER(Max, safe_max(a, b), int32_t)
+GPU_ATOMIC_INTEGER(Max, safe_max(a, b), int64_t)
+
+inline __device__ at::Half gpuAtomicMax(at::Half * address, at::Half val) {
+  return AtomicFPOp<at::Half>()(address, val,
+                                [](at::Half bsum, at::Half val) {
+                                  return safe_max(bsum, val);
+                                });
+}
+
+inline __device__ at::BFloat16 gpuAtomicMax(at::BFloat16 * address, at::BFloat16 val) {
+  return AtomicFPOp<at::BFloat16>()(address, val,
+                                    [](at::BFloat16 bsum, at::BFloat16 val) {
+                                      return safe_max(bsum, val);
+                                    });
+}
+
+inline __device__ double gpuAtomicMax(double * address, double val) {
+  return AtomicFPOp<double>()(address, val,
+                              [](double val, unsigned long long int assumed) {
+                                return __double_as_longlong(safe_max(val, __longlong_as_double(assumed)));
+                              });
+}
+
+// Dont use a templated function for this since the addition function defaults to the CUDA built-in.
+inline __device__ float gpuAtomicMax(float * address, float val) {
+  unsigned int* address_as_ull = (unsigned int*)address;
+  unsigned int old = *address_as_ull;
+  unsigned int assumed;
+
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+                    __float_as_int(safe_max(val, __int_as_float(assumed))));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+  } while (assumed != old);
+
+  return __int_as_float(old);
+}
+
+// Atomic minimum implementation.
+
+template <typename T>
+__host__ __device__ T safe_min(T a, T b) {
+  #if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+    T min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min<T>(a, b));
+  #else
+    T min = at::_isnan(b) ? b : std::min<T>(a, b);
+  #endif
+
+  return min;
+}
+
+ATOMIC_INTEGER_IMPL(Min)
+GPU_ATOMIC_INTEGER(Min, safe_min(a, b), uint8_t)
+GPU_ATOMIC_INTEGER(Min, safe_min(a, b), int8_t)
+GPU_ATOMIC_INTEGER(Min, safe_min(a, b), int16_t)
+GPU_ATOMIC_INTEGER(Min, safe_min(a, b), int32_t)
+GPU_ATOMIC_INTEGER(Min, safe_min(a, b), int64_t)
+
+inline __device__ at::Half gpuAtomicMin(at::Half * address, at::Half val) {
+  return AtomicFPOp<at::Half>()(address, val,
+                                [](at::Half bsum, at::Half val) {
+                                  return safe_min(bsum, val);
+                                });
+}
+
+inline __device__ at::BFloat16 gpuAtomicMin(at::BFloat16 * address, at::BFloat16 val) {
+  return AtomicFPOp<at::BFloat16>()(address, val,
+                                    [](at::BFloat16 bsum, at::BFloat16 val) {
+                                      return safe_min(bsum, val);
+                                    });
+}
+
+inline __device__ double gpuAtomicMin(double * address, double val) {
+  return AtomicFPOp<double>()(address, val,
+                              [](double val, unsigned long long int assumed) {
+                                return __double_as_longlong(safe_min(val, __longlong_as_double(assumed)));
+                              });
+}
+
+// Dont use a templated function for this since the addition function defaults to the CUDA built-in.
+inline __device__ float gpuAtomicMin(float * address, float val) {
+  unsigned int* address_as_ull = (unsigned int*)address;
+  unsigned int old = *address_as_ull;
+  unsigned int assumed;
+
+  do {
+    assumed = old;
+    old = atomicCAS(address_as_ull, assumed,
+                    __float_as_int(safe_min(val, __int_as_float(assumed))));
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);

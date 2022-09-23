@@ -3,8 +3,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
-#include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -12,10 +12,12 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
+#include <torch/csrc/jit/codegen/cuda/lower_index_compute.h>
 #include <torch/csrc/jit/codegen/cuda/lower_magic_zero.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -26,266 +28,6 @@ namespace fuser {
 namespace cuda {
 
 namespace {
-
-// A merge is contiguous if:
-//   Inputs of outer are to the left in the root domain of the inputs of RHS.
-//   All inputs are contiguous in the root domain:
-//     - All marked as contiguous
-//     - Only gaps between inputs are broadcast or reductoin dims
-//   There are no split transformations performed on outer or inner
-//   All transformations on outer or inner are contiguous merges
-// If this criteria holds, then we can index the input root domains of this
-// merge with the indexing provided to the output of the merge in the backward
-// index pass
-
-class ContigIDs : public OptInDispatch {
- private:
-  using OptInDispatch::handle;
-
-  // Mark if ids are result of contigous merges
-  std::unordered_set<IterDomain*> contig_ids;
-  // Given contiguous domain, return all iter domains within its history.
-  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
-      within_contig_ids;
-  const std::vector<IterDomain*>& root_domain_;
-  const std::vector<bool>& root_contiguity_;
-  std::unordered_map<IterDomain*, bool> is_contig_root;
-
-  bool inRoot(const std::vector<IterDomain*>& ids) {
-    return std::all_of(ids.begin(), ids.end(), [this](IterDomain* id) {
-      return is_contig_root.find(id) != is_contig_root.end();
-    });
-  }
-
-  bool isContig(IterDomain* id) {
-    return contig_ids.find(id) != contig_ids.end();
-  }
-
-  // Split outputs are not contiguous, don't need to do anything.
-  void handle(Split*) override {}
-
-  void handle(Merge* merge) override {
-    // If either input is non-contiguous so is output.
-    const auto inner = merge->inner();
-    const auto outer = merge->outer();
-
-    if (!isContig(inner) || !isContig(outer)) {
-      return;
-    }
-
-    // Grab inputs, make sure they're in root domain, check if they're
-    // contiguous.
-
-    auto lhs_inputs =
-        ir_utils::iterDomainInputsOfOrderedAs({outer}, root_domain_);
-    auto rhs_inputs =
-        ir_utils::iterDomainInputsOfOrderedAs({inner}, root_domain_);
-
-    TORCH_INTERNAL_ASSERT(
-        inRoot(lhs_inputs) && inRoot(rhs_inputs),
-        "Found an invalid merge operation, inputs of its arguments are not in the root domain.");
-
-    std::deque<IterDomain*> ordered_inputs(
-        lhs_inputs.begin(), lhs_inputs.end());
-    ordered_inputs.insert(
-        ordered_inputs.end(), rhs_inputs.begin(), rhs_inputs.end());
-
-    // If any root input is not contig, output is not contig
-    if (!(std::all_of(
-            ordered_inputs.begin(),
-            ordered_inputs.end(),
-            [this](IterDomain* id) {
-              return is_contig_root.at(id) && !id->isBroadcast() &&
-                  !id->isReduction();
-            }))) {
-      return;
-    }
-
-    std::deque<IterDomain*> root_copy(root_domain_.begin(), root_domain_.end());
-
-    // Forward to first matching argument
-    while (!root_copy.empty() && !ordered_inputs.empty()) {
-      if (root_copy.front() != ordered_inputs.front()) {
-        root_copy.pop_front();
-      } else {
-        break;
-      }
-    }
-
-    // Forward through all matching arguments
-    while (!root_copy.empty() && !ordered_inputs.empty()) {
-      if (root_copy.front() == ordered_inputs.front()) {
-        root_copy.pop_front();
-        ordered_inputs.pop_front();
-        // This is no longer causing an error in:
-        // ReductionSchedulerMultiDimNonFastest TODO: test reenablement to make
-        // sure it does what's expected
-        //  } else if (
-        //     root_copy.front()->isReduction() ||
-        //     root_copy.front()->isBroadcast()) {
-        //   root_copy.pop_front();
-      } else {
-        break;
-      }
-    }
-
-    // If we matched all inputs, the output is contiguous. Only want to keep the
-    // top contig ID, lower ids should be placed in the "within_contig_ids" map
-    // of top id.
-    auto out = merge->out()->as<IterDomain>();
-    if (ordered_inputs.empty()) {
-      if (contig_ids.find(inner) != contig_ids.end()) {
-        contig_ids.erase(inner);
-      }
-
-      if (contig_ids.find(outer) != contig_ids.end()) {
-        contig_ids.erase(outer);
-      }
-
-      contig_ids.emplace(out);
-
-      std::unordered_set<IterDomain*> within_out;
-      within_out.emplace(inner);
-      if (within_contig_ids.find(inner) != within_contig_ids.end()) {
-        auto in_inner = within_contig_ids.at(inner);
-        within_out.insert(in_inner.begin(), in_inner.end());
-        within_contig_ids.erase(inner);
-      }
-
-      within_out.emplace(outer);
-      if (within_contig_ids.find(outer) != within_contig_ids.end()) {
-        auto in_outer = within_contig_ids.at(outer);
-        within_out.insert(in_outer.begin(), in_outer.end());
-        within_contig_ids.erase(outer);
-      }
-
-      within_contig_ids[out] = within_out;
-    }
-  }
-
- public:
-  ContigIDs() = delete;
-
-  // Check through the history of ids whose inputs map to root_domain with
-  // contiguity root_contiguity. Return unordered_set of all merges that are
-  // contiguous. Ignore root order is primarily used for predicate generation.
-  // In this case we can linearize indexing of any ID that only consists of
-  // merge operations.
-  ContigIDs(
-      const std::vector<IterDomain*>& ids,
-      const std::vector<IterDomain*>& root_domain,
-      const std::vector<bool>& root_contiguity)
-      : root_domain_(root_domain), root_contiguity_(root_contiguity) {
-    if (ids.empty()) {
-      return;
-    }
-
-    TORCH_INTERNAL_ASSERT(
-        root_domain_.size() == root_contiguity_.size(),
-        "Arguments don't match ",
-        root_domain_.size(),
-        " != ",
-        root_contiguity_.size());
-
-    for (const auto i : c10::irange(root_domain_.size())) {
-      // If a root domain has halo, can't use merged domain even if
-      // both inputs are contiguous. HaloInfo is also initialized for
-      // rfactor root domains, which should just return "zero"
-      // RootAxisInfo. This should be safe as no rfactor tensor should
-      // need halo.
-      if (root_contiguity_[i] &&
-          !GpuLower::current()
-               ->haloInfo()
-               .getRootAxisInfo(root_domain_[i])
-               .hasHalo()) {
-        auto root_domain_i = root_domain_[i]->as<IterDomain>();
-        contig_ids.emplace(root_domain_i);
-        within_contig_ids[root_domain_i] = std::unordered_set<IterDomain*>();
-        is_contig_root[root_domain_[i]] = true;
-      } else {
-        is_contig_root[root_domain_[i]] = false;
-      }
-    }
-
-    auto exprs = StmtSort::getExprs(ids[0]->fusion(), {ids.begin(), ids.end()});
-
-    for (auto expr : exprs) {
-      handle(expr);
-    }
-  }
-
-  const std::unordered_set<IterDomain*> contigIDs() const {
-    return contig_ids;
-  }
-
-  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
-  withinContigIDs() const {
-    return within_contig_ids;
-  }
-};
-
-// Update the HaloInfo mappings for a reference tensor by propagating
-// the halo information from the consumer tensor.
-void updateHaloInfoForReference(
-    const ReferenceTensor& reference,
-    const TensorView* consumer_tv) {
-  const auto gpu_lower = GpuLower::current();
-
-  auto& halo_info = gpu_lower->haloInfo();
-
-  auto reference_domain = reference.domain;
-
-  // First, propagate the halo information of the consumer root domain
-  // to the reference root domain.
-  for (auto consumer_root_id : consumer_tv->getRootDomain()) {
-    auto consumer_index_concrete_id =
-        gpu_lower->caIndexMap().getConcreteMappedID(consumer_root_id);
-    auto reference_it =
-        reference.concrete_to_id.find(consumer_index_concrete_id);
-    if (reference_it == reference.concrete_to_id.end()) {
-      // This happens when consumer_root_id is a broadcast or an
-      // initialization of a reduction buffer. In those cases, since
-      // the domain is not going to be predicated, it's not necessary
-      // to propagate halo information to the reference tensor.
-      continue;
-    }
-    auto reference_id = reference_it->second;
-    halo_info.setRootAxisInfo(
-        reference_id, halo_info.getRootAxisInfo(consumer_root_id));
-  }
-
-  // Now that the reference root has halo information copied from
-  // the cosumer, propagate it down to non-root domains.
-  halo_info.build(reference_domain);
-
-  return;
-}
-
-// Get a map of IterDomains to halo-extended extents of corresponding
-// reference IterDomains.
-//
-// ref_map: ref-to-consumer in consumer indexing; ref-to-producer in
-// producer indexing
-std::unordered_map<IterDomain*, Val*> getReferenceHaloExtentMap(
-    const ReferenceTensor& reference,
-    const std::unordered_map<IterDomain*, IterDomain*>& index_map_from_ref) {
-  const auto& halo_info = GpuLower::current()->haloInfo();
-
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map;
-
-  // Propagate halo extents of the reference to the consumer or
-  // producer tensor
-  for (auto kv : index_map_from_ref) {
-    auto ref_id = kv.first;
-    auto producer_or_consumer_id = kv.second;
-    auto extent = halo_info.getExtent(ref_id);
-    if (extent != nullptr) {
-      reference_halo_extent_map[producer_or_consumer_id] = extent;
-    }
-  }
-
-  return reference_halo_extent_map;
-}
 
 //! Offset of an index of a producer axis with respect to its
 //! corresponding consumer index
@@ -380,8 +122,8 @@ Val* getProducerOffsetWithGather(
   // When index_map maps a reference tensor, find the corresponding
   // reference ID of window_id.
   if (use_reference_map) {
-    auto concrete_window_id =
-        gpu_lower->caIndexMap().getConcreteMappedID(window_id);
+    auto concrete_window_id = gpu_lower->caMap()->getConcreteMappedID(
+        window_id, IdMappingMode::EXACT);
     auto concrete_2_ref_it = concrete_to_ref_map.find(concrete_window_id);
     TORCH_INTERNAL_ASSERT(concrete_2_ref_it != concrete_to_ref_map.end());
     window_id = concrete_2_ref_it->second;
@@ -395,7 +137,59 @@ Val* getProducerOffsetWithGather(
 
   // producer offset: window_index - padding
   auto producer_offset = SimplifyingIrBuilder::subExpr(
-      window_idx, IrBuilder::create<Int>(pad_width));
+      window_idx, SimplifyingIrBuilder::create<Int>(pad_width));
+  return producer_offset;
+}
+
+//! Create a producer offset based off a consumer index
+//!
+//! \param consumer_root_axis Position of corresponding consumer axis
+//! \param consumer_tv Consumer TensorView
+//! \param index_map Mappings from consumer or reference to indices
+//! \param use_reference_map True when index_map maps reference domains
+//! \param concrete_to_ref_map Mappings from concrete to reference domains
+Val* getConcreteProducerOffsetWithGather(
+    size_t consumer_root_axis,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, Val*>& index_map,
+    bool use_concrete_map = false) {
+  const auto gpu_lower = GpuLower::current();
+
+  const auto gather_expr = dynamic_cast<GatherOp*>(consumer_tv->definition());
+
+  if (gather_expr == nullptr) {
+    return gpu_lower->kernel()->zeroVal();
+  }
+
+  // If the window extent is one, no specific offsetting
+  // is necessary
+  if (consumer_root_axis >= gather_expr->windowShape().size() ||
+      gather_expr->windowShape()[consumer_root_axis] == 1) {
+    return gpu_lower->kernel()->zeroVal();
+  }
+
+  // Basically, the goal is to build an expression of producer_index +
+  // window_index, so we first need to locate the index expression
+  // that corresponds to the window axis of this producer axis.
+
+  const auto window_axis = gather_expr->gatherAxis(consumer_root_axis);
+  auto window_id = consumer_tv->getRootDomain().at(window_axis);
+
+  Val* window_idx = nullptr;
+
+  if (use_concrete_map) {
+    window_idx = index_map.at(ir_utils::caMapExactConcreteId(window_id));
+  } else {
+    window_idx = index_map.at(window_id);
+  }
+
+  // Positive padding at offset zero means the indexing shifted to the
+  // negative direction.
+  auto pad_width = gather_expr->padWidth()[consumer_root_axis][0];
+
+  // producer offset: window_index - padding
+  auto producer_offset = SimplifyingIrBuilder::subExpr(
+      window_idx, SimplifyingIrBuilder::create<Int>(pad_width));
   return producer_offset;
 }
 
@@ -410,8 +204,7 @@ Val* getProducerIndexWithGather(
     size_t producer_root_axis,
     const TensorView* producer_tv,
     const TensorView* consumer_tv,
-    const std::unordered_map<IterDomain*, IterDomain*>& concrete_to_ref_map,
-    const std::unordered_map<IterDomain*, Val*>& ref_index_map) {
+    const std::unordered_map<IterDomain*, Val*>& concrete_index_map) {
   auto gather_op = dynamic_cast<const GatherOp*>(consumer_tv->definition());
 
   // Just return the producer index as is if this is not a gather
@@ -437,8 +230,8 @@ Val* getProducerIndexWithGather(
       ", producer_axis: ",
       producer_root_axis);
 
-  auto offset = getProducerOffsetWithGather(
-      consumer_axis, consumer_tv, ref_index_map, true, concrete_to_ref_map);
+  auto offset = getConcreteProducerOffsetWithGather(
+      consumer_axis, consumer_tv, concrete_index_map, true);
   return SimplifyingIrBuilder::addExpr(producer_index, offset);
 }
 
@@ -496,14 +289,14 @@ Val* getProducerIndexWithPartialSplit(
     if (consumer_offset->isZeroInt()) {
       return producer_index;
     } else {
-      return IrBuilder::addExpr(producer_index, consumer_offset);
+      return SimplifyingIrBuilder::addExpr(producer_index, consumer_offset);
     }
   }
 
   // Non-global case. Difference of the split offsets must be
   // accounted.
 
-  auto diff = IrBuilder::subExpr(consumer_offset, producer_offset);
+  auto diff = SimplifyingIrBuilder::subExpr(consumer_offset, producer_offset);
   kir::ExpressionEvaluator ee;
   auto diff_eval = ee.evaluate(diff);
   // We currently only allow constant offsetting
@@ -513,16 +306,16 @@ Val* getProducerIndexWithPartialSplit(
     return producer_index;
   }
 
-  return IrBuilder::addExpr(
-      producer_index, IrBuilder::create<Int>(diff_eval.value()));
+  return SimplifyingIrBuilder::addExpr(
+      producer_index, SimplifyingIrBuilder::create<Int>(diff_eval.value()));
 }
 
 } // namespace
 
 void IndexCompute::handle(Split* split) {
-  auto in_id = split->in()->as<IterDomain>();
-  auto outer_id = split->outer()->as<IterDomain>();
-  auto inner_id = split->inner()->as<IterDomain>();
+  auto in_id = maybeGetExactMapConcreteID(split->in()->as<IterDomain>());
+  auto outer_id = maybeGetExactMapConcreteID(split->outer()->as<IterDomain>());
+  auto inner_id = maybeGetExactMapConcreteID(split->inner()->as<IterDomain>());
 
   auto outer_it = index_map_.find(outer_id);
   auto inner_it = index_map_.find(inner_id);
@@ -564,21 +357,22 @@ void IndexCompute::handle(Split* split) {
     index_map_[in_id] = outer_ind;
     extent_map_[in_id] = getExtent(outer_id);
   } else {
-    index_map_[in_id] = IrBuilder::addExpr(
-        IrBuilder::mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
+    index_map_[in_id] = SimplifyingIrBuilder::addExpr(
+        SimplifyingIrBuilder::mulExpr(outer_ind, getExtent(inner_id)),
+        inner_ind);
     // The extent should be updated only when its allocation is
     // partial, i.e., zero_merged_in is true. See PR #1270.
     if (zero_merged_in) {
-      extent_map_[in_id] =
-          IrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
+      extent_map_[in_id] = SimplifyingIrBuilder::mulExpr(
+          getExtent(outer_id), getExtent(inner_id));
     }
   }
 }
 
 void IndexCompute::handle(Merge* merge) {
-  auto out_id = merge->out();
-  auto outer_id = merge->outer();
-  auto inner_id = merge->inner();
+  auto out_id = maybeGetExactMapConcreteID(merge->out());
+  auto outer_id = maybeGetExactMapConcreteID(merge->outer());
+  auto inner_id = maybeGetExactMapConcreteID(merge->inner());
 
   auto out_it = index_map_.find(out_id);
   if (out_it == index_map_.end()) {
@@ -591,6 +385,8 @@ void IndexCompute::handle(Merge* merge) {
   if (isZero(out_id)) {
     index_map_[outer_id] = zero;
     index_map_[inner_id] = zero;
+    // TODO: Why do we set extent_map_ to zero? This has to be protected by zero
+    // merged in, but seems logical to me the extent would still be one.
     extent_map_[outer_id] = zero;
     extent_map_[inner_id] = zero;
     zero_domains_.emplace(outer_id);
@@ -598,7 +394,7 @@ void IndexCompute::handle(Merge* merge) {
     return;
   }
 
-  if (!hasZeroMerged(out_id) && contig_ids.find(out_id) != contig_ids.end()) {
+  if (!hasZeroMerged(out_id) && contig_ids_.find(out_id) != contig_ids_.end()) {
     // Contiguous indexing path
     auto input_ids = ir_utils::iterDomainInputsOfOrderedAs(
         {merge->out()}, td_->getMaybeRFactorDomain());
@@ -606,11 +402,36 @@ void IndexCompute::handle(Merge* merge) {
     // Shouldn't hit this, but don't want to segfault if somehow we do.
     TORCH_INTERNAL_ASSERT(!input_ids.empty());
 
+    // Try to find the last non broadcast entry to put the index in if it's a
+    // contiguous merge. This isn't strictly necessary but there's implicit
+    // assumptions in the indexing logic that assume broadcasted root domains
+    // can be ignored. This logic is just to try and match that logic.
+    // Initialize everything to zero.
     for (auto root_id : input_ids) {
       index_map_[root_id] = zero;
     }
 
-    index_map_[*(input_ids.end() - 1)] = out_ind;
+    // If all are broadcast we can just send the index to the last entry.
+    if (std::all_of(input_ids.begin(), input_ids.end(), [](IterDomain* id) {
+          // I don't think reductions can be in here, but strictly matching the
+          // logic in the indexing functions like
+          // getNonGlobalConsumerStridedIndices
+          return id->isBroadcast() || id->isReduction() || id->isStride();
+        })) {
+      index_map_[*(input_ids.end() - 1)] = out_ind;
+    } else {
+      for (auto id_it = input_ids.rbegin(); id_it != input_ids.rend();
+           id_it++) {
+        auto id = *id_it;
+        if (id->isBroadcast() || id->isReduction() || id->isStride()) {
+          continue;
+        } else {
+          index_map_[id] = out_ind;
+          break;
+        }
+      }
+    }
+
     return;
   }
 
@@ -631,12 +452,18 @@ void IndexCompute::handle(Merge* merge) {
     index_map_[inner_id] = zero;
 
     extent_map_[outer_id] = getExtent(out_id);
+    if (hasZeroMerged(out_id)) {
+      zero_merged_in_.insert(outer_id);
+    }
   } else if (outer_id->isBroadcast() && outer_extent->isOneInt()) {
     // Propagate away from broadcast dims
     index_map_[outer_id] = zero;
     index_map_[inner_id] = out_ind;
 
     extent_map_[inner_id] = getExtent(out_id);
+    if (hasZeroMerged(out_id)) {
+      zero_merged_in_.insert(inner_id);
+    }
   } else if (hasZeroMerged(out_id)) {
     // Don't propagate to inner id if it's comprised of only broadcast root
     // domains, unless outer is also all broadcast domains. Index shouldn't be
@@ -679,8 +506,63 @@ void IndexCompute::handle(Merge* merge) {
     zero_merged_in_.emplace(inner_id);
     zero_merged_in_.emplace(outer_id);
   } else {
-    index_map_[outer_id] = IrBuilder::divExpr(out_ind, inner_extent);
-    index_map_[inner_id] = IrBuilder::modExpr(out_ind, inner_extent);
+    index_map_[outer_id] = SimplifyingIrBuilder::divExpr(out_ind, inner_extent);
+    index_map_[inner_id] = SimplifyingIrBuilder::modExpr(out_ind, inner_extent);
+  }
+}
+
+void IndexCompute::handle(Swizzle2D* swizzle_2d) {
+  auto out_x_id = maybeGetExactMapConcreteID(swizzle_2d->outX());
+  auto out_y_id = maybeGetExactMapConcreteID(swizzle_2d->outY());
+  auto in_x_id = maybeGetExactMapConcreteID(swizzle_2d->inX());
+  auto in_y_id = maybeGetExactMapConcreteID(swizzle_2d->inY());
+
+  auto out_x_it = index_map_.find(out_x_id);
+  auto out_y_it = index_map_.find(out_y_id);
+
+  if (out_x_it == index_map_.end() || out_y_it == index_map_.end()) {
+    return;
+  }
+
+  const auto out_x_ind = out_x_it->second;
+  const auto out_y_ind = out_y_it->second;
+
+  if (swizzle_mode_ == SwizzleMode::NoSwizzle ||
+      swizzle_mode_ != swizzle_2d->swizzleMode()) {
+    // Handle inactive swizzles by just passing through index
+    //  and extend information.
+
+    TORCH_INTERNAL_ASSERT(
+        index_map_.count(in_x_id) == index_map_.count(in_y_id),
+        "input index should be either both defined or both undefined");
+    if (index_map_.count(in_x_id)) {
+      // Only propagate original index through if
+      //  the input index hasn't been computed.
+      // TODO:
+      //  This part should be cleaner once we remove the
+      // second index traversal pass.
+      return;
+    }
+    index_map_[in_x_id] = out_x_ind;
+    index_map_[in_y_id] = out_y_ind;
+    extent_map_[in_y_id] = getExtent(out_y_id);
+    extent_map_[in_x_id] = getExtent(out_x_id);
+  } else {
+    // Generate integer swizzle math if the
+    //  swizzle is activated. See also
+    //  [Note on swizzle mode].
+
+    auto out_pair = IrBuilder::swizzle2DIntExpr(
+        out_x_ind,
+        out_y_ind,
+        getExtent(out_x_id),
+        getExtent(out_y_id),
+        swizzle_2d->swizzleType());
+
+    index_map_[in_x_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
+    index_map_[in_y_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
   }
 }
 
@@ -688,6 +570,7 @@ void IndexCompute::handle(Expr* e) {
   switch (e->getExprType().value()) {
     case (ExprType::Split):
     case (ExprType::Merge):
+    case (ExprType::Swizzle2D):
       break;
     default:
       TORCH_INTERNAL_ASSERT(
@@ -696,15 +579,35 @@ void IndexCompute::handle(Expr* e) {
   BackwardVisitor::handle(e);
 }
 
-// Otherwise warning on runBackward as it hides an overloaded virtual
-// using TransformIter::runBackward;
 IndexCompute::IndexCompute(
     const TensorDomain* _td,
     std::unordered_map<IterDomain*, Val*> initial_index_map,
     std::unordered_map<IterDomain*, Val*> extent_map,
     std::unordered_set<IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> zero_merged_in,
-    const std::vector<bool>& root_contiguity,
+    std::unordered_set<IterDomain*> preferred_paths,
+    std::unordered_map<IterDomain*, Val*> reference_halo_extent_map)
+    : IndexCompute(
+          _td,
+          std::move(initial_index_map),
+          std::move(extent_map),
+          std::move(zero_domains),
+          std::move(zero_merged_in),
+          ContigIDs(
+              _td->domain(),
+              _td->getMaybeRFactorDomain(),
+              std::vector<bool>(_td->getMaybeRFactorDomain().size(), false),
+              {}),
+          std::move(preferred_paths),
+          std::move(reference_halo_extent_map)) {}
+
+IndexCompute::IndexCompute(
+    const TensorDomain* _td,
+    std::unordered_map<IterDomain*, Val*> initial_index_map,
+    std::unordered_map<IterDomain*, Val*> extent_map,
+    std::unordered_set<IterDomain*> zero_domains,
+    std::unordered_set<IterDomain*> zero_merged_in,
+    const ContigIDs& contig_finder,
     std::unordered_set<IterDomain*> preferred_paths,
     std::unordered_map<IterDomain*, Val*> reference_halo_extent_map)
     : td_(_td),
@@ -718,22 +621,58 @@ IndexCompute::IndexCompute(
 
   // Make sure we recompute any indices we can that map to a contiguous access
   // in physical memory.
-  if (std::any_of(root_contiguity.begin(), root_contiguity.end(), [](bool b) {
-        return b;
-      })) {
-    ContigIDs contig_finder(
-        td_->domain(), td_->getMaybeRFactorDomain(), root_contiguity);
-    contig_ids = contig_finder.contigIDs();
-    auto within_contig = contig_finder.withinContigIDs();
-    for (auto contig_id : contig_ids) {
-      if (index_map_.find(contig_id) != index_map_.end()) {
-        TORCH_INTERNAL_ASSERT(
-            within_contig.find(contig_id) != within_contig.end());
-        for (auto id : within_contig.at(contig_id)) {
-          index_map_.erase(id);
-        }
+  contig_ids_ = contig_finder.contigIDs();
+  root_to_indexed_id_ = contig_finder.rootToIndexedID();
+  const auto& within_contig = contig_finder.withinContigIDs();
+  for (auto contig_id : contig_ids_) {
+    if (index_map_.find(contig_id) != index_map_.end()) {
+      TORCH_INTERNAL_ASSERT(
+          within_contig.find(contig_id) != within_contig.end());
+      for (auto id : within_contig.at(contig_id)) {
+        index_map_.erase(id);
       }
     }
+  }
+}
+
+IndexCompute::IndexCompute(
+    std::unordered_map<IterDomain*, Val*> initial_index_map,
+    std::unordered_set<IterDomain*> zero_domains,
+    std::unordered_set<IterDomain*> preferred_paths,
+    std::unordered_map<IterDomain*, Val*> reference_halo_extent_map)
+    : index_map_(std::move(initial_index_map)),
+      zero_domains_(std::move(zero_domains)),
+      preferred_paths_(std::move(preferred_paths)),
+      reference_halo_extent_map_(std::move(reference_halo_extent_map)) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::IndexCompute::IndexCompute");
+  concrete_id_pass_ = true;
+  swizzle_mode_ = SwizzleMode::Loop;
+}
+
+void IndexCompute::run(const LoopIndexing& loop_indexing) {
+  // Apply loop swizzles if there are any that outputs to
+  //  the loop domains.
+  // Currently only support loop swizzles that directly output
+  //  to concrete loop domains and these are validated in
+  //  validate swizzle pass.
+  // TODO:
+  //  will gradually enable replaying and mapping of loop
+  // swizzles in the IR infrastructure and once that's piped
+  // through this part of logic will be removed.
+  std::unordered_set<Expr*> visited;
+  for (auto loop_id : loop_indexing.loopDomains()) {
+    auto loop_id_def = loop_id->definition();
+    if (loop_id_def != nullptr && loop_id_def->isA<Swizzle2D>()) {
+      if (visited.insert(loop_id_def).second) {
+        handle(loop_id_def);
+      }
+    }
+  }
+
+  // Run through the loop indexing expressions and generate
+  //  the indexing integer math for the concrete ids.
+  for (auto expr : loop_indexing.getBackwardExprList()) {
+    handle(expr);
   }
 }
 
@@ -744,7 +683,15 @@ void IndexCompute::run() {
   traverseFrom(td_->fusion(), domain_vals, false);
 }
 
-Val* IndexCompute::getExtent(IterDomain* id) {
+IterDomain* IndexCompute::maybeGetExactMapConcreteID(IterDomain* id) {
+  if (concrete_id_pass_) {
+    return GpuLower::current()->caMap()->getConcreteMappedID(
+        id, IdMappingMode::EXACT);
+  }
+  return id;
+}
+
+Val* IndexCompute::getExtent(IterDomain* id) const {
   // Pick from extent_map_ if available. Previously parallel
   // dimensions were ued (e.g., blockDim.x), however, it would result
   // in out-of-bounds errors when the extent of IterDomain is smaller
@@ -767,8 +714,9 @@ bool IndexCompute::isZero(IterDomain* id) const {
 IndexCompute IndexCompute::updateIndexCompute(
     const TensorDomain* new_td,
     const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-    const std::vector<bool>& root_contiguity,
-    const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map) {
+    const ContigIDs& contig_finder,
+    const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map)
+    const {
   FUSER_PERF_SCOPE("GpuLower::Lower::updateIndexCompute");
 
   std::unordered_map<IterDomain*, Val*> updated_index_map;
@@ -801,9 +749,28 @@ IndexCompute IndexCompute::updateIndexCompute(
       updated_extent_map,
       updated_zero_domains,
       updated_zero_merged_in,
-      root_contiguity,
+      contig_finder,
       {},
       reference_halo_extent_map);
+
+  if (concrete_id_pass_) {
+    // This should be the same behavior as with a reference tensor
+    //   created, since originally halo was pulled through exact
+    //   ca mapping and in the concrete_id_pass case, the id_map
+    //   also represents exact ca mapping.
+    // TODO: might need to re-visit pathological cases when we may
+    //  need to traverse and propagate halo info again in here.
+    for (auto id_entry : id_map) {
+      IterDomain* prev_id = id_entry.first;
+      IterDomain* new_id = id_entry.second;
+      auto halo_extent_it = reference_halo_extent_map_.find(prev_id);
+      if (halo_extent_it != reference_halo_extent_map_.end()) {
+        updated_index_compute.reference_halo_extent_map_[new_id] =
+            halo_extent_it->second;
+      }
+    }
+  }
+
   updated_index_compute.run();
 
   return updated_index_compute;
@@ -851,17 +818,44 @@ class UpdateLeafIndices : public IterVisitor {
       return;
     }
 
+    if (!index_map_.count(in_id)) {
+      // Reduction axes on producer side could be visited on forward
+      //  propagation pass and current implementation does not yet
+      //  support reduciton on swizzled iterdomains, so un-indexed
+      //  reduction iterdomains are just ignored for now.
+      TORCH_INTERNAL_ASSERT(
+          in_id->isReduction(), "Undefined index for ", in_id->toString());
+      return;
+    }
+
     auto factor = split->factor();
-    index_map_[inner_id] = IrBuilder::modExpr(index_map_[in_id], factor);
+    index_map_[inner_id] =
+        SimplifyingIrBuilder::modExpr(index_map_[in_id], factor);
     extent_map_[inner_id] = factor;
-    index_map_[outer_id] = IrBuilder::divExpr(index_map_[in_id], factor);
-    extent_map_[outer_id] = IrBuilder::ceilDivExpr(getExtent(in_id), factor);
+    index_map_[outer_id] =
+        SimplifyingIrBuilder::divExpr(index_map_[in_id], factor);
+    extent_map_[outer_id] =
+        SimplifyingIrBuilder::ceilDivExpr(getExtent(in_id), factor);
   }
 
   void handle(Merge* merge) override {
     auto out_id = merge->out();
     auto outer_id = merge->outer();
     auto inner_id = merge->inner();
+
+    if (!index_map_.count(outer_id) || !index_map_.count(inner_id)) {
+      // Reduction axes on producer side could be visited on forward
+      //  propagation pass and current implementation does not yet
+      //  support reduciton on swizzled iterdomains, so un-indexed
+      //  reduction iterdomains are just ignored for now.
+      TORCH_INTERNAL_ASSERT(
+          outer_id->isReduction() && inner_id->isReduction(),
+          "Undefined index for ",
+          outer_id->toString(),
+          " and ",
+          inner_id->toString());
+      return;
+    }
 
     // Nothing need to be done when mappings for the output axes
     // already exist.
@@ -874,12 +868,29 @@ class UpdateLeafIndices : public IterVisitor {
     TORCH_INTERNAL_ASSERT(
         index_map_.find(inner_id) != index_map_.end(), "Inner ID not found");
 
-    index_map_[out_id] = IrBuilder::mulExpr(
+    index_map_[out_id] = SimplifyingIrBuilder::addExpr(
         index_map_[inner_id],
-        IrBuilder::mulExpr(index_map_[outer_id], getExtent(inner_id)));
+        SimplifyingIrBuilder::mulExpr(
+            index_map_[outer_id], getExtent(inner_id)));
 
     extent_map_[out_id] =
-        IrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
+        SimplifyingIrBuilder::mulExpr(getExtent(outer_id), getExtent(inner_id));
+  }
+
+  void handle(Swizzle2D* swizzle_2d) override {
+    auto in_x = swizzle_2d->inX();
+    auto in_y = swizzle_2d->inY();
+    auto out_x = swizzle_2d->outX();
+    auto out_y = swizzle_2d->outY();
+
+    // Forward propagation pass still just forward
+    //  through the indices and the actual swizzle
+    //  will be applied on the backward pass in
+    //  IndexSwizzle class implementation.
+    index_map_[out_x] = index_map_.at(in_x);
+    extent_map_[out_x] = getExtent(in_x);
+    index_map_[out_y] = index_map_.at(in_y);
+    extent_map_[out_y] = getExtent(in_y);
   }
 
   // return extent_map_[id] if exists, else return id->extent()
@@ -906,8 +917,8 @@ Val* getHaloExtentOfRootAxis(IterDomain* id, Val* normal_extent = nullptr) {
 
   const auto& halo = GpuLower::current()->haloInfo().getRootAxisInfo(id);
   if (halo.hasHalo()) {
-    auto halo_extent =
-        IrBuilder::addExpr(normal_extent, IrBuilder::create<Int>(halo.width()));
+    auto halo_extent = SimplifyingIrBuilder::addExpr(
+        normal_extent, SimplifyingIrBuilder::create<Int>(halo.width()));
     return halo_extent;
   } else {
     return normal_extent;
@@ -927,8 +938,24 @@ IndexSwizzle::IndexSwizzle(
           std::move(initial_index_map),
           std::move(extent_map),
           std::move(zero_domains),
-          std::move(zero_merged_in),
-          std::vector<bool>(tv->getRootDomain().size(), false)),
+          std::move(zero_merged_in)),
+      tv_(tv),
+      swizzle_type_(tv->swizzleType()),
+      ids_to_swizzle_(tv->axesToSwizzle()) {}
+
+IndexSwizzle::IndexSwizzle(
+    const TensorView* tv,
+    const TensorDomain* domain,
+    std::unordered_map<IterDomain*, Val*> initial_index_map,
+    std::unordered_map<IterDomain*, Val*> extent_map,
+    std::unordered_set<IterDomain*> zero_domains,
+    std::unordered_set<IterDomain*> zero_merged_in)
+    : IndexCompute(
+          domain,
+          std::move(initial_index_map),
+          std::move(extent_map),
+          std::move(zero_domains),
+          std::move(zero_merged_in)),
       tv_(tv),
       swizzle_type_(tv->swizzleType()),
       ids_to_swizzle_(tv->axesToSwizzle()) {}
@@ -959,22 +986,44 @@ void IndexSwizzle::run() {
       auto idx_to_swizzle_i = indexMap().at(id_to_swizzle_i);
       auto idx_to_swizzle_j = indexMap().at(id_to_swizzle_j);
 
-      auto swizzled_idx = IrBuilder::modExpr(
-          IrBuilder::addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
+      auto swizzled_idx = SimplifyingIrBuilder::modExpr(
+          SimplifyingIrBuilder::addExpr(idx_to_swizzle_i, idx_to_swizzle_j),
           id_to_swizzle_j->extent());
       index_map_[id_to_swizzle_j] = swizzled_idx;
       swizzled_ids_.insert(id_to_swizzle_j);
       IndexCompute::run();
     }
+  } else if (tv_->hasSwizzleOp()) {
+    // Propagate backward for the annotated swizzle path.
+    // TODO:
+    //  eventually will unify the two swizzling implementation
+    //  code path in a follow up. Currently just focusing on
+    //  getting the necessary implementation of the swizzle
+    //  operator ready.
+    //
+    // At this intermediate state, the legacy swizzle implementation
+    //  takes precedence, i.e. whenever swizzle_type_ is not NoSwizzle,
+    //  the new swizzle op pass is disabled.
+    UpdateLeafIndices update_leaves(td_, indexMap(), extentMap());
+    index_map_ = update_leaves.indexMap();
+    extent_map_ = update_leaves.extentMap();
+    IndexCompute::swizzle_mode_ = SwizzleMode::Data;
+    IndexCompute::run();
   }
 }
 
 void IndexSwizzle::handle(Expr* e) {
   auto out_ids = ir_utils::filterByType<IterDomain>(e->outputs());
   bool needs_update =
-      std::any_of(out_ids.begin(), out_ids.end(), [this](IterDomain* id) {
-        return swizzled_ids_.find(id) != swizzled_ids_.end();
-      });
+      std::any_of(
+          out_ids.begin(),
+          out_ids.end(),
+          [this](IterDomain* id) {
+            return swizzled_ids_.find(id) != swizzled_ids_.end();
+          }) ||
+      (e->isA<Swizzle2D>() &&
+       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle &&
+       e->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Data);
   if (!needs_update) {
     return;
   }
@@ -985,7 +1034,24 @@ void IndexSwizzle::handle(Expr* e) {
   }
 }
 
-namespace {
+void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
+  auto out_x_id = swizzle_2d->outX();
+  auto out_y_id = swizzle_2d->outY();
+
+  auto out_x_it = index_map_.find(out_x_id);
+  auto out_y_it = index_map_.find(out_y_id);
+
+  // TODO: unify the legacy path in all usage
+  TORCH_INTERNAL_ASSERT(
+      swizzle_type_ == SwizzleType::NoSwizzle,
+      "Cannot mix usage of two swizzle implementations");
+
+  TORCH_INTERNAL_ASSERT(
+      out_x_it != index_map_.end() && out_y_it != index_map_.end(),
+      "Swizzle output indices were not propagated through");
+
+  IndexCompute::handle(swizzle_2d);
+}
 
 // Used for local and shared index mapping. Returns a map from loops
 // to loop indices as well as a set of loops that do not contribute to
@@ -998,9 +1064,7 @@ indexMapFromTV(
     const std::vector<kir::ForLoop*>& loops,
     kir::ForLoop* alloc_loop,
     bool as_consumer,
-    kir::ForLoop* double_buffer_loop = nullptr) {
-  const auto gpu_lower = GpuLower::current();
-
+    kir::ForLoop* double_buffer_loop) {
   bool within_alloc = false;
   if (alloc_loop == nullptr) {
     within_alloc = true;
@@ -1011,6 +1075,13 @@ indexMapFromTV(
   const bool is_local = tv->getMemoryType() == MemoryType::Local;
 
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
+
+  // Check if the current op has an implicit loop implemented
+  //  within an mma instruction.
+  bool within_mma_loops =
+      std::any_of(loops.begin(), loops.end(), [](kir::ForLoop* fl) {
+        return fl->iter_domain()->isMma();
+      });
 
   // When indexed as a producer, the parallel types of the the
   // producer domains may not be the same as those of the loops, but
@@ -1027,8 +1098,10 @@ indexMapFromTV(
         [&](IterDomain* tv_id) {
           // Matching is done using the index and loop maps. See
           // validateParallelize as well.
-          return gpu_lower->caIndexMap().areMapped(id, tv_id) ||
-              (gpu_lower->caLoopMap().areMapped(id, tv_id) &&
+          return gpu_lower->caMap()->areMapped(
+                     id, tv_id, IdMappingMode::EXACT) ||
+              (GpuLower::current()->caMap()->areMapped(
+                   id, tv_id, IdMappingMode::PERMISSIVE) &&
                ir_utils::derivedFromRootCAAxes(tv, tv_id));
         });
     if (it == tv->domain()->domain().end()) {
@@ -1047,8 +1120,15 @@ indexMapFromTV(
 
   for (auto loop : loops) {
     Val* idx = nullptr;
-    const auto same_parallel_type =
-        as_consumer || find_matching_parallel_domain(loop->iter_domain());
+    const auto same_parallel_type = as_consumer ||
+        find_matching_parallel_domain(loop->iter_domain()) ||
+        // Note && TODO:
+        //  mma swizzled lane_id does not map naturally from producer
+        //   to consumer but they should still be detected as same
+        //   parallel type. In a follow up may want to extent
+        //   find_matching_parallel_domain to cover this case.
+        (within_mma_loops &&
+         loop->iter_domain()->getParallelType() == ParallelType::TIDx);
     // See also LoopNestGenerator::pushAlloc.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (!within_alloc) {
@@ -1077,17 +1157,33 @@ indexMapFromTV(
         // only done when there's a matching domain with the same
         // parallel type
         (loop->iter_domain()->isThread() && is_local && same_parallel_type) ||
-        loop->vectorize()) {
+        // MMA operands are currently indexed in units of "fragments",
+        //  so each mma tensor domain would be zero-ed and the tensor index
+        //  calculated here would be the fragment index.
+        // TODO: This is a quick WAR to enable iterating over a register array
+        //  of MMA fragments, so we could generate unrolled mma loops.
+        //  Eventually we still want IdGraph to be able to analyze the
+        //  in-register layout of mma fragments for more unified indexing math
+        //  as well as more flexibility in swizzling loops.
+        (loop->iter_domain()->isMma() && !as_consumer)) {
       idx = GpuLower::current()->kernel()->zeroVal();
-      if (!loop->vectorize()) {
-        zero_loops.insert(loop);
-      }
+      zero_loops.insert(loop);
     } else {
       idx = loop->index();
     }
 
+    // If the loop is trivial, the loop index can only be the loop
+    // start value.
+    if (idx == loop->index() && loop->isTrivial()) {
+      idx = loop->start();
+    }
+
     if (loop == double_buffer_loop) {
-      idx = IrBuilder::addExpr(idx, GpuLower::current()->kernel()->oneVal());
+      auto stage_depth =
+          GpuLower::current()->doubleBufferInfo().getStageDepthFor(
+              loop->iter_domain());
+      idx = SimplifyingIrBuilder::addExpr(
+          idx, SimplifyingIrBuilder::create<Int>(stage_depth - 1));
     }
 
     loop_to_ind_map[loop] = idx;
@@ -1111,7 +1207,7 @@ void ensureStaticIndexing(
     const TensorView* tv,
     kir::ForLoop* alloc_loop,
     const std::vector<kir::ForLoop*>& loops,
-    const std::unordered_map<IterDomain*, IterDomain*>& id_map = {}) {
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map) {
   if (tv->getMemoryType() != MemoryType::Local) {
     return;
   }
@@ -1146,7 +1242,8 @@ void ensureStaticIndexing(
           if (id_replacement != id_map.end()) {
             id = id_replacement->second;
           }
-          return GpuLower::current()->caLoopMap().areMapped(loop_id, id);
+          return GpuLower::current()->caMap()->areMapped(
+              loop_id, id, IdMappingMode::PERMISSIVE);
         });
     if (it != tv->domain()->domain().end()) {
       loop->requireUnroll();
@@ -1154,42 +1251,148 @@ void ensureStaticIndexing(
   }
 }
 
-// Map everything we can from reference to provided tv using the provided
-// compute at map. If root_only is true, only root domains are included.
-// We can't simply try to use the provided tv root domains and
-// map those to the reference as the provided tv may have root domains that
-// don't exist in reference. This can happen when the provided tv is from before
-// a view, but all the loops are generated from TVs generated after the view
-// operation.
-std::unordered_map<IterDomain*, IterDomain*> indexMapReferenceTo(
+namespace {
+
+//! Returns an iterdomain that corresponds to the
+//!  indexing sub-expression to hoist or a nullopt
+//!  if the index should not be hoisted.
+c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
+    IterDomain* root_id,
     const TensorView* tv,
-    const ComputeAtMap& ca_map,
-    const std::unordered_map<IterDomain*, IterDomain*>&
-        reference_concrete_to_id_map,
-    bool root_only = false) {
-  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
-
-  auto gen_map = [&](const auto& pids) {
-    for (auto p_id : pids) {
-      auto concrete_id = ca_map.getConcreteMappedID(p_id);
-      auto ref_id_it = reference_concrete_to_id_map.find(concrete_id);
-      if (ref_id_it != reference_concrete_to_id_map.end()) {
-        index_map_ref_to_producer[ref_id_it->second] = p_id;
-      }
-    }
-  };
-
-  if (root_only) {
-    gen_map(tv->getRootDomain());
-  } else {
-    auto all_pid_vals = DependencyCheck::getAllValsBetween(
-        {tv->getRootDomain().begin(), tv->getRootDomain().end()},
-        {tv->domain()->domain().begin(), tv->domain()->domain().end()});
-    auto all_pids = ir_utils::filterByType<IterDomain>(all_pid_vals);
-    gen_map(all_pids);
+    const IndexCompute& indexing,
+    Val* index) {
+  if (isOptionDisabled(DisableOption::IndexHoist) ||
+      index->definition() == nullptr) {
+    return c10::nullopt;
   }
 
-  return index_map_ref_to_producer;
+  // The old swizzle interface, which should be deprecated, is not
+  // supported.
+  if (tv->swizzleType() != SwizzleType::NoSwizzle) {
+    return c10::nullopt;
+  }
+
+  // New swizzle interface not yet supported
+  if (tv->hasSwizzleOp()) {
+    return c10::nullopt;
+  }
+
+  // Find the true indexed domain, which can be a merged contiguous domain.
+  auto contig_id_it = indexing.rootToContigID().find(root_id);
+  TORCH_INTERNAL_ASSERT(
+      contig_id_it != indexing.rootToContigID().end(),
+      "Consumer indexed ID not found: ",
+      root_id->toString());
+  auto indexed_id = contig_id_it->second;
+  // Make sure this contig ID is indeed indexed
+  TORCH_INTERNAL_ASSERT(
+      indexing.indexMap().find(contig_id_it->second) !=
+          indexing.indexMap().end(),
+      "Invalid contig index: ",
+      contig_id_it->second->toString());
+
+  return indexed_id;
+}
+
+// Version of hoisting without using reference tensor,
+//  should eventually deprecate the other one once reference
+//  tensor is completely deprecated.
+Val* hoistConsumerIndex(
+    IterDomain* consumer_root_id,
+    const TensorView* consumer_tv,
+    const IndexCompute& consumer_indexing,
+    std::vector<IterDomain*> loop_domains,
+    const std::unordered_map<IterDomain*, Val*> initial_loop_index_map,
+    const std::vector<kir::ForLoop*>& loops,
+    Val* index) {
+  auto maybe_hoisted_consumer_id = getMaybeIndexedIdToHoist(
+      consumer_root_id, consumer_tv, consumer_indexing, index);
+
+  if (!maybe_hoisted_consumer_id.has_value()) {
+    return index;
+  }
+
+  // Insert the index into the common index map. A previously inserted
+  // val can be returned.
+  auto common_index = GpuLower::current()
+                          ->commonIndexMap()
+                          .insert(
+                              maybe_hoisted_consumer_id.value(),
+                              consumer_tv->domain(),
+                              loop_domains,
+                              initial_loop_index_map,
+                              loops,
+                              index)
+                          .first;
+
+  return common_index;
+}
+
+std::unordered_map<IterDomain*, IterDomain*> invertOneToOneMap(
+    const std::unordered_map<IterDomain*, IterDomain*>& map) {
+  std::unordered_map<IterDomain*, IterDomain*> inverted;
+  for (const auto& kv : map) {
+    bool inserted = inverted.emplace(kv.second, kv.first).second;
+    TORCH_INTERNAL_ASSERT(
+        inserted,
+        "Multiple mappings to the same value detected: ",
+        kv.second->toString());
+  }
+  return inverted;
+}
+
+Val* hoistProducerIndex(
+    IterDomain* producer_root_id,
+    const TensorView* producer_tv,
+    const IndexCompute& producer_indexing,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, IterDomain*>& p2c_map,
+    std::vector<IterDomain*> loop_domains,
+    const std::unordered_map<IterDomain*, Val*> initial_loop_index_map,
+    const std::vector<kir::ForLoop*>& loops,
+    Val* index) {
+  auto maybe_indexed_producer_id = getMaybeIndexedIdToHoist(
+      producer_root_id, producer_tv, producer_indexing, index);
+
+  if (!maybe_indexed_producer_id.has_value()) {
+    return index;
+  }
+
+  // Use the corresponding consumer domain to find matching
+  // for-loops. Note that there's no CA mapping with the producer
+  // domains as the producer TensorDomain is a temporary replay
+  // domain.
+  auto indexed_consumer_id_it = p2c_map.find(maybe_indexed_producer_id.value());
+
+  // There can be no corresponding consumer ID. For example, consider:
+  //   consumer: [b1, i2, i3]
+  //   producer: [i2, i3].
+  // Suppose the consumer is transformed as:
+  //   consumer: [(b1*i2)*i3]
+  // Then the producer would be transformed when indexed:
+  //   producer: [i2*i3]
+  // Assuming i2 and i3 are contiguous, the producer indexing is done
+  // with the mreged i2*i3 domain, but there's no domain in the
+  // cosumer that maps with the producer indexed domain.
+  // It seems non-trivial to support patterns like this. Skip for now.
+  if (indexed_consumer_id_it == p2c_map.end()) {
+    return index;
+  }
+
+  IterDomain* indexed_consumer_id = indexed_consumer_id_it->second;
+
+  auto common_index = GpuLower::current()
+                          ->commonIndexMap()
+                          .insert(
+                              indexed_consumer_id,
+                              consumer_tv->domain(),
+                              loop_domains,
+                              initial_loop_index_map,
+                              loops,
+                              index)
+                          .first;
+
+  return common_index;
 }
 
 } // namespace
@@ -1201,11 +1404,6 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalProducerIndex");
   const auto gpu_lower = GpuLower::current();
 
-  // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
-  auto reference_domain = reference.domain;
-  auto reference_id_map = reference.concrete_to_id;
-
   // Replay producer to look like consumer so we can index on producer since
   // our loop nests look like consumer
   auto pairwise_map = PairwiseRootDomainMap(producer_tv, consumer_tv);
@@ -1216,40 +1414,20 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // Make the producer_tv look like consumer while performing indexing math
   ir_utils::TVDomainGuard domain_guard(producer_tv, producerAsC);
 
-  // Map everything we can from reference to producer using compute at index
-  // map. Use consumer as a proxy between producer and the generated reference.
-  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
-  {
-    // This replay has to be consistent with compute at index map.
-    BestEffortReplay replay_producer_as_consumer(
-        producer_tv->domain()->domain(),
-        consumer_tv->domain()->domain(),
-        pairwise_map.mapConsumerToProducer(
-            consumer_tv->domain(), producer_tv->domain()));
+  // Map sent to best effort replay needs to match the exact incantation for
+  // compute_at_mode.cpp with MappingMode::Index
+  auto c2p_root_map =
+      PairwiseRootDomainMap(producer_tv, consumer_tv, true)
+          .mapConsumerToProducer(consumer_tv->domain(), producer_tv->domain());
 
-    const auto& c2p_map = replay_producer_as_consumer.getReplay();
+  // This replay has to be consistent with compute at index map.
+  BestEffortReplay replay_producer_as_consumer(
+      producer_tv->domain()->domain(),
+      consumer_tv->domain()->domain(),
+      c2p_root_map);
 
-    std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-        indexMapReferenceTo(
-            consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
-
-    for (auto entry : index_map_ref_to_consumer) {
-      auto r_id = entry.first;
-      auto c_id = entry.second;
-      auto c2p_it = c2p_map.find(c_id);
-      if (c2p_it != c2p_map.end()) {
-        auto p_id = c2p_it->second;
-        index_map_ref_to_producer[r_id] = p_id;
-      }
-    }
-  }
-
-  kir::ForLoop* db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
-      consumer_tv, loops, true);
-
-  // Index into the reference tensor. Reference indexing will handle vectorized
-  // dims where index should be set to 0
-  auto ref_compute = getReferenceIndexing(loops, reference_domain, db_loop);
+  const auto& c2p_map = replay_producer_as_consumer.getReplay();
+  const auto p2c_map = invertOneToOneMap(c2p_map);
 
   // Forward vectorized IDs to index into producer correctly
   // We want p_id to be vectorized like consumer just for the indexing, then we
@@ -1257,8 +1435,8 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // need to do this as replaying producer as consumer can use replay best
   // effort which means some domains may be producer's original domains.
   std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
-  for (auto entry : index_map_ref_to_producer) {
-    auto ref_id = entry.first;
+  for (auto entry : c2p_map) {
+    auto ref_id = ir_utils::caMapExactConcreteId(entry.first);
     auto p_id = entry.second;
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
       p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
@@ -1268,18 +1446,10 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     }
   }
 
-  // Adds halo info mappings for the reference
-  updateHaloInfoForReference(reference, consumer_tv);
+  auto producer_indexing_from_idgraph =
+      getTensorIndexFromIdGraph(loops, consumer_tv, producer_tv, true, c2p_map);
 
-  const auto reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, index_map_ref_to_producer);
-
-  // Index into producer using reference indexing
-  auto producer_indexing = ref_compute.updateIndexCompute(
-      producer_tv->domain(),
-      index_map_ref_to_producer,
-      producer_tv->domain()->contiguity(),
-      reference_halo_extent_map);
+  auto producer_indexing = producer_indexing_from_idgraph.index;
 
   // Revert p_ids
   for (auto entry : p_id_backup) {
@@ -1295,14 +1465,14 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   {
     int stride_i = 0;
     for (const auto i : c10::irange(root_dom.size())) {
-      if (root_dom[i]->isReduction() ||
-          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride) {
+      if (root_dom[i]->isReduction()) {
         strides[i] = GpuLower::current()->kernel()->oneVal();
         continue;
       }
       std::stringstream ss;
       ss << "T" << producer_tv->name() << ".stride[" << stride_i++ << "]";
-      strides[i] = IrBuilder::create<NamedScalar>(ss.str(), DataType::Int);
+      strides[i] =
+          SimplifyingIrBuilder::create<NamedScalar>(ss.str(), DataType::Int);
     }
   }
 
@@ -1314,26 +1484,23 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     if (root_dom[dim]->isReduction()) {
       continue;
     }
-    if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
-      continue;
-    }
 
     Val* root_ind = nullptr;
     if (producer_indexing.indexMap().find(root_dom[dim]) !=
         producer_indexing.indexMap().end()) {
       root_ind = producer_indexing.indexMap().at(root_dom[dim]);
-    } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
+    } else if (root_dom[dim]->isBroadcast()) {
       root_ind = GpuLower::current()->kernel()->zeroVal();
     }
 
     TORCH_INTERNAL_ASSERT(
         root_ind != nullptr,
-        "Couldn't find root mapping for TV",
-        producer_tv->name(),
+        "Couldn't find root mapping for ",
+        producer_tv->toString(),
         " dim: ",
-        i,
+        dim,
         " id: ",
-        root_dom[dim]);
+        root_dom[dim]->toString());
 
     if (producer_tv->domain()->contiguity()[dim]) {
       // If contig, used the stored stride which may be the previous
@@ -1343,12 +1510,13 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
       // by extent of this dimension
       auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
       cur_contig_stride =
-          IrBuilder::mulExpr(cur_contig_stride, root_dim_extent);
+          SimplifyingIrBuilder::mulExpr(cur_contig_stride, root_dim_extent);
     } else {
       // If non contiguous dimension, keep local stride information, set cur
       // stride to local stride * local raw extent
       auto root_dim_extent = getHaloExtentOfRootAxis(root_dom[dim]);
-      cur_contig_stride = IrBuilder::mulExpr(strides[dim], root_dim_extent);
+      cur_contig_stride =
+          SimplifyingIrBuilder::mulExpr(strides[dim], root_dim_extent);
     }
   }
 
@@ -1361,9 +1529,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   for (const auto i : c10::irange(root_dom.size())) {
     // If the domain is derived from a trivial reduction, no indexing
     // to create.
-    if (root_dom[i]->isReduction() ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
+    if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i])) {
       continue;
     }
@@ -1380,6 +1546,18 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
 
     auto root_ind = producer_indexing.indexMap().at(root_dom[i]);
 
+    // index hoist must be done before the adjustments for halo
+    root_ind = hoistProducerIndex(
+        root_dom[i],
+        producer_tv,
+        producer_indexing,
+        consumer_tv,
+        p2c_map,
+        producer_indexing_from_idgraph.resolved_loop_domains,
+        producer_indexing_from_idgraph.initial_concrete_index_map,
+        loops,
+        root_ind);
+
     root_ind = getProducerIndexWithHalo(producer_tv, i, root_ind, consumer_tv);
 
     root_ind = getProducerIndexWithGather(
@@ -1387,8 +1565,7 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
         i,
         producer_tv,
         consumer_tv,
-        reference_id_map,
-        ref_compute.indexMap());
+        producer_indexing_from_idgraph.concrete_index.indexMap());
 
     root_ind = getProducerIndexWithPartialSplit(
         root_ind, root_dom[i], producer_tv, consumer_tv);
@@ -1396,9 +1573,10 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
     if (root_ind->isZeroInt()) {
       continue;
     } else {
-      auto strided_ind = IrBuilder::mulExpr(root_ind, strides[i]);
+      auto strided_ind = SimplifyingIrBuilder::mulExpr(root_ind, strides[i]);
       if (i == root_dom.size() - 1 && vectorize_shift != nullptr) {
-        strided_inds[i] = IrBuilder::addExpr(strided_ind, vectorize_shift);
+        strided_inds[i] =
+            SimplifyingIrBuilder::addExpr(strided_ind, vectorize_shift);
       } else {
         strided_inds[i] = strided_ind;
       }
@@ -1408,17 +1586,51 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   return strided_inds;
 }
 
+namespace {
+
+// Maps all producer domains to consumer with broadcast
+// forwarding. Used to find the allocation position.
+std::unordered_map<IterDomain*, IterDomain*> mapAllProducerDomainsToConsumer(
+    TensorView* producer_tv,
+    const TensorView* consumer_tv) {
+  // This map has forwarded broadcast axes, it should only be used to compute
+  // the allocation position of the producer, and to figure out which producer
+  // indices are mapped to consumer trivial reductions.
+  std::unordered_map<IterDomain*, IterDomain*> p2c_alloc_map;
+
+  //  We want to replay producer as consumer instead of the other way around
+  //  since consumer may have some broadcasted axes producer doesn't have
+  //  merged into loops producer may use. If we did consumer as producer we
+  //  wouldn't have this information in the mapping.
+  auto replay_PasC = BestEffortReplay::replayPasC(
+      producer_tv,
+      consumer_tv,
+      -1,
+      PairwiseRootDomainMap(producer_tv, consumer_tv));
+
+  // Grab consumer domain entries and reverse replay map. TODO: Maybe
+  // TransformReplay::replayPasC could return this map
+  for (auto id : consumer_tv->domain()->domain()) {
+    const auto& c2p_map = replay_PasC.getReplay();
+    auto c2p_it = c2p_map.find(id);
+    if (c2p_it != c2p_map.end()) {
+      auto c_id = c2p_it->first;
+      auto p_id = c2p_it->second;
+      p2c_alloc_map[p_id] = c_id;
+    }
+  }
+
+  return p2c_alloc_map;
+}
+
+} // namespace
+
 // Producer index for either shared or local memory
 std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     TensorView* producer_tv,
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
   const auto gpu_lower = GpuLower::current();
-
-  // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
-  auto reference_domain = reference.domain;
-  auto reference_id_map = reference.concrete_to_id;
 
   // Replay producer to look like consumer so we can index on producer since our
   // loop nests look like consumer
@@ -1429,67 +1641,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
   ir_utils::TVDomainGuard domain_guard(
       producer_tv, producer_replayed_as_consumer);
-
-  // This map has forwarded broadcast axes, it should only be used to compute
-  // the allocation position of the producer, and to figure out which producer
-  // indices are mapped to consumer trivial reductions.
-  std::unordered_map<IterDomain*, IterDomain*> p2c_alloc_map;
-  {
-    //  We want to play producer as consumer instead of the other way around
-    //  since consumer may have some broadcasted axes producer doesn't have
-    //  merged into loops producer may use. If we did consumer as producer we
-    //  wouldn't have this information in the mapping.
-    auto replay_PasC = BestEffortReplay::replayPasC(
-        producer_tv, consumer_tv, -1, pairwise_map);
-
-    auto c2p_map = replay_PasC.getReplay();
-
-    // Grab consumer domain entries and reverse replay map. TODO: Maybe
-    // TransformReplay::replayPasC could return this map
-    for (auto id : consumer_tv->domain()->domain()) {
-      auto c2p_it = c2p_map.find(id);
-      if (c2p_it != c2p_map.end()) {
-        auto c_id = c2p_it->first;
-        auto p_id = c2p_it->second;
-        p2c_alloc_map[p_id] = c_id;
-      }
-    }
-  }
-
-  kir::ForLoop* consumer_db_loop =
-      gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
-          consumer_tv, loops, true);
-
-  // Find allocation point of producer relative to loop nests. P2C map is
-  // required because producer was replayed as consumer, so we can't use the
-  // regular compute at maps to line up its iter domains with the for loops.
-  auto alloc_info =
-      loop_utils::getAllocInformation(producer_tv, loops, p2c_alloc_map, true);
-  std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
-  std::unordered_set<kir::ForLoop*> zero_loops;
-  std::tie(loop_to_ind_map, zero_loops) = indexMapFromTV(
-      producer_tv, loops, alloc_info.init_for_loop, false, consumer_db_loop);
-
-  ensureStaticIndexing(
-      producer_tv, alloc_info.init_for_loop, loops, p2c_alloc_map);
-
-  // Map loop nests to indicies, zeroing out those not used due to locality of
-  // memory
-  std::unordered_map<IterDomain*, Val*> ref_id_to_ind_map;
-  // Track which domains are not used
-  std::unordered_set<IterDomain*> ref_zero_domains;
-
-  // Due to rfactor/initialization reference_domain may be bigger than loop nest
-  // structure, ignore IterDomains that aren't present in the loop nest when
-  // indexing reference.
-  TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (const auto loop_i : c10::irange(loops.size())) {
-    auto ref_axis = reference_domain->axis(loop_i);
-    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
-    if (zero_loops.count(loops[loop_i]) > 0) {
-      ref_zero_domains.insert(ref_axis);
-    }
-  }
+  const auto p2c_alloc_map =
+      mapAllProducerDomainsToConsumer(producer_tv, consumer_tv);
 
   // Map everything we can from reference to producer using compute at index
   // map. All producer id's don't exist in the compute at map. The rfactor axes
@@ -1497,54 +1650,23 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   // more conservative approach, which is to use the consumer as a proxy between
   // producer to reference.
   std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_producer;
-  {
-    // This replay has to be consistent with compute at index map.
-    BestEffortReplay replay_producer_as_consumer(
-        producer_tv->domain()->domain(),
-        consumer_tv->domain()->domain(),
-        pairwise_map.mapConsumerToProducer(
-            consumer_tv->domain(), producer_tv->domain()));
+  std::unordered_map<IterDomain*, IterDomain*> c2p_index_map;
+  std::unordered_map<IterDomain*, IterDomain*> p2c_index_map;
 
-    const auto& c2p_map = replay_producer_as_consumer.getReplay();
+  // Map sent to best effort replay needs to match the exact incantation for
+  // compute_at_mode.cpp with MappingMode::Index
+  auto c2p_root_map =
+      PairwiseRootDomainMap(producer_tv, consumer_tv, true)
+          .mapConsumerToProducer(consumer_tv->domain(), producer_tv->domain());
 
-    std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-        indexMapReferenceTo(
-            consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+  // This replay has to be consistent with compute at index map.
+  BestEffortReplay replay_producer_as_consumer(
+      producer_tv->domain()->domain(),
+      consumer_tv->domain()->domain(),
+      c2p_root_map);
 
-    for (auto entry : index_map_ref_to_consumer) {
-      auto r_id = entry.first;
-      auto c_id = entry.second;
-      auto c2p_it = c2p_map.find(c_id);
-      if (c2p_it != c2p_map.end()) {
-        auto p_id = c2p_it->second;
-        index_map_ref_to_producer[r_id] = p_id;
-      }
-    }
-  }
-
-  // Grab roots that map into producer and save them into the preferred roots
-  // set for references indexing
-  std::unordered_set<IterDomain*> preferred_roots;
-  for (auto entry : index_map_ref_to_producer) {
-    if (entry.second->isBroadcast() || entry.second->isReduction() ||
-        entry.second->isStride()) {
-      continue;
-    }
-    preferred_roots.emplace(entry.first);
-  }
-
-  // Make sure propagation of indexing while mixing with 0 indicies we propagate
-  // in a way that the producer will be able to see what's going on (propagating
-  // into common roots of reference and producer).
-  auto preferred_paths = buildPreferredPaths(reference_domain, preferred_roots);
-
-  // Index into the reference tensor
-  auto ref_compute = getReferenceIndexing(
-      loops,
-      reference_domain,
-      ref_id_to_ind_map,
-      ref_zero_domains,
-      preferred_paths);
+  c2p_index_map = replay_producer_as_consumer.getReplay();
+  p2c_index_map = invertOneToOneMap(c2p_index_map);
 
   // Forward vectorized IDs to index into producer correctly
   // We want p_id to be vectorized like consumer just for the indexing, then we
@@ -1552,8 +1674,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   // need to do this as replaying producer as consumer can use replay best
   // effort which means some domains may be the originals.
   std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
-  for (auto entry : index_map_ref_to_producer) {
-    auto ref_id = entry.first;
+  for (auto entry : c2p_index_map) {
+    auto ref_id = ir_utils::caMapExactConcreteId(entry.first);
     auto p_id = entry.second;
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
       p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
@@ -1563,19 +1685,10 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     }
   }
 
-  // Index into producer using reference indexing
+  auto producer_indexing_from_idgraph = getTensorIndexFromIdGraph(
+      loops, consumer_tv, producer_tv, false, c2p_index_map);
 
-  // Adds halo info mappings for the reference
-  updateHaloInfoForReference(reference, consumer_tv);
-
-  const auto reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, index_map_ref_to_producer);
-
-  auto producer_indexing = ref_compute.updateIndexCompute(
-      producer_tv->domain(),
-      index_map_ref_to_producer,
-      producer_tv->domain()->contiguity(),
-      reference_halo_extent_map);
+  auto producer_indexing = producer_indexing_from_idgraph.index;
 
   // Revert p_ids
   for (auto entry : p_id_backup) {
@@ -1591,7 +1704,32 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
   index_swizzle.run();
 
-  const auto& index_map = index_swizzle.indexMap();
+  auto producer_swizzled_index = index_swizzle;
+
+  if (producer_tv->hasSwizzleOp()) {
+    // Special handling needed on the new swizzle
+    //  op pass:
+    //  each swizzle op is local to the tensor,
+    //  so ReplayPasC will not include the swizzle
+    //  ops on the producer iterdomain. So would
+    //  need to traverse forward the producer domain
+    //  before the replay to get the swizzle ops.
+    IndexSwizzle producer_swizzle2d(
+        producer_tv,
+        domain_guard.prevDomain(),
+        producer_indexing.indexMap(),
+        producer_indexing.extentMap(),
+        producer_indexing.zeroDomains(),
+        producer_indexing.zeroMergedIn());
+    producer_swizzle2d.run();
+    producer_swizzled_index = producer_swizzle2d;
+  }
+
+  // TODO: merge the two swizzle compute logic once the new one is ready.
+  //  will need to replace cyclic shift swizzle with xor since swizzle2d
+  //  doesn't have cyclic shift.
+  const auto& index_map = producer_swizzled_index.indexMap();
+
   const auto& extent_map = producer_indexing.extentMap();
   const auto& zero_domain_map = producer_indexing.zeroDomains();
   // Indices should now be mapped onto IterDomains in producer, so just grab
@@ -1632,14 +1770,26 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
     TORCH_INTERNAL_ASSERT(
         index_map.find(root_dom[i]) != index_map.end(),
-        "Couldn't find root mapping for TV",
-        producer_tv->name(),
+        "Couldn't find root mapping for ",
+        producer_tv->toString(),
         " dim: ",
         i,
         " id: ",
         root_dom[i]->toString());
 
     auto root_ind_i = index_map.at(root_dom[i]);
+
+    // index hoist must be done before the adjustments for halo
+    root_ind_i = hoistProducerIndex(
+        root_dom[i],
+        producer_tv,
+        producer_indexing,
+        consumer_tv,
+        p2c_index_map,
+        producer_indexing_from_idgraph.resolved_loop_domains,
+        producer_indexing_from_idgraph.initial_concrete_index_map,
+        loops,
+        root_ind_i);
 
     root_ind_i =
         getProducerIndexWithHalo(producer_tv, i, root_ind_i, consumer_tv);
@@ -1649,8 +1799,7 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         i,
         producer_tv,
         consumer_tv,
-        reference_id_map,
-        ref_compute.indexMap());
+        producer_indexing_from_idgraph.concrete_index.indexMap());
 
     root_ind_i = getProducerIndexWithPartialSplit(
         root_ind_i, root_dom[i], producer_tv, consumer_tv);
@@ -1668,12 +1817,12 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
 
       TORCH_INTERNAL_ASSERT(
           index_map.find(root_dom[j]) != index_map.end(),
-          "Couldn't find root mapping for TV",
-          consumer_tv->name(),
+          "Couldn't find root mapping for ",
+          producer_tv->name(),
           " dim: ",
-          i,
+          j,
           " id: ",
-          root_dom[i]);
+          root_dom[j]->toString());
 
       auto root_ext_j = extent_map.find(root_dom[j]) == extent_map.end()
           ? root_dom[j]->extent()
@@ -1685,68 +1834,79 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
-          stride = IrBuilder::mulExpr(stride, root_ext_j);
+          stride = SimplifyingIrBuilder::mulExpr(stride, root_ext_j);
         }
       }
     }
 
     if (stride != nullptr) {
-      strided_inds[i] = IrBuilder::mulExpr(root_ind_i, stride);
+      strided_inds[i] = SimplifyingIrBuilder::mulExpr(root_ind_i, stride);
     } else {
       strided_inds[i] = root_ind_i;
     }
   }
 
-  if (producer_tv->isDoubleBuffered()) {
+  if (producer_tv->isDoubleBuffered() || producer_tv->isCircularBuffered()) {
     auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
         producer_tv, loops, true);
     if (db_loop != nullptr) {
-      auto db_switch_index =
-          IrBuilder::modExpr(db_loop->index(), IrBuilder::create<Int>(2));
+      auto stage_depth = gpu_lower->doubleBufferInfo().getStageDepthFor(
+          db_loop->iter_domain());
+      auto loop_index =
+          db_loop->isTrivial() ? db_loop->start() : db_loop->index();
+      auto db_switch_index = SimplifyingIrBuilder::modExpr(
+          loop_index, SimplifyingIrBuilder::create<Int>(stage_depth));
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(producer_tv);
       auto db_strided_index =
-          IrBuilder::mulExpr(db_switch_index, original_alloc_size);
+          SimplifyingIrBuilder::mulExpr(db_switch_index, original_alloc_size);
       strided_inds.push_back(db_strided_index);
     }
   }
+
   return strided_inds;
+}
+
+std::vector<Val*> Index::getRandomTensorStridedIndices(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops) {
+  // Use domain guard to ignore the contiguity of
+  //  consumer tv.
+  TensorDomain* consumer_tv_no_contiguity_domain = nullptr;
+  auto contiguity_vector =
+      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), true);
+  if (consumer_tv->hasRFactor()) {
+    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
+        consumer_tv->getRootDomain(),
+        consumer_tv->getRFactorDomain(),
+        consumer_tv->domain()->domain(),
+        contiguity_vector);
+  } else {
+    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
+        consumer_tv->getRootDomain(),
+        consumer_tv->domain()->domain(),
+        contiguity_vector);
+  }
+
+  ir_utils::TVDomainGuard domain_guard(
+      consumer_tv, consumer_tv_no_contiguity_domain);
+
+  // TODO:
+  //  More optimization on the underlying tensor layout
+  //   will be done in a follow up.
+  return getGlobalConsumerStridedIndices(consumer_tv, loops);
 }
 
 std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     const TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
   FUSER_PERF_SCOPE("GpuLower::Lower::getGlobalConsumerIndex");
-  const auto gpu_lower = GpuLower::current();
 
-  // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
-  auto reference_domain = reference.domain;
-  auto reference_id_map = reference.concrete_to_id;
+  auto gpu_lower = GpuLower::current();
 
-  // Map everything we can from reference to consumer using compute at index
-  // map.
-  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-      indexMapReferenceTo(
-          consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
+  auto index_from_id_graph = getTensorIndexFromIdGraph(loops, consumer_tv);
 
-  // Index into the reference tensor. Reference indexing will handle vectorized
-  // dims where index should be set to 0
-  auto ref_compute = getReferenceIndexing(loops, reference_domain);
-
-  // Index into consumer using reference indexing
-
-  // Adds halo info mappings for the reference
-  updateHaloInfoForReference(reference, consumer_tv);
-
-  const auto reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, index_map_ref_to_consumer);
-
-  auto consumer_indexing = ref_compute.updateIndexCompute(
-      consumer_tv->domain(),
-      index_map_ref_to_consumer,
-      consumer_tv->domain()->contiguity(),
-      reference_halo_extent_map);
+  auto consumer_indexing = index_from_id_graph.index;
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
@@ -1758,9 +1918,7 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
   {
     int stride_i = 0;
     for (const auto i : c10::irange(root_dom.size())) {
-      if (root_dom[i]->isReduction() ||
-          root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
-          root_dom[i]->isStride()) {
+      if (root_dom[i]->isReduction() || root_dom[i]->isStride()) {
         strides[i] = GpuLower::current()->kernel()->oneVal();
         continue;
       }
@@ -1779,26 +1937,23 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     if (root_dom[dim]->isReduction() || root_dom[dim]->isStride()) {
       continue;
     }
-    if (root_dom[dim]->getIterType() == IterType::BroadcastWithoutStride) {
-      continue;
-    }
 
     Val* root_ind = nullptr;
     if (consumer_indexing.indexMap().find(root_dom[dim]) !=
         consumer_indexing.indexMap().end()) {
       root_ind = consumer_indexing.indexMap().at(root_dom[dim]);
-    } else if (root_dom[dim]->getIterType() == IterType::BroadcastWithStride) {
+    } else if (root_dom[dim]->isBroadcast()) {
       root_ind = GpuLower::current()->kernel()->zeroVal();
     }
 
     TORCH_INTERNAL_ASSERT(
         root_ind != nullptr,
-        "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        "Couldn't find root mapping for ",
+        consumer_tv->toString(),
         " dim: ",
-        i,
+        dim,
         " id: ",
-        root_dom[dim]);
+        root_dom[dim]->toString());
 
     if (consumer_tv->domain()->contiguity()[dim]) {
       // If contig, used the stored stride which may be the previous
@@ -1825,9 +1980,7 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
       root_dom.size(), GpuLower::current()->kernel()->zeroVal());
   for (const auto i : c10::irange(root_dom.size())) {
     // See a comment in indexing to root domains in getGlobalProducerIndex.
-    if (root_dom[i]->isReduction() ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithoutStride ||
-        root_dom[i]->getIterType() == IterType::BroadcastWithStride ||
+    if (root_dom[i]->isReduction() || root_dom[i]->isBroadcast() ||
         gpu_lower->trivialReductionInfo().isDerived(root_dom[i]) ||
         root_dom[i]->isStride()) {
       continue;
@@ -1836,14 +1989,24 @@ std::vector<Val*> Index::getGlobalConsumerStridedIndices(
     TORCH_INTERNAL_ASSERT(
         consumer_indexing.indexMap().find(root_dom[i]) !=
             consumer_indexing.indexMap().end(),
-        "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        "Couldn't find root mapping for ",
+        consumer_tv->toString(),
         " dim: ",
         i,
         " id: ",
         root_dom[i]->toString());
 
     auto root_ind = consumer_indexing.indexMap().at(root_dom[i]);
+
+    // index hoist must be done before the adjustments for halo
+    root_ind = hoistConsumerIndex(
+        root_dom[i],
+        consumer_tv,
+        consumer_indexing,
+        index_from_id_graph.resolved_loop_domains,
+        index_from_id_graph.initial_concrete_index_map,
+        loops,
+        root_ind);
 
     root_ind = SimplifyingIrBuilder::addExpr(
         root_ind, getGlobalConsumerOffsetWithPartialSplit(root_dom[i]));
@@ -1873,77 +2036,15 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
     const std::vector<kir::ForLoop*>& loops) {
   const auto gpu_lower = GpuLower::current();
 
-  // Get a reference tensor replayed as existing loop structure
-  auto reference = IndexReferenceReplay::getReference(loops);
-  auto reference_domain = reference.domain;
-  auto reference_id_map = reference.concrete_to_id;
-
-  auto alloc_info = loop_utils::getAllocInformation(consumer_tv, loops);
-  std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
-  std::unordered_set<kir::ForLoop*> zero_loops;
-  std::tie(loop_to_ind_map, zero_loops) =
-      indexMapFromTV(consumer_tv, loops, alloc_info.init_for_loop, true);
-
-  ensureStaticIndexing(consumer_tv, alloc_info.init_for_loop, loops);
-
-  // Map loop nests to indicies, zeroing out those not used due to locality of
-  // memory
-  std::unordered_map<IterDomain*, Val*> ref_id_to_ind_map;
-  std::unordered_set<IterDomain*> ref_zero_domains;
-
-  // Due to rfactor/initialization reference_domain may be bigger than loop nest
-  // structure, ignore IterDomains that aren't present in the loop nest when
-  // indexing reference.
-  TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (const auto loop_i : c10::irange(loops.size())) {
-    auto ref_axis = reference_domain->axis(loop_i);
-    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loops[loop_i]];
-    if (zero_loops.count(loops[loop_i]) > 0) {
-      ref_zero_domains.insert(ref_axis);
-    }
-  }
-
-  // Map everything we can from reference to consumer using compute at index
-  // map.
-  std::unordered_map<IterDomain*, IterDomain*> index_map_ref_to_consumer =
-      indexMapReferenceTo(
-          consumer_tv, gpu_lower->caIndexMap(), reference_id_map);
-
-  // Grab roots that map into consumer and save them into the preferred roots
-  // set for references indexing
-  std::unordered_set<IterDomain*> preferred_roots;
-  for (auto entry : index_map_ref_to_consumer) {
-    if (entry.second->isBroadcast() || entry.second->isReduction() ||
-        entry.second->isStride()) {
-      continue;
-    }
-    preferred_roots.emplace(entry.first);
-  }
-
-  // Make sure propagation of indexing while mixing with 0 indicies we propagate
-  // in a way that consumer will be able to see what's going on.
-  auto preferred_paths = buildPreferredPaths(reference_domain, preferred_roots);
-
-  // Index into the reference tensor
-  auto ref_compute = getReferenceIndexing(
+  auto consumer_indexing_from_idgraph = getTensorIndexFromIdGraph(
       loops,
-      reference_domain,
-      ref_id_to_ind_map,
-      ref_zero_domains,
-      preferred_paths);
+      consumer_tv,
+      // Producer tv
+      nullptr,
+      // Index global
+      false);
 
-  // Adds halo info mappings for the reference
-  updateHaloInfoForReference(reference, consumer_tv);
-
-  const auto reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, index_map_ref_to_consumer);
-
-  // Index into consumer using reference indexing
-  auto consumer_indexing = ref_compute.updateIndexCompute(
-      consumer_tv->domain(),
-      index_map_ref_to_consumer,
-      consumer_tv->domain()->contiguity(),
-      reference_halo_extent_map);
+  auto consumer_indexing = consumer_indexing_from_idgraph.index;
 
   IndexSwizzle index_swizzle(
       consumer_tv,
@@ -1972,17 +2073,27 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
 
     TORCH_INTERNAL_ASSERT(
         index_map.find(root_dom[i]) != index_map.end(),
-        "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        "Couldn't find root mapping for ",
+        consumer_tv->toString(),
         " dim: ",
         i,
         " id: ",
         root_dom[i]->toString());
 
-    const auto root_ind_i = index_map.at(root_dom[i]);
+    auto root_ind_i = index_map.at(root_dom[i]);
     if (root_ind_i->isZeroInt()) {
       continue;
     }
+
+    // index hoist must be done before the adjustments for halo
+    root_ind_i = hoistConsumerIndex(
+        root_dom[i],
+        consumer_tv,
+        consumer_indexing,
+        consumer_indexing_from_idgraph.resolved_loop_domains,
+        consumer_indexing_from_idgraph.initial_concrete_index_map,
+        loops,
+        root_ind_i);
 
     // Compute striding for this index.
     Val* stride = nullptr;
@@ -1995,12 +2106,12 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
 
       TORCH_INTERNAL_ASSERT(
           index_map.find(root_dom[j]) != index_map.end(),
-          "Couldn't find root mapping for TV",
-          consumer_tv->name(),
+          "Couldn't find root mapping for ",
+          consumer_tv->toString(),
           " dim: ",
-          i,
+          j,
           " id: ",
-          root_dom[i]);
+          root_dom[j]->toString());
 
       auto root_ext_j = extent_map.find(root_dom[j]) == extent_map.end()
           ? root_dom[j]->extent()
@@ -2012,13 +2123,13 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
         if (stride == nullptr) {
           stride = root_ext_j;
         } else {
-          stride = IrBuilder::mulExpr(stride, root_ext_j);
+          stride = SimplifyingIrBuilder::mulExpr(stride, root_ext_j);
         }
       }
     }
 
     if (stride != nullptr) {
-      strided_inds[i] = IrBuilder::mulExpr(root_ind_i, stride);
+      strided_inds[i] = SimplifyingIrBuilder::mulExpr(root_ind_i, stride);
     } else {
       strided_inds[i] = root_ind_i;
     }
@@ -2033,17 +2144,40 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   TORCH_INTERNAL_ASSERT(
       strided_inds.size() == consumer_tv->getMaybeRFactorDomain().size());
 
-  if (consumer_tv->isDoubleBuffered()) {
-    auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
-        consumer_tv, loops, true);
-    if (db_loop != nullptr) {
-      auto db_switch_index = IrBuilder::subExpr(
-          gpu_lower->kernel()->oneVal(),
-          IrBuilder::modExpr(db_loop->index(), IrBuilder::create<Int>(2)));
+  if (consumer_tv->isDoubleBuffered() || consumer_tv->isCircularBuffered()) {
+    auto db_loop =
+        gpu_lower->doubleBufferInfo().getDoubleBufferLoop(consumer_tv, loops);
+    auto stage_depth =
+        gpu_lower->doubleBufferInfo().getStageDepthFor(db_loop->iter_domain());
+    bool is_circular_buffer_loop = stage_depth > 2;
+    bool is_prolog =
+        db_loop->doubleBufferLoopStage() == DoubleBufferLoopStage::Prolog;
+
+    Val* db_switch_index = nullptr;
+
+    // In double buffered we don't materialize the prolog loop as there will
+    //  be only one iteration. In circular buffer case we materialize the
+    //  prolog loop as well covering the first N-1 iterations, N being the
+    //  stage depth.
+    if (!is_prolog || is_circular_buffer_loop) {
+      if (is_prolog && is_circular_buffer_loop) {
+        // The buffer switching logic is the same as original index
+        //  in the case of circular buffer prolog.
+        db_switch_index = db_loop->index();
+      } else {
+        // Switching index generated for main loop or epilog component.
+        db_switch_index = SimplifyingIrBuilder::modExpr(
+            SimplifyingIrBuilder::addExpr(
+                db_loop->index(),
+                SimplifyingIrBuilder::create<Int>(stage_depth - 1)),
+            SimplifyingIrBuilder::create<Int>(stage_depth));
+      }
+
+      // Use the generated switching buffer index to access the buffer space.
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(consumer_tv);
       auto db_strided_index =
-          IrBuilder::mulExpr(db_switch_index, original_alloc_size);
+          SimplifyingIrBuilder::mulExpr(db_switch_index, original_alloc_size);
       strided_inds.push_back(db_strided_index);
     }
   }
@@ -2074,7 +2208,8 @@ std::vector<Val*> Index::getProducerStridedIndices(
   TORCH_INTERNAL_ASSERT(
       strided_indices.size() ==
       producer->getMaybeRFactorDomain().size() +
-          (producer->isDoubleBuffered() ? 1 : 0));
+          (producer->isDoubleBuffered() || producer->isCircularBuffered() ? 1
+                                                                          : 0));
 
   return strided_indices;
 }
@@ -2085,7 +2220,8 @@ kir::TensorIndex* Index::getProducerIndex(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
   auto strided_indices = getProducerStridedIndices(producer, consumer, loops);
-  return IrBuilder::create<kir::TensorIndex>(producer, strided_indices);
+  return SimplifyingIrBuilder::create<kir::TensorIndex>(
+      producer, strided_indices);
 }
 
 std::vector<Val*> Index::getConsumerStridedIndices(
@@ -2113,7 +2249,8 @@ kir::TensorIndex* Index::getConsumerIndex(
     const TensorView* consumer,
     const std::vector<kir::ForLoop*>& loops) {
   auto strided_indices = getConsumerStridedIndices(consumer, loops);
-  return IrBuilder::create<kir::TensorIndex>(consumer, strided_indices);
+  return SimplifyingIrBuilder::create<kir::TensorIndex>(
+      consumer, strided_indices);
 }
 
 namespace {
@@ -2137,8 +2274,12 @@ struct PredicateDomainInfo {
 // want to return every IterDomain that's contiguous, just the one closest to
 // the leaves. Predicates are not associated with physical memory so we can
 // treat all of them as contiguous merges.
+//
+// TODO: This seems to have a large overlap with ContigIDs. Consider
+// refactoring.
 std::vector<PredicateDomainInfo> getPredicateContigIds(
-    TensorView* consumer_tv) {
+    TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, Val*>& consumer_index_map) {
   const auto gpu_lower = GpuLower::current();
 
   const auto& consumer_root_domain = consumer_tv->getRootDomain();
@@ -2170,8 +2311,9 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
     // reference unless the concrete domain is also a broadcast
     // domain.
     if (consumer_root_id->isBroadcast() &&
-        !gpu_lower->caLoopMap()
-             .getConcreteMappedID(consumer_root_id)
+        !GpuLower::current()
+             ->caMap()
+             ->getConcreteMappedID(consumer_root_id, IdMappingMode::PERMISSIVE)
              ->isBroadcast()) {
       excluded_ids.insert(consumer_root_id);
       continue;
@@ -2210,6 +2352,13 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
         continue;
       }
 
+      // Do not try to predicate the merge output domain if the output
+      // domain has not a predicate that is mapped from the reference.
+      // See FusionContigPredicate_CUDA for a concrete example.
+      if (consumer_index_map.find(merge->out()) == consumer_index_map.end()) {
+        continue;
+      }
+
       if (inner_contig_it != contiguous_ids.end() &&
           outer_contig_it != contiguous_ids.end()) {
         // If inner and outer are contiguous, out must be contiguous. Remove
@@ -2239,18 +2388,6 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
     contig_id_infos.push_back(contig_id_info);
   }
   return contig_id_infos;
-}
-
-IterDomain* getMappedReferenceDomain(
-    IterDomain* id,
-    const ReferenceTensor& reference) {
-  // Partially overlaps with getPredicateContigIds()
-  auto concrete_id = GpuLower::current()->caIndexMap().getConcreteMappedID(id);
-  auto it = reference.concrete_to_id.find(concrete_id);
-  if (it == reference.concrete_to_id.end()) {
-    return nullptr;
-  }
-  return it->second;
 }
 
 std::vector<PredicateDomainInfo> getNonDivisibleConsumerDomainsToPredicate(
@@ -2284,10 +2421,11 @@ bool needsPadding(TensorView* tv) {
 }
 
 // Get an additional offset of a stop index when building a predicate
-// for unswitch. Initial stop indices generated at getPredicateReferenceIndexing
-// do not take halo into account, and the adjustment for halo is done as an
-// additional offset to the final index value so that unswitch predicates can be
-// compared with each other by just looking at the additional offsets.
+// for unswitch. Initial stop indices generated at
+// getPredicateIndexingFromIdGraph do not take halo into account, and the
+// adjustment for halo is done as an additional offset to the final index value
+// so that unswitch predicates can be compared with each other by just looking
+// at the additional offsets.
 //
 // consumer_root_id: the domain for which a stop predicate is being built.
 int getUnswitchStopOffset(
@@ -2363,8 +2501,8 @@ std::pair<Val*, Val*> getStartAndStopOffsetsForShift(
   }
 
   return {
-      IrBuilder::create<Int>(start_offset),
-      IrBuilder::create<Int>(stop_offset)};
+      SimplifyingIrBuilder::create<Int>(start_offset),
+      SimplifyingIrBuilder::create<Int>(stop_offset)};
 }
 
 std::pair<Val*, Val*> getStartAndStopOffsetsForGather(
@@ -2511,197 +2649,11 @@ std::pair<Val*, Val*> getStartAndStopLimitOffsets(
   return {start_limit, stop_limit};
 }
 
-// Return an IndexCompute for a predicate reference tensor. Two different
-// maps are used when generating predicates for unswitched expressions
-// as start and stop conditions need to use different loop-to-index
-// mappings.
-auto getPredicateReferenceIndexing(
-    const std::vector<kir::ForLoop*>& loops,
-    const ReferenceTensor& reference,
-    kir::ForLoop* unswitch_or_vec_loop,
-    IterDomain* double_buffer_axis,
-    bool start) {
-  auto reference_domain = reference.domain;
-
-  std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
-
-  std::transform(
-      loops.begin(),
-      loops.end(),
-      std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
-      [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
-
-  // If unswitch don't directly use indices from for loop, use zero
-  // and for loop extent minus 1
-  if (unswitch_or_vec_loop != nullptr) {
-    // Vectorized predicates are different from unswitch. Unswitch predicates
-    // all loops within the unswitch (the outer most unswitch) are generated
-    // with loop->extent-1 as the index. With vectorized predicates, only the
-    // vectorized loop should be like this.
-
-    bool vectorized_pred =
-        unswitch_or_vec_loop->iter_domain()->getParallelType() ==
-        ParallelType::Vectorize;
-
-    TORCH_INTERNAL_ASSERT(
-        loops.size() <= reference_domain->nDims(),
-        "Invalid reference generated.");
-
-    bool within_unswitch = false;
-
-    for (const auto loop_i : c10::irange(loops.size())) {
-      auto loop = loops[loop_i];
-      auto loop_id = loop->iter_domain();
-      auto loop_pt = loop_id->getParallelType();
-      auto ref_id = reference_domain->axis(loop_i);
-
-      if (loop == unswitch_or_vec_loop) {
-        within_unswitch = true;
-      }
-
-      if (within_unswitch) {
-        // Rely on the reference to check broadcasting. The for loop could be
-        // broadcasted on a constant value from an unroll split. Since reference
-        // may convert this to an iter domain, that for loop could be valid to
-        // generate predication from.
-
-        // Note that loop->stop() is not used below. Instead,
-        // loop->iter_domain()->extent() is used, which is uniform
-        // across the mapped domains irrespective of halo. Predicates are
-        // compared with each to pick the most restrictive ones. The
-        // comparison is done by only using the offset, which is the
-        // term added to the index. So, the index term must be the
-        // same among all predicates, otherwise the comparison would
-        // be invalid. The effect by halo is added to the offset
-        // term. See getUnswitchStopOffset.
-
-        if (ref_id->isBroadcast()) {
-          // Ignore indexing into broadcasted dimensions.
-          continue;
-        } else if (loop_id->isThread()) {
-          // When parallelized, if the loop stop is the same as the
-          // extent of the associated IterDomain, i.e., no extra
-          // iterations for halo, predicating with the threading index
-          // is sufficient for both the start and stop
-          // predicates. That isn't the case if the loop has halo, and
-          // in the case either the minimum and maximum values of the
-          // iteration domain needs to be used.
-          //
-          // Note: Better performance was obtained if using
-          // threadIdx in unswitch predicates was avoided. More
-          // specifically, in the Hdiff stencil example, instead of
-          // predicating with threadIdx.x for both the start and stop
-          // predicates, using zero and (blockDim.x - 1) for the start
-          // and stop predicates, respectively, resulted in less
-          // register pressure. The alternative codegen can be done by
-          // adding this to the first if condition:
-          // loop_id->isBlockDim(). This would not be a concern if the
-          // else part could be omitted, so canOmitElseClause should
-          // be used as well.
-          if (loop->stop() == loop_id->extent()) {
-            loop_to_ind_map[loop] = loop->start();
-          } else if (start) {
-            loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
-          } else {
-            // Note that the parallel dimension is used rather than
-            // loop-stop(). See the above comment.
-            loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
-                GpuLower::current()->parallelDimensionMap().get(loop_pt),
-                GpuLower::current()->kernel()->zeroVal());
-          }
-        } else if (start) {
-          loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
-        } else {
-          // Similar to the above, loop_id()->extent() is
-          // used here instead of loop->stop(). See the above comment.
-          loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
-              loop_id->extent(), GpuLower::current()->kernel()->oneVal());
-        }
-      }
-
-      // If a vectorized predicate, bail after the vectorized loop was found.
-      // Don't continue unswitching loops.
-      if (vectorized_pred && within_unswitch) {
-        break;
-      }
-    }
-  }
-
-  if (double_buffer_axis != nullptr) {
-    auto db_loop = GpuLower::current()->doubleBufferInfo().getDoubleBufferLoop(
-        double_buffer_axis, loops, true);
-    if (db_loop != nullptr) {
-      auto loop_to_ind_map_it = loop_to_ind_map.find(db_loop);
-      TORCH_INTERNAL_ASSERT(loop_to_ind_map_it != loop_to_ind_map.end());
-      auto cur_index = loop_to_ind_map_it->second;
-      // if cur_index is not the same as the index of db_loop, it must
-      // be true that that index has been modified to support
-      // unswitch. In that case, it is not necessary to move ahead the
-      // index for double buffering.
-      if (cur_index == db_loop->index()) {
-        loop_to_ind_map[db_loop] = IrBuilder::addExpr(
-            cur_index, GpuLower::current()->kernel()->oneVal());
-      }
-    }
-  }
-
-  // Add magic zero to a loop pretty far inside in indexing
-  IterDomain* magic_zero_loop = nullptr;
-  std::unordered_map<IterDomain*, Val*> ref_id_to_ind_map;
-  // Due to rfactor/initialization reference_domain may be bigger than loop nest
-  // structure
-  TORCH_INTERNAL_ASSERT(loops.size() <= reference_domain->nDims());
-  for (const auto loop_i : c10::irange(loops.size())) {
-    auto loop = loops[loop_i];
-    auto ind = loop_to_ind_map[loops[loop_i]];
-    auto ref_axis = reference_domain->axis(loop_i);
-
-    if (Index::protectWithMagicZero(loop, ref_axis, ind)) {
-      magic_zero_loop = ref_axis;
-    }
-
-    ref_id_to_ind_map[ref_axis] = loop_to_ind_map[loop];
-  }
-
-  if (ref_id_to_ind_map.count(magic_zero_loop)) {
-    auto& ind = ref_id_to_ind_map[magic_zero_loop];
-    if (!ind->isConstScalar()) {
-      ind = SimplifyingIrBuilder::addExpr(
-          ind, GpuLower::current()->kernel()->magicZeroVal());
-    }
-  }
-
-  std::unordered_map<IterDomain*, IterDomain*> ref_self_map;
-  auto all_vals = DependencyCheck::getAllValsBetween(
-      {reference_domain->getRootDomain().begin(),
-       reference_domain->getRootDomain().end()},
-      {reference_domain->domain().begin(), reference_domain->domain().end()});
-  auto all_ids = ir_utils::filterByType<IterDomain>(all_vals);
-  std::for_each(all_ids.begin(), all_ids.end(), [&ref_self_map](auto id) {
-    ref_self_map.insert({id, id});
-  });
-
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, ref_self_map);
-
-  // Index into the reference tensor
-  auto index_compute = getReferenceIndexing(
-      loops,
-      reference_domain,
-      ref_id_to_ind_map,
-      {},
-      {},
-      reference_halo_extent_map);
-
-  return index_compute;
-}
-
 // Get the offsets for the start and stop predicates. The offsets
 // are to be added to the index.
 std::pair<Val*, Val*> getStartAndStopOffsets(
     IterDomain* consumer_id,
     TensorView* consumer_tv,
-    const ReferenceTensor& reference,
     const std::unordered_map<IterDomain*, Val*>& consumer_start_index_map,
     const std::unordered_map<IterDomain*, Val*>& consumer_stop_index_map,
     bool padding_predicate,
@@ -2745,7 +2697,7 @@ std::pair<Val*, Val*> getStartAndStopOffsets(
 
     // If generating a predicate for unswitch, adjust the stop offset to
     // accommodate the addition of halo to the loop stop. See the
-    // comment in getPredicateReferenceIndexing as well.
+    // comment in getPredicateIndexingFromIdGraph as well.
     if (unswitch) {
       TORCH_INTERNAL_ASSERT(
           !padding_predicate, "Unswitch should not use the padding predicate");
@@ -2813,8 +2765,7 @@ bool canOmitStopPredicate(
     }
   }
 
-  // Omit only when both the index and extent are "simple".
-  if (!(index_simple && contig_id->extent()->definition() == nullptr)) {
+  if (!index_simple) {
     return false;
   }
 
@@ -2827,13 +2778,19 @@ bool canOmitStopPredicate(
 
   auto stop_offset_val = stop_offset->as<Int>()->value();
 
-  auto halo_ext = gpu_lower->haloInfo().getRootAxisInfo(contig_id).width();
-
   // If they are not compile-time constant, can't prove the
   // condition.
   if (!stop_offset_val.has_value()) {
     return false;
   }
+
+  // Note that when a root domain is halo extended, it is the domain
+  // to be predicated, not its merged contig id even if it exists. So,
+  // if contig_id does not have root axis info, contig_id is
+  // guaranteed to have no halo.
+  auto halo_ext = gpu_lower->haloInfo().hasRootAxisInfo(contig_id)
+      ? gpu_lower->haloInfo().getRootAxisInfo(contig_id).width()
+      : 0;
 
   if (halo_ext + stop_offset_val.value() > 0) {
     return false;
@@ -2858,15 +2815,85 @@ bool canOmitStopPredicate(
   return true;
 }
 
+std::pair<Val*, Val*> hoistPredicates(
+    Val* start_index,
+    Val* stop_index,
+    const std::vector<kir::ForLoop*>& loops,
+    std::vector<IterDomain*> loop_domains,
+    const std::unordered_map<IterDomain*, Val*>& start_initial_loop_index_map,
+    const std::unordered_map<IterDomain*, Val*>& stop_initial_loop_index_map,
+    kir::ForLoop* unswitch_or_vec_loop,
+    IterDomain* predicated_consumer_id,
+    TensorView* predicated_consumer_tv) {
+  const std::pair<Val*, Val*> same_indices{start_index, stop_index};
+
+  if (isOptionDisabled(DisableOption::IndexHoist)) {
+    return same_indices;
+  }
+
+  const auto start_is_same_as_stop = stop_index == start_index;
+
+  Val* hoisted_stop_index = nullptr;
+
+  if (stop_index->definition() == nullptr) {
+    // If the index doens't have an expression, nothing to hoist
+    hoisted_stop_index = stop_index;
+  } else {
+    bool inserted = false;
+    std::tie(hoisted_stop_index, inserted) =
+        GpuLower::current()->commonIndexMap().insert(
+            predicated_consumer_id,
+            predicated_consumer_tv->domain(),
+            loop_domains,
+            stop_initial_loop_index_map,
+            loops,
+            stop_index);
+  }
+
+  Val* hoisted_start_index = nullptr;
+  if (start_is_same_as_stop) {
+    hoisted_start_index = hoisted_stop_index;
+  } else if (start_index->definition() == nullptr) {
+    hoisted_start_index = start_index;
+  } else {
+    bool inserted = false;
+    std::tie(hoisted_start_index, inserted) =
+        GpuLower::current()->commonIndexMap().insert(
+            predicated_consumer_id,
+            predicated_consumer_tv->domain(),
+            loop_domains,
+            start_initial_loop_index_map,
+            loops,
+            start_index);
+  }
+
+  return {hoisted_start_index, hoisted_stop_index};
+}
+
+// Updates a loop index map with a loop index protected by magic zero
+std::unordered_map<IterDomain*, Val*> updateInitialLoopIndexMap(
+    const std::unordered_map<IterDomain*, Val*>& initial_loop_index_map,
+    const IndexMagicZeroInfo& magic_zero_info) {
+  if (magic_zero_info.original_loop_index != nullptr) {
+    TORCH_INTERNAL_ASSERT(magic_zero_info.protected_loop_index != nullptr);
+    auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        magic_zero_info.loop_id, IdMappingMode::EXACT);
+    auto updated_map = initial_loop_index_map;
+    updated_map[concrete_loop_id] = magic_zero_info.protected_loop_index;
+    return updated_map;
+  } else {
+    return initial_loop_index_map;
+  }
+}
+
 } // namespace
 
 // Returns predicates and the concrete (by loop map) root domains they cover
-std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
-    getReferenceRootPredicates(
-        TensorView* consumer_tv,
-        const std::vector<kir::ForLoop*>& loops,
-        kir::ForLoop* unswitch_or_vec_loop,
-        bool shift_padding) {
+std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops,
+    kir::ForLoop* unswitch_or_vec_loop,
+    bool shift_padding) {
   FUSER_PERF_SCOPE("GpuLower::Lower::Index::getReferenceRootPredicates");
 
   const auto gpu_lower = GpuLower::current();
@@ -2875,55 +2902,44 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
 
   // Nothing needs to be done when padding is not required.
   if (shift_padding && !needsPadding(consumer_tv)) {
-    return {{RootPredicateInfo::getFalseInfo()}, ReferenceTensor{}};
+    return {RootPredicateInfo::getFalseInfo()};
   }
-
-  // Get a reference tensor replayed as existing loop structure
-  ReferenceTensor reference = IndexReferenceReplay::getReference(loops);
-
-  // Generate halo information for reference.
-  updateHaloInfoForReference(reference, consumer_tv);
-
-  const auto ref_2_consumer = indexMapReferenceTo(
-      consumer_tv, gpu_lower->caIndexMap(), reference.concrete_to_id);
-
-  const auto reference_halo_extent_map =
-      getReferenceHaloExtentMap(reference, ref_2_consumer);
 
   auto db_axis = gpu_lower->doubleBufferInfo().getDoubleBufferAxis(consumer_tv);
 
+  // Indexing is done without considering contig merging. Actual
+  // predicated domains are determined by considering contiguity.
+  const ContigIDs contig_finder(
+      consumer_tv->domain()->domain(),
+      consumer_tv->getMaybeRFactorDomain(),
+      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
+      {});
+
+  // Generate start and stop indexing from idgraph.
+  //
   // Both start and stop positions may need to be predicated. Indexing
   // differs when generating predicates for unswitch.
   // NOTE: If we could find-and-replace KIR nodes, we could just
   // generate one index map, clone it and replace the loop-to-index
   // mappings of unswitched loops for the start predicate.
-  auto ref_stop_indexing = getPredicateReferenceIndexing(
-      loops, reference, unswitch_or_vec_loop, db_axis, false);
-  const auto consumer_stop_indexing = ref_stop_indexing.updateIndexCompute(
-      consumer_tv->domain(),
-      ref_2_consumer,
-      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
-      reference_halo_extent_map);
+
+  auto stop_indexing_from_idgraph = getPredicateIndexingFromIdGraph(
+      loops, consumer_tv, unswitch_or_vec_loop, db_axis, false);
+  const auto consumer_stop_indexing = stop_indexing_from_idgraph.index;
   const auto& consumer_stop_index_map = consumer_stop_indexing.indexMap();
 
   // If not unswitch, share the same indexing map as the stop index
   // map
-  std::unordered_map<IterDomain*, Val*> consumer_start_index_map;
-  if (is_unswitch) {
-    auto ref_start_indexing = getPredicateReferenceIndexing(
-        loops, reference, unswitch_or_vec_loop, db_axis, true);
-    const auto consumer_start_indexing = ref_start_indexing.updateIndexCompute(
-        consumer_tv->domain(),
-        ref_2_consumer,
-        std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
-        reference_halo_extent_map);
-    consumer_start_index_map = consumer_start_indexing.indexMap();
-  } else {
-    consumer_start_index_map = consumer_stop_index_map;
-  }
+  const auto start_indexing_from_idgraph = is_unswitch
+      ? getPredicateIndexingFromIdGraph(
+            loops, consumer_tv, unswitch_or_vec_loop, db_axis, true)
+      : stop_indexing_from_idgraph;
+  const auto consumer_start_indexing = start_indexing_from_idgraph.index;
+  const auto& consumer_start_index_map = consumer_start_indexing.indexMap();
 
   // Get the contiguous ids we need to generate predicates for
-  auto contig_id_infos = getPredicateContigIds(consumer_tv);
+  auto contig_id_infos =
+      getPredicateContigIds(consumer_tv, consumer_stop_index_map);
 
   auto non_divisible_splits =
       getNonDivisibleConsumerDomainsToPredicate(consumer_tv);
@@ -2976,7 +2992,6 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     std::tie(info.start_offset_, info.stop_offset_) = getStartAndStopOffsets(
         contig_id,
         consumer_tv,
-        reference,
         consumer_start_index_map,
         consumer_stop_index_map,
         shift_padding,
@@ -2985,6 +3000,42 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
 
     auto stop_index = consumer_stop_indexing_it->second;
     auto start_index = consumer_start_index_map.at(contig_id);
+
+    IndexMagicZeroInfo start_magic_zero_info;
+    IndexMagicZeroInfo stop_magic_zero_info;
+
+    // When the start and stop indices are not the same, apply the
+    // magic-zero protection separately for both of them.
+    if (stop_index != start_index) {
+      start_magic_zero_info = protectPredicateIndexWithMagicZero(
+          start_index, start_indexing_from_idgraph, loops);
+      stop_magic_zero_info = protectPredicateIndexWithMagicZero(
+          stop_index, stop_indexing_from_idgraph, loops);
+    } else {
+      stop_magic_zero_info = protectPredicateIndexWithMagicZero(
+          stop_index, stop_indexing_from_idgraph, loops);
+      start_magic_zero_info = stop_magic_zero_info;
+    }
+
+    start_index = start_magic_zero_info.index;
+    stop_index = stop_magic_zero_info.index;
+
+    // Update the loop-index map with the magic-zero protection info
+    // before passing it to the hoisting function
+    std::tie(start_index, stop_index) = hoistPredicates(
+        start_index,
+        stop_index,
+        loops,
+        stop_indexing_from_idgraph.resolved_loop_domains,
+        updateInitialLoopIndexMap(
+            start_indexing_from_idgraph.initial_concrete_index_map,
+            start_magic_zero_info),
+        updateInitialLoopIndexMap(
+            stop_indexing_from_idgraph.initial_concrete_index_map,
+            stop_magic_zero_info),
+        unswitch_or_vec_loop,
+        contig_id,
+        consumer_tv);
 
     // Build predicates for start positions as:
     //   start_index + start_offset >= 0
@@ -3021,20 +3072,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     pred_info_vec.emplace_back(info);
   }
 
-  return {pred_info_vec, reference};
-}
-
-bool Index::protectWithMagicZero(
-    kir::ForLoop* loop,
-    IterDomain* reference_domain,
-    Val* ind) {
-  bool ref_dom_simple =
-      (reference_domain == nullptr ? true
-                                   : reference_domain->definition() != nullptr);
-  bool ind_simple =
-      (ind == nullptr ? true
-                      : ind->definition() != nullptr && !ind->isZeroInt());
-  return loop->isUnrolled() && (!ref_dom_simple || !ind_simple);
+  return pred_info_vec;
 }
 
 RootPredicateInfo RootPredicateInfo::getFalseInfo() {

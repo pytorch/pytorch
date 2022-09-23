@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
@@ -203,8 +203,17 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "has_writers",
           [&](AliasDb& db, Value* v1) { return db.hasWriters(v1); })
-      .def("__str__", &AliasDb::toString);
-
+      .def("__str__", &AliasDb::toString)
+      .def(
+          "move_after_topologically_valid",
+          [](AliasDb& db, Node* n, Node* movePoint) {
+            return db.moveAfterTopologicallyValid(n, movePoint);
+          })
+      .def(
+          "move_before_topologically_valid",
+          [](AliasDb& db, Node* n, Node* movePoint) {
+            return db.moveBeforeTopologicallyValid(n, movePoint);
+          });
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
@@ -255,11 +264,13 @@ void initPythonIRBindings(PyObject* module_) {
             RawDataExportMap export_map;
             SymbolDimMap symbol_map;
             bool val_use_external_data_format = false;
+            NodeNameMap onnx_node_names;
             std::tie(
                 model_proto,
                 export_map,
                 symbol_map,
-                val_use_external_data_format) =
+                val_use_external_data_format,
+                onnx_node_names) =
                 export_onnx(
                     g,
                     initializers,
@@ -289,7 +300,8 @@ void initPythonIRBindings(PyObject* module_) {
             return std::make_tuple(
                 py::bytes(graph),
                 python_serialized_export_map,
-                val_use_external_data_format);
+                val_use_external_data_format,
+                onnx_node_names);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
@@ -375,6 +387,11 @@ void initPythonIRBindings(PyObject* module_) {
       .GS(eraseInput)
       .GS(eraseOutput)
       .GS(registerOutput)
+      .def(
+          "permuteInputs",
+          [](Graph& g, const std::vector<size_t>& new_inputs) {
+            g.block()->permuteInputs(new_inputs);
+          })
       .def(
           "create",
           [](Graph& g, const char* str) {
@@ -601,7 +618,7 @@ void initPythonIRBindings(PyObject* module_) {
           "schema",
           [](Node& n) {
             std::stringstream ss;
-            if (auto sch = n.maybeSchema()) {
+            if (n.maybeSchema()) {
               ss << n.schema();
             } else {
               ss << "(no schema)";
@@ -636,6 +653,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "getModuleHierarchy",
           [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
+      .def(
+          "namedInput",
+          [](Node& n, const std::string& unqualName) {
+            return n.namedInput(unqualName);
+          })
       .NS(addInput)
       .NS(copyMetadata)
       .NS(replaceInput)
@@ -741,6 +763,16 @@ void initPythonIRBindings(PyObject* module_) {
           "z",
           [](Node& n, const char* name) { return n.t(Symbol::attr(name)); })
       .def(
+          "ty_",
+          [](Node& n, const char* name, const TypePtr& type) {
+            return n.ty_(Symbol::attr(name), type);
+          })
+      .def(
+          "tys_",
+          [](Node& n, const char* name, const std::vector<TypePtr>& types) {
+            return n.tys_(Symbol::attr(name), types);
+          })
+      .def(
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
@@ -782,6 +814,9 @@ void initPythonIRBindings(PyObject* module_) {
             s << t;
             return s.str();
           })
+      .def(
+          "containedTypes",
+          [](Type& self) { return self.containedTypes().vec(); })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
       .def(
           "dim",
@@ -948,6 +983,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &NumberType::get);
   py::class_<IntType, Type, IntTypePtr>(m, "IntType")
       .def_static("get", &IntType::get);
+  py::class_<SymIntType, Type, SymIntTypePtr>(m, "SymIntType")
+      .def_static("get", &SymIntType::get);
   py::class_<FloatType, Type, FloatTypePtr>(m, "FloatType")
       .def_static("get", &FloatType::get);
   py::class_<ComplexType, Type, ComplexTypePtr>(m, "ComplexType")
@@ -984,10 +1021,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
   py::class_<UnionType, Type, UnionTypePtr>(m, "UnionType")
       .def(py::init(
-          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
-      .def("containedTypes", [](UnionType& self) {
-        return self.containedTypes().vec();
-      });
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }));
   py::class_<ListType, Type, ListTypePtr>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)

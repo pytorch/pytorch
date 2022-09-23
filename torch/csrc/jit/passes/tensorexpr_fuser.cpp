@@ -5,6 +5,7 @@
 #include <ATen/record_function.h>
 #include <c10/util/FunctionRef.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -69,11 +70,17 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 
 namespace tensorexpr {
 
+OperatorSet& getCustomOperatorSet() {
+  static OperatorSet _g_custom_operator_set{};
+  return _g_custom_operator_set;
+}
+
 static const OperatorSet& supported_non_eltwise_set() {
   // clang-format off
   static const OperatorSet supported_non_eltwise_set{
       "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor",
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
   };
   // clang-format on
@@ -88,7 +95,7 @@ bool isSupported(Node* node) {
 
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
-      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
       "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
       "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
   };
@@ -101,6 +108,7 @@ bool isSupported(Node* node) {
   if (get_tensorexpr_elementwise_set().contains(node) ||
       node->isMemberOf(supported_non_eltwise_set()) ||
       node->isMemberOf(supported_misc_set) ||
+      node->isMemberOf(getCustomOperatorSet()) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.
@@ -140,7 +148,6 @@ bool isSupported(Node* node) {
 
   return false;
 }
-
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = true;
@@ -248,9 +255,9 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes:\n", *graph);
 }
 
-void removeTensorTypeSpecialization(Value* v) {
+bool hasTensorTypeSpecialization(Value* v) {
   if (!v->type()->cast<TensorType>()) {
-    return;
+    return false;
   }
   // Constants & TensorExprGroup will always produce specialized tensor type,
   // TypeCheck are inserted by this pass and only used by fusion groups that
@@ -258,9 +265,18 @@ void removeTensorTypeSpecialization(Value* v) {
   if (v->node()->kind() == prim::Constant ||
       v->node()->kind() == prim::TypeCheck ||
       v->node()->kind() == prim::TensorExprGroup) {
-    return;
+    return false;
   }
-  v->setType(TensorType::get());
+  if (v->type() == TensorType::get()) {
+    return false;
+  }
+  return true;
+}
+
+void removeTensorTypeSpecialization(Value* v) {
+  if (hasTensorTypeSpecialization(v)) {
+    v->setType(TensorType::get());
+  }
 }
 
 void removeTensorTypeSpecializations(Block* block) {
@@ -450,6 +466,23 @@ class TensorExprFuser {
     }
 
     for (Node* n : subgraph->nodes()) {
+      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
+        return v->type()->isSubtypeOf(*TensorType::get());
+      });
+      GRAPH_DEBUG("Building sizes for ", getHeader(n));
+      bool all_inputs_have_sizes = true;
+      auto shapes = fmap(tensor_inputs, [&](Value* v) {
+        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
+        all_inputs_have_sizes &= shape_of.count(v);
+        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
+      });
+      if (!all_inputs_have_sizes) {
+        GRAPH_DEBUG(
+            "Not all tensor arguments have sizes available to compute the broadcasted size",
+            getHeader(n));
+        continue;
+      }
+
       if (n->kind() == prim::ConstantChunk) {
         Node* sizes_node = graph->insertNode(
             graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
@@ -478,23 +511,6 @@ class TensorExprFuser {
         continue;
       }
 
-      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
-        return v->type()->isSubtypeOf(*TensorType::get());
-      });
-      GRAPH_DEBUG("Building sizes for ", getHeader(n));
-      bool all_inputs_have_sizes = true;
-      auto shapes = fmap(tensor_inputs, [&](Value* v) {
-        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
-        all_inputs_have_sizes &= shape_of.count(v);
-        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
-      });
-
-      if (!all_inputs_have_sizes) {
-        GRAPH_DEBUG(
-            "Not all tensor arguments have sizes available to compute the broadcasted size",
-            getHeader(n));
-        continue;
-      }
       shape_of.emplace(
           n->output(),
           shapes.size() == 1 ? shapes[0]
@@ -549,8 +565,6 @@ class TensorExprFuser {
     } else {
       prepareFusionGroupAndGuardOutputs(graph_->block());
       GRAPH_DUMP("After guarding fusion groups: ", graph_);
-      removeTensorTypeSpecializations(graph_->block());
-      GRAPH_DUMP("After removing tensor type specializations: ", graph_);
     }
   }
 
@@ -745,6 +759,10 @@ class TensorExprFuser {
     }
     // Cleanup the subgraph from duplicated constants while we're at it.
     ConstantPooling(subgraph);
+
+    if (GRAPH_DEBUG_ENABLED) {
+      GRAPH_EXPORT("", subgraph);
+    }
     return false;
   }
 
@@ -837,6 +855,11 @@ class TensorExprFuser {
     if (device->is_cpu()) {
       return canFuseOnCPU();
     } else if (device->is_cuda()) {
+#ifndef C10_MOBILE
+      if (fuser::cuda::isEnabled()) {
+        return false;
+      }
+#endif
       return canFuseOnGPU();
     } else if (device->is_xpu()) {
       return false;
@@ -875,6 +898,7 @@ class TensorExprFuser {
     };
     static const OperatorSet cpu_compute_heavy_set{
       "aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+      "aten::_convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor",
       "aten::matmul(Tensor self, Tensor other) -> Tensor",
     };
     static const OperatorSet gpu_only_operator_set{
@@ -1023,8 +1047,13 @@ class TensorExprFuser {
       }
     }
 
-    if (node->kind() == aten::conv2d) {
-      if (!tensorexpr::conv2dIsSupportedJit(node)) {
+    if (node->kind() == aten::_convolution && !tensorexpr::isConv2d(node)) {
+      GRAPH_DEBUG("This aten::_convolution node is not a 2D conv");
+      return false;
+    }
+    if (node->kind() == aten::_convolution || node->kind() == aten::conv2d) {
+      if (!tensorexpr::conv2dIsSupportedJit(node) &&
+          !tensorexpr::mkldnnPrepackedConvIsSupportedJit(node)) {
         GRAPH_DEBUG("Params of conv2d are not supported");
         return false;
       }
@@ -1090,6 +1119,7 @@ class TensorExprFuser {
       // aten::cat, though it does not have a shape function.
       REQ(node->kind() == prim::ListConstruct ||
           node->kind() == prim::TensorExprGroup ||
+          node->isMemberOf(tensorexpr::getCustomOperatorSet()) ||
           (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
     }
 

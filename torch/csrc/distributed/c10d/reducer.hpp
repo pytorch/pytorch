@@ -14,6 +14,7 @@
 #include <c10d/Utils.hpp>
 #include <c10d/comm.hpp>
 #include <c10d/debug.h>
+#include <c10d/reducer_timer.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/profiler.h>
@@ -28,76 +29,9 @@ constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
 // Collect runtime stats once for every kDDPRuntimeLoggingSampleRate iterations.
 constexpr int kDDPRuntimeLoggingSampleRate = 100;
-constexpr int kUnsetTime = -1;
-
-inline int64_t current_time_in_nanos() {
-  return torch::profiler::impl::getTime();
-}
 
 // Forward declaration
 class Logger;
-
-class TORCH_API Timer {
-  private:
-    // The timestamp of forward call start time in each iteration.
-    int64_t forward_start_time = kUnsetTime;
-    // The timestamp of backward computation start and end time in each
-    // iteration.
-    int64_t backward_compute_start_time = kUnsetTime;
-    int64_t backward_compute_end_time = kUnsetTime;
-    // The timestamp of first communication call start time in each iteration.
-    int64_t backward_comm_start_time = kUnsetTime;
-    // The timestamp of last communication call end time in each iteration.
-  int64_t backward_comm_end_time = kUnsetTime;
- public:
-  enum class Event {
-    kForwardStart,
-    kBackwardComputeStart,
-    kBackwardComputeEnd,
-    kBackwardCommStart,
-    kBackwardCommEnd,
-  };
-
-  // Record the current event, i.e., mark it as having occurred now. Default
-  // CPU implementation.
-  virtual void record(Event event) {
-    getTimeRef(event) = current_time_in_nanos();
-  }
-
-  // Return the difference between when two events occurred, in nanoseconds.
-  // Or nullopt if one of them hasn't been recorded.
-  virtual c10::optional<int64_t> measureDifference(Event start, Event end) = 0;
-
-  virtual ~Timer() = default;
-
-  // Return host-side timestamp, or nullopt if it has not yet been recorded.
-  c10::optional<int64_t> getTimestamp(Event event) {
-    auto time = getTimeRef(event);
-    if (time == kUnsetTime) {
-      return c10::nullopt;
-    } else {
-      return time;
-    }
-  }
-
-  // Return host-side time member variable corresponding to the given event.
-  int64_t& getTimeRef(Event event) {
-    switch (event) {
-      case Event::kForwardStart:
-        return forward_start_time;
-      case Event::kBackwardComputeStart:
-        return backward_compute_start_time;
-      case Event::kBackwardComputeEnd:
-        return backward_compute_end_time;
-      case Event::kBackwardCommStart:
-        return backward_comm_start_time;
-      case Event::kBackwardCommEnd:
-        return backward_comm_end_time;
-      default:
-        TORCH_INTERNAL_ASSERT(false);
-    }
-  }
-};
 
 // Local accumulator type for a single bucket.
 struct BucketAccumulator {
@@ -105,8 +39,6 @@ struct BucketAccumulator {
   size_t size = 0;
   size_t size_limit = 0;
 };
-
-C10_DECLARE_TYPED_REGISTRY(TimerRegistry, c10::DeviceType, Timer, std::unique_ptr, c10::Device);
 
 class TORCH_API Reducer {
  public:
@@ -132,10 +64,8 @@ class TORCH_API Reducer {
   // To (re-)initialize bucket assignment, pass a list of buckets, each of
   // which is specified by a list of indices in the bucket's `variables` list.
   // This function performs validation that the variables within a bucket
-  // have the same dtype and device.
-  void initialize_buckets(
-      std::vector<std::vector<size_t>> bucket_indices,
-      std::vector<size_t> per_bucket_sizes);
+  // all live on the same device and have the same dimensionality.
+  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -203,10 +133,10 @@ class TORCH_API Reducer {
   // Pushes all parameters to be rebuilt.
   void push_rebuilt_params_for_all_indices();
 
-  // Creates and sets ForwardPassWorkHandle given a ProcessGroup::Work and the
+  // Creates and sets ForwardPassWorkHandle given a Work and the
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
-      c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+      c10::intrusive_ptr<c10d::Work> forwardPassWorkHandle,
       bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. It is
@@ -301,7 +231,7 @@ class TORCH_API Reducer {
   c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
 
   // Work handle for allreduce on local_used_map_
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> local_used_work_;
+  c10::intrusive_ptr<c10d::Work> local_used_work_;
 
   void mark_variable_ready_dense(size_t variable_index);
 
@@ -425,11 +355,6 @@ class TORCH_API Reducer {
     // If `true`, then this implies that `bucket.variables.size() == 1`.
     bool expect_sparse_gradient = false;
 
-    // "Limit" of the cumulative gradient sizes that this bucket manages
-    // It is actually a soft limit because we do not shard parameter across
-    // buckets, so a single parameter may push the bucket size over the limit.
-    size_t bucket_size_limit;
-
     // TODO(@pietern)
     // Memory copies from gradient tensors into the bucket are potentially
     // done on different CUDA streams. We record an event for every copy
@@ -508,7 +433,7 @@ class TORCH_API Reducer {
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
   struct ForwardPassAllreduceWork {
-    c10::intrusive_ptr<c10d::ProcessGroup::Work> workHandle;
+    c10::intrusive_ptr<c10d::Work> workHandle;
     at::Tensor resultTensor;
     // whether we should divide by the initial world_size or the no. of
     // remaining DDP ranks.

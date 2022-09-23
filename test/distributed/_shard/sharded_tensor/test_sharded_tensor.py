@@ -9,19 +9,21 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed import rpc
-from torch.distributed._shard import (
+from torch.distributed import distributed_c10d
+from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard.api import (
     shard_parameter,
-    sharded_tensor,
     _shard_tensor,
+    load_with_process_group,
+    _collect_local_shard,
+    _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
-    load_with_process_group,
+    custom_sharded_op_impl,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
-    _collect_local_shard,
-    _reshard_output,
+    Shard
 )
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
@@ -38,6 +40,7 @@ from torch.distributed._shard.sharded_tensor.api import (
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
+    tp_transports,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -52,31 +55,12 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 from torch.distributed.remote_device import _remote_device
 from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common import (
     _chunk_sharding_specs_list_for_test,
+    MyShardedModel1,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
     print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
     sys.exit(0)
-
-class MyShardedModel2(torch.nn.Module):
-    def __init__(self, spec=None, group=None):
-        super(MyShardedModel2, self).__init__()
-        if spec is not None:
-            self.sharded_tensor2 = sharded_tensor.empty(spec, 10, 20, process_group=group, init_rrefs=True)
-        else:
-            self.sharded_tensor2 = None
-        self.random_tensor2 = torch.nn.Parameter(torch.rand(2, 2))
-
-
-class MyShardedModel1(torch.nn.Module):
-    def __init__(self, spec=None, group=None):
-        super(MyShardedModel1, self).__init__()
-        if spec is not None:
-            self.sharded_tensor1 = sharded_tensor.empty(spec, 10, 20, process_group=group, init_rrefs=True)
-        else:
-            self.sharded_tensor1 = None
-        self.random_tensor1 = torch.nn.Parameter(torch.rand(2, 2))
-        self.submodule = MyShardedModel2(spec, group)
 
 class TestShardedTensorMetadata(TestCase):
     def test_serialize_and_deserialize(self):
@@ -191,7 +175,7 @@ class TestShardParameter(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
             shard_parameter(fc, 'weight', spec, src_rank=self.rank)
 
-        with self.assertRaisesRegex(ValueError, 'does not have parameter'):
+        with self.assertRaisesRegex(AttributeError, 'has no attribute'):
             shard_parameter(fc, 'foo', spec)
 
         with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
@@ -420,6 +404,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, 10, 20, init_rrefs=True)
         st_metadata = st.metadata()
         self.assertEqual(torch.Size([10, 20]), st_metadata.size)
+        self.assertEqual(torch.Size([10, 20]), st.size())
         self.assertEqual(torch.float, st.dtype)
         self.assertEqual(torch.strided, st.layout)
         self.assertEqual(False, st.requires_grad)
@@ -448,7 +433,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         # test read only properties, they're read only as we can't simply change
         # the global metadata without changing the underlying shard's properties
-        with self.assertRaisesRegex(AttributeError, "can't set attribute"):
+        with self.assertRaisesRegex(RuntimeError, "torch function '__set__'"):
             st.requires_grad = True
 
     @with_comms
@@ -635,7 +620,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_create_sharded_tensor_with_rand(self):
-        """ Test sharded_tensor.rand(...) """
+        """ Test sharded_tensor.rand(...)/randn(...) """
 
         spec = ChunkShardingSpec(
             dim=0,
@@ -653,6 +638,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         expected_device = torch.device(f"cuda:{self.rank}")
         dtype = torch.double
         torch.manual_seed(seed)
+        # Test sharded_tensor.rand creation
         expected = torch.rand(expected_h, w, device=expected_device, dtype=dtype)
         # reset seed to ensure the same random numbers are generated
         torch.manual_seed(seed)
@@ -666,6 +652,20 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual((expected_h, w), local_shard.size())
         self.assertEqual(expected, local_shard)
 
+        # Test sharded_tensor.randn creation
+        torch.manual_seed(seed)
+        expected_randn = torch.randn(expected_h, w, device=expected_device, dtype=dtype)
+        # reset seed to ensure the same random numbers are generated
+        torch.manual_seed(seed)
+        st_randn = sharded_tensor.randn(spec, h, w, dtype=dtype)
+
+        # Validate local shard is initialized with torch.randn
+        local_shards = st_randn.local_shards()
+        self.assertEqual(1, len(local_shards))
+        local_shard = local_shards[0].tensor
+        self.assertEqual(expected_device, local_shard.device)
+        self.assertEqual((expected_h, w), local_shard.size())
+        self.assertEqual(expected_randn, local_shard)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -697,6 +697,52 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.assertEqual(local_shard,
                          torch.full(size=(expected_h, w), fill_value=fill_value, dtype=torch.int32))
 
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_create_sharded_tensor_like(self):
+        """ Test tensor like methods, i.e. torch.zeros_like(...), torch.full_like, etc. """
+
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 8, 8
+        expected_h = 2
+        seed = 1234
+        dtype = torch.double
+        expected_device = torch.device(f"cuda:{self.rank}")
+        st = sharded_tensor.rand(spec, (h, w), dtype=dtype)
+        tensor_like_ops = {
+            torch.zeros_like: torch.zeros,
+            torch.ones_like: torch.ones,
+            torch.rand_like: torch.rand,
+            torch.randn_like: torch.randn,
+            torch.empty_like: torch.empty,
+            torch.full_like: torch.full
+        }
+        for op, expect_local_op in tensor_like_ops.items():
+            if op == torch.full_like:
+                # special handle full/full_like as it needs to have additional fill_value arg
+                expect_tensor = expect_local_op((expected_h, w), 8.8, device=expected_device, dtype=dtype)
+                new_op_st = op(st, 8.8, dtype=dtype)
+                self.assertEqual(new_op_st.local_tensor(), expect_tensor)
+            elif op == torch.empty_like:
+                # empty/empty_like we only compare the shape
+                expect_tensor = expect_local_op(expected_h, w, device=expected_device, dtype=dtype)
+                new_op_st = op(st, dtype=dtype)
+                self.assertEqual(new_op_st.local_tensor().shape, expect_tensor.shape)
+            else:
+                torch.manual_seed(seed)
+                expect_tensor = expect_local_op(expected_h, w, device=expected_device, dtype=dtype)
+                torch.manual_seed(seed)
+                new_op_st = op(st, dtype=dtype)
+                self.assertEqual(new_op_st.local_tensor(), expect_tensor)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -902,12 +948,12 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         st = sharded_tensor.empty(spec, 10, 20)
         tensor = torch.empty(10, 20)
-        with self.assertRaisesRegex(RuntimeError, "not supported for ShardedTensor!"):
+        with self.assertRaisesRegex(RuntimeError, "not supported yet for ShardedTensor!"):
             torch.add(st, tensor)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.strided layout is currently supported'):
-            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse)
+            sharded_tensor.empty(spec, 10, 20, layout=torch.sparse_coo)
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:0/cuda:1"])
         with self.assertRaisesRegex(ValueError, 'Only torch.contiguous_format memory_format is currently supported'):
@@ -936,7 +982,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.init_pg()
 
         # Init RPC with different ranks.
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(_transports=tp_transports())
         rpc_backend_options.init_method = f"file://{self.file_name}"
         rank = (self.rank + 1) % self.world_size
         rpc.init_rpc(
@@ -1024,11 +1070,18 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
         self.assertEqual(st.size(1), 20)
 
+        # Test with negative indexed size
+        st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
+        self.assertEqual(st.size(-1), 20)
+
+        # Test with dim/ndim
+        self.assertEqual(st.dim(), 2)
+        self.assertEqual(st.ndim, 2)
         # Test with invalid input
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
-            st.size(-1)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
+            st.size(-3)
+        with self.assertRaisesRegex(IndexError, 'Dimension out of range'):
             st.size(2)
 
         with self.assertRaises(TypeError):
@@ -1053,7 +1106,11 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         # Test save
         m._register_state_dict_hook(state_dict_hook)
         buffer = io.BytesIO()
-        torch.save(m.state_dict(), buffer)
+        mod_state_dict = m.state_dict()
+        mod_state_keys = mod_state_dict.keys()
+        self.assertTrue("sharded_tensor1" in mod_state_keys)
+        self.assertTrue("submodule.sharded_tensor2" in mod_state_keys)
+        torch.save(mod_state_dict, buffer)
 
         # Test load.
         module_load = MyShardedModel1()
@@ -1063,6 +1120,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         state_dict_deser = torch.load(buffer)
         module_load.load_state_dict(state_dict_deser, strict=False)
 
+        module_load._register_state_dict_hook(state_dict_hook)
+        loaded_dict_keys = module_load.state_dict().keys()
+        self.assertTrue("sharded_tensor1" in loaded_dict_keys)
+        self.assertTrue("submodule.sharded_tensor2" in loaded_dict_keys)
         # Verify after load.
         self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
         self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
@@ -1463,6 +1524,244 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(full_tensor, torch.ones(h, w))
         else:
             self.assertIsNone(full_tensor)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_to_cpu(self):
+        cpu_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cpu",
+                "rank:3/cpu",
+            ],
+        )
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        gloo_pg = dist.new_group(backend="gloo")
+
+        # CPU sharded tensor should return the same instance (no copy)
+        st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
+        new_st_cpu = st_cpu.cpu()
+        self.assertTrue(st_cpu is new_st_cpu)
+
+        # GPU sharded tensor to cpu
+        st = sharded_tensor.zeros(spec, h, w)
+        # test ability to move st to CPU
+        spec_before_move = st.sharding_spec()
+        new_st = st.cpu(process_group=gloo_pg)
+        # return a copy of orginal st
+        self.assertFalse(st is new_st)
+        # check the spec is still ChunkShardingSpec
+        spec_after_move = new_st.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # now it should be ProcessGroupGloo since it's on CPU
+        self.assertIsInstance(new_st._process_group, distributed_c10d.ProcessGroupGloo)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(spec_before_move.dim, spec_after_move.dim)
+        self.assertEqual(len(spec_before_move.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = spec_before_move.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_after.device()), "cpu")
+
+        # ensure metdata also get changed to CPU
+        metas = new_st.metadata().shards_metadata
+        for meta in metas:
+            self.assertEqual(str(meta.placement.device()), "cpu")
+
+        # Test if a mixed sharded tensor (ShardedTensor with different devices) to cpu
+        mixed_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+
+        st = sharded_tensor.zeros(mixed_spec, h, w, process_group=gloo_pg)
+        new_st = st.cpu()
+        # return a copy of orginal st
+        self.assertFalse(st is new_st)
+        # check the spec is still ChunkShardingSpec
+        spec_after_move = new_st.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(mixed_spec.dim, spec_after_move.dim)
+        self.assertEqual(len(mixed_spec.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = mixed_spec.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_after.device()), "cpu")
+
+        # ensure metdata also get changed to CPU
+        metas = new_st.metadata().shards_metadata
+        for meta in metas:
+            self.assertEqual(str(meta.placement.device()), "cpu")
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_to_cuda(self):
+        cpu_spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cpu",
+                "rank:1/cpu",
+                "rank:2/cpu",
+                "rank:3/cpu",
+            ],
+        )
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st_cuda = sharded_tensor.zeros(spec, h, w)
+        new_st_cuda = st_cuda.cuda()
+        self.assertTrue(st_cuda is not new_st_cuda)
+        self.assertTrue(st_cuda.local_tensor() is new_st_cuda.local_tensor())
+
+        gloo_pg = dist.new_group(backend="gloo")
+
+        # CPU sharded tensor to GPU
+        st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
+        # test ability to move st to GPU
+        spec_before_move = st_cpu.sharding_spec()
+        new_st_gpu = st_cpu.cuda()
+        # check the spec is still ChunkShardingSpec
+        spec_after_move = new_st_gpu.sharding_spec()
+        self.assertIsInstance(spec_after_move, ChunkShardingSpec)
+        # test specs before and after the move almost the same except placement device
+        self.assertEqual(spec_before_move.dim, spec_after_move.dim)
+        self.assertEqual(len(spec_before_move.placements), len(spec_after_move.placements))
+        for i, remote_device_after in enumerate(spec_after_move.placements):
+            remote_device_before = spec_before_move.placements[i]
+            self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
+            self.assertEqual(str(remote_device_before.device().type), "cpu")
+            self.assertEqual(str(remote_device_after.device().type), "cuda")
+
+        # ensure metdata also get changed to GPU
+        metas = new_st_gpu.metadata().shards_metadata
+        for meta in metas:
+            self.assertEqual(str(meta.placement.device().type), "cuda")
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_to_test(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st = sharded_tensor.zeros(spec, h, w)
+        # test same dtype, device return itself
+        st_self = st.to(dtype=st.dtype, device="cuda")
+        self.assertTrue(st_self is st)
+
+        # test dtype to
+        st_16 = st.to(torch.float16)
+        self.assertFalse(st_16 is st)
+        self.assertEqual(st_16.dtype, torch.float16)
+        # test device to
+        st_cpu = st.to(device=torch.device("cpu"))
+        self.assertFalse(st_cpu is st)
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        st_cuda = st_cpu.to(device=torch.device("cuda"))
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        # non-kwarg device to
+        st_cuda = st_cpu.to(torch.device("cuda"))
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        st_cpu = st_cuda.to(torch.device("cpu"))
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        # with string like device conversion
+        st_cpu = st_cuda.to("cpu")
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        st_cuda = st_cpu.to("cuda")
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+        # with int like device conversion
+        st_cpu = st_cuda.to("cpu")
+        self.assertEqual(st_cpu.local_tensor().device.type, "cpu")
+        st_cuda = st_cpu.to(self.rank)
+        self.assertEqual(st_cuda.local_tensor().device.type, "cuda")
+
+        # test tensor to
+        cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device="cuda")
+        st_cuda = st.to(cuda_tensor)
+        self.assertFalse(st_cuda is st)
+        self.assertEqual(st_cuda.dtype, torch.float16)
+
+        cuda_tensor = torch.randn(3, 4, dtype=torch.float16, device="cuda:2")
+        st_cuda = st.to(cuda_tensor)
+        self.assertEqual(st_cuda.dtype, torch.float16)
+
+        # test dtype and device together
+        st_cpu_16 = st.to("cpu", torch.float16)
+        self.assertEqual(st_cpu_16.dtype, torch.float16)
+        self.assertEqual(st_cpu_16.local_tensor().device.type, "cpu")
+
+        st_cuda_32 = st_cpu_16.to("cuda", torch.float32)
+        self.assertEqual(st_cuda_32.dtype, torch.float32)
+        self.assertEqual(st_cuda_32.local_tensor().device.type, "cuda")
+
+        # test pass additional process group
+        gloo_pg = dist.new_group(backend="gloo")
+        st_gloo = st.to(device="cpu", process_group=gloo_pg)
+        self.assertFalse(st_gloo is st)
+        self.assertEqual(st_gloo.local_tensor().device.type, "cpu")
+        self.assertEqual(st_gloo._process_group, gloo_pg)
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    @requires_nccl()
+    def test_sharded_tensor_device(self):
+        spec = ChunkShardingSpec(
+            dim=0,
+            placements=[
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
+            ],
+        )
+        h, w = 10, 20
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st = sharded_tensor.zeros(spec, h, w)
+        current_device = torch.device(torch.cuda.current_device())
+        self.assertEqual(current_device, st.device)
+
+        # test after to cpu, device get changed
+        cpu_device = torch.device("cpu")
+        st_cpu = st.to(device=cpu_device)
+        self.assertEqual(st_cpu.device, cpu_device)
 
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -1970,6 +2269,65 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
+    @skip_if_lt_x_gpu(4)
+    def test_st_base_init_from_local_shards_and_global_metadata(self):
+        world_size = 4
+        shards_metadata = []
+        shards = []
+        for rank in range(world_size):
+            local_shard_metadata = ShardMetadata(
+                shard_offsets=[(rank // 2) * 5, (rank % 2) * 5],
+                shard_sizes=[5, 5],
+                placement=f"rank:{rank}/cuda:{rank}",
+            )
+            shards_metadata.append(local_shard_metadata)
+            shards.append(
+                sharded_tensor.Shard(
+                    torch.randn(5, 5, device=f"cuda:{rank}"), local_shard_metadata
+                )
+            )
+
+        tensor_properties = TensorProperties(
+            dtype=torch.get_default_dtype(),
+            layout=torch.strided,
+            requires_grad=False,
+            memory_format=torch.contiguous_format,
+            pin_memory=False,
+        )
+
+        sharded_tensor_metadata = sharded_tensor.ShardedTensorMetadata(
+            shards_metadata=shards_metadata,
+            size=torch.Size([10, 10]),
+            tensor_properties=tensor_properties,
+        )
+
+        st_base = sharded_tensor.ShardedTensorBase._init_from_local_shards_and_global_metadata(
+            shards, sharded_tensor_metadata=sharded_tensor_metadata
+        )
+        self.assertEqual(4, len(st_base.local_shards()))
+
+        # Verify local shard of st_base
+        local_shard = st_base.local_shards()[0]
+        self.assertEqual(torch.device("cuda:0"), local_shard.tensor.device)
+        self.assertEqual((5, 5), local_shard.tensor.size())
+
+        # Verify local shard metadata.
+        self.assertEqual(
+            (0, 0),
+            local_shard.metadata.shard_offsets,
+        )
+        self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
+        self.assertEqual("rank:0/cuda:0", str(local_shard.metadata.placement))
+
+        # Verify global metadata.
+        shards_metadata = st_base.metadata().shards_metadata
+        self.assertEqual(4, len(shards_metadata))
+        for rank, shard_metadata in enumerate(shards_metadata):
+            self.assertEqual(
+                (rank // 2 * 5, (rank % 2) * 5), shard_metadata.shard_offsets
+            )
+            self.assertEqual((5, 5), shard_metadata.shard_sizes)
+            self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -2333,7 +2691,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_op(self):
 
-        @sharded_op_impl(torch.asin)
+        @custom_sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
             return torch.asin(args[0].local_shards()[0].tensor)
 
@@ -2358,7 +2716,9 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
 
         t = torch.rand(10, 10).cuda(self.rank)
 
-        @sharded_op_impl(torch.nn.functional.linear)
+        from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
+
+        @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
         def my_sharded_linear(types, args, kwargs, process_group):
             return t
 
@@ -2383,15 +2743,39 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     def test_custom_op_errors(self):
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op1(types, args, kwargs, process_group, random_param):
                 pass
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op2(types):
                 pass
 
+class TestShardMetadata(ShardedTensorTestBase):
+    @with_comms
+    @requires_nccl()
+    def test_shard_metadata_init(self):
+        pg = dist.distributed_c10d._get_default_group()
+
+        md = ShardMetadata([10], [0])
+        self.assertIsNone(md.placement)
+        with self.assertRaisesRegex(ValueError, "remote device is None"):
+            _parse_and_validate_remote_device(pg, md.placement)
+
+        # String placement gets converted by ctor
+        md = ShardMetadata([10], [0], "rank:0/cpu")
+        self.assertEqual(md.placement, _remote_device("rank:0/cpu"))
+        rank, device = _parse_and_validate_remote_device(pg, md.placement)
+        self.assertEqual(0, rank)
+        self.assertEqual(device, torch.device("cpu"))
+
+    @with_comms
+    @requires_nccl()
+    def test_create_shard_with_no_placement(self):
+        md = ShardMetadata([0], [10])
+        shard = Shard(torch.zeros(10), md)
+        self.assertIsNone(shard.metadata.placement)
 
 if __name__ == '__main__':
     run_tests()

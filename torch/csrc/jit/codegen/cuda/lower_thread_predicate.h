@@ -48,6 +48,25 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
     ParallelTypeBitmap limited_types;
     // Parallel types where only one thread/block is enough.
     ParallelTypeBitmap redundant_types;
+    // Tracking use chain of redundant writes:
+    //  [Redundant use chain]
+    //  a parallel type is a `redundant_consumer_type` only
+    //    if all of its propagation use chains terminate with
+    //    a redundant write of this type.
+    //  A propagation use chain is currently either a reg-to-reg
+    //   chain for a shared mem tv, or a reg/smem-to-reg/smem chain
+    //   for a global tv.
+    // This is complementary information to `redundant_types`.
+    //  If a tensor view is redundantly written and not redundantly
+    //  used by all consumers, see FusionRedundantPredSync3,
+    //  a RAW sync will need to be inserted before reading
+    //  this redundantly written tensor.
+    ParallelTypeBitmap redundant_use_types;
+    bool operator==(const PredicateInfo& other) const {
+      return limited_types == other.limited_types &&
+          redundant_types == other.redundant_types &&
+          redundant_use_types == other.redundant_use_types;
+    }
   };
 
   using MapType = std::unordered_map<const TensorView*, PredicateInfo>;
@@ -78,11 +97,18 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   //! blockBroadcast unless it is predicated by limited_types_
   ParallelTypeBitmap getParallelBroadcastDomains(const TensorView* tv) const;
 
+  //! Mark tv as updated so that rebuilding the map should recompute
+  //! its predicates and those of its dependents.
+  void markAsUpdated(const TensorView* tv);
+
   void print() const;
 
   //! Generate a Bool value from PredicateInfo.
   static Bool* getPredicateFromPredicateInfo(
       const ThreadPredicateMap::PredicateInfo& pred_info);
+
+  //! Get the redundant use types of the given expr, see [Redundant use chain]
+  ParallelTypeBitmap getRedundantConsumerType(Expr* expr) const;
 
  private:
   // Update the thread_predicates bitset based on provided Expr
@@ -94,17 +120,23 @@ class TORCH_CUDA_CU_API ThreadPredicateMap {
   const PredicateInfo& at(const TensorView* tv) const;
   PredicateInfo& at(const TensorView* tv);
 
-  //! Insert a new mapping
-  void insert(
+  //! Update a mapping
+  bool update(
       const TensorView* tv,
-      const ParallelTypeBitmap& valid_types,
+      const ParallelTypeBitmap& limited_types,
       const ParallelTypeBitmap& redundant_types);
 
-  //! Insert a new mapping
-  void insert(const TensorView* tv, const PredicateInfo& pred_and_src);
+  //! Update a mapping
+  bool update(const TensorView* tv, const PredicateInfo& pred_and_src);
+
+  //! Backward populate redundant use chain info once the redundant
+  //!  parallel writes have been identified.
+  void populateRedundantUseMap(Fusion* fusion);
 
  private:
   MapType thread_predicates_;
+  //! Keep track of updated tensors that need predicates to be computed
+  std::unordered_set<const TensorView*> updated_tvs_;
 };
 
 } // namespace cuda

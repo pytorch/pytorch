@@ -3,11 +3,13 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/import.h> // removed after using simple type_resolver/obj_loader
 #include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
+#include <caffe2/serialize/in_memory_adapter.h>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -67,18 +69,32 @@ std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
 // Forward declare
 uint64_t _get_model_bytecode_version(
     const std::vector<IValue>& bytecode_ivalues);
+static uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size);
 
 uint64_t _get_model_bytecode_version(std::istream& in) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  return _get_model_bytecode_version(std::move(rai));
+  auto orig_pos = in.tellg();
+  in.seekg(0, in.beg);
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_stream_content(in);
+  in.seekg(orig_pos, in.beg);
+  return _get_model_bytecode_version_from_bytes(data.get(), size);
 }
 
 uint64_t _get_model_bytecode_version(const std::string& filename) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  return _get_model_bytecode_version(std::move(rai));
+  std::ifstream ifile(filename);
+  return _get_model_bytecode_version(ifile);
 }
 
 uint64_t _get_model_bytecode_version(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_rai_content(rai.get());
+  return _get_model_bytecode_version_from_bytes(data.get(), size);
+}
+
+uint64_t _get_model_bytecode_version_zip(
     std::shared_ptr<ReadAdapterInterface> rai) {
   if (!check_zip_file(rai)) {
     TORCH_CHECK(
@@ -88,6 +104,31 @@ uint64_t _get_model_bytecode_version(
   PyTorchStreamReader reader(std::move(rai));
   auto bytecode_values = get_bytecode_ivalues(reader);
   return _get_model_bytecode_version(bytecode_values);
+}
+
+uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size) {
+  TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
+  auto format = getFileFormat(data);
+  switch (format) {
+    case FileFormat::FlatbufferFileFormat: {
+      if (get_flatbuffer_bytecode_version == nullptr) {
+        TORCH_CHECK(
+            false,
+            "Flatbuffer input file but the build hasn't enabled flatbuffer");
+      } else {
+        return get_flatbuffer_bytecode_version(data);
+      }
+    }
+    case FileFormat::ZipFileFormat: {
+      auto rai =
+          std::make_unique<caffe2::serialize::MemoryReadAdapter>(data, size);
+      auto version = _get_model_bytecode_version_zip(std::move(rai));
+      return version;
+    }
+
+    default:
+      TORCH_CHECK(false, "Unrecognized data format");
+  }
 }
 
 uint64_t _get_model_bytecode_version(

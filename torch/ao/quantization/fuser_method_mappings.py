@@ -21,6 +21,7 @@ def fuse_conv_bn(is_qat, conv, bn):
 
         >>> m1 = nn.Conv2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn(m1, b1)
     """
     assert(conv.training == bn.training),\
@@ -33,8 +34,6 @@ def fuse_conv_bn(is_qat, conv, bn):
     }
 
     if is_qat:
-        # TODO: remove the assert later
-        assert conv.training, "qat is only supported when conv.training is True currently"
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
@@ -60,14 +59,13 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
         >>> m1 = nn.Conv2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
         >>> r1 = nn.ReLU(inplace=False)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_conv_bn_relu(m1, b1, r1)
     """
     assert(conv.training == bn.training == relu.training),\
         "Conv and BN both must be in the same mode (train or eval)."
     fused_module : Optional[Type[nn.Sequential]] = None
     if is_qat:
-        # TODO: remove the assert later
-        assert conv.training, "qat is only supported when conv.training is True currently"
         map_to_fused_module_train = {
             nn.Conv1d: nni.ConvBnReLU1d,
             nn.Conv2d: nni.ConvBnReLU2d,
@@ -107,14 +105,13 @@ def fuse_linear_bn(is_qat, linear, bn):
 
         >>> m1 = nn.Linear(20, 10)
         >>> b1 = nn.BatchNorm1d(10)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_linear_bn(m1, b1)
     """
     assert(linear.training == bn.training),\
         "Linear and BN both must be in the same mode (train or eval)."
 
     if is_qat:
-        # TODO: remove the assert later
-        assert linear.training, "qat is only supported when linear.training is True currently"
         assert bn.num_features == linear.out_features,\
             "Output features of Linear must match num_features of BatchNorm1d"
         assert bn.affine, "Only support fusing BatchNorm1d with affine set to True"
@@ -136,14 +133,14 @@ def fuse_convtranspose_bn(is_qat, convt, bn):
 
         >>> m1 = nn.ConvTranspose2d(10, 20, 3)
         >>> b1 = nn.BatchNorm2d(20)
+        >>> # xdoctest: +SKIP
         >>> m2 = fuse_convtranspose_bn(m1, b1)
     """
     assert(convt.training == bn.training),\
         "ConvTranspose and BN both must be in the same mode (train or eval)."
 
     if is_qat:
-        assert convt.training, "qat is only supported when convt.training is True currently"
-        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in training.")
+        raise Exception("Fusing ConvTranspose+BatchNorm not yet supported in QAT.")
     else:
         return nn.utils.fusion.fuse_conv_bn_eval(convt, bn, transpose=True)
 
@@ -180,7 +177,7 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     return None if fuser method does not exist
     '''
     if additional_fuser_method_mapping is None:
-        additional_fuser_method_mapping = dict()
+        additional_fuser_method_mapping = {}
     all_mappings = get_combined_dict(DEFAULT_OP_LIST_TO_FUSER_METHOD,
                                      additional_fuser_method_mapping)
     fuser_method = all_mappings.get(op_list, None)

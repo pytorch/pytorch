@@ -18,7 +18,7 @@
 namespace at {
 namespace native {
 
-void layer_norm_cpu_out(
+void layer_norm_with_mean_rstd_out(
     at::Tensor& out,
     at::Tensor& mean,
     at::Tensor& rstd,
@@ -29,10 +29,6 @@ void layer_norm_cpu_out(
     double eps,
     int64_t M,
     int64_t N) {
-  if (M <= 0) {
-    return;
-  }
-
   LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, &mean, &rstd);
   const auto input_shape = input.sizes();
   const size_t axis = input.dim() - normalized_shape.size();
@@ -41,13 +37,26 @@ void layer_norm_cpu_out(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable warning
+  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
     stat_shape.emplace_back(1);
   }
 
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
+}
+
+void layer_norm_cpu_out(
+    at::Tensor& out,
+    const at::Tensor& input,
+    const Tensor& gamma,
+    const Tensor& beta,
+    double eps,
+    int64_t M,
+    int64_t N) {
+  if (M <= 0) {
+    return;
+  }
+  LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, /*mean=*/nullptr, /*rstd=*/nullptr);
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
@@ -78,7 +87,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
   Tensor mean = at::empty({M}, X->options());
   Tensor rstd = at::empty({M}, X->options());
 
-  layer_norm_cpu_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
+  layer_norm_with_mean_rstd_out(Y, mean, rstd, *X, normalized_shape, *gamma, *beta, eps, M, N);
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
@@ -196,7 +205,17 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   const int normalized_ndim = normalized_shape.size();
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
-  at::Tensor input_reshaped = input.view({1, M, -1});
+
+  // Properly handle zero-size inputs: the view(1, M, -1) call below breaks on this.
+  if (input.numel() == 0) {
+    auto result_type = c10::promoteTypes(input.scalar_type(), kFloat);
+    return std::make_tuple(
+      at::empty_like(input),
+      at::empty_like(input, c10::TensorOptions().dtype(result_type)),
+      at::empty_like(input, c10::TensorOptions().dtype(result_type))
+    );
+  }
+  at::Tensor input_reshaped = input.reshape({1, M, -1});
   // Unlike Batch Normalization, which applies scalar scale and bias for each
   // entire channel/plane with the affine option, Layer Normalization applies
   // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
@@ -219,8 +238,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto idx : c10::irange(axis, input.dim())) {
-    (void)idx; // Suppress unused variable
+  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);

@@ -1,11 +1,27 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
-#include <thrust/execution_policy.h>
+
+#include <c10/util/Load.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_unique2_native.h>
+#include <ATen/ops/_unique_native.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/unique_consecutive_native.h>
+#include <ATen/ops/unique_dim_consecutive_native.h>
+#include <ATen/ops/unique_dim_native.h>
+#endif
 
 #include <tuple>
 #include <iterator>
 #include <thrust/adjacent_difference.h>
+#include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
 #include <thrust/scan.h>
@@ -17,7 +33,6 @@ namespace at {
 namespace native{
 
 namespace {
-
 
 template <
   typename policy_t, typename scalar_t,
@@ -34,7 +49,6 @@ std::tuple<Tensor, Tensor, int64_t> compute_unique(
   equal_t equal,
   not_equal_t not_equal
 ) {
-
   // inverse indices
   Tensor inverse_indices;
   if (!return_inverse || num_inp == 0) {
@@ -103,7 +117,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     TORCH_CHECK(
         num_zero_dims == 1,
         "Number of zero sized dimensions is more than one, so unique cannot be applied ")
-    Tensor output = at::empty({0}, self.options());
+    Tensor output = at::empty(sizes, self.options());
     Tensor inverse_indices =
         at::empty({0}, self.options().dtype(kLong));
     Tensor counts = at::empty({0}, self.options().dtype(kLong));
@@ -126,8 +140,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     thrust::sort(policy, indices_data, indices_data + num_inp,
       [=] __device__ (int64_t a, int64_t b) -> bool {
         for (int64_t i = 0; i < n; ++i) {
-          scalar_t lhs = input_flat_ptr[i + a * n];
-          scalar_t rhs = input_flat_ptr[i + b * n];
+          scalar_t lhs = c10::load(&input_flat_ptr[i + a * n]);
+          scalar_t rhs = c10::load(&input_flat_ptr[i + b * n]);
           if (lhs < rhs) {
             return true;
           } else if (lhs > rhs) {
@@ -146,8 +160,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     return_inverse, return_counts, options,
     [=] __device__ (int64_t a, int64_t b) -> bool {
       for (int64_t i = 0; i < n; ++i) {
-        scalar_t lhs = input_flat_ptr[i + a * n];
-        scalar_t rhs = input_flat_ptr[i + b * n];
+        scalar_t lhs = c10::load(&input_flat_ptr[i + a * n]);
+        scalar_t rhs = c10::load(&input_flat_ptr[i + b * n]);
         if (lhs != rhs) {
           return false;
         }
@@ -156,8 +170,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
     },
     [=] __device__ (int64_t a, int64_t b) -> int64_t {
       for (int64_t i = 0; i < n; ++i) {
-        scalar_t lhs = input_flat_ptr[i + a * n];
-        scalar_t rhs = input_flat_ptr[i + b * n];
+        scalar_t lhs = c10::load(&input_flat_ptr[i + a * n]);
+        scalar_t rhs = c10::load(&input_flat_ptr[i + b * n]);
         if (lhs != rhs) {
           return 1;
         }

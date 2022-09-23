@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
@@ -167,7 +168,14 @@ std::shared_ptr<Graph> ToONNX(
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   std::unordered_map<Value*, Value*> env;
-  BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  try {
+    BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
+  } catch (std::runtime_error& ex) {
+    ONNX_LOG(
+        "ONNX graph being constructed during exception:\n",
+        new_graph->toString());
+    throw;
+  }
   GRAPH_DUMP("after ToONNX: ", new_graph);
   ConstantValueMap::ClearMaps();
   return new_graph;
@@ -234,8 +242,9 @@ void NodeToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     std::unordered_map<Value*, Value*>& env) {
   py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic_helper");
-  py::object onnx_registry = py::module::import("torch.onnx.symbolic_registry");
+  py::object onnx_globals = py::module::import("torch.onnx._globals");
+  py::object onnx_registration =
+      py::module::import("torch.onnx._internal.registration");
 
   // Setup all the lambda helper functions.
 
@@ -265,8 +274,8 @@ void NodeToONNX(
     }
     // For const node, it does not need params_dict info, so set it to {}.
     const ParamMap empty_params_dict = {};
-    auto opset_version =
-        py::cast<int>(onnx_symbolic.attr("_export_onnx_opset_version"));
+    auto opset_version = py::cast<int>(
+        onnx_globals.attr("GLOBALS").attr("export_onnx_opset_version"));
     for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
@@ -357,6 +366,21 @@ void NodeToONNX(
     }
   };
 
+  // Inline the prim::PythonOp sub-block nodes and append them to the onnx graph
+  auto inlineAutograd = [&](Node* PythonOpNode) {
+    for (auto subblock : PythonOpNode->blocks()) {
+      for (const auto i : c10::irange(PythonOpNode->inputs().size())) {
+        env[subblock->inputs()[i]] = env[PythonOpNode->inputs()[i]];
+      }
+      for (auto* node : subblock->nodes()) {
+        NodeToONNX(node, new_block, operator_export_type, env);
+      }
+      for (const auto i : c10::irange(PythonOpNode->outputs().size())) {
+        env[PythonOpNode->outputs()[i]] = env[subblock->outputs()[i]];
+      }
+    }
+  };
+
   // Cast output of symbolic() python implementation
   auto processSymbolicOutput = [&](const std::string& op_name,
                                    Node* n,
@@ -427,16 +451,39 @@ void NodeToONNX(
       pyobj = func->get();
     }
 
-    py::object opset_version = onnx_symbolic.attr("_export_onnx_opset_version");
-    py::object is_registered_op = onnx_registry.attr("is_registered_op")(
-        "PythonOp", "prim", opset_version);
-    if (!py::hasattr(pyobj, "symbolic") &&
-        (!PyObject_IsTrue(is_registered_op.ptr()))) {
-      // Simply clone the node, unless either
+    py::object opset_version =
+        onnx_globals.attr("GLOBALS").attr("export_onnx_opset_version");
+    // NOTE(justinchuby): Call the internal registry to register the symbolic
+    // method defined in the module.
+    bool is_registered_op =
+        onnx_registration.attr("registry")
+            .attr("is_registered_op")("prim::PythonOp", opset_version)
+            .cast<bool>();
+    if (!py::hasattr(pyobj, "symbolic") && !is_registered_op) {
+      // Inline the subgraph within the prim::PythonOp unless
+      // either of these conditions are satisfied
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
-      cloneNode(op);
+      if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX) {
+        try {
+          inlineAutograd(op);
+        } catch (const std::exception& ex) {
+          TORCH_WARN(
+              "Unable to inline PythonOp: ",
+              op->name(),
+              " due to the following exception\n",
+              ex.what(),
+              "prim::PythonOp will be exported as is and without being inlined\n",
+              "Try exporting with the following alternatives: \n",
+              "1) Set operator_export_type to ONNX_FALLTHROUGH mode\n",
+              "2) Register a symbolic method for the prim::PythonOp ",
+              op->name());
+          cloneNode(op);
+        }
+      } else {
+        cloneNode(op);
+      }
       return;
     }
 
@@ -471,8 +518,16 @@ void NodeToONNX(
       // Call the symbolic function
       // Use a little trampoline function so we can give good error messages
       // upon argument mismatch
-      onnx_registry.attr("register_op")(
-          op->name(), pyobj.attr("symbolic"), "", opset_version);
+      // Register as a custom operator
+      // TODO: Find a more elegant way to do this without having to touch
+      // internal Python modules.
+      // TODO(justinchuby): Define a namespace for these Python Ops.
+      onnx_registration.attr("registry")
+          .attr("register")(
+              "::" + op->name(),
+              opset_version,
+              pyobj.attr("symbolic"),
+              /* custom */ true);
       py::object raw_output = onnx.attr("_run_symbolic_method")(
           new_block->owningGraph(),
           op->name(),
@@ -481,7 +536,7 @@ void NodeToONNX(
 
       processSymbolicOutput(op->name(), op, raw_output);
     } else {
-      TORCH_INTERNAL_ASSERT(PyObject_IsTrue(is_registered_op.ptr()));
+      TORCH_INTERNAL_ASSERT(is_registered_op);
       Node* n = static_cast<Node*>(op);
       n->s_(attr::name, op->name());
       // Call symbolic function

@@ -35,6 +35,8 @@ IS_MACOS = sys.platform == "darwin"
 
 log = logging.getLogger(__name__)
 
+__all__ = ["SignalException", "Std", "to_map", "RunProcsResult", "PContext", "get_std_cm", "MultiprocessContext",
+           "SubprocessHandler", "SubprocessContext"]
 
 class SignalException(Exception):
     """
@@ -47,7 +49,7 @@ class SignalException(Exception):
         self.sigval = sigval
 
 
-def _terminate_process_handler(signum: int, frame: FrameType) -> None:
+def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
     """Termination handler that raises exceptions on the main process.
 
     When the process receives death signal(SIGTERM, SIGINT), this termination handler will

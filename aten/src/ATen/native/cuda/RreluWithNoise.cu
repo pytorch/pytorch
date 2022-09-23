@@ -1,12 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 #include <ATen/native/Resize.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/leaky_relu.h>
+#include <ATen/ops/rrelu_with_noise_native.h>
+#endif
+
+
 namespace at { namespace native {
 
 template <typename scalar_t, int unroll_factor, typename F>
-#if __CUDA_ARCH__ >= 350 || defined __HIP_PLATFORM_HCC__
+#if __CUDA_ARCH__ >= 350 || defined USE_ROCM
 C10_LAUNCH_BOUNDS_2(256, 4)
 #endif
 __global__ void rrelu_with_noise_cuda_kernel(
@@ -49,7 +60,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
         noise[li] = r;
       } else {
         output[li] = input[li];
-        noise[li] = static_cast<scalar_t>(0);
+        noise[li] = static_cast<scalar_t>(1);
       }
     }
     __syncthreads();
@@ -144,7 +155,7 @@ Tensor& rrelu_with_noise_out_cuda(const Tensor& self,
   checkAllSameGPU("rrelu_with_noise_out_cuda", {self_arg, noise_arg, output_arg});
 
   if (training) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
         self.scalar_type(), "rrelu_with_noise_out_cuda", [&] {
           _rrelu_with_noise_cuda_train<scalar_t>(
               output, self, noise, lower, upper, generator);

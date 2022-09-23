@@ -2,6 +2,8 @@
 
 #include <mutex>
 
+#include <c10/util/C++17.h>
+
 namespace c10 {
 
 /**
@@ -42,9 +44,9 @@ class Synchronized final {
    * provided callback safely.
    */
   template <typename CB>
-  void withLock(CB cb) {
+  typename c10::invoke_result_t<CB, T&> withLock(CB cb) {
     std::lock_guard<std::mutex> guard(this->mutex_);
-    cb(this->data_);
+    return cb(this->data_);
   }
 
   /**
@@ -53,9 +55,9 @@ class Synchronized final {
    * the provided callback safely.
    */
   template <typename CB>
-  void withLock(CB cb) const {
+  typename c10::invoke_result_t<CB, T const&> withLock(CB cb) const {
     std::lock_guard<std::mutex> guard(this->mutex_);
-    cb(this->data_);
+    return cb(this->data_);
   }
 };
 } // end namespace c10

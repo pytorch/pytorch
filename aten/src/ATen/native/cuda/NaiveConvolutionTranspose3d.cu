@@ -1,6 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 
@@ -9,6 +10,17 @@
 
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/vol2col.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/sum.h>
+#include <ATen/ops/ones.h>
+#include <ATen/ops/slow_conv_transpose3d_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -164,7 +176,7 @@ void slow_conv_transpose3d_out_cuda_template(
     const Tensor& input_,
     const Tensor& weight_,
     IntArrayRef kernel_size,
-    const Tensor& bias,
+    const Tensor& bias_,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -214,7 +226,7 @@ void slow_conv_transpose3d_out_cuda_template(
   int n_output_plane = weight_.size(1);
 
   TensorArg input_arg{input_, "input", 1}, output_arg{output, "output", 2},
-      weight_arg{weight_, "weight", 3}, bias_arg{bias, "bias", 4};
+      weight_arg{weight_, "weight", 3}, bias_arg{bias_, "bias", 4};
 
   checkAllSameGPU(
       "slow_conv_transpose3d_out_cuda",
@@ -224,7 +236,7 @@ void slow_conv_transpose3d_out_cuda_template(
       input_,
       Tensor(),
       weight_,
-      bias,
+      bias_,
       kernel_depth,
       kernel_width,
       kernel_height,
@@ -242,12 +254,9 @@ void slow_conv_transpose3d_out_cuda_template(
       output_padding_height,
       0);
 
-  TORCH_CHECK(
-      !bias.defined() || bias.is_contiguous(),
-      "bias tensor has to be contiguous");
-
   Tensor input = input_.contiguous();
   Tensor weight = weight_.contiguous();
+  Tensor bias = bias_.defined() ? bias_.contiguous() : bias_;
 
   int is_batch = false;
   if (input.dim() == 4) {

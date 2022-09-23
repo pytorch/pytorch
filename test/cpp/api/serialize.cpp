@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/tempfile.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
+#include <c10/util/tempfile.h>
 
 #include <torch/torch.h>
 
@@ -37,7 +37,9 @@ torch::Tensor save_and_load(torch::Tensor input) {
 } // namespace
 
 template <typename DerivedOptions>
-void is_optimizer_param_group_equal(const OptimizerParamGroup& lhs, const OptimizerParamGroup& rhs) {
+void is_optimizer_param_group_equal(
+    const OptimizerParamGroup& lhs,
+    const OptimizerParamGroup& rhs) {
   const auto& lhs_params = lhs.params();
   const auto& rhs_params = rhs.params();
 
@@ -45,26 +47,36 @@ void is_optimizer_param_group_equal(const OptimizerParamGroup& lhs, const Optimi
   for (const auto j : c10::irange(lhs_params.size())) {
     ASSERT_TRUE(torch::equal(lhs_params[j], rhs_params[j]));
   }
-  ASSERT_TRUE(static_cast<const DerivedOptions&>(lhs.options()) == static_cast<const DerivedOptions&>(rhs.options()));
+  ASSERT_TRUE(
+      static_cast<const DerivedOptions&>(lhs.options()) ==
+      static_cast<const DerivedOptions&>(rhs.options()));
 }
 
 template <typename DerivedOptimizerParamState>
 void is_optimizer_state_equal(
-  const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& lhs_state,
-  const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>& rhs_state) {
-
+    const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+        lhs_state,
+    const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+        rhs_state) {
   ASSERT_TRUE(lhs_state.size() == rhs_state.size());
   for (const auto& value : lhs_state) {
     auto found = rhs_state.find(value.first);
     ASSERT_TRUE(found != rhs_state.end());
-    const DerivedOptimizerParamState& lhs_curr_state = static_cast<const DerivedOptimizerParamState&>(*(value.second.get()));
-    const DerivedOptimizerParamState& rhs_curr_state = static_cast<const DerivedOptimizerParamState&>(*(found->second.get()));
+    const DerivedOptimizerParamState& lhs_curr_state =
+        static_cast<const DerivedOptimizerParamState&>(*(value.second.get()));
+    const DerivedOptimizerParamState& rhs_curr_state =
+        static_cast<const DerivedOptimizerParamState&>(*(found->second.get()));
     ASSERT_TRUE(lhs_curr_state == rhs_curr_state);
   }
 }
 
-template <typename OptimizerClass, typename DerivedOptimizerOptions, typename DerivedOptimizerParamState>
-void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_global_state = false) {
+template <
+    typename OptimizerClass,
+    typename DerivedOptimizerOptions,
+    typename DerivedOptimizerParamState>
+void test_serialize_optimizer(
+    DerivedOptimizerOptions options,
+    bool only_has_global_state = false) {
   torch::manual_seed(0);
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
@@ -86,14 +98,10 @@ void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_glo
   // Make some optimizers
   auto optim1 = OptimizerClass(
       {torch::optim::OptimizerParamGroup(model1->parameters())}, options);
-  auto optim2 = OptimizerClass(
-      model2->parameters(), options);
-  auto optim2_2 = OptimizerClass(
-      model2->parameters(), options);
-  auto optim3 = OptimizerClass(
-      model3->parameters(), options);
-  auto optim3_2 = OptimizerClass(
-      model3->parameters(), options);
+  auto optim2 = OptimizerClass(model2->parameters(), options);
+  auto optim2_2 = OptimizerClass(model2->parameters(), options);
+  auto optim3 = OptimizerClass(model3->parameters(), options);
+  auto optim3_2 = OptimizerClass(model3->parameters(), options);
 
   auto x = torch::ones({10, 5});
 
@@ -126,21 +134,25 @@ void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_glo
   auto& optim3_2_state = optim3_2.state();
   auto& optim3_state = optim3.state();
 
-  // optim3_2 and optim1 should have param_groups and state of size 1 and state_size respectively
+  // optim3_2 and optim1 should have param_groups and state of size 1 and
+  // state_size respectively
   ASSERT_TRUE(optim3_2_param_groups.size() == 1);
-  // state_size = 2 for all optimizers except LBFGS as LBFGS only maintains one global state
-  int state_size = only_has_global_state ? 1 : 2;
+  // state_size = 2 for all optimizers except LBFGS as LBFGS only maintains one
+  // global state
+  unsigned state_size = only_has_global_state ? 1 : 2;
   ASSERT_TRUE(optim3_2_state.size() == state_size);
 
   // optim3_2 and optim1 should have param_groups and state of same size
   ASSERT_TRUE(optim3_2_param_groups.size() == optim3_param_groups.size());
   ASSERT_TRUE(optim3_2_state.size() == optim3_state.size());
 
-  // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
+  // checking correctness of serialization logic for optimizer.param_groups_ and
+  // optimizer.state_
   for (const auto i : c10::irange(optim3_2_param_groups.size())) {
     is_optimizer_param_group_equal<DerivedOptimizerOptions>(
-      optim3_2_param_groups[i], optim3_param_groups[i]);
-    is_optimizer_state_equal<DerivedOptimizerParamState>(optim3_2_state, optim3_state);
+        optim3_2_param_groups[i], optim3_param_groups[i]);
+    is_optimizer_state_equal<DerivedOptimizerParamState>(
+        optim3_2_state, optim3_state);
   }
 
   // Do step2 for model 3
@@ -205,7 +217,8 @@ TEST(SerializeTest, KeysFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
   for (const auto i : c10::irange(3)) {
-    output_archive.write("element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
+    output_archive.write(
+        "element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
   }
   output_archive.save_to(tempfile.name);
   torch::serialize::InputArchive input_archive;
@@ -221,7 +234,8 @@ TEST(SerializeTest, TryReadFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
   for (const auto i : c10::irange(3)) {
-    output_archive.write("element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
+    output_archive.write(
+        "element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
   }
   output_archive.save_to(tempfile.name);
   torch::serialize::InputArchive input_archive;
@@ -266,7 +280,7 @@ TEST(SerializeTest, BasicViaFunc) {
 
   std::string serialized;
   torch::save(x, [&](const void* buf, size_t n) {
-    serialized.append(reinterpret_cast<const char *>(buf), n);
+    serialized.append(reinterpret_cast<const char*>(buf), n);
     return n;
   });
   torch::Tensor y;
@@ -277,14 +291,17 @@ TEST(SerializeTest, BasicViaFunc) {
   ASSERT_TRUE(x.allclose(y));
 
   torch::Tensor z;
-  torch::load(z, [&](uint64_t pos, void* buf, size_t n) -> size_t {
-    if (pos >= serialized.size()) return 0;
-    size_t nbytes = std::min(static_cast<size_t>(pos) + n,
-                             serialized.size()) - pos;
-    memcpy(buf, serialized.data() + pos, nbytes);
-    return nbytes;
-  },
-  [&]() -> size_t { return serialized.size(); });
+  torch::load(
+      z,
+      [&](uint64_t pos, void* buf, size_t n) -> size_t {
+        if (pos >= serialized.size())
+          return 0;
+        size_t nbytes =
+            std::min(static_cast<size_t>(pos) + n, serialized.size()) - pos;
+        memcpy(buf, serialized.data() + pos, nbytes);
+        return nbytes;
+      },
+      [&]() -> size_t { return serialized.size(); });
   ASSERT_TRUE(z.defined());
   ASSERT_EQ(x.sizes().vec(), z.sizes().vec());
   ASSERT_TRUE(x.allclose(z));
@@ -355,6 +372,7 @@ TEST(SerializeTest, ErrorOnMissingKey) {
   // We want the errors to contain hierarchy information, too.
   ASSERT_THROWS_WITH(
       torch::load(model2, stream), "No such serialized tensor 'a.b.x'");
+  stream.seekg(0, stream.beg);
   ASSERT_THROWS_WITH(
       torch::load(model3, stream), "No such serialized submodule: 'a.x'");
 }
@@ -472,7 +490,8 @@ TEST(SerializeTest, Optim) {
 }
 
 TEST(SerializeTest, Optim_Adagrad) {
-  test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
+  test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(
+      AdagradOptions(1e-1));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
@@ -487,17 +506,19 @@ TEST(SerializeTest, Optim_Adagrad) {
     optimizer.step();
   };
   step(optim1, model1);
-  auto optim1_2 = Adagrad(model1->parameters(), torch::optim::AdagradOptions(1e-1));
+  auto optim1_2 =
+      Adagrad(model1->parameters(), torch::optim::AdagradOptions(1e-1));
 
   // fill up with optim1 sum_buffers
   std::vector<torch::Tensor> sum_buffers;
-   // fill up with optim1 state_buffers
+  // fill up with optim1 state_buffers
   std::vector<int64_t> step_buffers;
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for (const auto & param : params_) {
+  for (const auto& param : params_) {
     auto key_ = c10::guts::to_string(param.unsafeGetTensorImpl());
-    const AdagradParamState& curr_state_ = static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
+    const AdagradParamState& curr_state_ =
+        static_cast<const AdagradParamState&>(*(optim1_state.at(key_).get()));
     sum_buffers.emplace_back(curr_state_.sum());
     step_buffers.emplace_back(curr_state_.step());
   }
@@ -507,19 +528,23 @@ TEST(SerializeTest, Optim_Adagrad) {
   write_tensors_to_archive(output_archive, "sum_buffers", sum_buffers);
   write_step_buffers(output_archive, "step_buffers", step_buffers);
   output_archive.save_to(optim_tempfile_old_format.name);
-  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(
+      torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<AdagradParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, Optim_SGD) {
-  test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(SGDOptions(1e-1).momentum(0.9));
+  test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(
+      SGDOptions(1e-1).momentum(0.9));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
-  // added a tensor for lazy init check - when all params do not have a momentum buffer entry
-  model1_params.emplace_back(torch::randn({2,3}));
-  auto optim1 = torch::optim::SGD(model1_params, torch::optim::SGDOptions(0.01).momentum(0.9));
+  // added a tensor for lazy init check - when all params do not have a momentum
+  // buffer entry
+  model1_params.emplace_back(torch::randn({2, 3}));
+  auto optim1 = torch::optim::SGD(
+      model1_params, torch::optim::SGDOptions(0.01).momentum(0.9));
 
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
@@ -535,9 +560,10 @@ TEST(SerializeTest, Optim_SGD) {
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
-    if(i != (params_.size() - 1)) {
+    if (i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
-      const SGDParamState& curr_state_ = static_cast<const SGDParamState&>(*(optim1_state.at(key_).get()));
+      const SGDParamState& curr_state_ =
+          static_cast<const SGDParamState&>(*(optim1_state.at(key_).get()));
       momentum_buffers.emplace_back(curr_state_.momentum_buffer());
     }
   }
@@ -545,23 +571,29 @@ TEST(SerializeTest, Optim_SGD) {
   // write momentum_buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
-  write_tensors_to_archive(output_archive, "momentum_buffers", momentum_buffers);
+  write_tensors_to_archive(
+      output_archive, "momentum_buffers", momentum_buffers);
   write_int_value(output_archive, "iteration_", iteration_);
   output_archive.save_to(optim_tempfile_old_format.name);
-  auto optim1_2 = SGD(model1_params, torch::optim::SGDOptions(1e-1).momentum(0.9));
-  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  auto optim1_2 =
+      SGD(model1_params, torch::optim::SGDOptions(1e-1).momentum(0.9));
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(
+      torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, Optim_Adam) {
-  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().lr(0.99999).amsgrad(true).weight_decay(0.5));
+  test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(
+      AdamOptions().lr(0.99999).amsgrad(true).weight_decay(0.5));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
-  // added a tensor for lazy init check - when all params do not have entry in buffers
-  model1_params.emplace_back(torch::randn({2,3}));
-  auto optim1 = torch::optim::Adam(model1_params, torch::optim::AdamOptions().weight_decay(0.5));
+  // added a tensor for lazy init check - when all params do not have entry in
+  // buffers
+  model1_params.emplace_back(torch::randn({2, 3}));
+  auto optim1 = torch::optim::Adam(
+      model1_params, torch::optim::AdamOptions().weight_decay(0.5));
 
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
@@ -579,13 +611,14 @@ TEST(SerializeTest, Optim_Adam) {
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
-    if(i != (params_.size() - 1)) {
+    if (i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
-      const AdamParamState& curr_state_ = static_cast<const AdamParamState&>(*(optim1_state.at(key_).get()));
+      const AdamParamState& curr_state_ =
+          static_cast<const AdamParamState&>(*(optim1_state.at(key_).get()));
       step_buffers.emplace_back(curr_state_.step());
       exp_average_buffers.emplace_back(curr_state_.exp_avg());
       exp_average_sq_buffers.emplace_back(curr_state_.exp_avg_sq());
-      if(curr_state_.max_exp_avg_sq().defined()) {
+      if (curr_state_.max_exp_avg_sq().defined()) {
         max_exp_average_sq_buffers.emplace_back(curr_state_.max_exp_avg_sq());
       }
     }
@@ -594,24 +627,32 @@ TEST(SerializeTest, Optim_Adam) {
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
   write_step_buffers(output_archive, "step_buffers", step_buffers);
-  write_tensors_to_archive(output_archive, "exp_average_buffers", exp_average_buffers);
-  write_tensors_to_archive(output_archive, "exp_average_sq_buffers", exp_average_sq_buffers);
-  write_tensors_to_archive(output_archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
+  write_tensors_to_archive(
+      output_archive, "exp_average_buffers", exp_average_buffers);
+  write_tensors_to_archive(
+      output_archive, "exp_average_sq_buffers", exp_average_sq_buffers);
+  write_tensors_to_archive(
+      output_archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
   output_archive.save_to(optim_tempfile_old_format.name);
   auto optim1_2 = Adam(model1_params, torch::optim::AdamOptions());
-  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(
+      torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<AdamParamState>(optim1.state(), optim1_2.state());
 }
 
 TEST(SerializeTest, Optim_AdamW) {
-  test_serialize_optimizer<AdamW, AdamWOptions, AdamWParamState>(AdamWOptions().lr(0.99999).amsgrad(true).betas(std::make_tuple(0.999, 0.1)));
+  test_serialize_optimizer<AdamW, AdamWOptions, AdamWParamState>(
+      AdamWOptions().lr(0.99999).amsgrad(true).betas(
+          std::make_tuple(0.999, 0.1)));
 
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
-  // added a tensor for lazy init check - when all params do not have entry in buffers
-  model1_params.emplace_back(torch::randn({2,3}));
-  auto optim1 = torch::optim::AdamW(model1_params, torch::optim::AdamWOptions().weight_decay(0.5));
+  // added a tensor for lazy init check - when all params do not have entry in
+  // buffers
+  model1_params.emplace_back(torch::randn({2, 3}));
+  auto optim1 = torch::optim::AdamW(
+      model1_params, torch::optim::AdamWOptions().weight_decay(0.5));
 
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
@@ -629,13 +670,14 @@ TEST(SerializeTest, Optim_AdamW) {
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
-    if(i != (params_.size() - 1)) {
+    if (i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
-      const AdamWParamState& curr_state_ = static_cast<const AdamWParamState&>(*(optim1_state.at(key_).get()));
+      const AdamWParamState& curr_state_ =
+          static_cast<const AdamWParamState&>(*(optim1_state.at(key_).get()));
       step_buffers.emplace_back(curr_state_.step());
       exp_average_buffers.emplace_back(curr_state_.exp_avg());
       exp_average_sq_buffers.emplace_back(curr_state_.exp_avg_sq());
-      if(curr_state_.max_exp_avg_sq().defined()) {
+      if (curr_state_.max_exp_avg_sq().defined()) {
         max_exp_average_sq_buffers.emplace_back(curr_state_.max_exp_avg_sq());
       }
     }
@@ -644,12 +686,16 @@ TEST(SerializeTest, Optim_AdamW) {
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
   write_step_buffers(output_archive, "step_buffers", step_buffers);
-  write_tensors_to_archive(output_archive, "exp_average_buffers", exp_average_buffers);
-  write_tensors_to_archive(output_archive, "exp_average_sq_buffers", exp_average_sq_buffers);
-  write_tensors_to_archive(output_archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
+  write_tensors_to_archive(
+      output_archive, "exp_average_buffers", exp_average_buffers);
+  write_tensors_to_archive(
+      output_archive, "exp_average_sq_buffers", exp_average_sq_buffers);
+  write_tensors_to_archive(
+      output_archive, "max_exp_average_sq_buffers", max_exp_average_sq_buffers);
   output_archive.save_to(optim_tempfile_old_format.name);
   auto optim1_2 = AdamW(model1_params, torch::optim::AdamWOptions());
-  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(
+      torch::load, optim1_2, optim_tempfile_old_format.name);
   is_optimizer_state_equal<AdamWParamState>(optim1.state(), optim1_2.state());
 }
 
@@ -661,8 +707,9 @@ TEST(SerializeTest, Optim_RMSprop) {
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
 
-  // added a tensor for lazy init check - when all params do not have a momentum buffer entry
-  model1_params.emplace_back(torch::randn({2,3}));
+  // added a tensor for lazy init check - when all params do not have a momentum
+  // buffer entry
+  model1_params.emplace_back(torch::randn({2, 3}));
   auto optim1 = torch::optim::RMSprop(model1_params, options);
 
   auto x = torch::ones({10, 5});
@@ -680,14 +727,15 @@ TEST(SerializeTest, Optim_RMSprop) {
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
   for (const auto i : c10::irange(params_.size())) {
-    if(i != (params_.size() - 1)) {
+    if (i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
-      const RMSpropParamState& curr_state_ = static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
+      const RMSpropParamState& curr_state_ =
+          static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
       square_average_buffers.emplace_back(curr_state_.square_avg());
-      if(curr_state_.momentum_buffer().defined()) {
+      if (curr_state_.momentum_buffer().defined()) {
         momentum_buffers.emplace_back(curr_state_.momentum_buffer());
       }
-      if(curr_state_.grad_avg().defined()) {
+      if (curr_state_.grad_avg().defined()) {
         grad_average_buffers.emplace_back(curr_state_.grad_avg());
       }
     }
@@ -695,21 +743,27 @@ TEST(SerializeTest, Optim_RMSprop) {
   // write buffers to the file
   auto optim_tempfile_old_format = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
-  write_tensors_to_archive(output_archive, "square_average_buffers", square_average_buffers);
-  write_tensors_to_archive(output_archive, "momentum_buffers", momentum_buffers);
-  write_tensors_to_archive(output_archive, "grad_average_buffers", grad_average_buffers);
+  write_tensors_to_archive(
+      output_archive, "square_average_buffers", square_average_buffers);
+  write_tensors_to_archive(
+      output_archive, "momentum_buffers", momentum_buffers);
+  write_tensors_to_archive(
+      output_archive, "grad_average_buffers", grad_average_buffers);
   output_archive.save_to(optim_tempfile_old_format.name);
   auto optim1_2 = RMSprop(model1_params, options);
-  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(
+      torch::load, optim1_2, optim_tempfile_old_format.name);
   const auto& params1_2_ = optim1_2.param_groups()[0].params();
   auto& optim1_2_state = optim1_2.state();
   // old RMSprop didn't track step value
   for (const auto i : c10::irange(params1_2_.size())) {
-    if(i != (params1_2_.size() - 1)) {
+    if (i != (params1_2_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       auto key1_2_ = c10::guts::to_string(params1_2_[i].unsafeGetTensorImpl());
-      const RMSpropParamState& curr_state_ = static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
-      RMSpropParamState& curr_state1_2_ = static_cast<RMSpropParamState&>(*(optim1_2_state.at(key_).get()));
+      const RMSpropParamState& curr_state_ =
+          static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
+      RMSpropParamState& curr_state1_2_ =
+          static_cast<RMSpropParamState&>(*(optim1_2_state.at(key_).get()));
       curr_state1_2_.step(curr_state_.step());
     }
   }
@@ -717,13 +771,16 @@ TEST(SerializeTest, Optim_RMSprop) {
 }
 
 TEST(SerializeTest, Optim_LBFGS) {
-  test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), true);
+  test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(
+      LBFGSOptions(), true);
   // bc compatibility check
   auto model1 = Linear(5, 2);
   auto model1_params = model1->parameters();
-  // added a tensor for lazy init check - when all params do not have entry in buffers
-  model1_params.emplace_back(torch::randn({2,3}));
-  auto optim1 = torch::optim::LBFGS(model1_params, torch::optim::LBFGSOptions());
+  // added a tensor for lazy init check - when all params do not have entry in
+  // buffers
+  model1_params.emplace_back(torch::randn({2, 3}));
+  auto optim1 =
+      torch::optim::LBFGS(model1_params, torch::optim::LBFGSOptions());
 
   auto x = torch::ones({10, 5});
   auto step = [&x](torch::optim::Optimizer& optimizer, Linear model) {
@@ -741,7 +798,8 @@ TEST(SerializeTest, Optim_LBFGS) {
 
   const auto& params_ = optim1.param_groups()[0].params();
   auto key_ = c10::guts::to_string(params_[0].unsafeGetTensorImpl());
-  const auto& optim1_state = static_cast<const LBFGSParamState&>(*(optim1.state().at(key_).get()));
+  const auto& optim1_state =
+      static_cast<const LBFGSParamState&>(*(optim1.state().at(key_).get()));
   d = optim1_state.d();
   t = at::tensor(optim1_state.t());
   H_diag = optim1_state.H_diag();
@@ -762,11 +820,13 @@ TEST(SerializeTest, Optim_LBFGS) {
   output_archive.save_to(optim_tempfile_old_format.name);
 
   auto optim1_2 = LBFGS(model1_params, torch::optim::LBFGSOptions());
-  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(torch::load, optim1_2, optim_tempfile_old_format.name);
+  OLD_SERIALIZATION_LOGIC_WARNING_CHECK(
+      torch::load, optim1_2, optim_tempfile_old_format.name);
 
   const auto& params1_2_ = optim1_2.param_groups()[0].params();
   auto param_key = c10::guts::to_string(params1_2_[0].unsafeGetTensorImpl());
-  auto& optim1_2_state = static_cast<LBFGSParamState&>(*(optim1_2.state().at(param_key).get()));
+  auto& optim1_2_state =
+      static_cast<LBFGSParamState&>(*(optim1_2.state().at(param_key).get()));
 
   // old LBFGS didn't track func_evals, n_iter, ro, al values
   optim1_2_state.func_evals(optim1_state.func_evals());
@@ -872,7 +932,8 @@ TEST(
 TEST(SerializeTest, VectorOfTensors) {
   torch::manual_seed(0);
 
-  std::vector<torch::Tensor> x_vec = { torch::randn({1, 2}), torch::randn({3, 4}) };
+  std::vector<torch::Tensor> x_vec = {
+      torch::randn({1, 2}), torch::randn({3, 4})};
 
   std::stringstream stream;
   torch::save(x_vec, stream);
@@ -902,11 +963,14 @@ TEST(SerializeTest, IValue) {
   input_archive.read("value", ivalue_out);
   ASSERT_EQ(ivalue_out.toInt(), 1);
 
-  ASSERT_THROWS_WITH(input_archive.read("bad_key", ivalue_out), "does not have a field with name");
+  ASSERT_THROWS_WITH(
+      input_archive.read("bad_key", ivalue_out),
+      "does not have a field with name");
 }
 
-// NOTE: if a `Module` contains unserializable submodules (e.g. `nn::Functional`),
-// we expect those submodules to be skipped when the `Module` is being serialized.
+// NOTE: if a `Module` contains unserializable submodules (e.g.
+// `nn::Functional`), we expect those submodules to be skipped when the `Module`
+// is being serialized.
 TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
   struct A : torch::nn::Module {
     A() {
@@ -923,13 +987,14 @@ TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
   torch::serialize::InputArchive relu_archive;
 
   // Submodule with name "relu" should not exist in the `InputArchive`,
-  // because the "relu" submodule is an `nn::Functional` and is not serializable.
+  // because the "relu" submodule is an `nn::Functional` and is not
+  // serializable.
   ASSERT_FALSE(archive.try_read("relu", relu_archive));
 }
 
-// NOTE: If a `Module` contains unserializable submodules (e.g. `nn::Functional`),
-// we don't check the existence of those submodules in the `InputArchive` when
-// deserializing.
+// NOTE: If a `Module` contains unserializable submodules (e.g.
+// `nn::Functional`), we don't check the existence of those submodules in the
+// `InputArchive` when deserializing.
 TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   struct B : torch::nn::Module {
     B() {
@@ -945,8 +1010,8 @@ TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   };
 
   auto out = std::make_shared<A>();
-  // Manually change the values of "b.foo", so that we can check whether the buffer
-  // contains these values after deserialization.
+  // Manually change the values of "b.foo", so that we can check whether the
+  // buffer contains these values after deserialization.
   out->named_buffers()["b.foo"].fill_(1);
   auto tempfile = c10::make_tempfile();
   torch::save(out, tempfile.name);
@@ -960,23 +1025,24 @@ TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   ASSERT_TRUE(archive.try_read("b", archive_b));
   ASSERT_TRUE(archive_b.try_read("foo", tensor_foo, /*is_buffer=*/true));
 
-  // Submodule with name "relu1" should not exist in `archive_b`, because the "relu1"
-  // submodule is an `nn::Functional` and is not serializable.
+  // Submodule with name "relu1" should not exist in `archive_b`, because the
+  // "relu1" submodule is an `nn::Functional` and is not serializable.
   ASSERT_FALSE(archive_b.try_read("relu1", archive_relu));
 
-  // Submodule with name "relu2" should not exist in `archive`, because the "relu2"
-  // submodule is an `nn::Functional` and is not serializable.
+  // Submodule with name "relu2" should not exist in `archive`, because the
+  // "relu2" submodule is an `nn::Functional` and is not serializable.
   ASSERT_FALSE(archive.try_read("relu2", archive_relu));
 
   auto in = std::make_shared<A>();
-  // `torch::load(...)` works without error, even though `A` contains the `nn::Functional`
-  // submodules while the serialized file doesn't, because the `nn::Functional` submodules
-  // are not serializable and thus ignored when deserializing.
+  // `torch::load(...)` works without error, even though `A` contains the
+  // `nn::Functional` submodules while the serialized file doesn't, because the
+  // `nn::Functional` submodules are not serializable and thus ignored when
+  // deserializing.
   torch::load(in, tempfile.name);
 
   // Check that the "b.foo" buffer is correctly deserialized from the file.
   const int output = in->named_buffers()["b.foo"].sum().item<int>();
-  // `output` should equal to the sum of the values we manually assigned to "b.foo" before
-  // serialization.
+  // `output` should equal to the sum of the values we manually assigned to
+  // "b.foo" before serialization.
   ASSERT_EQ(output, 5);
 }

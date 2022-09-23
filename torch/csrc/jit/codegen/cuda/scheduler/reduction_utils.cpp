@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.h>
 
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
+#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
@@ -48,11 +50,7 @@ TensorView* scheduleReductionTV(
       "Multiple reductions requires an iter domain, but one wasn't found.");
 
   TORCH_INTERNAL_ASSERT(
-      !(rparams.cross_grid_inner_reduction && rparams.unroll_iter_dom),
-      "Unrolling on iter domain not supported with cross grid reductions.");
-
-  TORCH_INTERNAL_ASSERT(
-      !(rparams.unroll_iter_dom && !has_iter_axis),
+      !(rparams.unroll_factor_iter_dom > 1 && !has_iter_axis),
       "Unrolling on iter domain requires an iter domain.");
 
   auto vectorize = [&reduction_tv](int axis, int factor) {
@@ -106,7 +104,8 @@ TensorView* scheduleReductionTV(
 
     outer_unswitch(outer_i++);
 
-    if (!rparams.vectorize_inner_reduction && rparams.unroll_inner_reduction) {
+    if (!rparams.vectorize_inner_reduction &&
+        rparams.unroll_factor_inner_reduction > 1) {
       outer_unroll(outer_i++, rparams.unroll_factor_inner_reduction);
     }
 
@@ -130,7 +129,8 @@ TensorView* scheduleReductionTV(
       }
     }
 
-    if (!rparams.vectorize_inner_reduction && rparams.unroll_inner_reduction) {
+    if (!rparams.vectorize_inner_reduction &&
+        rparams.unroll_factor_inner_reduction > 1) {
       inner_unroll(inner_reduce_axis, rparams.unroll_factor_inner_reduction);
     }
 
@@ -158,7 +158,7 @@ TensorView* scheduleReductionTV(
       reduction_tv->split(
           outer_i++, rparams.batches_per_block_outer_reduction, false);
 
-      if (rparams.unroll_outer_reduction) {
+      if (rparams.unroll_factor_outer_reduction > 1) {
         outer_unroll(outer_i++, rparams.unroll_factor_outer_reduction);
       }
 
@@ -171,7 +171,7 @@ TensorView* scheduleReductionTV(
         inner_parallel(outer_reduce_axis, rparams.block_dim_outer_reduction);
       }
 
-      if (rparams.unroll_outer_reduction) {
+      if (rparams.unroll_factor_outer_reduction > 1) {
         inner_unroll(outer_reduce_axis, rparams.unroll_factor_outer_reduction);
       }
 
@@ -193,11 +193,11 @@ TensorView* scheduleReductionTV(
       inner_parallel(iter_axis, rparams.block_dim_iter_dom);
     }
 
-    if (!rparams.vectorize_iter_dom && rparams.unroll_iter_dom) {
+    if (!rparams.vectorize_iter_dom && rparams.unroll_factor_iter_dom > 1) {
       inner_unroll(iter_axis, rparams.unroll_factor_iter_dom);
     }
 
-    if (rparams.unroll_iter_dom) {
+    if (rparams.unroll_factor_iter_dom > 1) {
       inner_unswitch(iter_axis);
     }
 
@@ -221,12 +221,13 @@ void multiReductionInliner(
     std::vector<TensorView*> reduction_tvs,
     std::vector<TensorView*> cached_inputs,
     std::vector<std::pair<TensorView*, TensorView*>> cached_outputs) {
-  TransformPropagator::from(reference_tv);
+  // Propagate transformations before we rfactor the other reductions
+  TransformPropagator propagator(reference_tv);
+  MaxRootDomainInfoSpanningTree(reference_tv).traverse(&propagator);
 
-  // Apply rfactor to all reductions if applicable
-  std::vector<TensorView*> rfactor_tvs;
-
+  // If reduction_tv is rfactored, rfactor all reductions.
   if (reference_tv != reduction_tv) {
+    // Apply rfactor to all reductions if applicable
     std::vector<int> rfactor_axes;
     for (const auto i : c10::irange(reference_tv->nDims())) {
       if (reference_tv->axis((int)i)->isReduction() &&
@@ -237,132 +238,86 @@ void multiReductionInliner(
 
     for (auto reduction_tv_ : reduction_tvs) {
       if (reduction_tv_ == reduction_tv) {
-        // The reduction tv
-        rfactor_tvs.push_back(reference_tv);
+        // This should come in already rfactored
         continue;
       } else {
-        rfactor_tvs.push_back(
-            ir_utils::rfactorHelper(reduction_tv_, rfactor_axes));
+        ir_utils::rfactorHelper(reduction_tv_, rfactor_axes);
       }
     }
-
-    TORCH_INTERNAL_ASSERT(
-        reduction_tvs.size() == rfactor_tvs.size(),
-        "Expected all reductions to contain rfactor.");
   }
 
-  // Propagate parallelization
-  scheduler_utils::parallelizeAllLike(reference_tv, ir_utils::allTvs(fusion));
-
-  // Find iter domains that are mapped to a trivial reduction, these should
-  // never be inlined.
-  std::unordered_set<IterDomain*> mapped_to_trivial_reduction =
-      scheduler_utils::getTrivialReductionMap(fusion);
-
-  bool unroll = rparams.unroll_inner_reduction || rparams.unroll_iter_dom;
+  bool unroll = rparams.isUnrolled();
 
   bool vectorize =
       rparams.vectorize_inner_reduction || rparams.vectorize_iter_dom;
 
+  // Propagate parallelization except vectorization and unrolling
+  scheduler_utils::parallelizeAllLike(
+      reference_tv,
+      {},
+      allParallelTypesExcept(
+          {ParallelType::Unroll,
+           ParallelType::Vectorize,
+           ParallelType::MisalignedVectorize}));
+
   if (unroll) {
-    // Inline Input caches to their consumers outside unswitched/vectorization
-    // position Inline consumers of input caches to rfactor tensors
-
-    // Mark which tensor views are actual input caches to leave vectorization on
-    // them
-    std::unordered_set<TensorView*> keep_unrolled;
-
-    std::vector<TensorView*> compute_from;
+    // Find all tensor views that should have unroll or vectorization
+    std::unordered_set<TensorView*> are_unrolled;
 
     // Grab all tensor views that should be vectorized
-    auto vecotrizable_inputs_outputs =
+    auto vectorizable_inputs_outputs =
         scheduler_utils::getInputsOutputsWithInnerDim(reference_tv, true);
 
-    // Inputs to cache
+    auto vectorizable_expr = [](Expr* e) {
+      return e->isA<UnaryOp>() &&
+          e->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Set;
+    };
+
     for (auto cached_input : cached_inputs) {
-      auto consumers_of_input_cache = ir_utils::consumerTvsOf(cached_input);
-      for (auto consumer : consumers_of_input_cache) {
-        auto unswitch_it = std::find_if(
-            consumer->domain()->domain().begin(),
-            consumer->domain()->domain().end(),
-            [&mapped_to_trivial_reduction](IterDomain* id) {
-              return id->getParallelType() == ParallelType::Unswitch ||
-                  id->getParallelType() == ParallelType::Unroll ||
-                  id->getParallelType() == ParallelType::Vectorize ||
-                  id->getParallelType() == ParallelType::MisalignedVectorize ||
-                  mapped_to_trivial_reduction.count(id);
-            });
-        auto unswitch_pos = unswitch_it == consumer->domain()->domain().end()
-            ? -1
-            : std::distance(consumer->domain()->domain().begin(), unswitch_it) +
-                1;
-
-        cached_input->computeAt(
-            consumer, unswitch_pos, ComputeAtMode::BestEffort);
-        compute_from.push_back(consumer);
-
-        if (vectorize) {
-          auto producer_tvs = ir_utils::producerTvsOf(cached_input);
-          if (producer_tvs.size() == 1 &&
-              std::find(
-                  vecotrizable_inputs_outputs.begin(),
-                  vecotrizable_inputs_outputs.end(),
-                  producer_tvs[0]) != vecotrizable_inputs_outputs.end()) {
-            keep_unrolled.emplace(cached_input);
-          }
-        } else {
-          keep_unrolled.emplace(cached_input);
-        }
-      }
-    }
-
-    // Inline output caches into outputs
-    std::vector<TensorView*> compute_to;
-    for (auto cached_output_pair : cached_outputs) {
-      auto cached_output = cached_output_pair.first;
-      auto output = cached_output_pair.second;
-
-      // If an output has multiple consumers don't process here, we want only
-      // terminating outputs
-      if (cached_output->uses().size() > 1) {
-        continue;
-      }
-
-      auto pos_it = std::find_if(
-          output->domain()->domain().begin(),
-          output->domain()->domain().end(),
-          [&mapped_to_trivial_reduction](IterDomain* id) {
-            return id->getParallelType() == ParallelType::Unswitch ||
-                id->getParallelType() == ParallelType::Unroll ||
-                id->getParallelType() == ParallelType::Vectorize ||
-                id->getParallelType() == ParallelType::MisalignedVectorize ||
-                mapped_to_trivial_reduction.count(id);
-          });
-      auto pos = pos_it == output->domain()->domain().end()
-          ? -1
-          : std::distance(output->domain()->domain().begin(), pos_it) + 1;
-
-      cached_output->computeAt(output, pos, ComputeAtMode::BestEffort);
-
-      compute_to.push_back(cached_output);
       if (vectorize) {
-        if (std::find(
-                vecotrizable_inputs_outputs.begin(),
-                vecotrizable_inputs_outputs.end(),
-                output) != vecotrizable_inputs_outputs.end()) {
-          keep_unrolled.emplace(output);
+        auto producer_tvs = ir_utils::producerTvsOf(cached_input);
+        if (producer_tvs.size() == 1 &&
+            vectorizable_expr(cached_input->definition()) &&
+            std::find(
+                vectorizable_inputs_outputs.begin(),
+                vectorizable_inputs_outputs.end(),
+                producer_tvs[0]) != vectorizable_inputs_outputs.end()) {
+          are_unrolled.emplace(cached_input);
         }
       } else {
-        keep_unrolled.emplace(output);
+        are_unrolled.emplace(cached_input);
       }
     }
 
-    // Before compute at-ing the internal structure, remove vectorization
-    // anywhere it doesn't belong. Otherwise it will mess up our inlining. Clear
-    // explicit unroll or vectorization when not for input or output GMEM
-    // transfers.
-    for (auto tv : ir_utils::allTvs(fusion)) {
-      if (!keep_unrolled.count(tv)) {
+    for (auto cached_output_pair : cached_outputs) {
+      auto output = cached_output_pair.second;
+      if (vectorize) {
+        if (vectorizable_expr(output->definition()) &&
+            std::find(
+                vectorizable_inputs_outputs.begin(),
+                vectorizable_inputs_outputs.end(),
+                output) != vectorizable_inputs_outputs.end()) {
+          are_unrolled.emplace(output);
+        }
+      } else {
+        are_unrolled.emplace(output);
+      }
+    }
+
+    // Propagate vectorization/unrolling to those tensors that need it
+    scheduler_utils::parallelizeAllLike(
+        reference_tv,
+        -1,
+        {are_unrolled.begin(), are_unrolled.end()},
+        {ParallelType::Unroll,
+         ParallelType::Vectorize,
+         ParallelType::MisalignedVectorize});
+
+    std::vector<TensorView*> rfactor_and_reduction_tvs = {
+        reference_tv, reduction_tv};
+    // If reference shouldn't be unrolled, clear that parallel type.
+    for (auto tv : rfactor_and_reduction_tvs) {
+      if (are_unrolled.count(tv) == 0) {
         for (const auto i : c10::irange(tv->nDims())) {
           auto id = tv->axis((int)i);
           if (id->getParallelType() == ParallelType::Unroll ||
@@ -373,152 +328,22 @@ void multiReductionInliner(
         }
       }
     }
-
-    // Make sure not to completely inline if there's trivial reductions in the
-    // fusion
-    auto pos_it = std::find_if(
-        reference_tv->domain()->domain().begin(),
-        reference_tv->domain()->domain().end(),
-        [&mapped_to_trivial_reduction](IterDomain* id) {
-          return mapped_to_trivial_reduction.count(id);
-        });
-
-    auto pos = pos_it == reference_tv->domain()->domain().end()
-        ? -1
-        : std::distance(reference_tv->domain()->domain().begin(), pos_it) + 1;
-
-    // Compute at inputs to rfactor dimensions
-    scheduler_utils::computeAtBetween(
-        compute_from, rfactor_tvs, pos, ComputeAtMode::MostInlined);
-
-    // Inline rfactor into reduction
-    if (reference_tv != reduction_tv) {
-      // Compute at rfactor into following reduction, keep outside first
-      // reduction iter domain in the rfactor tensor view
-      for (const auto i : c10::irange(rfactor_tvs.size())) {
-        if (rparams.unroll_iter_dom) {
-          auto rfactor_tv = rfactor_tvs[i];
-          auto rfactor_tv_dom = rfactor_tv->domain()->domain();
-          auto reduction_it = std::find_if(
-              rfactor_tv_dom.begin(), rfactor_tv_dom.end(), [](IterDomain* id) {
-                return id->isReduction();
-              });
-          TORCH_INTERNAL_ASSERT(
-              reduction_it != rfactor_tv_dom.end(),
-              "Expected reduction axis in ",
-              rfactor_tv);
-          auto pos = std::distance(rfactor_tv_dom.begin(), reduction_it);
-          // I would like computeAtMode here to be Standard. However, the
-          // processing of welford rfactors in compute at ends up propating
-          // compute at from reduction_tv->rfactor_tv to all outputs.
-          rfactor_tv->computeWith(
-              reduction_tvs[i], pos, ComputeAtMode::BestEffort);
-        } else {
-          rfactor_tvs[i]->computeWith(
-              reduction_tvs[i], -1, ComputeAtMode::BestEffort);
-        }
-      }
-    }
-
-    // Remove anything before a reduction from compute_from
-    {
-      auto producers_of_reductions = DependencyCheck::getAllValsBetween(
-          {fusion->inputs().begin(), fusion->inputs().end()},
-          {reduction_tvs.begin(), reduction_tvs.end()});
-
-      auto producer_tvs_of_reductions =
-          ir_utils::filterByType<TensorView>(producers_of_reductions);
-      compute_from.erase(
-          std::remove_if(
-              compute_from.begin(),
-              compute_from.end(),
-              [&producer_tvs_of_reductions](TensorView* compute_from_tv) {
-                return std::find(
-                           producer_tvs_of_reductions.begin(),
-                           producer_tvs_of_reductions.end(),
-                           compute_from_tv) != producer_tvs_of_reductions.end();
-              }),
-          compute_from.end());
-    }
-
-    // Add reduction tensor views to compute from
-    compute_from.insert(
-        compute_from.end(), reduction_tvs.begin(), reduction_tvs.end());
-
-    // Compute between reductions and output caches
-    scheduler_utils::computeAtBetween(
-        compute_from,
-        compute_to,
-        -1,
-        ComputeAtMode::BestEffort,
-        mapped_to_trivial_reduction);
-
-  } else {
-    // Want to inline, especially backwards based on reduction_tv, otherwise
-    // rfactor tv may not be inlined correctly
-    auto ref_tvs = rfactor_tvs.size() ? rfactor_tvs : reduction_tvs;
-    for (auto red_tv : ref_tvs) {
-      auto pos_it = std::find_if(
-          red_tv->domain()->domain().begin(),
-          red_tv->domain()->domain().end(),
-          [&mapped_to_trivial_reduction](IterDomain* id) {
-            return id->getParallelType() == ParallelType::Unswitch ||
-                id->getParallelType() == ParallelType::Unroll ||
-                id->getParallelType() == ParallelType::Vectorize ||
-                id->getParallelType() == ParallelType::MisalignedVectorize ||
-                mapped_to_trivial_reduction.count(id);
-          });
-      auto pos = pos_it == red_tv->domain()->domain().end()
-          ? -1
-          : std::distance(red_tv->domain()->domain().begin(), pos_it) + 1;
-
-      scheduler_utils::computeAtInputs(red_tv, pos, ComputeAtMode::MostInlined);
-      scheduler_utils::computeWithOutputs(
-          red_tv, pos, ComputeAtMode::BestEffort);
-    }
-    // For topologies where there may not be paths to all inputs/outputs from
-    // the reductions, we need to take a similar approach to the unrolled
-    // version and setup of compute at from inputs->outputs that are not
-    // inputs/outputs of the reductions.
-    std::vector<TensorView*> compute_to;
-    std::unordered_set<TensorView*> outs_of_reds;
-    {
-      auto outs_of_red_vec = ir_utils::outputTvsOf(ref_tvs);
-      outs_of_reds = std::unordered_set<TensorView*>(
-          outs_of_red_vec.begin(), outs_of_red_vec.end());
-    }
-    for (auto out : ir_utils::filterByType<TensorView>(fusion->outputs())) {
-      // only terminating outputs
-      if (out->uses().size()) {
-        continue;
-      }
-      if (outs_of_reds.find(out) != outs_of_reds.end()) {
-        continue;
-      }
-      compute_to.push_back(out);
-    }
-
-    std::vector<TensorView*> compute_from;
-    std::unordered_set<TensorView*> inps_of_reds;
-    {
-      auto inps_of_red_vec = ir_utils::inputTvsOf(ref_tvs);
-      inps_of_reds = std::unordered_set<TensorView*>(
-          inps_of_red_vec.begin(), inps_of_red_vec.end());
-    }
-    for (auto inp : ir_utils::filterByType<TensorView>(fusion->inputs())) {
-      if (inps_of_reds.find(inp) != inps_of_reds.end()) {
-        continue;
-      }
-      compute_from.push_back(inp);
-    }
-
-    scheduler_utils::computeAtBetween(
-        compute_from,
-        compute_to,
-        -1,
-        ComputeAtMode::MostInlined,
-        mapped_to_trivial_reduction);
   }
+
+  // Find iter domains that are mapped to a trivial reduction, these should
+  // never be inlined.
+  std::unordered_set<IterDomain*> mapped_to_trivial_reduction =
+      scheduler_utils::getTrivialReductionMap(fusion);
+
+  // Inline the schedule
+  InlinePropagator inline_propagator(
+      reference_tv,
+      -1,
+      ComputeAtMode::MostInlined,
+      {},
+      mapped_to_trivial_reduction);
+
+  MaxRootDomainInfoSpanningTree(reference_tv).traverse(&inline_propagator);
 }
 
 namespace {
@@ -531,12 +356,6 @@ int idPos(const IterDomain* id) {
   // Trivial reduction
   if (id->isReduction() && id->getParallelType() == ParallelType::Serial &&
       id->extent()->isOneInt()) {
-    return inner_most;
-  }
-  inner_most--;
-
-  // Broadcast
-  if (id->isBroadcast() || id->isImplicitBroadcast()) {
     return inner_most;
   }
   inner_most--;
@@ -564,6 +383,12 @@ int idPos(const IterDomain* id) {
 
   // Reduction and thread
   if (id->isReduction() && id->isThread()) {
+    return inner_most;
+  }
+  inner_most--;
+
+  // Broadcast
+  if (id->isBroadcast() || id->isImplicitBroadcast()) {
     return inner_most;
   }
   inner_most--;

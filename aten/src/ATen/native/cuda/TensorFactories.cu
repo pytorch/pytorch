@@ -1,13 +1,28 @@
-#include <ATen/ATen.h>
-#include <ATen/cuda/EmptyTensor.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_efficientzerotensor_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/eye_native.h>
+#include <ATen/ops/tril_indices_native.h>
+#include <ATen/ops/tril_native.h>
+#include <ATen/ops/triu_indices_native.h>
+#include <ATen/ops/triu_native.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -275,10 +290,10 @@ Tensor tril_indices_cuda(
       cuda::getApplyGrid(tril_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "tril_indices_cuda", [&] {
+    AT_DISPATCH_INDEX_TYPES(tensor.scalar_type(), "tril_indices_cuda", [&] {
       tril_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data_ptr<scalar_t>(),
+        tensor.data_ptr<index_t>(),
         trapezoid_row_offset,
         m_first_row,
         col,
@@ -353,10 +368,10 @@ Tensor triu_indices_cuda(
       cuda::getApplyGrid(triu_size, dim_grid, tensor.get_device()),
       "unable to get dim grid");
 
-    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, tensor.scalar_type(), "triu_indices_cuda", [&] {
+    AT_DISPATCH_INDEX_TYPES(tensor.scalar_type(), "triu_indices_cuda", [&] {
       triu_indices_kernel<<<
           dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        tensor.data_ptr<scalar_t>(),
+        tensor.data_ptr<index_t>(),
         std::max<int64_t>(0, offset),
         m_first_row,
         col,

@@ -10,9 +10,10 @@ See https://github.com/pytorch/pytorch/issues/21478 for the reason for
 introducing torch._VF
 
 """
-import torch
 import sys
 import types
+
+import torch
 
 
 class VFModule(types.ModuleType):

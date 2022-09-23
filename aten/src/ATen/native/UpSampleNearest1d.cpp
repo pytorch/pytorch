@@ -16,7 +16,7 @@ TORCH_META_FUNC(upsample_nearest1d) (
       "Non-empty 3D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output_raw_strided(0, full_output_size, {}, input.options());
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact1d) (
@@ -30,7 +30,7 @@ TORCH_META_FUNC(_upsample_nearest_exact1d) (
       "Non-empty 3D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
-  set_output(full_output_size, input.options());
+  set_output_raw_strided(0, full_output_size, {}, input.options());
 }
 
 TORCH_META_FUNC(upsample_nearest1d_backward) (
@@ -42,7 +42,7 @@ TORCH_META_FUNC(upsample_nearest1d_backward) (
   check_dim_size(grad_output, 3, 1, full_output_size[1]);
   check_dim_size(grad_output, 3, 2, full_output_size[2]);
 
-  set_output(input_size, grad_output.options());
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 TORCH_META_FUNC(_upsample_nearest_exact1d_backward) (
@@ -54,7 +54,7 @@ TORCH_META_FUNC(_upsample_nearest_exact1d_backward) (
   check_dim_size(grad_output, 3, 1, full_output_size[1]);
   check_dim_size(grad_output, 3, 2, full_output_size[2]);
 
-  set_output(input_size, grad_output.options());
+  set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
 } // namespace meta
@@ -109,7 +109,7 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_nearest1d(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_w = get_scale_value(scale_factors, 0);
@@ -118,7 +118,7 @@ Tensor upsample_nearest1d(
 
 Tensor _upsample_nearest_exact1d(
     const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_w = get_scale_value(scale_factors, 0);
@@ -127,7 +127,7 @@ Tensor _upsample_nearest_exact1d(
 
 Tensor upsample_nearest1d_backward(
     const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input_size, output_size, scale_factors);
@@ -137,7 +137,7 @@ Tensor upsample_nearest1d_backward(
 
 Tensor _upsample_nearest_exact1d_backward(
     const Tensor& grad_output,
-    c10::optional<IntArrayRef> output_size,
+    at::OptionalIntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input_size, output_size, scale_factors);

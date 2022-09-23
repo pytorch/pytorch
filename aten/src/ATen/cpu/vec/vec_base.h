@@ -14,6 +14,7 @@
 // See https://github.com/pytorch/pytorch/issues/37577 for an instance
 // of this bug in the past.
 
+#include <cassert>
 #include <cstring>
 #include <functional>
 #include <cmath>
@@ -32,6 +33,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
+#include <c10/util/Load.h>
 
 // These macros helped us unify vec_base.h
 #ifdef CPU_CAPABILITY_AVX512
@@ -133,7 +135,7 @@ public:
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(T);
   }
-  Vectorized() : values{0} {}
+  Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
     for (int i = 0; i != size(); i++) {
       values[i] = val;
@@ -537,7 +539,7 @@ private:
     // 1 if the pred is true, otherwise 0.
     Vectorized<T> vector;
     for (int i = 0; i != size(); ++ i) {
-      vector[i] = bool(op(values[i], other.values[i]));
+      vector[i] = static_cast<T>(op(values[i], other.values[i]));
     }
     return vector;
   }
@@ -974,7 +976,7 @@ inline void convert(const src_T *src, dst_T *dst, int64_t n) {
 #endif
   for (const auto i : c10::irange(n)) {
     (void)i; //Suppress unused variable warning
-    *dst = c10::static_cast_with_inter_type<dst_T, src_T>::apply(*src);
+    *dst = c10::convert<dst_T>(c10::load(src));
     src++;
     dst++;
   }

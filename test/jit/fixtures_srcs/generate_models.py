@@ -52,7 +52,7 @@ You will need to make sure that the entry is SORTED according to the version bum
 fbcode/caffe2/torch/csrc/jit/mobile/upgrader_mobile.cpp
 
 ```
-python pytorch/tools/codegen/operator_versions/gen_mobile_upgraders.py
+python pytorch/torchgen/operator_versions/gen_mobile_upgraders.py
 ```
 
 4. Generate the test to cover upgrader.

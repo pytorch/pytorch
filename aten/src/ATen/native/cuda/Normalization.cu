@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/ReduceOps.h>
@@ -6,6 +7,24 @@
 #include <ATen/native/cuda/Resize.h>
 #include <ATen/native/cuda/Normalization.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/batch_norm_backward_elemt_native.h>
+#include <ATen/ops/batch_norm_backward_reduce_native.h>
+#include <ATen/ops/batch_norm_elemt_native.h>
+#include <ATen/ops/batch_norm_gather_stats_native.h>
+#include <ATen/ops/batch_norm_gather_stats_with_counts_native.h>
+#include <ATen/ops/batch_norm_stats_native.h>
+#include <ATen/ops/batch_norm_update_stats_native.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/from_blob.h>
+#include <ATen/ops/native_batch_norm_backward_native.h>
+#include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 namespace at { namespace native {
 

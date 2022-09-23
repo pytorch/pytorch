@@ -78,8 +78,30 @@ TensorIndex::TensorIndex(
   }
 }
 
-Sync::Sync(IrBuilderPasskey passkey, bool war_sync)
-    : Expr(passkey, ExprType::Sync), war_sync_(war_sync) {
+BlockSync::BlockSync(IrBuilderPasskey passkey, bool war_sync)
+    : Expr(passkey, ExprType::BlockSync), war_sync_(war_sync) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+GridSync::GridSync(
+    IrBuilderPasskey passkey,
+    ParallelTypeBitmap sync_dims,
+    Val* sync_buffer)
+    : Expr(passkey, ExprType::GridSync),
+      sync_dims_(sync_dims),
+      sync_buffer_(sync_buffer) {}
+
+CpAsyncWait::CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages)
+    : Expr(passkey, ExprType::CpAsyncWait), keep_stages_(keep_stages) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+CpAsyncCommit::CpAsyncCommit(IrBuilderPasskey passkey)
+    : Expr(passkey, ExprType::CpAsyncCommit) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -97,6 +119,57 @@ UpdateMagicZero::UpdateMagicZero(IrBuilderPasskey passkey)
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+namespace {
+
+bool isIntegralScalar(const Val* val) {
+  return val->isScalar() && val->getDataType().has_value() &&
+      isIntegralType(val->getDataType().value());
+}
+
+} // namespace
+
+IntPair::IntPair(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::IntPair, DataType::Index) {}
+
+PairSelect::PairSelect(
+    IrBuilderPasskey passkey,
+    Val* out,
+    IntPair* in,
+    PairSelect::Selection selection)
+    : Expr(passkey, ExprType::PairSelect),
+      out_{out},
+      in_{in},
+      selection_(selection) {
+  addOutput(out);
+  addInput(in);
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(out), "Integer only for this op");
+}
+
+Swizzle2DInt::Swizzle2DInt(
+    IrBuilderPasskey passkey,
+    IntPair* out,
+    Val* in_x,
+    Val* in_y,
+    Val* extent_x,
+    Val* extent_y,
+    Swizzle2DType swizzle_type)
+    : Expr(passkey, ExprType::Swizzle2DInt),
+      out_{out},
+      in_x_{in_x},
+      in_y_{in_y},
+      extent_x_(extent_x),
+      extent_y_(extent_y),
+      swizzle_type_(swizzle_type) {
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(in_x), "Integer only for this op");
+  TORCH_INTERNAL_ASSERT(isIntegralScalar(in_y), "Integer only for this op");
+
+  addOutput(out);
+  addInput(in_x);
+  addInput(in_y);
+  addInput(extent_x);
+  addInput(extent_y);
 }
 
 void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
@@ -134,7 +207,7 @@ void Scope::insert(size_t pos, Expr* expr) {
 
 void Scope::erase(std::vector<Expr*>::const_iterator pos) {
   // Remove the scope of the expr if this is the scope
-  auto expr = *pos;
+  C10_UNUSED auto expr = *pos;
   exprs_.erase(pos);
 }
 
@@ -168,7 +241,8 @@ ForLoop::ForLoop(
     Val* step,
     bool vectorize,
     Val* vectorize_shift,
-    bool unroll_required)
+    bool unroll_required,
+    DoubleBufferLoopStage double_buffer_loop_stage)
     : Expr(passkey, ExprType::ForLoop),
       iter_domain_{iter_domain},
       index_(index),
@@ -178,7 +252,8 @@ ForLoop::ForLoop(
       vectorize_(vectorize),
       vectorize_shift_(vectorize_shift),
       unroll_required_(unroll_required),
-      body_(this) {
+      body_(this),
+      double_buffer_loop_stage_(double_buffer_loop_stage) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -201,14 +276,15 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, IterDomain* iter_domain)
     : ForLoop(
           passkey,
           iter_domain,
-          iter_domain->isBroadcast() ? FusionGuard::getCurFusion()->zeroVal()
-                                     : IrBuilder::create<Int>(c10::nullopt),
+          GpuLower::current()->caMap()->getIndexVariable(iter_domain),
           nullptr,
           nullptr,
           nullptr,
-          isParallelTypeVectorize(iter_domain->getParallelType()),
+          !iter_domain->isBroadcast() &&
+              isParallelTypeVectorize(iter_domain->getParallelType()),
           nullptr,
-          false) {
+          false,
+          DoubleBufferLoopStage::NotApplicable) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -224,7 +300,8 @@ ForLoop::ForLoop(IrBuilderPasskey passkey, const ForLoop* other)
           other->step(),
           other->vectorize(),
           other->vectorize_shift(),
-          other->isUnrollRequired()) {
+          other->isUnrollRequired(),
+          other->doubleBufferLoopStage()) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -296,6 +373,51 @@ Val* ForLoop::stop() const {
 Val* ForLoop::step() const {
   TORCH_INTERNAL_ASSERT(step_ != nullptr);
   return step_;
+}
+
+bool ForLoop::isTrivial() const {
+  // These loops are not materialized
+  if (vectorize() || iter_domain()->isBroadcast() ||
+      iter_domain()->isStride() || iter_domain()->isMma()) {
+    return true;
+  }
+
+  // By default, a parallelized loop would look like:
+  //
+  //   for (int x = threadIdx.x; x < stop; x += blockDim.x) {
+  //     do_some_comp(x);
+  //   }
+  //
+  // When stop is guaranteed to be smaller or equal to the number of
+  // threads, the for-loop is not necessary. In the above case, we
+  // would just generate the loop body without the for clause but
+  // references to the loop index replaced by the loop start value.
+  //
+  // When the loop end is the same as the IterDomain extent, the
+  // assumption can be safely made. This is more conservative than
+  // necessary since the loop stop value just needs to be <= the
+  // IterDomain extent. However, at this point, this conservative
+  // analysis seems sufficient.
+  if (stop() == iter_domain()->extent() && iter_domain()->isThread()) {
+    return true;
+  }
+
+  // Extent-1 loop: for (int i = 0; i < 1; ++i) {
+  if (start()->isZeroInt() && stop()->isOneInt() && step()->isOneInt()) {
+    return true;
+  }
+
+  // Another extent-1 loop: for (int i = N - 1; i < N; ++i) {
+  if (start()->definition() != nullptr &&
+      start()->definition()->isA<BinaryOp>() &&
+      start()->definition()->as<BinaryOp>()->getBinaryOpType() ==
+          BinaryOpType::Sub &&
+      start()->definition()->as<BinaryOp>()->lhs() == stop() &&
+      start()->definition()->as<BinaryOp>()->rhs()->isOneInt()) {
+    return true;
+  }
+
+  return false;
 }
 
 IfThenElse::IfThenElse(IrBuilderPasskey passkey, Predicate* cond)
@@ -375,13 +497,57 @@ Allocate::Allocate(
 
 GridReduction::GridReduction(
     IrBuilderPasskey passkey,
-    ReductionOp* reduction_op,
+    BinaryOpType reduction_op_type,
+    Val* init,
+    Val* out,
+    Val* in,
     Allocate* reduction_buffer,
-    Allocate* sync_buffer)
-    : Expr(passkey, ExprType::GridReduction),
-      reduction_op_(reduction_op),
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances,
+    bool is_allreduce)
+    : ReductionOp(
+          passkey,
+          reduction_op_type,
+          init,
+          out,
+          in,
+          is_allreduce,
+          ExprType::GridReduction),
       reduction_buffer_(reduction_buffer),
-      sync_buffer_(sync_buffer) {
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+GroupedGridReduction::GroupedGridReduction(
+    IrBuilderPasskey passkey,
+    std::vector<BinaryOpType> reduction_op_types,
+    std::vector<Val*> init_vals,
+    std::vector<Val*> outputs,
+    std::vector<Val*> inputs,
+    std::vector<Allocate*> reduction_buffers,
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances,
+    Val* buffer_stride,
+    bool is_allreduce)
+    : GroupedReductionOp(
+          passkey,
+          std::move(reduction_op_types),
+          std::move(init_vals),
+          std::move(outputs),
+          std::move(inputs),
+          is_allreduce,
+          ExprType::GroupedGridReduction),
+      reduction_buffers_(std::move(reduction_buffers)),
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances),
+      buffer_stride_(buffer_stride) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
@@ -407,16 +573,79 @@ GridWelford::GridWelford(
     Allocate* var_buffer,
     Allocate* avg_buffer,
     Allocate* n_buffer,
-    Allocate* sync_buffer)
+    Allocate* sync_buffer,
+    Val* entrance_index,
+    Val* entrances)
     : Expr(passkey, ExprType::GridWelford),
       welford_op_(welford_op),
       var_buffer_(var_buffer),
       avg_buffer_(avg_buffer),
       n_buffer_(n_buffer),
-      sync_buffer_(sync_buffer) {
+      sync_buffer_(sync_buffer),
+      entrance_index_(entrance_index),
+      entrances_(entrances) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridReduction* grid_reduction)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_reduction) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GridWelford* grid_welford)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grid_welford) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+AllocateFusedReduction::AllocateFusedReduction(
+    IrBuilderPasskey passkey,
+    GroupedGridReduction* grouped_grid_reduction)
+    : Expr(passkey, ExprType::AllocateFusedReduction),
+      grid_expr_(grouped_grid_reduction) {
+  TORCH_INTERNAL_ASSERT(
+      passkey.ir_container_->isA<kir::Kernel>(),
+      "IR type only valid for Kernel container.");
+}
+
+TensorIndex* AllocateFusedReduction::out() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (grid_expr_->isA<GridReduction>() ||
+      grid_expr_->isA<GroupedGridReduction>()) {
+    return grid_expr_->outputs().at(0)->as<kir::TensorIndex>();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->welford_op()->out()->as<kir::TensorIndex>();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
+}
+
+const ParallelTypeBitmap& AllocateFusedReduction::threadPredicate() const {
+  TORCH_INTERNAL_ASSERT(grid_expr_ != nullptr);
+  if (auto grid_reduction = dynamic_cast<GridReduction*>(grid_expr_)) {
+    return grid_reduction->threadPredicate();
+  } else if (auto grid_welford = dynamic_cast<GridWelford*>(grid_expr_)) {
+    return grid_welford->threadPredicate();
+  } else if (
+      auto grouped_grid_reduction =
+          dynamic_cast<GroupedGridReduction*>(grid_expr_)) {
+    return grouped_grid_reduction->threadPredicate();
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid grid expression: ", grid_expr_->toString());
+  }
 }
 
 } // namespace kir

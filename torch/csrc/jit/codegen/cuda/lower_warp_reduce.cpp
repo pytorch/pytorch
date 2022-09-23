@@ -13,6 +13,46 @@ namespace cuda {
 
 namespace {
 
+//! A helper class for EliminateDeadBroadcastAndAllocate. Eliminate
+//! dead Allocate and Broadcast detected by EliminateDeadBroadcastAndAllocate.
+class DeadTvEliminator : private kir::ExprMutator {
+ public:
+  static std::vector<Expr*> run(
+      const std::vector<Expr*>& exprs,
+      const std::unordered_set<TensorView*>& dead_tvs) {
+    return DeadTvEliminator(exprs, dead_tvs).exprs_;
+  }
+
+ private:
+  DeadTvEliminator(
+      const std::vector<Expr*>& exprs,
+      const std::unordered_set<TensorView*>& dead_tvs)
+      : dead_tvs_(dead_tvs) {
+    traverseAndInsert(exprs);
+  }
+
+  using kir::ExprMutator::handle;
+
+  void handle(kir::Allocate* allocate) final {
+    if (auto buffer_tv = dynamic_cast<TensorView*>(allocate->buffer())) {
+      if (dead_tvs_.count(buffer_tv)) {
+        registerRemove(allocate);
+      }
+    }
+  }
+
+  void handle(BroadcastOp* broadcast) final {
+    if (auto out_ti = dynamic_cast<kir::TensorIndex*>(broadcast->out())) {
+      if (dead_tvs_.count(out_ti->view())) {
+        registerRemove(broadcast);
+      }
+    }
+  }
+
+ private:
+  const std::unordered_set<TensorView*>& dead_tvs_;
+};
+
 //! A simple DCE for eliminating the
 //!  parallel broadcasts that has been fused
 //!  and their corresponding allocations
@@ -20,14 +60,13 @@ class EliminateDeadBroadcastAndAllocate {
  public:
   static std::vector<Expr*> run(const std::vector<Expr*>& exprs) {
     EliminateDeadBroadcastAndAllocate dce(exprs);
-    return dce.result_exprs_;
+    return DeadTvEliminator::run(exprs, dce.dead_tvs_);
   }
 
  private:
   EliminateDeadBroadcastAndAllocate(const std::vector<Expr*>& exprs) {
     findLiveTvs(exprs);
     findDeadTvs();
-    eliminateDeadCode(exprs);
   }
 
   void findLiveTvs(const std::vector<Expr*>& exprs) {
@@ -70,93 +109,10 @@ class EliminateDeadBroadcastAndAllocate {
     }
   }
 
-  void eliminateDeadCode(const std::vector<Expr*>& exprs) {
-    result_exprs_ = eliminateDeadCodeInScope(exprs);
-  }
-
-  bool shouldEliminate(Expr* expr) {
-    if (auto allocate = dynamic_cast<kir::Allocate*>(expr)) {
-      if (auto buffer_tv = dynamic_cast<TensorView*>(allocate->buffer())) {
-        if (dead_tvs_.count(buffer_tv)) {
-          return true;
-        }
-      }
-    } else if (auto broadcast = dynamic_cast<BroadcastOp*>(expr)) {
-      if (auto out_ti = dynamic_cast<kir::TensorIndex*>(broadcast->out())) {
-        if (dead_tvs_.count(out_ti->view())) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  //! Returns a new vector of exprs with dead exprs
-  //!  eliminated.
-  std::vector<Expr*> eliminateDeadCodeInScope(const std::vector<Expr*>& exprs) {
-    std::vector<Expr*> result_exprs;
-
-    for (auto expr : exprs) {
-      auto result_expr = expr;
-      if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-        result_expr = eliminateDeadCode(for_loop);
-      } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-        result_expr = eliminateDeadCode(ite);
-      } else {
-        if (shouldEliminate(expr)) {
-          result_expr = nullptr;
-        }
-      }
-
-      // Push the result expr if not eliminated
-      if (result_expr) {
-        result_exprs.push_back(result_expr);
-      }
-    }
-
-    return result_exprs;
-  }
-
-  kir::ForLoop* eliminateDeadCode(kir::ForLoop* for_loop) {
-    auto new_loop_body = eliminateDeadCodeInScope(for_loop->body().exprs());
-    if (new_loop_body.empty()) {
-      return nullptr;
-    }
-
-    // TODO: we will need a kernel_ir cloner to make this
-    //  kind of logic re-usable.
-    auto new_loop = scope_utils::cloneForLoop(for_loop);
-
-    for (auto expr : new_loop_body) {
-      new_loop->body().push_back(expr);
-    }
-    return new_loop;
-  }
-
-  kir::IfThenElse* eliminateDeadCode(kir::IfThenElse* ite) {
-    auto new_then_body = eliminateDeadCodeInScope(ite->thenBody().exprs());
-    auto new_else_body = eliminateDeadCodeInScope(ite->elseBody().exprs());
-    if (new_then_body.empty() && new_else_body.empty()) {
-      return nullptr;
-    }
-
-    auto new_ite = scope_utils::cloneIfThenElse(ite);
-
-    for (auto expr : new_then_body) {
-      new_ite->thenBody().push_back(expr);
-    }
-    for (auto expr : new_else_body) {
-      new_ite->elseBody().push_back(expr);
-    }
-    return new_ite;
-  }
-
  private:
   std::unordered_set<TensorView*> live_tvs_;
   std::unordered_set<TensorView*> dead_tvs_;
   std::unordered_set<TensorView*> candidate_tv_set_;
-
-  std::vector<Expr*> result_exprs_;
 };
 
 //! A pass to eliminate redundant parallel broadcasts that are consumers
@@ -220,6 +176,7 @@ class FuseBroadcastWithWarpReduce : private kir::IrVisitor {
         }
       }
     }
+    kir::IrVisitor::handle(expr);
   }
 
   bool openLoopNestLevel(IterDomain* id) {

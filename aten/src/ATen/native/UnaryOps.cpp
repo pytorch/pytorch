@@ -67,9 +67,22 @@ CREATE_UNARY_FLOAT_META_FUNC(special_i0e)
 CREATE_UNARY_FLOAT_META_FUNC(special_i1)
 CREATE_UNARY_FLOAT_META_FUNC(special_i1e)
 CREATE_UNARY_FLOAT_META_FUNC(special_ndtri)
+CREATE_UNARY_FLOAT_META_FUNC(special_log_ndtr)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
+CREATE_UNARY_FLOAT_META_FUNC(special_airy_ai)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_j0)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_j1)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_y0)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_y1)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i0)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i1)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k0)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k1)
+CREATE_UNARY_FLOAT_META_FUNC(special_scaled_modified_bessel_k0)
+CREATE_UNARY_FLOAT_META_FUNC(special_scaled_modified_bessel_k1)
+CREATE_UNARY_FLOAT_META_FUNC(special_spherical_bessel_j0)
 
 TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
@@ -144,6 +157,21 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
   func_stub(device_type(), *this);                                      \
 }
 
+// This macro is as optional as the one above. torch.(ceil|floor|round|trunc) are no-ops for integers
+// See gh-70918
+#define CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(func_out, func_stub)                                \
+TORCH_IMPL_FUNC(func_out) (const Tensor& self, const Tensor& result) {  \
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/false)) {                                      \
+    result.copy_(self);                                                 \
+  } else {                                                              \
+    func_stub(device_type(), *this);                                    \
+  }                                                                     \
+}
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(ceil_out, ceil_stub)
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(floor_out, floor_stub)
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(round_out, round_stub)
+CREATE_UNARY_TORCH_IMPL_INTEGER_NO_OP_FUNC(trunc_out, trunc_stub)
+
 CREATE_UNARY_TORCH_IMPL_FUNC(acos_out, acos_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(acosh_out, acosh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(asin_out, asin_stub)
@@ -151,7 +179,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(asinh_out, asinh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(atan_out, atan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(atanh_out, atanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(bitwise_not_out, bitwise_not_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(ceil_out, ceil_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(cos_out, cos_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(cosh_out, cosh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(digamma_out, digamma_stub)
@@ -161,7 +188,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(erfinv_out, erfinv_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp_out, exp_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(exp2_out, exp2_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(expm1_out, expm1_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(floor_out, floor_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(frac_out, frac_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(i0_out, i0_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(lgamma_out, lgamma_stub)
@@ -171,7 +197,6 @@ CREATE_UNARY_TORCH_IMPL_FUNC(log1p_out, log1p_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(log2_out, log2_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(neg_out, neg_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(reciprocal_out, reciprocal_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(round_out, round_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(rsqrt_out, rsqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sigmoid_out, sigmoid_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sign_out, sign_stub)
@@ -184,10 +209,22 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_i0e_out, special_i0e_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i1e_out, special_i1e_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_i1_out, special_i1_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_ndtri_out, special_ndtri_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_log_ndtr_out, special_log_ndtr_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
-CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_airy_ai_out, special_airy_ai_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j0_out, special_bessel_j0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j1_out, special_bessel_j1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_y0_out, special_bessel_y0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_y1_out, special_bessel_y1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i0_out, special_modified_bessel_i0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i1_out, special_modified_bessel_i1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k0_out, special_modified_bessel_k0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k1_out, special_modified_bessel_k1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k0_out, special_scaled_modified_bessel_k0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k1_out, special_scaled_modified_bessel_k1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_spherical_bessel_j0_out, special_spherical_bessel_j0_stub)
 
 TORCH_IMPL_FUNC(round_decimals_out)
 (const Tensor& self, int64_t decimals, const Tensor& result) {
@@ -289,7 +326,7 @@ template <typename OutImpl>
 static inline Tensor unary_op_impl_with_complex_to_float(const Tensor& self, OutImpl& out_impl) {
   if (self.is_complex()) {
     const auto float_type = c10::toRealValueType(self.scalar_type());
-    Tensor result = at::empty({0}, self.options().dtype(float_type));
+    Tensor result = at::empty_like(self, self.options().dtype(float_type));
     return out_impl(result, self);
   }
 
@@ -455,10 +492,6 @@ Tensor& conj_physical_(Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_neg(const Tensor& self) {
   if (!self.is_neg()) { return self; }
-  // currently a tensor should never have both conj and neg bit set
-  // the only way to get an imag bit is complex_tensor.conj().imag but there's
-  // no intended designed mechanism to enter the complex world with this imag bit
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_conj());
   // negation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
@@ -467,10 +500,6 @@ Tensor resolve_neg(const Tensor& self) {
 // else returns a new negated tensor with neg bit set to 0
 Tensor resolve_conj(const Tensor& self) {
   if (!self.is_conj()) { return self; }
-  // currently a tensor should never have both conj and neg bit set
-  // the only way to get an imag bit is complex_tensor.conj().imag but there's
-  // no intended designed mechanism to enter the complex world with this imag bit
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!self.is_neg());
   // conjugation is materialized in `copy_()` that clone ultimately calls into
   return self.clone();
 }
@@ -538,7 +567,7 @@ Tensor special_sinc(const Tensor& self) { return self.sinc(); }
 namespace {
 
 inline Tensor calc_ndtr(const Tensor& self) {
-  auto x_sqrt_2 = self / std::sqrt(2.);
+  auto x_sqrt_2 = self * M_SQRT1_2;
   return (1 + at::erf(x_sqrt_2)) * 0.5;
 }
 
@@ -705,8 +734,7 @@ constexpr double QUARTER = 0.25;
 }
 
 static inline void mvlgamma_check(const Tensor& self, int64_t p) {
-  TORCH_CHECK((self > HALF * (p - 1)).all().item<bool>(),
-              "All elements must be greater than (p-1)/2");
+  TORCH_CHECK(self.scalar_type() != kBool, "The input tensor may not be a boolean tensor.");
   TORCH_CHECK(p >= 1, "p has to be greater than or equal to 1");
 }
 
@@ -806,8 +834,6 @@ Tensor& special_gammaln_out(const Tensor& self, Tensor& result) { return at::lga
 
 DEFINE_DISPATCH(abs_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(angle_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(real_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(imag_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(conj_physical_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acos_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(acosh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -841,6 +867,7 @@ DEFINE_DISPATCH(log1p_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-
 DEFINE_DISPATCH(log2_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(logical_not_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_ndtri_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_log_ndtr_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(neg_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(nan_to_num_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(polygamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -862,6 +889,18 @@ DEFINE_DISPATCH(tanh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(trigamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(trunc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lgamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_airy_ai_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_j1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_y0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_y1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_k0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_scaled_modified_bessel_k0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_scaled_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_spherical_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 } // namespace native
 } // namespace at

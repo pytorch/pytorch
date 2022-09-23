@@ -4,14 +4,13 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
+#include <gtest/gtest.h>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
-#include <gtest/gtest.h>
 
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
-using c10d::ProcessGroup;
 
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
@@ -94,12 +93,13 @@ class AsyncInputIsOutputTest : public AsyncTest {
     }
   }
 
-  void wait(c10::intrusive_ptr<ProcessGroup::Work>& work) {
+  void wait(c10::intrusive_ptr<c10d::Work>& work) {
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }
 
-  std::vector<at::Tensor> getCpuTensors(const std::vector<at::Tensor>& gpu_tensors) {
+  std::vector<at::Tensor> getCpuTensors(
+      const std::vector<at::Tensor>& gpu_tensors) {
     std::vector<at::Tensor> outputs(gpu_tensors.size());
 
     // For the duration of this function, make THC use our streams
@@ -117,7 +117,6 @@ class AsyncInputIsOutputTest : public AsyncTest {
     return getCpuTensors(inputs_);
   }
 
-
  protected:
   const int numTensors_;
   const int numDevices_;
@@ -130,7 +129,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
   AsyncAllreduceTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -156,7 +155,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
   AsyncBroadcastTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+  c10::intrusive_ptr<c10d::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -185,25 +184,25 @@ void runAsyncAllreduceTest(
     size_t numProcesses = 4,
     size_t numTensors = 2) {
   auto tests = initialize<AsyncAllreduceTest>(path, numProcesses, numTensors);
-  std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
-  for(const auto i : c10::irange(numProcesses)) {
+  std::vector<c10::intrusive_ptr<c10d::Work>> work(numProcesses);
+  for (const auto i : c10::irange(numProcesses)) {
     work[i] = tests[i].run();
   }
 
   // Wait for work to complete
-  for(const auto i : c10::irange(numProcesses)) {
+  for (const auto i : c10::irange(numProcesses)) {
     tests[i].wait(work[i]);
   }
 
   // Check results
-  for(const auto i : c10::irange(numProcesses)) {
+  for (const auto i : c10::irange(numProcesses)) {
     const auto size = numProcesses * numTensors;
     const auto expected = (size * (size - 1)) / 2;
     auto tensors = tests[i].getTensors();
     auto results = tests[i].getCpuTensors(work[i]->result());
     EXPECT_EQ(tensors.size(), results.size());
 
-    for(const auto j : c10::irange(tensors.size())) {
+    for (const auto j : c10::irange(tensors.size())) {
       auto& tensor = tensors[j];
       auto data = tensor.data_ptr<float>();
 
@@ -227,24 +226,24 @@ void runAsyncBroadcastTest(
   auto tests = initialize<AsyncBroadcastTest>(path, numProcesses, numTensors);
 
   // Try every permutation of root rank and root tensor
-  for(const auto rootRank : c10::irange(numProcesses)) {
-    for(const auto rootTensor : c10::irange(numTensors)) {
-      std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
-      for(const auto i : c10::irange(numProcesses)) {
+  for (const auto rootRank : c10::irange(numProcesses)) {
+    for (const auto rootTensor : c10::irange(numTensors)) {
+      std::vector<c10::intrusive_ptr<c10d::Work>> work(numProcesses);
+      for (const auto i : c10::irange(numProcesses)) {
         work[i] = tests[i].run(rootRank, rootTensor);
       }
 
       // Wait for work to complete
-      for(const auto i : c10::irange(numProcesses)) {
+      for (const auto i : c10::irange(numProcesses)) {
         tests[i].wait(work[i]);
       }
 
       // Check results
       const auto expected = (rootRank * numTensors + rootTensor);
-      for(const auto i : c10::irange(numProcesses)) {
+      for (const auto i : c10::irange(numProcesses)) {
         auto tensors = tests[i].getTensors();
-        for (const auto & tensor : tensors) {
-          const auto *const data = tensor.data_ptr<float>();
+        for (const auto& tensor : tensors) {
+          const auto* const data = tensor.data_ptr<float>();
           for (const auto k : c10::irange(tensor.numel())) {
             EXPECT_EQ(data[k], expected);
           }

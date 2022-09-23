@@ -1,8 +1,12 @@
 import torch
 import torch.fx
+import traceback
+
 from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
+
+__all__ = ['TensorMetadata', 'ShapeProp']
 
 @compatibility(is_backward_compatible=True)
 class TensorMetadata(NamedTuple):
@@ -108,7 +112,14 @@ class ShapeProp(torch.fx.Interpreter):
 
     """
     def run_node(self, n : Node) -> Any:
-        result = super().run_node(n)
+        try:
+            result = super().run_node(n)
+        except Exception:
+            traceback.print_exc()
+            raise RuntimeError(
+                f"ShapeProp error for: node={n.format_node()} with "
+                f"meta={n.meta}"
+            )
 
         found_tensor = False
 

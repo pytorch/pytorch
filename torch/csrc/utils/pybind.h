@@ -3,15 +3,14 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/util/irange.h>
+#include <c10/util/variant.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_tuples.h>
-#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/Generator.h>
 
 #include <stdexcept>
@@ -27,28 +26,22 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
 
-namespace pybind11 { namespace detail {
+namespace pybind11 {
+namespace detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
-struct type_caster<at::Tensor> {
+struct TORCH_PYTHON_API type_caster<at::Tensor> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::Tensor, _("at::Tensor"));
 
-  bool load(handle src, bool) {
-    PyObject* obj = src.ptr();
-    if (THPVariable_Check(obj)) {
-      value = THPVariable_Unpack(obj);
-      return true;
-    }
-    return false;
-  }
+  bool load(handle src, bool);
 
-  static handle
-  cast(const at::Tensor& src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(THPVariable_Wrap(src));
-  }
+  static handle cast(
+      const at::Tensor& src,
+      return_value_policy /* policy */,
+      handle /* parent */);
 };
 
 // torch._StorageBase <-> at::Storage
@@ -67,8 +60,10 @@ struct type_caster<at::Storage> {
     return false;
   }
 
-  static handle
-  cast(const at::Storage& src, return_value_policy /* policy */, handle /* parent */) {
+  static handle cast(
+      const at::Storage& src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
     return handle(torch::createPyObject(src));
   }
 };
@@ -88,44 +83,27 @@ struct type_caster<at::Generator> {
     return false;
   }
 
-  static handle
-  cast(const at::Generator& src, return_value_policy /* policy */, handle /* parent */) {
+  static handle cast(
+      const at::Generator& src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
     return handle(THPGenerator_Wrap(src));
   }
 };
 
-template<> struct type_caster<at::IntArrayRef> {
-public:
+template <>
+struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
+ public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(at::IntArrayRef, _("at::IntArrayRef"));
 
-  bool load(handle src, bool) {
-    PyObject *source = src.ptr();
-    auto tuple = PyTuple_Check(source);
-    if (tuple || PyList_Check(source)) {
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      const auto size = tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
-      v_value.resize(size);
-      for(const auto idx : c10::irange(size)) {
-        PyObject* obj = tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
-        if (THPVariable_Check(obj)) {
-          v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
-        } else if (PyLong_Check(obj)) {
-          // use THPUtils_unpackLong after it is safe to include python_numbers.h
-          v_value[idx] = THPUtils_unpackLong(obj);
-        } else {
-          return false;
-        }
-      }
-      value = v_value;
-      return true;
-    }
-    return false;
-  }
-  static handle cast(at::IntArrayRef src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(THPUtils_packInt64Array(src.size(), src.data()));
-  }
-private:
+  bool load(handle src, bool);
+  static handle cast(
+      at::IntArrayRef src,
+      return_value_policy /* policy */,
+      handle /* parent */);
+
+ private:
   std::vector<int64_t> v_value;
 };
 
@@ -150,17 +128,51 @@ struct type_caster<at::Device> {
     return false;
   }
 
-  static handle
-  cast(const at::Device& src, return_value_policy /* policy */, handle /* parent */) {
+  static handle cast(
+      const at::Device& src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
     return handle(THPDevice_New(src));
   }
 };
 
-// Pybind11 bindings for our optional type.
+template <>
+struct type_caster<c10::DispatchKey>
+    : public type_caster_base<c10::DispatchKey> {
+  using base = type_caster_base<c10::DispatchKey>;
+  c10::DispatchKey tmp;
+
+ public:
+  bool load(handle src, bool convert) {
+    if (base::load(src, convert)) {
+      return true;
+    } else if (py::isinstance(
+                   src, py::module_::import("builtins").attr("str"))) {
+      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
+      value = &tmp;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      c10::DispatchKey src,
+      return_value_policy policy,
+      handle parent) {
+    return base::cast(src, policy, parent);
+  }
+};
+
+// Pybind11 bindings for our optional and variant types.
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
-}} // namespace pybind11::detail
+
+template <typename... Ts>
+struct C10_MPARK_VISIBILITY_HIDDEN type_caster<c10::variant<Ts...>>
+    : variant_caster<c10::variant<Ts...>> {};
+} // namespace detail
+} // namespace pybind11
 
 namespace torch {
 namespace impl {
@@ -192,8 +204,10 @@ namespace impl {
 // violation (why does code that is ostensibly Python agnostic calling into the
 // GIL).
 //
-// Adapted from https://github.com/pybind/pybind11/issues/1446#issuecomment-406341510
-template <typename T> inline void destroy_without_gil(T *ptr) {
+// Adapted from
+// https://github.com/pybind/pybind11/issues/1446#issuecomment-406341510
+template <typename T>
+inline void destroy_without_gil(T* ptr) {
   // Because the ownership of a shared_ptr is diffuse, it's not possible to
   // necessarily predict whether or not the last reference to an object will
   // be destructed from Python or C++.  This means that in the destructor here,

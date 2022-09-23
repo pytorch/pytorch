@@ -4,6 +4,8 @@ from typing import Callable, List, Dict, Any, Optional
 from torch.fx._compatibility import compatibility
 import inspect
 
+__all__ = ['Partition', 'split_module']
+
 @compatibility(is_backward_compatible=True)
 class Partition:
     def __init__(self, name: str):
@@ -238,7 +240,7 @@ def split_module(
         if node.op == 'placeholder':
             default_value = node.args[0] if len(node.args) > 0 else inspect.Signature.empty
             base_mod_env[node.name] = base_mod_graph.placeholder(
-                node.name, type_expr=node.type, default_value=default_value)
+                node.target, type_expr=node.type, default_value=default_value)
             base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == 'get_attr':
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)

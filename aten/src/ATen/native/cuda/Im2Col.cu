@@ -1,6 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/div_rtn.h>
@@ -9,6 +10,16 @@
 
 #include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/im2col_shape_check.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/col2im_native.h>
+#include <ATen/ops/im2col_native.h>
+#include <ATen/ops/im2col_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -95,7 +106,7 @@ static void im2col_out_cuda_template(
   output.zero_();
 
   // Launch kernel
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "im2col_out_cuda", [&] {
     Tensor input_n;
     Tensor output_n;

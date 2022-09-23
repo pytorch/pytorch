@@ -26,7 +26,7 @@ class TORCH_API TensorMaker {
  public:
   using ContextDeleter = DeleterFnPtr;
 
-  TensorMaker& strides(optional<IntArrayRef> value) noexcept {
+  TensorMaker& strides(OptionalIntArrayRef value) noexcept {
     strides_ = value;
 
     return *this;
@@ -79,7 +79,7 @@ class TORCH_API TensorMaker {
 
   void* data_;
   IntArrayRef sizes_;
-  optional<IntArrayRef> strides_{};
+  OptionalIntArrayRef strides_{};
   optional<int64_t> storage_offset_{};
   std::function<void(void*)> deleter_{};
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
@@ -100,6 +100,23 @@ inline Tensor from_blob(
     const c10::optional<Device> target_device = c10::nullopt) {
   return for_blob(data, sizes)
       .strides(strides)
+      .deleter(deleter)
+      .options(options)
+      .target_device(target_device)
+      .make_tensor();
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    int64_t storage_offset,
+    const std::function<void(void*)>& deleter,
+    const TensorOptions& options = {},
+    const c10::optional<Device> target_device = c10::nullopt) {
+  return for_blob(data, sizes)
+      .strides(strides)
+      .storage_offset(storage_offset)
       .deleter(deleter)
       .options(options)
       .target_device(target_device)

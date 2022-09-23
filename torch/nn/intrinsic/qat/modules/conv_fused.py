@@ -2,7 +2,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.utils import fuse_conv_bn_weights
@@ -10,6 +10,8 @@ from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.parameter import Parameter
 from typing import TypeVar
 
+__all__ = ['ConvBn1d', 'ConvBnReLU1d', 'ConvReLU1d', 'ConvBn2d', 'ConvBnReLU2d', 'ConvReLU2d', 'ConvBn3d',
+           'ConvBnReLU3d', 'ConvReLU3d', 'update_bn_stats', 'freeze_bn_stats']
 _BN_CLASS_MAP = {
     1: nn.BatchNorm1d,
     2: nn.BatchNorm2d,
@@ -103,9 +105,9 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
         # using zero bias here since the bias for original conv
         # will be added later
         if self.bias is not None:
-            zero_bias = torch.zeros_like(self.bias)
+            zero_bias = torch.zeros_like(self.bias, dtype=input.dtype)
         else:
-            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device, dtype=input.dtype)
         conv = self._conv_forward(input, scaled_weight, zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:
@@ -351,6 +353,43 @@ class ConvBnReLU1d(ConvBn1d):
     @classmethod
     def from_float(cls, mod):
         return super(ConvBnReLU1d, cls).from_float(mod)
+
+class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
+    r"""A ConvReLU1d module is a fused module of Conv1d and ReLU, attached with
+    FakeQuantize modules for weight for
+    quantization aware training.
+
+    We combined the interface of :class:`~torch.nn.Conv1d` and
+    :class:`~torch.nn.BatchNorm1d`.
+
+    Attributes:
+        weight_fake_quant: fake quant module for weight
+
+    """
+    _FLOAT_MODULE = nni.ConvReLU1d
+    _FLOAT_CONV_MODULE = nn.Conv1d
+    _FLOAT_BN_MODULE = None
+    _FLOAT_RELU_MODULE = nn.ReLU
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1,
+                 bias=True, padding_mode='zeros',
+                 qconfig=None):
+        super(ConvReLU1d, self).__init__(in_channels, out_channels, kernel_size,
+                                         stride=stride, padding=padding, dilation=dilation,
+                                         groups=groups, bias=bias, padding_mode=padding_mode,
+                                         qconfig=qconfig)
+        assert qconfig, 'qconfig must be provided for QAT module'
+        self.qconfig = qconfig
+        self.weight_fake_quant = self.qconfig.weight()
+
+    def forward(self, input):
+        return F.relu(
+            self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
+
+    @classmethod
+    def from_float(cls, mod):
+        return super(ConvReLU1d, cls).from_float(mod)
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""

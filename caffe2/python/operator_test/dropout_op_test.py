@@ -19,7 +19,7 @@ class TestDropout(serial.SerializedTestCase):
            in_place=st.booleans(),
            ratio=st.floats(0, 0.999),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     def test_dropout_is_test(self, X, in_place, ratio, engine, gc, dc):
         """Test with is_test=True for a deterministic reference impl."""
         # TODO(lukeyeager): enable this path when the GPU path is fixed
@@ -47,7 +47,7 @@ class TestDropout(serial.SerializedTestCase):
            in_place=st.booleans(),
            output_mask=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_dropout_ratio0(self, X, in_place, output_mask, engine, gc, dc):
         """Test with ratio=0 for a deterministic reference impl."""
@@ -80,7 +80,7 @@ class TestDropout(serial.SerializedTestCase):
            in_place=st.booleans(),
            output_mask=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
-           **hu.gcs)
+           **hu.gcs_cpu_only)
     @settings(deadline=10000)
     def test_dropout_ratio1(self, X, in_place, output_mask, engine, gc, dc):
         """Test with ratio=0 for a deterministic reference impl."""

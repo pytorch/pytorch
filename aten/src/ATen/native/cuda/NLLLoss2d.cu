@@ -1,7 +1,7 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -11,6 +11,16 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cuda/block_reduce.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/nll_loss2d_forward_native.h>
+#include <ATen/ops/nll_loss2d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {
@@ -258,9 +268,9 @@ void nll_loss2d_forward_out_cuda_template(
                  0,
                  at::cuda::getCurrentCUDAStream()>>>(
                   count,
-                  input.packed_accessor<scalar_t, 4>(),
-                  target.packed_accessor<int64_t, 3>(),
-                  output.packed_accessor<scalar_t, 3>(),
+                  input.packed_accessor64<scalar_t, 4>(),
+                  target.packed_accessor64<int64_t, 3>(),
+                  output.packed_accessor64<scalar_t, 3>(),
                   optional_data<scalar_t>(weight_),
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -393,9 +403,9 @@ void nll_loss2d_backward_out_cuda_template(
                  0,
                  at::cuda::getCurrentCUDAStream()>>>(
                   count,
-                  target.packed_accessor<int64_t, 3>(),
-                  grad_output.packed_accessor<scalar_t, 3>(),
-                  grad_input.packed_accessor<scalar_t, 4>(),
+                  target.packed_accessor64<int64_t, 3>(),
+                  grad_output.packed_accessor64<scalar_t, 3>(),
+                  grad_input.packed_accessor64<scalar_t, 4>(),
                   optional_data<scalar_t>(weight_),
                   ignore_index);
           C10_CUDA_KERNEL_LAUNCH_CHECK();

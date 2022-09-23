@@ -1,15 +1,23 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/fractional_max_pool2d_backward_native.h>
+#include <ATen/ops/fractional_max_pool2d_native.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
@@ -177,10 +185,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {
-      auto devInput = input_.packed_accessor<scalar_t, 4>();
-      auto devOutput = output_.packed_accessor<scalar_t, 4>();
-      auto devIndices = indices_.packed_accessor<int64_t, 4>();
-      auto devSamples = randomSamples.packed_accessor<scalar_t, 3>();
+      auto devInput = input_.packed_accessor64<scalar_t, 4>();
+      auto devOutput = output_.packed_accessor64<scalar_t, 4>();
+      auto devIndices = indices_.packed_accessor64<int64_t, 4>();
+      auto devSamples = randomSamples.packed_accessor64<scalar_t, 3>();
       fractional_max_pool2d_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,
@@ -245,12 +253,12 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
             gradInput_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  auto devIndices = indices_.packed_accessor<int64_t, 4>();
+  auto devIndices = indices_.packed_accessor64<int64_t, 4>();
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.scalar_type(),
     "fractional_max_pool2d_backward_out_cuda_frame",
     [&] {
-      auto devGradInput = gradInput_.packed_accessor<scalar_t, 4>();
-      auto devGradOutput = gradOutput_.packed_accessor<scalar_t, 4>();
+      auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();
+      auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 4>();
       fractional_max_pool2d_backward_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         devGradInput, devGradOutput, devIndices);

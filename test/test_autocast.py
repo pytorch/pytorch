@@ -104,8 +104,9 @@ class TestAutocastCPU(TestCase):
             self._run_autocast_outofplace(op, args, torch.bfloat16, add_kwargs=maybe_kwargs)
 
     def test_autocast_nn_bf16(self):
-        for op, args in self.autocast_lists.nn_bf16:
-            self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn)
+        for op_with_args in self.autocast_lists.nn_bf16:
+            op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
+            self._run_autocast_outofplace(op, args, torch.bfloat16, module=torch._C._nn, add_kwargs=maybe_kwargs)
 
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:

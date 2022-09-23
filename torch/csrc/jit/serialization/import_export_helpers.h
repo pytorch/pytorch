@@ -12,7 +12,7 @@ class PyTorchStreamReader;
 namespace torch {
 namespace jit {
 
-struct SourceView;
+struct Source;
 
 // Convert a class type's qualifier name to the corresponding path the source
 // file it should be written to.
@@ -23,7 +23,7 @@ std::string qualifierToArchivePath(
     const std::string& qualifier,
     const std::string& export_prefix);
 
-std::shared_ptr<SourceView> findSourceInArchiveFromQualifier(
+std::shared_ptr<Source> findSourceInArchiveFromQualifier(
     caffe2::serialize::PyTorchStreamReader& reader,
     const std::string& export_prefix,
     const std::string& qualifier);

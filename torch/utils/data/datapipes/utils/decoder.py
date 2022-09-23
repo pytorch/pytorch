@@ -11,8 +11,18 @@ import torch
 from torch.utils.data.datapipes.utils.common import StreamWrapper
 
 
-__all__ = ["basichandlers", "imagehandler", "videohandler", "audiohandler",
-           "mathandler", "Decoder", "extension_extract_fn"]
+__all__ = [
+    "Decoder",
+    "ImageHandler",
+    "MatHandler",
+    "audiohandler",
+    "basichandlers",
+    "extension_extract_fn",
+    "handle_extension",
+    "imagehandler",
+    "mathandler",
+    "videohandler",
+]
 
 
 ################################################################

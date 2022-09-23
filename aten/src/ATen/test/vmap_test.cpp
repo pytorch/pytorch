@@ -728,7 +728,7 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     // logical dim is 0, expand size has same dimensionality as logical dim
     auto tensor = at::randn({2, 3});
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
-    auto batched_out = batched.expand({});
+    auto batched_out = batched.expand(c10::IntArrayRef({}));
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
     ASSERT_TRUE(at::allclose(out, tensor));

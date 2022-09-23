@@ -63,6 +63,7 @@ class PiecewiseLinearTransformOp final : public Operator<Context> {
       const int64_t num_group) {
     const T* start = bounds;
     for (const auto i : c10::irange(num_group)) {
+      (void)i; // CUDA-10.2 on Windows crashes when C10_UNUSED macro is used
       if (!std::is_sorted(start, start + num_bounds_per_group)) {
         return false;
       }

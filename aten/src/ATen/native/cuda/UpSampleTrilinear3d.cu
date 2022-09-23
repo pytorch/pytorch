@@ -1,9 +1,10 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
-#include <ATen/ATen.h>
-#include <ATen/ceil_div.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/ceil_div.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/Atomic.cuh>
@@ -11,6 +12,14 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_trilinear3d_native.h>
+#include <ATen/ops/upsample_trilinear3d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {

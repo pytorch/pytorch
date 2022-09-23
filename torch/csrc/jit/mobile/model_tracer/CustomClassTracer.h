@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/record_function.h>
+#include <c10/util/Synchronized.h>
 #include <map>
-#include <mutex>
 #include <set>
 #include <string>
 
@@ -29,9 +29,7 @@ struct CustomClassTracer final {
   typedef std::set<std::string> custom_classes_type;
 
   CustomClassTracer();
-  static custom_classes_type& getLoadedClasses();
-  /* Protect concurrent writes into the set. */
-  static std::mutex& getMutex();
+  static c10::Synchronized<custom_classes_type>& getLoadedClasses();
 
   ~CustomClassTracer() {
     at::removeCallback(handle_);

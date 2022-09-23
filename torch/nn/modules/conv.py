@@ -15,6 +15,10 @@ from torch._torch_docs import reproducibility_notes
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
 from typing import Optional, List, Tuple, Union
 
+__all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d',
+           'LazyConv1d', 'LazyConv2d', 'LazyConv3d', 'LazyConvTranspose1d', 'LazyConvTranspose2d',
+           'LazyConvTranspose3d']
+
 convolution_notes = \
     {"groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
@@ -50,7 +54,7 @@ class _ConvNd(Module):
     def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:
         ...
 
-    _in_channels: int
+    in_channels: int
     _reversed_padding_repeated_twice: List[int]
     out_channels: int
     kernel_size: Tuple[int, ...]
@@ -80,6 +84,8 @@ class _ConvNd(Module):
                  dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(_ConvNd, self).__init__()
+        if groups <= 0:
+            raise ValueError('groups must be a positive integer')
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
@@ -191,6 +197,8 @@ class Conv1d(_ConvNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
@@ -214,6 +222,9 @@ class Conv1d(_ConvNd):
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
 
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -221,7 +232,7 @@ class Conv1d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
@@ -323,6 +334,8 @@ class Conv2d(_ConvNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
 
@@ -353,6 +366,9 @@ class Conv2d(_ConvNd):
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
 
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -360,7 +376,7 @@ class Conv2d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to all four sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input
@@ -462,6 +478,8 @@ class Conv3d(_ConvNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of padding applied to the input. It
@@ -490,6 +508,9 @@ class Conv3d(_ConvNd):
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
 
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
+
     Args:
         in_channels (int): Number of channels in the input image
         out_channels (int): Number of channels produced by the convolution
@@ -497,7 +518,7 @@ class Conv3d(_ConvNd):
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int, tuple or str, optional): Padding added to all six sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``, ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
         groups (int, optional): Number of blocked connections from input channels to output channels. Default: 1
         bias (bool, optional): If ``True``, adds a learnable bias to the output. Default: ``True``
@@ -610,22 +631,24 @@ class _ConvTransposeNd(_ConvNd):
     # compatibility
     def _output_padding(self, input: Tensor, output_size: Optional[List[int]],
                         stride: List[int], padding: List[int], kernel_size: List[int],
-                        dilation: Optional[List[int]] = None) -> List[int]:
+                        num_spatial_dims: int, dilation: Optional[List[int]] = None) -> List[int]:
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
         else:
-            k = input.dim() - 2
-            if len(output_size) == k + 2:
-                output_size = output_size[2:]
-            if len(output_size) != k:
+            has_batch_dim = input.dim() == num_spatial_dims + 2
+            num_non_spatial_dims = 2 if has_batch_dim else 1
+            if len(output_size) == num_non_spatial_dims + num_spatial_dims:
+                output_size = output_size[num_non_spatial_dims:]
+            if len(output_size) != num_spatial_dims:
                 raise ValueError(
-                    "output_size must have {} or {} elements (got {})"
-                    .format(k, k + 2, len(output_size)))
+                    "ConvTranspose{}D: for {}D input, output_size must have {} or {} elements (got {})"
+                    .format(num_spatial_dims, input.dim(), num_spatial_dims,
+                            num_non_spatial_dims + num_spatial_dims, len(output_size)))
 
             min_sizes = torch.jit.annotate(List[int], [])
             max_sizes = torch.jit.annotate(List[int], [])
-            for d in range(k):
-                dim_size = ((input.size(d + 2) - 1) * stride[d] -
+            for d in range(num_spatial_dims):
+                dim_size = ((input.size(d + num_non_spatial_dims) - 1) * stride[d] -
                             2 * padding[d] +
                             (dilation[d] if dilation is not None else 1) * (kernel_size[d] - 1) + 1)
                 min_sizes.append(dim_size)
@@ -642,7 +665,7 @@ class _ConvTransposeNd(_ConvNd):
                             output_size, min_sizes, max_sizes, input.size()[2:]))
 
             res = torch.jit.annotate(List[int], [])
-            for d in range(k):
+            for d in range(num_spatial_dims):
                 res.append(output_size[d] - min_sizes[d])
 
             ret = res
@@ -660,6 +683,8 @@ class ConvTranspose1d(_ConvTransposeNd):
     `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -769,8 +794,10 @@ class ConvTranspose1d(_ConvTransposeNd):
         assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
+        num_spatial_dims = 1
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            input, output_size, self.stride, self.padding, self.kernel_size,  # type: ignore[arg-type]
+            num_spatial_dims, self.dilation)  # type: ignore[arg-type]
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
@@ -787,6 +814,8 @@ class ConvTranspose2d(_ConvTransposeNd):
     `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -919,8 +948,10 @@ class ConvTranspose2d(_ConvTransposeNd):
         assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
+        num_spatial_dims = 2
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            input, output_size, self.stride, self.padding, self.kernel_size,  # type: ignore[arg-type]
+            num_spatial_dims, self.dilation)  # type: ignore[arg-type]
 
         return F.conv_transpose2d(
             input, self.weight, self.bias, self.stride, self.padding,
@@ -940,6 +971,8 @@ class ConvTranspose3d(_ConvTransposeNd):
     `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -1067,8 +1100,10 @@ class ConvTranspose3d(_ConvTransposeNd):
         assert isinstance(self.padding, tuple)
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
+        num_spatial_dims = 3
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            input, output_size, self.stride, self.padding, self.kernel_size,  # type: ignore[arg-type]
+            num_spatial_dims, self.dilation)  # type: ignore[arg-type]
 
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
@@ -1172,7 +1207,7 @@ class LazyConv1d(_LazyConvXdMixin, Conv1d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
@@ -1241,7 +1276,7 @@ class LazyConv2d(_LazyConvXdMixin, Conv2d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1
@@ -1310,7 +1345,7 @@ class LazyConv3d(_LazyConvXdMixin, Conv3d):  # type: ignore[misc]
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of
             the input. Default: 0
-        padding_mode (string, optional): ``'zeros'``, ``'reflect'``,
+        padding_mode (str, optional): ``'zeros'``, ``'reflect'``,
             ``'replicate'`` or ``'circular'``. Default: ``'zeros'``
         dilation (int or tuple, optional): Spacing between kernel
             elements. Default: 1

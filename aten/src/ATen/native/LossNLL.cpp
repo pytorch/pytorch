@@ -50,13 +50,13 @@ TORCH_META_FUNC(nll_loss_forward)
   const auto batch_size = self.size(0);
 
   if (reduction == Reduction::None && n_dims == 2) {
-    set_output(0, {batch_size}, self.options());
+    set_output_raw_strided(0, {batch_size}, {}, self.options());
   } else {
     // produce scalar output when reducing or input is 1d
-    set_output(0, {}, self.options());
+    set_output_raw_strided(0, {}, {}, self.options());
   }
 
-  set_output(1, {}, self.options());
+  set_output_raw_strided(1, {}, {}, self.options());
 }
 
 TORCH_META_FUNC(nll_loss_backward)
@@ -107,7 +107,7 @@ TORCH_META_FUNC(nll_loss_backward)
         grad_output.sizes());
   }
 
-  set_output(self.sizes(), self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+  set_output_raw_strided(0, self.sizes(), {}, self.options().memory_format(LEGACY_CONTIGUOUS_MEMORY_FORMAT));
 }
 } // namespace meta
 
@@ -463,7 +463,8 @@ Tensor cross_entropy_loss_prob_target(
     const Tensor& weight,
     int64_t reduction,
     double label_smoothing) {
-  const auto n_classes = self.size(1);
+  const auto class_dim = self.dim() == 1 ? 0 : 1;
+  const auto n_classes = self.size(class_dim);
   TORCH_CHECK(
       !weight.defined() || (weight.dim() == 1 && weight.numel() == n_classes),
       "cross_entropy: weight tensor should be defined either for all ",
@@ -472,7 +473,7 @@ Tensor cross_entropy_loss_prob_target(
       " but got weight tensor of shape: ",
       weight.sizes());
 
-  auto input = at::log_softmax(self, 1, self.scalar_type());
+  auto input = at::log_softmax(self, class_dim, self.scalar_type());
   Tensor target;
 
   if (label_smoothing > 0.0) {
@@ -484,29 +485,40 @@ Tensor cross_entropy_loss_prob_target(
 
   if (weight.defined()) {
     // Expand weight to the correct number of dims for broadcasting with input / target
-    auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
-    std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
-    weight_broadcast_shape[1] = weight.size(0);
-    Tensor weight_ = weight.view(weight_broadcast_shape);
+    Tensor weight_ = weight;
+    if (input.dim() > 1) {
+        auto weight_broadcast_shape = SmallBuffer<int64_t, 5>(input.dim());
+        std::fill(weight_broadcast_shape.begin(), weight_broadcast_shape.end(), 1);
+        weight_broadcast_shape[1] = weight.size(0);
+        weight_ = weight.view(weight_broadcast_shape);
+    }
 
     switch (reduction) {
       case Reduction::Mean:
-        return -(input * target * weight_).sum() / (input.numel() / input.size(1));
+        if (input.numel()==0){
+          return -(input * target * weight_).sum().fill_(std::numeric_limits<double>::quiet_NaN());
+        } else {
+          return -(input * target * weight_).sum() / (input.numel() / n_classes);
+        }
       case Reduction::Sum:
         return -(input * target * weight_).sum();
       case Reduction::None:
-        return -(input * target * weight_).sum(1);
+        return -(input * target * weight_).sum(class_dim);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }
   } else {
     switch (reduction) {
       case Reduction::Mean:
-        return -(input * target).sum() / (input.numel() / input.size(1));
+        if (input.numel()==0){
+          return -(input * target).sum().fill_(std::numeric_limits<double>::quiet_NaN());
+        } else {
+          return -(input * target).sum() / (input.numel() / n_classes);
+        }
       case Reduction::Sum:
         return -(input * target).sum();
       case Reduction::None:
-        return -(input * target).sum(1);
+        return -(input * target).sum(class_dim);
       default:
         TORCH_CHECK(false, "Invalid reduction type encountered in cross_entropy: ", reduction);
     }

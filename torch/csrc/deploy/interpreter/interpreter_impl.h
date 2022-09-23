@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
+#include <torch/csrc/deploy/interpreter/Optional.hpp>
 
 /* Torch Deploy intentionally embeds multiple copies of c++ libraries
    providing python bindings necessary for torch::deploy users in the same
@@ -15,8 +16,8 @@
    the client application.
 
    It is safe to throw exception types that are defined once in
-   the context of the client application, such as c10::Error, which is defined
-   in libtorch, which isn't duplicated in torch::deploy interpreters.
+   the context of the client application, such as std::runtime_error,
+   which isn't duplicated in torch::deploy interpreters.
 
    ==> Use TORCH_DEPLOY_TRY, _SAFE_CATCH_RETHROW around _ALL_ torch::deploy APIs
 
@@ -30,20 +31,17 @@
 
 */
 #define TORCH_DEPLOY_TRY try {
-#define TORCH_DEPLOY_SAFE_CATCH_RETHROW                                        \
-  }                                                                            \
-  catch (std::exception & err) {                                               \
-    throw c10::Error(                                                          \
-        std::string(                                                           \
-            "Exception Caught inside torch::deploy embedded library: \n") +    \
-            err.what(),                                                        \
-        "");                                                                   \
-  }                                                                            \
-  catch (...) {                                                                \
-    throw c10::Error(                                                          \
-        std::string(                                                           \
-            "Unknown Exception Caught inside torch::deploy embedded library"), \
-        "");                                                                   \
+#define TORCH_DEPLOY_SAFE_CATCH_RETHROW                                     \
+  }                                                                         \
+  catch (std::exception & err) {                                            \
+    throw std::runtime_error(                                               \
+        std::string(                                                        \
+            "Exception Caught inside torch::deploy embedded library: \n") + \
+        err.what());                                                        \
+  }                                                                         \
+  catch (...) {                                                             \
+    throw std::runtime_error(std::string(                                   \
+        "Unknown Exception Caught inside torch::deploy embedded library")); \
   }
 namespace torch {
 namespace deploy {
@@ -132,7 +130,7 @@ struct InterpreterSessionImpl {
 struct InterpreterImpl {
   virtual InterpreterSessionImpl* acquireSession() = 0;
   virtual void setFindModule(
-      std::function<at::optional<std::string>(const std::string&)>
+      std::function<multipy::optional<std::string>(const std::string&)>
           find_module) = 0;
   virtual ~InterpreterImpl() = default; // this will uninitialize python
 };

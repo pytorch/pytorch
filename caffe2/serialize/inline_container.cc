@@ -5,6 +5,9 @@
 #include <ostream>
 #include <fstream>
 #include <algorithm>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -47,6 +50,17 @@ static std::string basename(const std::string& name) {
     }
   }
   return name.substr(start, end - start);
+}
+
+static std::string parentdir(const std::string& name) {
+  size_t end = name.find_last_of('/');
+  if(end == std::string::npos)
+    end = name.find_last_of('\\');
+
+  if(end == std::string::npos)
+    return "";
+
+  return name.substr(0, end);
 }
 
 size_t PyTorchStreamReader::read(uint64_t pos, char* buf, size_t n) {
@@ -128,23 +142,34 @@ void PyTorchStreamReader::init() {
     std::tie(version_ptr, version_size) = getRecord("version");
   }
   std::string version(static_cast<const char*>(version_ptr.get()), version_size);
-  version_ = caffe2::stoull(version);
-  AT_ASSERTM(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      version_ >= kMinSupportedFileFormatVersion,
-      "Attempted to read a PyTorch file with version ",
-      c10::to_string(version_),
-      ", but the minimum supported version for reading is ",
-      c10::to_string(kMinSupportedFileFormatVersion),
-      ". Your PyTorch script module file is too old. Please re-export it again.");
-  AT_ASSERTM(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-      version_ <= kMaxSupportedFileFormatVersion,
-      "Attempted to read a PyTorch file with version ",
-      version_,
-      ", but the maximum supported version for reading is ",
-      kMaxSupportedFileFormatVersion,
-      ". Your PyTorch installation may be too old.");
+  try {
+    version_ = caffe2::stoull(version);
+  } catch (const std::invalid_argument &e) {
+    CAFFE_THROW("Couldn't parse the version ",
+                 version,
+                 " as Long Long.");
+  }
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  if (version_ < kMinSupportedFileFormatVersion) {
+    CAFFE_THROW(
+        "Attempted to read a PyTorch file with version ",
+        c10::to_string(version_),
+        ", but the minimum supported version for reading is ",
+        c10::to_string(kMinSupportedFileFormatVersion),
+        ". Your PyTorch script module file is too old. Please regenerate it",
+        " with latest version of PyTorch to mitigate this issue.");
+  }
+
+  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+  if (version_ > kMaxSupportedFileFormatVersion) {
+    CAFFE_THROW(
+        "Attempted to read a PyTorch file with version ",
+        version_,
+        ", but the maximum supported version for reading is ",
+        kMaxSupportedFileFormatVersion,
+        ". The version of your PyTorch installation may be too old, ",
+        "please upgrade PyTorch to latest version to mitigate this issue.");
+  }
 }
 
 void PyTorchStreamReader::valid(const char* what, const char* info) {
@@ -333,6 +358,13 @@ void PyTorchStreamWriter::setup(const string& file_name) {
         file_name,
         std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     valid("opening archive ", file_name.c_str());
+
+    const std::string dir_name = parentdir(file_name);
+    if(!dir_name.empty()) {
+      struct stat st;
+      bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
+      TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
+    }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
       file_stream_.write(static_cast<const char*>(buf), nbytes);

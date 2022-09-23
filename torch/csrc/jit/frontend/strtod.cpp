@@ -1,7 +1,8 @@
 // Taken from
 // https://github.com/JuliaLang/julia/blob/v1.1.0/src/support/strtod.c
+#include <torch/csrc/jit/frontend/strtod.h>
 
-#include <ATen/core/Macros.h>
+#include <c10/macros/Macros.h>
 #include <clocale>
 #include <cstdlib>
 
@@ -31,19 +32,19 @@ namespace torch {
 namespace jit {
 
 #ifdef _MSC_VER
-C10_EXPORT double strtod_c(const char* nptr, char** endptr) {
+double strtod_c(const char* nptr, char** endptr) {
   static _locale_t loc = _create_locale(LC_ALL, "C");
   return _strtod_l(nptr, endptr, loc);
 }
 #else
-C10_EXPORT double strtod_c(const char* nptr, char** endptr) {
+double strtod_c(const char* nptr, char** endptr) {
   /// NOLINTNEXTLINE(hicpp-signed-bitwise)
   static locale_t loc = newlocale(LC_ALL_MASK, "C", nullptr);
   return strtod_l(nptr, endptr, loc);
 }
 #endif
 
-C10_EXPORT float strtof_c(const char* nptr, char** endptr) {
+float strtof_c(const char* nptr, char** endptr) {
   return (float)strtod_c(nptr, endptr);
 }
 

@@ -1,9 +1,7 @@
 import bisect
-import functools
 import warnings
+import math
 from typing import (
-    Callable,
-    Dict,
     Generic,
     Iterable,
     Iterator,
@@ -12,41 +10,27 @@ from typing import (
     Sequence,
     Tuple,
     TypeVar,
+    Union
 )
 
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator, randperm
 from torch._utils import _accumulate
-from torch.utils.data._typing import _DataPipeMeta
-from torch.utils.data._utils.serialization import serialize_fn, deserialize_fn, SerializationType
 
 from ... import Generator, Tensor
 
+__all__ = [
+    "Dataset",
+    "IterableDataset",
+    "TensorDataset",
+    "ConcatDataset",
+    "ChainDataset",
+    "Subset",
+    "random_split",
+]
+
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
-
-UNTRACABLE_DATAFRAME_PIPES = ['batch',  # As it returns DataChunks
-                              'groupby',   # As it returns DataChunks
-                              '_dataframes_as_tuples',  # As it unpacks DF
-                              'trace_as_dataframe',  # As it used to mark DF for tracing
-                              ]
-
-class DataChunk(list, Generic[T]):
-    def __init__(self, items):
-        super().__init__(items)
-        self.items = items
-
-    def as_str(self, indent=''):
-        res = indent + "[" + ", ".join(str(i) for i in iter(self)) + "]"
-        return res
-
-    def __iter__(self) -> Iterator[T]:
-        for i in super().__iter__():
-            yield i
-
-    def raw_iterator(self) -> T:
-        for i in self.items:
-            yield i
 
 
 class Dataset(Generic[T_co]):
@@ -74,80 +58,6 @@ class Dataset(Generic[T_co]):
     # No `def __len__(self)` default?
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
     # in pytorch/torch/utils/data/sampler.py
-
-
-class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
-    r"""
-    Map-style DataPipe.
-
-    All datasets that represent a map from keys to data samples should subclass this.
-    Subclasses should overwrite :meth:`__getitem__`, supporting fetching a
-    data sample for a given, unique key. Subclasses can also optionally overwrite
-    :meth:`__len__`, which is expected to return the size of the dataset by many
-    :class:`~torch.utils.data.Sampler` implementations and the default options
-    of :class:`~torch.utils.data.DataLoader`.
-
-    These DataPipes can be invoked in two ways, using the class constructor or applying their
-    functional form onto an existing `MapDataPipe` (recommend, available to most but not all DataPipes).
-
-    Note:
-        :class:`~torch.utils.data.DataLoader` by default constructs an index
-        sampler that yields integral indices. To make it work with a map-style
-        DataPipe with non-integral indices/keys, a custom sampler must be provided.
-
-    Example:
-        >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
-        >>> dp = SequenceWrapper(range(10))
-        >>> map_dp_1 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
-        >>> list(map_dp_1)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> map_dp_2 = Mapper(dp, lambda x: x + 1)  # Using class constructor
-        >>> list(map_dp_2)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> batch_dp = map_dp_1.batch(batch_size=2)
-        >>> list(batch_dp)
-        [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10]]
-    """
-    functions: Dict[str, Callable] = {}
-
-    def __getattr__(self, attribute_name):
-        if attribute_name in MapDataPipe.functions:
-            function = functools.partial(MapDataPipe.functions[attribute_name], self)
-            return function
-        else:
-            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
-
-    @classmethod
-    def register_function(cls, function_name, function):
-        cls.functions[function_name] = function
-
-    @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register):
-        if function_name in cls.functions:
-            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
-
-        def class_function(cls, source_dp, *args, **kwargs):
-            result_pipe = cls(source_dp, *args, **kwargs)
-            return result_pipe
-
-        function = functools.partial(class_function, cls_to_register)
-        cls.functions[function_name] = function
-
-    def __getstate__(self):
-        state_dict = {}
-        for k, v in self.__dict__.items():
-            if callable(v):
-                state_dict[k] = serialize_fn(v)
-            else:
-                state_dict[k] = v
-        return state_dict
-
-    def __setstate__(self, state_dict):
-        for k, v in state_dict.items():
-            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
-                self.__dict__[k] = deserialize_fn(v)
-            else:
-                self.__dict__[k] = v
 
 
 class IterableDataset(Dataset[T_co]):
@@ -196,16 +106,19 @@ class IterableDataset(Dataset[T_co]):
 
         >>> # Single-process loading
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
-        [3, 4, 5, 6]
+        [tensor([3]), tensor([4]), tensor([5]), tensor([6])]
 
+        >>> # xdoctest: +REQUIRES(POSIX)
         >>> # Mult-process loading with two worker processes
         >>> # Worker 0 fetched [3, 4].  Worker 1 fetched [5, 6].
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
         >>> print(list(torch.utils.data.DataLoader(ds, num_workers=2)))
-        [3, 5, 4, 6]
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20)))
-        [3, 4, 5, 6]
+        >>> # xdoctest: +IGNORE_WANT("non deterministic")
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12)))
+        [tensor([3]), tensor([5]), tensor([4]), tensor([6])]
 
     Example 2: splitting workload across all workers using :attr:`worker_init_fn`::
 
@@ -249,7 +162,7 @@ class IterableDataset(Dataset[T_co]):
         [3, 5, 4, 6]
 
         >>> # With even more workers
-        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=20, worker_init_fn=worker_init_fn)))
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=12, worker_init_fn=worker_init_fn)))
         [3, 4, 5, 6]
     """
     def __iter__(self) -> Iterator[T_co]:
@@ -260,125 +173,6 @@ class IterableDataset(Dataset[T_co]):
 
     # No `def __len__(self)` default? Subclasses raise `TypeError` when needed.
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
-
-
-class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
-    r"""
-    Iterable-style DataPipe.
-
-    All DataPipes that represent an iterable of data samples should subclass this.
-    This style of DataPipes is particularly useful when data come from a stream, or
-    when the number of samples is too large to fit them all in memory.
-
-    All subclasses should overwrite :meth:`__iter__`, which would return an
-    iterator of samples in this DataPipe.
-
-    `IterDataPipe` is lazily initialized and its elements are computed only when ``next()`` is called
-    on its iterator.
-
-    These DataPipes can be invoked in two ways, using the class constructor or applying their
-    functional form onto an existing `IterDataPipe` (recommended, available to most but not all DataPipes).
-    You can chain multiple `IterDataPipe` together to form a pipeline that will perform multiple
-    operations in succession.
-
-    Note:
-        When a subclass is used with :class:`~torch.utils.data.DataLoader`, each
-        item in the DataPipe will be yielded from the :class:`~torch.utils.data.DataLoader`
-        iterator. When :attr:`num_workers > 0`, each worker process will have a
-        different copy of the DataPipe object, so it is often desired to configure
-        each copy independently to avoid having duplicate data returned from the
-        workers. :func:`~torch.utils.data.get_worker_info`, when called in a worker
-        process, returns information about the worker. It can be used in either the
-        dataset's :meth:`__iter__` method or the :class:`~torch.utils.data.DataLoader` 's
-        :attr:`worker_init_fn` option to modify each copy's behavior.
-
-    Example:
-        >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
-        >>> dp = IterableWrapper(range(10))
-        >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
-        >>> map_dp_2 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
-        >>> list(map_dp_1)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> list(map_dp_2)
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-        >>> filter_dp = map_dp_1.filter(lambda x: x % 2 == 0)
-        >>> list(filter_dp)
-        [2, 4, 6, 8, 10]
-    """
-    functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
-    getstate_hook: Optional[Callable] = None
-
-    def __getattr__(self, attribute_name):
-        if attribute_name in IterDataPipe.functions:
-            function = functools.partial(IterDataPipe.functions[attribute_name], self)
-            return function
-        else:
-            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
-
-    @classmethod
-    def register_function(cls, function_name, function):
-        cls.functions[function_name] = function
-
-    @classmethod
-    def register_datapipe_as_function(cls, function_name, cls_to_register, enable_df_api_tracing=False):
-        if function_name in cls.functions:
-            raise Exception("Unable to add DataPipe function name {} as it is already taken".format(function_name))
-
-        def class_function(cls, enable_df_api_tracing, source_dp, *args, **kwargs):
-            result_pipe = cls(source_dp, *args, **kwargs)
-            if isinstance(result_pipe, IterDataPipe):
-                if enable_df_api_tracing or isinstance(source_dp, DFIterDataPipe):
-                    if function_name not in UNTRACABLE_DATAFRAME_PIPES:
-                        result_pipe = result_pipe.trace_as_dataframe()
-
-            return result_pipe
-
-        function = functools.partial(class_function, cls_to_register, enable_df_api_tracing)
-        cls.functions[function_name] = function
-
-    def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        state_dict = {}
-        for k, v in self.__dict__.items():
-            if callable(v):
-                state_dict[k] = serialize_fn(v)
-            else:
-                state_dict[k] = v
-        return state_dict
-
-    def __setstate__(self, state_dict):
-        for k, v in state_dict.items():
-            if isinstance(v, tuple) and len(v) == 2 and isinstance(v[1], SerializationType):
-                self.__dict__[k] = deserialize_fn(v)
-            else:
-                self.__dict__[k] = v
-
-    def __reduce_ex__(self, *args, **kwargs):
-        if IterDataPipe.reduce_ex_hook is not None:
-            try:
-                return IterDataPipe.reduce_ex_hook(self)
-            except NotImplementedError:
-                pass
-        return super().__reduce_ex__(*args, **kwargs)
-
-    @classmethod
-    def set_getstate_hook(cls, hook_fn):
-        if IterDataPipe.getstate_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing getstate_hook")
-        IterDataPipe.getstate_hook = hook_fn
-
-    @classmethod
-    def set_reduce_ex_hook(cls, hook_fn):
-        if IterDataPipe.reduce_ex_hook is not None and hook_fn is not None:
-            raise Exception("Attempt to override existing reduce_ex_hook")
-        IterDataPipe.reduce_ex_hook = hook_fn
-
-
-class DFIterDataPipe(IterDataPipe):
-    def _is_dfpipe(self):
-        return True
 
 
 class TensorDataset(Dataset[Tuple[Tensor, ...]]):
@@ -476,7 +270,7 @@ class ChainDataset(IterableDataset):
         total = 0
         for d in self.datasets:
             assert isinstance(d, IterableDataset), "ChainDataset only supports IterableDataset"
-            total += len(d)
+            total += len(d)  # type: ignore[arg-type]
         return total
 
 
@@ -504,22 +298,53 @@ class Subset(Dataset[T_co]):
         return len(self.indices)
 
 
-def random_split(dataset: Dataset[T], lengths: Sequence[int],
+def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
                  generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
+
+    If a list of fractions that sum up to 1 is given,
+    the lengths will be computed automatically as
+    floor(frac * len(dataset)) for each fraction provided.
+
+    After computing the lengths, if there are any remainders, 1 count will be
+    distributed in round-robin fashion to the lengths
+    until there are no remainders left.
+
     Optionally fix the generator for reproducible results, e.g.:
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
+    >>> random_split(range(30), [0.3, 0.3, 0.4], generator=torch.Generator(
+    ...   ).manual_seed(42))
 
     Args:
         dataset (Dataset): Dataset to be split
-        lengths (sequence): lengths of splits to be produced
+        lengths (sequence): lengths or fractions of splits to be produced
         generator (Generator): Generator used for the random permutation.
     """
+    if math.isclose(sum(lengths), 1) and sum(lengths) <= 1:
+        subset_lengths: List[int] = []
+        for i, frac in enumerate(lengths):
+            if frac < 0 or frac > 1:
+                raise ValueError(f"Fraction at index {i} is not between 0 and 1")
+            n_items_in_split = int(
+                math.floor(len(dataset) * frac)  # type: ignore[arg-type]
+            )
+            subset_lengths.append(n_items_in_split)
+        remainder = len(dataset) - sum(subset_lengths)  # type: ignore[arg-type]
+        # add 1 to all the lengths in round-robin fashion until the remainder is 0
+        for i in range(remainder):
+            idx_to_add_at = i % len(subset_lengths)
+            subset_lengths[idx_to_add_at] += 1
+        lengths = subset_lengths
+        for i, length in enumerate(lengths):
+            if length == 0:
+                warnings.warn(f"Length of split at index {i} is 0. "
+                              f"This might result in an empty dataset.")
+
     # Cannot verify that dataset is Sized
-    if sum(lengths) != len(dataset):
+    if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    indices = randperm(sum(lengths), generator=generator).tolist()
+    indices = randperm(sum(lengths), generator=generator).tolist()  # type: ignore[call-overload]
     return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]

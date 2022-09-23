@@ -3,6 +3,7 @@
 #include <pybind11/stl.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#include <torch/csrc/utils/pybind.h>
 #ifdef USE_CUDA
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #endif
@@ -14,6 +15,10 @@
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/lowerings.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
+
+template <>
+struct pybind11::detail::type_caster<torch::jit::tensorexpr::ArgValue>
+    : public type_caster_base<torch::jit::tensorexpr::ArgValue> {};
 
 namespace torch {
 namespace jit {
@@ -707,8 +712,14 @@ void initTensorExprBindings(PyObject* module) {
         }
         if (NNCLoweringFunction lowering =
                 getStandardLoweringFor(op.toQualString())) {
+          std::vector<ExprHandle> outputStrides =
+              c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
           return lowering(
-              argInputs, outputShape, outputType.scalar_type(), at::kCPU);
+              argInputs,
+              outputShape,
+              outputStrides,
+              outputType.scalar_type(),
+              at::kCPU);
         }
         std::string msg = std::string("Unhandled node kind (in te.lower): ") +
             op.toQualString();

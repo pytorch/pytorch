@@ -270,6 +270,26 @@ bool immediateIsNegative(ExprPtr e) {
   return false;
 }
 
+bool immediateIsPositive(ExprPtr e) {
+#define TYPE_CASE(Type, Name)                \
+  if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
+    return imm->value() > 0;                 \
+  }
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
+}
+
+bool immediateIsZero(ExprPtr e) {
+#define TYPE_CASE(Type, Name)                \
+  if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
+    return imm->value() == 0;                \
+  }
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+#undef TYPE_CASE
+  return false;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

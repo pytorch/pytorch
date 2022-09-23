@@ -7,7 +7,7 @@ from typing import DefaultDict, List, Optional, Tuple
 from torch.utils.benchmark.utils import common
 from torch import tensor as _tensor
 
-__all__ = ["Compare"]
+__all__ = ["Colorize", "Compare"]
 
 BEST = "\033[92m"
 GOOD = "\033[34m"

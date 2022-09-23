@@ -3,7 +3,8 @@ PHASES = ["build", "test"]
 CUDA_VERSIONS = [
     "102",
     "113",
-    "115",
+    "116",
+    "117",
 ]
 
 ROCM_VERSIONS = [

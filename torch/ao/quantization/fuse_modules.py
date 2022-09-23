@@ -7,6 +7,7 @@ from torch.ao.quantization.fuser_method_mappings import get_fuser_method
 # for backward compatiblity
 from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn  # noqa: F401
 from torch.ao.quantization.fuser_method_mappings import fuse_conv_bn_relu  # noqa: F401
+from torch.nn.utils.parametrize import type_before_parametrizations
 
 from typing import List, Optional
 
@@ -41,7 +42,7 @@ def fuse_known_modules(mod_list, is_qat, additional_fuser_method_mapping=None):
     For these sequences, the first element in the output module list performs
     the fused operation. The rest of the elements are set to nn.Identity()
     """
-    types = tuple(type(m) for m in mod_list)
+    types = tuple(type_before_parametrizations(m) for m in mod_list)
     fuser_method = get_fuser_method(types, additional_fuser_method_mapping)
     if fuser_method is None:
         raise NotImplementedError("Cannot fuse modules: {}".format(types))
@@ -134,6 +135,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
 
     Examples::
 
+            >>> # xdoctest: +SKIP
             >>> m = M().eval()
             >>> # m is a module containing the sub-modules below
             >>> modules_to_fuse = [ ['conv1', 'bn1', 'relu1'], ['submodule.conv', 'submodule.relu']]

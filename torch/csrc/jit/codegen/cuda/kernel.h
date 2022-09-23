@@ -5,8 +5,11 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower_sync_information.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
+#include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
+#include <torch/csrc/jit/codegen/cuda/vectorization_info.h>
 
 #include <memory>
 #include <unordered_map>
@@ -35,7 +38,7 @@ struct KernelSummary {
   std::vector<const kir::Allocate*> static_smem_allocations;
 
   //! Indicate the need to generate random numbers
-  bool is_stochastic = false;
+  int max_rng_offsets = -1;
 
   //! Do we have any block reductions?
   bool has_block_reductions = false;
@@ -78,12 +81,82 @@ struct KernelSummary {
   //! Effective ParallelTypes of broadcast ops
   std::unordered_map<const BroadcastOp*, ParallelTypeBitmap>
       broadcast_parallel_types;
+
+  //! Track which tensor views are inputs or outputs of a vectorized operation
+  //! and their maximum vectorized access size
+  std::unordered_map<TensorView*, int> vectorized_accesses;
+
+  // Sync map is needed to figure out if global memory buffers need to be marked
+  // as volatile because they're used for communication.
+  SyncMap sync_map;
+
+  // Parallel dimension map needed to set the correct properties of grid buffers
+  // (is a dim inactive)
+  ParallelDimensionMap parallel_dimension_map_;
+
+  //! Track information on vectorized set operations for runtime validation
+  std::vector<VectorizedSetInfo> vectorized_set_info;
 };
+
+class TORCH_CUDA_CU_API KernelPerformanceProfile {
+ public:
+  //! Register an expression to profile
+  void registerExpr(const Expr* expr);
+
+  //! Query if an expression is profiled
+  bool isProfiled(const Expr* expr) const;
+
+  //! Get the number of profiled expressions
+  int getNumberOfProfileEntries() const {
+    return num_profile_entries_;
+  }
+
+  //! Set the backing buffer of profile.
+  void setBuffer(TensorView* buffer) {
+    buffer_ = buffer;
+  }
+
+  //! Get the backing buffer
+  TensorView* getBuffer() const {
+    return buffer_;
+  }
+
+  //! Get the indices of the profile of an expression in the backing buffer
+  std::array<int, 2> getIndicesInProfileBuffer(const Expr* expr) const;
+
+  std::string toString(const at::Tensor& buffer) const;
+
+ private:
+  //! Get the new profile index
+  int getNewIndex();
+
+  //! Get the profile index
+  c10::optional<int> getIndex(const Expr* expr) const;
+
+ private:
+  int num_profile_entries_ = 0;
+
+  //! Backing buffer of Nx2 integer tensor, where N is the number of profiled
+  //! regions. Each region has two integer values, one representing
+  //! the cycles spent, and another the count.
+  TensorView* buffer_ = nullptr;
+
+  //! Map profiled expressions to profile entry offsets
+  std::unordered_map<const Expr*, int> expr_entry_map_;
+
+  // TODO: Allow profiling of ForLoops
+  //! Map profiled ForLoop to profile entry offsets
+  // std::unordered_map<const kir::ForLoop*, int> loop_entry_map_;
+};
+
+class KernelInternalProxy;
 
 //! Container for a lowered Kernel IR
 //!
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API Kernel final : public Fusion {
+  friend KernelInternalProxy;
+
  public:
   // Kernel starts by grabbing all the nodes from the provided fusion.
   // Kernel is not SSA, if a definition is not set, we should update it, but
@@ -91,7 +164,9 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   // we do something like generate an initialization statement for a reduction
   // TV, we may want to continue to do fusion like analysis on the original
   // expression.
-  Kernel(Fusion* fusion) : Fusion(*fusion) {}
+  // TODO: Assert index type is int or int32
+  Kernel(Fusion* fusion, DataType index_type = DataType::Int)
+      : Fusion(*fusion), index_type_(index_type) {}
 
   Kernel() = delete;
 
@@ -102,8 +177,7 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   //! Finalize a kernel definition
   //!
   //! At this point we have a complete kernel definition and we can
-  //! run analysis passes to build a KernelSummary
-  //!
+  //! run analysis passes to build a KernelSummary.
   void finalize(std::vector<Expr*> top_level_exprs);
 
   const std::vector<Expr*>& topLevelExprs() const {
@@ -114,6 +188,10 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
     return summary_;
   }
 
+  DataType indexType() const {
+    return index_type_;
+  }
+
   //! Checks if parallel type is padded
   bool isParallelTypePadded(ParallelType ptype) const {
     return ptype == ParallelType::TIDx &&
@@ -122,6 +200,10 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
 
   const WarpPaddedParallelInfo& getWarpPaddedParallelInfo() const {
     return warp_padded_parallel_info_;
+  }
+
+  const KernelPerformanceProfile& profile() const {
+    return profile_;
   }
 
   //! Debug dump of the Kernel IR
@@ -140,14 +222,32 @@ class TORCH_CUDA_CU_API Kernel final : public Fusion {
   // Analyze the kernel IR and caches the summary of interesting data
   void analyze();
 
- private:
   // Top level statements
   std::vector<Expr*> top_level_exprs_;
 
   // Summary of interesting kernel data
   KernelSummary summary_;
 
+  // Is this kernel being compiled with int32 or int64 indexing. This
+  // information is required to resolve DataType::Index
+  DataType index_type_ = DataType::Int;
+
   WarpPaddedParallelInfo warp_padded_parallel_info_;
+
+  KernelPerformanceProfile profile_;
+};
+
+//! A special debugging proxy for Kernel.
+//!
+//! Should not be used for other than testing and debugging.
+class TORCH_CUDA_CU_API KernelInternalProxy {
+ public:
+  KernelInternalProxy(Kernel* kernel) : kernel_(kernel) {}
+
+  std::vector<Expr*>& topLevelExprs();
+
+ private:
+  Kernel* kernel_ = nullptr;
 };
 
 } // namespace kir

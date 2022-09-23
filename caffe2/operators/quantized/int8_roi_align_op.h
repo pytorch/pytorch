@@ -229,8 +229,8 @@ void ROIAlignForward(
       for (const auto pw : c10::irange(pooled_width)) {
         vector<int32_t> acc_buffer(channels, 0);
 
-        for (const auto iy : c10::irange(roi_bin_grid_h)) {
-          for (const auto ix : c10::irange(roi_bin_grid_w)) {
+        for (C10_UNUSED const auto iy : c10::irange(roi_bin_grid_h)) {
+          for (C10_UNUSED const auto ix : c10::irange(roi_bin_grid_w)) {
             PreCalc pc = pre_calc[pre_calc_index];
 
             const uint8_t* data_1 = offset_bottom_data + channels * pc.pos1;
@@ -281,10 +281,10 @@ class Int8RoIAlignOp final : public Operator<CPUContext> {
         sampling_ratio_(
             this->template GetSingleArgument<int>("sampling_ratio", -1)),
         aligned_(this->template GetSingleArgument<bool>("aligned", false)) {
-    DCHECK_GT(spatial_scale_, 0);
-    DCHECK_GT(pooled_height_, 0);
-    DCHECK_GT(pooled_width_, 0);
-    DCHECK_GE(sampling_ratio_, 0);
+    TORCH_DCHECK_GT(spatial_scale_, 0);
+    TORCH_DCHECK_GT(pooled_height_, 0);
+    TORCH_DCHECK_GT(pooled_width_, 0);
+    TORCH_DCHECK_GE(sampling_ratio_, 0);
     // only supports NHWC
     CAFFE_ENFORCE(order_ == StorageOrder::NHWC);
   }

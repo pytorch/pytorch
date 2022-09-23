@@ -26,7 +26,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
     fi
 fi
 
-# /usr/local/caffe2 is where the cpp bits are installed to in in cmake-only
+# /usr/local/caffe2 is where the cpp bits are installed to in cmake-only
 # builds. In +python builds the cpp tests are copied to /usr/local/caffe2 so
 # that the test code in .jenkins/test.sh is the same
 INSTALL_PREFIX="/usr/local/caffe2"

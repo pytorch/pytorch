@@ -1,10 +1,15 @@
 from typing import Tuple
-from torch.utils.data import IterDataPipe
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import IterDataPipe
+
+__all__ = ["StreamReaderIterDataPipe", ]
 
 
+@functional_datapipe('read_from_stream')
 class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
     r"""
-    Given IO streams and their label names, yields bytes with label name in a tuple.
+    Given IO streams and their label names, yields bytes with label
+    name in a tuple (functional name: ``read_from_stream``).
 
     Args:
         datapipe: Iterable DataPipe provides label/URL and byte stream
@@ -12,6 +17,7 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
             If ``None``, all bytes will be read util the EOF.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper, StreamReader
         >>> from io import StringIO
         >>> dp = IterableWrapper([("alphabet", StringIO("abcde"))])
@@ -27,5 +33,6 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
             while True:
                 d = stream.read(self.chunk)
                 if not d:
+                    stream.close()
                     break
                 yield (furl, d)

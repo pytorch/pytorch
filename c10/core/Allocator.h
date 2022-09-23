@@ -217,9 +217,9 @@ struct AllocatorRegisterer {
   }
 };
 
-#define REGISTER_ALLOCATOR(t, f)                  \
-  namespace {                                     \
-  static AllocatorRegisterer<t> g_allocator_d(f); \
+#define REGISTER_ALLOCATOR(t, f)                       \
+  namespace {                                          \
+  static c10::AllocatorRegisterer<t> g_allocator_d(f); \
   }
 
 // An interface for reporting thread local memory usage
@@ -243,12 +243,24 @@ struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
       int64_t total_reserved,
       Device device) = 0;
 
+  virtual void reportOutOfMemory(
+      int64_t alloc_size,
+      int64_t total_allocated,
+      int64_t total_reserved,
+      Device device);
+
   virtual bool memoryProfilingEnabled() const = 0;
 };
 
 C10_API bool memoryProfilingEnabled();
 C10_API void reportMemoryUsageToProfiler(
     void* ptr,
+    int64_t alloc_size,
+    int64_t total_allocated,
+    int64_t total_reserved,
+    Device device);
+
+C10_API void reportOutOfMemoryToProfiler(
     int64_t alloc_size,
     int64_t total_allocated,
     int64_t total_reserved,

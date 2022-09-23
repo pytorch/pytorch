@@ -16,6 +16,10 @@ arg_parser.add_argument('-o', '--output', required=True,
 
 args = arg_parser.parse_args()
 
+# msvc string literal maximum length 16380
+# https://docs.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026?view=msvc-170
+MAX_STRING_LITERAL = 16000
+
 with open(args.input, 'r') as fin:
     with open(args.output, 'w') as fout:
         literal_name = f'{pathlib.Path(args.input).stem}_cu'
@@ -23,7 +27,15 @@ with open(args.input, 'r') as fin:
         fout.write(f'// {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n\n')
         fout.write('namespace nvfuser_resources {\n\n')
         fout.write(f'constexpr const char* {literal_name} = R"(\n')
+        accumulated_chars = 0
         for line in fin:
-            fout.write(line)
+            accumulated_chars = accumulated_chars + len(line) + 1
+            if accumulated_chars >= MAX_STRING_LITERAL:
+                fout.write(')"\n')
+                fout.write('R"(\n')
+                fout.write(line)
+                accumulated_chars = len(line) + 1
+            else:
+                fout.write(line)
         fout.write(')";\n')
         fout.write('\n} // namespace nvfuser_resources\n')

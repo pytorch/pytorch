@@ -12,7 +12,7 @@ namespace jit {
 bool insertableTensor(const at::Tensor& ten) {
   // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
   // or gradients because we have no way of serializing them & are mutable
-  return !ten.requires_grad() && ten.has_storage();
+  return !ten.requires_grad() && ten.has_storage() && !ten.is_nested();
 }
 
 bool insertableIValue(const IValue& ivalue) {
@@ -126,7 +126,9 @@ c10::optional<Value*> tryInsertConstant(
   } else if (val.isObject()) {
     const auto& ref = val.toObjectRef();
     // see: [Constant Object Weak CompilationUnit Reference]
-    if (!ref.type()->is_module() && ref.is_weak_compilation_ref()) {
+    if (!ref.type()->is_module() &&
+        (ref.is_weak_compilation_ref() ||
+         ref.is_empty_strong_compilation_ref())) {
       n->ival_(attr::value, val);
       n->output()->setType(val.type());
     } else {
