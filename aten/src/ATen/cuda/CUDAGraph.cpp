@@ -22,7 +22,7 @@ MempoolId_t graph_pool_handle() {
   // cudaStreamGetCaptureInfo id_s in capture_begin.
   return {0, uuid++};
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
   return {0, 0};
 #endif
 }
@@ -52,7 +52,7 @@ CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()) {
 #if (defined(CUDA_VERSION) && CUDA_VERSION < 11000) || defined(USE_ROCM)
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
 #endif
 }
 
@@ -128,7 +128,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // kernel will end up as part of the capture or not.
   c10::cuda::CUDACachingAllocator::notifyCaptureBegin(capture_dev_, id_, mempool_id_);
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
 #endif
 }
 
@@ -202,7 +202,7 @@ void CUDAGraph::capture_end() {
     TORCH_WARN("DEBUG: TORCH_CUDAGRAPHS_DEBUG_PATH detected. graph_ will not be freed");
   }
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
 #endif
 }
 
@@ -237,11 +237,12 @@ void CUDAGraph::replay() {
     AT_CUDA_CHECK(cudaDeviceSynchronize());
   }
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
 #endif
 }
 
 void CUDAGraph::debug_dump() {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (_cuda_graphs_debug_path != "") {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
@@ -251,6 +252,9 @@ void CUDAGraph::debug_dump() {
   } else {
     TORCH_WARN("CUDA Graphs debug path not set, set with torch._C._cuda_set_graphs_debug_path");
   }
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
+#endif
 }
 
 void CUDAGraph::reset() {
@@ -285,7 +289,7 @@ void CUDAGraph::reset() {
     C10_CUDA_CHECK_WARN(cudaGraphExecDestroy(graph_exec_));
   }
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
 #endif
 }
 
@@ -295,7 +299,7 @@ MempoolId_t CUDAGraph::pool() {
   TORCH_CHECK(has_graph_exec_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
 #else
-  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and not yet supported on ROCM");
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 and is not yet supported on ROCM");
 #endif
   return mempool_id_;
 }
