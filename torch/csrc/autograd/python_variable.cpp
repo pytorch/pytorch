@@ -296,15 +296,15 @@ struct ConcretePyInterpreterVTable final
     py::dict kwargs = std::move(args_kwargs.second);
     std::vector<py::object> output_objects;
 
-    for (auto& ivalue: ou tputs) {
+    for (auto& ivalue : ou tputs) {
       output_objects.push_back(torch::jit::toPyObject(ivalue));
     }
 
     if (Py_IsInitialized()) {
       try {
         py::module mod = py::module::import("torch.utils._cuda_trace");
-        py::object hook = mod
-            attr(trace_kernel_launch_fn_name).attr("fire_callbacks");
+        py::object hook =
+            mod attr(trace_kernel_launch_fn_name).attr("fire_callbacks");
         hook(op.schema(), args, kwargs, output_objects);
       } catch (const std::exception& e) {
         LOG(ERROR) << "Trace kernel launch hook execution failed: " << e.what();
