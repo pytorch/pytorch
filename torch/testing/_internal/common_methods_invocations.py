@@ -143,6 +143,50 @@ def close_to_int(x, eps=0.1):
     return (y < eps) | (y > (1 - eps))
 
 
+def sample_inputs_slice(op_info, device, dtype, requires_grad, **kwargs):
+
+    make_input = partial(make_tensor, device=device, dtype=dtype,
+                         low=None, high=None, requires_grad=requires_grad)
+
+    yield SampleInput(
+        input=make_input(3),
+        args=(0,),
+    )
+
+    yield SampleInput(
+        input=make_input(20, 30, 40),
+        args=(),
+        kwargs={
+            'dim': 1,
+            'start': 1,
+            'end': -2,
+        }
+    )
+
+    yield SampleInput(
+        input=make_input(20, 30, 40),
+        args=(),
+        kwargs={
+            'dim': 1,
+            'start': 1,
+            'end': -2,
+            'step': 3,
+        }
+    )
+
+    yield SampleInput(
+        input=make_input(20, 30, 40),
+        args=(),
+        kwargs={
+            'dim': 0,
+            'start': -10,
+            'end': -2,
+            'step': 2,
+        }
+    )
+
+
+
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype,
                          low=None, high=None, requires_grad=requires_grad)
@@ -12895,6 +12939,16 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_select_scatter,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           supports_out=False),
+    OpInfo('slice',
+           op=torch.ops.aten.slice.Tensor,
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool, torch.chalf),
+           sample_inputs_func=sample_inputs_slice,
+           gradcheck_fast_mode=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_scripting=False,
+           supports_inplace_autograd=False,
            supports_out=False),
     OpInfo('slice_scatter',
            dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
