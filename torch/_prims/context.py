@@ -251,7 +251,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
         if self._is_rand_like(orig_func):
-            if len(kwargs) > 0 :
+            if len(kwargs) > 0:
                 warn("rand_like has ignored kwars!")
             return torch.ops.nvprims.rand_like(*args)
         # Then we use TorchRefsMode to interpret the rest
