@@ -674,8 +674,6 @@ class FlatParamHandle:
         """
         ret = False
         if self._use_orig_params:
-            # TODO (awgu): I am not sure if we want to enable this by default
-            # for `use_orig_params=True` since there may be some CPU overhead.
             ret = ret or self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
@@ -931,7 +929,6 @@ class FlatParamHandle:
                 if self._config.keep_low_precision_grads:
                     assert flat_param.grad is not None
                     flat_param.grad.data = flat_param.grad.to(self._config.param_dtype)
-
         else:
             p_assert(
                 not self.uses_sharded_strategy
@@ -1095,8 +1092,6 @@ class FlatParamHandle:
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
-        # if dist.get_rank() == 0:
-        #     print(f"[Rank {dist.get_rank()}] _use_unsharded_views(as_params={as_params}) {self._training_state}!")
         self._check_unsharded()
         views = self._get_unflat_views(self.flat_param)
         for i, (view, (param_name, module, _)) in enumerate(
@@ -1172,8 +1167,6 @@ class FlatParamHandle:
         like model printability. Parameters whose data is present must preserve
         their variables to be passable to an optimizer.
         """
-        # if dist.get_rank() == 0:
-        #     print(f"[Rank {dist.get_rank()}] _use_sharded_views()! {self._training_state}")
         if not self.uses_sharded_strategy:
             # For `NO_SHARD`, use the *unflattened* unsharded views since we
             # have the unsharded parameter

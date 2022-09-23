@@ -3248,8 +3248,12 @@ class FullyShardedDataParallel(nn.Module):
         handles: List[FlatParamHandle],
     ) -> None:
         """
-        Registers post-backward hooks to reshard and to reduce-scatter
-        gradients.
+        Registers post-backward hooks on the ``FlatParameter`` s'
+        ``AccumulateGrad`` objects to reshard and to reduce-scatter gradients.
+
+        The ``AccumulateGrad`` object represents the last function that
+        finalizes the ``FlatParameter`` 's gradient, so it only runs after its
+        entire gradient computation has finished.
 
         We register the post-backward hook only once in the *first* forward
         that a ``FlatParameter`` participates in. This relies on the
