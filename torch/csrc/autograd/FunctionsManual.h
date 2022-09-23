@@ -555,11 +555,11 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
     const bool full_matrices);
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
-    const c10::IntArrayRef& input_sizes,
+    const c10::SymIntArrayRef& input_sizes,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step);
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
+    c10::SymInt step);
 std::tuple<Tensor, Tensor> linalg_eig_jvp(
     const Tensor& dA,
     const Tensor& L,
