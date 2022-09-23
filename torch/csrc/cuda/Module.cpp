@@ -806,15 +806,6 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THCPModule_clearBlasWorkspaces_wrap(
-    PyObject* self,
-    PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  at::cuda::clearCublasWorkspaces();
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_rocm_is_backward_pass(
     PyObject* _unused,
     PyObject* noargs) {
@@ -902,10 +893,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_getCurrentBlasHandle",
      THCPModule_getCurrentBlasHandle_wrap,
-     METH_NOARGS,
-     nullptr},
-    {"_cuda_clearCublasWorkspaces",
-     THCPModule_clearBlasWorkspaces_wrap,
      METH_NOARGS,
      nullptr},
     {"_cuda_isCurrentStreamCapturing",

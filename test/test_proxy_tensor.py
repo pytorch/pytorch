@@ -806,7 +806,8 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(4, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(25, 5)))
-        assert len(shape_env.guards) == 1
+        # one guard for size/stride contiguity, and one substantive guard
+        assert len(shape_env.guards) == 2, "\n" + shape_env.format_guards()
 
     def test_binary_broadcast(self):
         def f(a, b):
@@ -894,8 +895,8 @@ def forward(self, a_1):
         self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
 
     def _assert_no_guards(self, fx_g, free_symbols):
-        self.assertEqual(_get_free_symbols(fx_g.shape_env), free_symbols)
-        self.assertEqual(len(fx_g.shape_env.get_nontrivial_guards()), 0)
+        assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
+        assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
 
     def test_guards_equal(self):
         def f(a, b):
@@ -908,7 +909,7 @@ def forward(self, a_1):
         self._assert_no_guards(fx_g, 3)
 
         fx_g = _trace(f, (5, 1), (1, 5))
-        self._assert_no_guards(fx_g, 2)
+        self._assert_no_guards(fx_g, 3)
 
         def f(a, b, c, d):
             a = a + b
@@ -985,8 +986,6 @@ make_fx_failures = {
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
-    # ???
-    skip('nn.functional.ctc_loss'),  # sometimes it passes
 
     # proxy tensor doesn't support sparse correctly right now
     skip('to_sparse'),
@@ -1102,7 +1101,7 @@ symbolic_tensor_failures = {
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
-    xfail('isreal', ''),  # aten.empty_like.default - couldn't find symbolic meta function/decomposition
+    xfail('isreal', ''),  # aten.ones_like.default - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('lerp', ''),  # aten.lerp.Scalar - couldn't find symbolic meta function/decomposition
@@ -1173,7 +1172,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.avg_pool2d', ''),  # aten.avg_pool2d.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.avg_pool3d', ''),  # aten.avg_pool3d.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.batch_norm', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.bilinear', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.conv1d', ''),  # aten.convolution.default - couldn't find symbolic meta function/decomposition
@@ -1181,6 +1179,7 @@ symbolic_tensor_failures = {
     xfail('nn.functional.cosine_embedding_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nn.functional.cosine_similarity', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
+    xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.dropout2d', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.dropout3d', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.dropout', ''),  # Tensors of type TensorImpl do not have numel
@@ -1265,6 +1264,7 @@ symbolic_tensor_failures = {
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
     xfail('select', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
     xfail('select_scatter', ''),  # aten.select_scatter.default - couldn't find symbolic meta function/decomposition
+    xfail('slice', ''),  # aten.slice.Tensor - couldn't find symbolic meta function/decomposition
     xfail('slice_scatter', ''),  # aten.slice_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('sort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
@@ -1311,7 +1311,6 @@ symbolic_tensor_failures = {
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition
     xfail('view_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('where', ''),  # expected predicate to be bool, got torch.float32
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
