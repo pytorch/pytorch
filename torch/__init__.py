@@ -960,6 +960,7 @@ from ._linalg_utils import (  # type: ignore[misc]
     matrix_rank,
     eig,
     solve,
+    lstsq,
 )
 
 
