@@ -32,6 +32,8 @@ __all__ = [
     "hardtanh",
     "hinge_embedding_loss",
     "l1_loss",
+    "layer_norm",
+    "leaky_relu",
     "log_softmax",
     "margin_ranking_loss",
     "mish",
@@ -41,12 +43,15 @@ __all__ = [
     "relu",
     "relu6",
     "selu",
+    "sigmoid",
     "softmax",
     "softmin",
     "softplus",
     "softshrink",
+    "tanh",
     "tanhshrink",
     "threshold",
+    "gelu",
     "glu",
     "pairwise_distance",
     "pdist",
@@ -236,6 +241,7 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return scale * torch.where(a > 0, a, rhs)
 
 
+# Forwarding alias: the functional variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
@@ -249,6 +255,9 @@ def softmax(
     # users how to update their calls.
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+sigmoid = torch.sigmoid  # alias
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -390,6 +399,7 @@ def l1_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+# Forwarding alias: the functional variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
     a: TensorLikeType,
@@ -465,6 +475,9 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
+
+
+tanh = torch.tanh  # alias
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out

@@ -21,7 +21,9 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import out_wrapper
 
 __all__ = [
+    "diagonal",
     "svd",
+    "svdvals",
     "vector_norm",
     "matrix_norm",
     "norm",
@@ -54,6 +56,17 @@ def check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name
 
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
+
+
+# TODO: Defined as an alias in the OpInfo, but has different default arguments.
+def diagonal(
+    input: TensorLikeType,
+    *,
+    offset: int = 0,
+    dim1: int = -2,
+    dim2: int = -1,
+) -> TensorLikeType:
+    return torch.diagonal(input=input, offset=offset, dim1=dim1, dim2=dim2)
 
 
 @register_decomposition(torch.ops.aten.linalg_vector_norm)
