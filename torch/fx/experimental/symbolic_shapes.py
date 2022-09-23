@@ -1,6 +1,6 @@
 import torch
 import torch.utils._pytree as pytree
-from typing import Set, Dict, List, Type, Optional, cast
+from typing import Dict, List, Type, Optional, cast
 import operator
 import functools
 from functools import lru_cache, partial
@@ -19,7 +19,7 @@ aten = torch.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "PySymInt", "ShapeEnv",
-    "SymDispatchMode", "PySymFloat", "sym_float", "FloorDiv"
+    "SymDispatchMode", "PySymFloat", "sym_float"
 ]
 
 SYM_FUNCTION_MODE = None
@@ -152,24 +152,6 @@ class PySymFloat:
     def __str__(self):
         return f"{self.expr}"
 
-if HAS_SYMPY:
-    class FloorDiv(sympy.Function):
-        """
-        We maintain this so that:
-        1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
-        2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
-        """
-        nargs = (2,)
-
-        @classmethod
-        def eval(cls, base, divisor):
-            if base == 0:
-                return sympy.Integer(0)
-            if divisor == 1:
-                return base
-            if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-                return base // divisor
-
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
@@ -177,7 +159,7 @@ reflectable_magic_methods = {
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
     'truediv': lambda a, b: a / b,
-    'floordiv': lambda a, b: FloorDiv(a, b)
+    'floordiv': lambda a, b: (a - (a % b)) / b
 }
 
 magic_methods = {
@@ -281,8 +263,8 @@ class ShapeEnv(object):
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
-        # Set holds a % b expressions that evaluate to 0.
-        self.divisible: Set["sympy.Expr"] = set()
+        # Keys are Mod(x, y), values are 0 (for ease of substitution)
+        self.divisible: Dict["sympy.Expr", "sympy.Integer"] = {}
 
     def _get_key(self):
         """
@@ -313,7 +295,9 @@ class ShapeEnv(object):
         return all(guard.xreplace(new_env.var_to_val) == value for guard, value, _ in self.guards)
 
     def get_nontrivial_guards(self):
-        return [(self.simplify(guard), val) for guard, val, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+        guards = [(self.simplify(guard), val) for guard, val, _ in self.guards]
+        guards = [guard for guard in guards if len(guard[0].free_symbols) > 0]
+        return guards
 
     def format_guards(self, verbose=False):
         def format_val(guard, val):
@@ -342,7 +326,6 @@ class ShapeEnv(object):
         """
         Tries to evaluate expr without introducing guards
         """
-        expr = self.simplify(expr)
         # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
         symbols = list(expr.free_symbols)
         new_shape_env = {
@@ -350,10 +333,7 @@ class ShapeEnv(object):
             for idx, k in enumerate(symbols)
         }
         new_expr = expr.xreplace(new_shape_env)
-        floor_div_replace = {}
-        for atom in new_expr.atoms(FloorDiv):
-            floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
-        new_expr = sympy.expand(new_expr.xreplace(floor_div_replace))
+        new_expr = sympy.expand(new_expr)
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
         return None
@@ -365,25 +345,20 @@ class ShapeEnv(object):
 
     @_lru_cache
     def _update_divisible(self):
-        new_divisible = set()
+        new_divisible = {}
         for k in self.divisible:
             res = self.replace(k)
             if len(res.free_symbols) > 0:
-                new_divisible.add(k)
+                new_divisible[k] = sympy.Integer(0)
 
         self.divisible = new_divisible
 
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
-        if expr.has(FloorDiv):
+        if expr.has(sympy.Mod):
             self._update_divisible()
-            div_replacements = {}
-            for atom in expr.atoms(FloorDiv):
-                base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = base / divisor
-            expr = expr.xreplace(div_replacements)
+            expr = expr.xreplace(self.divisible)
             expr = sympy.expand(expr)
         return expr
 
@@ -445,7 +420,7 @@ class ShapeEnv(object):
                 try:
                     solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
                     if len(solutions) == 1 and solutions[0][mod_expr] == 0:
-                        self.divisible.add(mod_expr)
+                        self.divisible[mod_expr] = sympy.Integer(0)
                 except NotImplementedError:
                     pass
             return
@@ -458,6 +433,7 @@ class ShapeEnv(object):
         if len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)
+
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             return static_expr
