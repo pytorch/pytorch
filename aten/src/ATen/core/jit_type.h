@@ -9,6 +9,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
+#include <c10/core/SymFloat.h>
 
 #include <array>
 #include <memory>
@@ -1320,6 +1321,26 @@ struct TORCH_API SymIntType : public Type {
   SymIntType() : Type(TypeKind::SymIntType) {}
 };
 
+struct SymFloatType;
+using SymFloatTypePtr = SingletonTypePtr<SymFloatType>;
+struct TORCH_API SymFloatType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymFloat";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "float";
+  }
+  static const TypeKind Kind = TypeKind::SymFloatType;
+  // global singleton
+  static SymFloatTypePtr get();
+
+ private:
+  SymFloatType() : Type(TypeKind::SymFloatType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1801,6 +1822,20 @@ struct getMaybeFakeTypePtr_<SymInt, true> final {
     return IntType::get();
   }
 };
+
+template <>
+struct getMaybeFakeTypePtr_<SymFloat, false> final {
+  static decltype(auto) call() {
+    return SymFloatType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<SymFloat, true> final {
+  static decltype(auto) call() {
+    return FloatType::get();
+  }
+};
+
 template <>
 struct getTypePtr_<c10::Device> final {
   static decltype(auto) call() {
