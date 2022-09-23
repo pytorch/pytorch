@@ -13,18 +13,6 @@ complex_to_corresponding_float_type_map = {torch.complex32: torch.float16,
                                            torch.complex128: torch.float64}
 float_to_corresponding_complex_type_map = {v: k for k, v in complex_to_corresponding_float_type_map.items()}
 
-
-def _lerp(low: float, high: float, weight: torch.Tensor) -> torch.Tensor:
-    if low == 0 and high == 1:
-        return weight
-    elif low == 0:
-        return weight.mul_(high)
-    else:
-        # high * weight + low * (1 - weight)
-        one_m_weight = 1 - weight
-        return weight.mul_(high).add_(one_m_weight, alpha=low)
-
-
 def make_tensor(
     *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
     dtype: torch.dtype,
@@ -141,15 +129,15 @@ def make_tensor(
     elif dtype in _floating_types:
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
         m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        rand_val = torch.rand(shape, device=device, dtype=dtype)
-        result = _lerp(m_low, m_high, rand_val)
+        result = torch.empty(shape, device=device, dtype=dtype)
+        result.uniform_(m_low, m_high)
     elif dtype in _complex_types:
         float_dtype = complex_to_corresponding_float_type_map[dtype]
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
         m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        rand_val = torch.rand(shape + (2,), device=device, dtype=float_dtype)
-        rand_val = _lerp(m_low, m_high, rand_val)
-        result = torch.view_as_complex(rand_val)
+        result = torch.empty(shape, device=device, dtype=dtype)
+        result_real = torch.view_as_real(result)
+        result_real.uniform_(m_low, m_high)
     else:
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
