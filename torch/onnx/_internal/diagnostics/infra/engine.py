@@ -17,20 +17,22 @@ class DiagnosticEngine:
 
     Examples:
         Step 1: Create a set of rules.
-        >>> @dataclasses.dataclass(frozen=True)
-        ... class _Rules:
-        ...     rule1 = infra.Rule(
-        ...         id="r1",
-        ...         name="rule-1",
-        ...         short_description={"text": "This is rule 1."}
-        ...     )
-        >>> rules = _Rules()
+        >>> rules = infra.RuleCollection.from_list(
+        ...     "CustomRuleCollection",
+        ...     [
+        ...         infra.Rule(
+        ...             id="r1",
+        ...             name="rule-1",
+        ...             message_default_template="Mising xxx",
+        ...         ),
+        ...     ],
+        ... )
 
         Step 2: Create a diagnostic tool.
         >>> tool = infra.DiagnosticTool(
         ...     name="tool",
         ...     version="1.0.0",
-        ...     rules=list(dataclasses.asdict(_Rules).values()),
+        ...     rules=rules,
         ... )
 
         Step 3: Create a diagnostic engine.
