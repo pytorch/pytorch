@@ -907,9 +907,9 @@ TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
-    from tools.testing.test_selections import NUM_PROCS
+    num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "3"))
     # other libraries take up about 11% of space per process
-    torch.cuda.set_per_process_memory_fraction(round(1 / NUM_PROCS - .11, 2))
+    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
 
 def skipIfCrossRef(fn):
@@ -1473,7 +1473,6 @@ class CudaMemoryLeakCheck():
             #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
-                torch._C._cuda_clearCublasWorkspaces()
                 torch.cuda.empty_cache()
                 break
 
@@ -1495,8 +1494,6 @@ class CudaMemoryLeakCheck():
         discrepancy_detected = False
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
-            # avoid counting cuBLAS workspace allocations
-            torch._C._cuda_clearCublasWorkspaces()
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
 
             if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:

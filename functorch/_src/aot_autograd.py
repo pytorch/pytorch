@@ -17,7 +17,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
-from functorch._C import CompileCache
+from torch._C._functorch import CompileCache
 from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
@@ -128,7 +128,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
         special_stack = forward_node_stack.copy()
         special_stack.append(
-            "Gradient addition node due to mulitple use of tensor around:"
+            "Gradient addition node due to multiple use of tensor around:"
         )
         node.register_hook(get_posthook(special_stack))
 
