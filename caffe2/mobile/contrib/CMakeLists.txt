@@ -1,5 +1,3 @@
-add_subdirectory(ios)
-
 if(USE_NNAPI)
   add_subdirectory(nnapi)
 endif()
