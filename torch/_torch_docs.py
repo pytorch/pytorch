@@ -6622,51 +6622,6 @@ Example::
 )
 
 add_docstr(
-    torch.matrix_rank,
-    r"""
-matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor
-
-Returns the numerical rank of a 2-D tensor. The method to compute the
-matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
-then :attr:`input` is assumed to be symmetric, and the computation of the
-rank is done by obtaining the eigenvalues.
-
-:attr:`tol` is the threshold below which the singular values (or the eigenvalues
-when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
-specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
-singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
-is the epsilon value for the datatype of :attr:`input`.
-
-.. warning::
-
-    :func:`torch.matrix_rank` is deprecated in favor of :func:`torch.linalg.matrix_rank`
-    and will be removed in a future PyTorch release. The parameter :attr:`symmetric` was
-    renamed in :func:`torch.linalg.matrix_rank` to :attr:`hermitian`.
-
-Args:
-    input (Tensor): the input 2-D tensor
-    tol (float, optional): the tolerance value. Default: ``None``
-    symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
-                               Default: ``False``
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.eye(10)
-    >>> torch.matrix_rank(a)
-    tensor(10)
-    >>> b = torch.eye(10)
-    >>> b[0, 0] = 0
-    >>> torch.matrix_rank(b)
-    tensor(9)
-""".format(
-        **common_args
-    ),
-)
-
-add_docstr(
     torch.matrix_power,
     r"""
 matrix_power(input, n, *, out=None) -> Tensor
@@ -9217,8 +9172,11 @@ Keyword args:
 
 add_docstr(
     torch.randn,
-    r"""
-randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+    """
+randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -9240,6 +9198,7 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
