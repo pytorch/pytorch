@@ -432,11 +432,12 @@ def hinge_embedding_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
-# TODO: This ref supports int reduction to be compatible with ATen:
+# TODO: This ref supports int reduction and out kwarg to be compatible with ATen:
 # https://github.com/pytorch/pytorch/issues/83931
 # TODO: Could be rewritten to support complex:
 # https://github.com/pytorch/pytorch/pull/85041
 @register_decomposition(torch.ops.aten.huber_loss)
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("input", "target"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
