@@ -17692,6 +17692,17 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
         ),
     ),
+    PythonRefInfo(
+        "ops.nvprims.native_batch_norm",
+        torch_opinfo_name="native_batch_norm",
+        # Complex types are currently disabled
+        dtypes=floating_types(),
+        supports_out=False,
+        # This function is expected not to work with TorchRefsMode(strict=True)
+        decorators=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+        ),
+    ),
     #
     # Linear Algebra Operators
     #
