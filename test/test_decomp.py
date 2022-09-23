@@ -515,65 +515,6 @@ class TestDecomp(TestCase):
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
 
-    def test_slice(self):
-        class SampleInput:
-            def __init__(self, input, args, kwargs=None):
-                kwargs = kwargs if kwargs is not None else {}
-                self.input = input
-                self.args = args
-                self.kwargs = kwargs
-
-        class SliceOpInfo:
-            name = "fake slice"
-            supports_autograd = False
-            decomp_aten_name = "aten.slice.Tensor"
-
-            def op(self, *args, **kwargs):
-                return torch.ops.aten.slice(*args, **kwargs)
-
-            def get_op(self):
-                return torch.ops.aten.slice
-
-            def sample_inputs(self, device, dtype, requires_grad):
-                for i in [
-                    SampleInput(
-                        input=torch.ones(3, device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(0,),
-                    ),
-                    SampleInput(
-                        input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(),
-                        kwargs={
-                            'dim': 1,
-                            'start': 1,
-                            'end': -2,
-                        }
-                    ),
-                    SampleInput(
-                        input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(),
-                        kwargs={
-                            'dim': 1,
-                            'start': 1,
-                            'end': -2,
-                            'step': 3,
-                        }
-                    ),
-                    SampleInput(
-                        input=torch.randn((20, 30, 40), device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(),
-                        kwargs={
-                            'dim': 0,
-                            'start': -10,
-                            'end': -2,
-                            'step': 2,
-                        }
-                    ),
-                ]:
-                    yield i
-        slice = SliceOpInfo()
-        self.do_cross_ref('cpu', torch.float, slice, run_all=True)
-
 instantiate_device_type_tests(TestDecomp, globals())
 
 if __name__ == "__main__":

@@ -32,7 +32,11 @@ class Reduction(Enum):
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
 # We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
-def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
+def type_casts(
+    f: Callable,
+    type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND,
+    compute_dtype_only: bool = False,
+):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [
@@ -56,11 +60,19 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
                 return x
 
         r = f(*tree_map(increase_prec, args), **tree_map(increase_prec, kwargs))
-        return tree_map(decrease_prec, r)
+        if compute_dtype_only:
+            return r
+        else:
+            return tree_map(decrease_prec, r)
 
     return inner
 
 
+compute_only_pw_cast_for_opmath = functools.partial(
+    type_casts,
+    type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    compute_dtype_only=True,
+)
 pw_cast_for_opmath = functools.partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 )
@@ -664,24 +676,35 @@ def diagonal_backward(
     return torch.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
 
-@register_decomposition(aten._softmax_backward_data)
-@pw_cast_for_opmath
-def _softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
+def _cast_grad_to_input_dtype(
+    grad_output: Tensor, grad_input: Tensor, input_dtype: torch.dtype
 ):
-    new_grad = grad_output * output
-    return new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
+    if grad_output.dtype != input_dtype:
+        grad_input = grad_input.to(input_dtype)
+    return grad_input
+
+
+@register_decomposition(aten._softmax_backward_data)
+@compute_only_pw_cast_for_opmath
+def _softmax_backward_data(
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
+):
+    new_grad_output = grad_output * output
+    grad_input = new_grad_output - output * torch.sum(
+        new_grad_output, dim=dim, keepdim=True
+    )
+    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
 
 
 @register_decomposition(aten._log_softmax_backward_data)
-@pw_cast_for_opmath
+@compute_only_pw_cast_for_opmath
 def _log_softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
 ):
     grad_input = grad_output - torch.exp(output) * torch.sum(
         grad_output, dim=dim, keepdim=True
     )
-    return grad_input
+    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
 
 
 @register_decomposition(aten.im2col)
@@ -1118,7 +1141,7 @@ def native_layer_norm_backward(
     input_ndim = input.dim()
     computation_dtype = utils.get_computation_dtype(input.dtype)
     grad_out_cast, input_cast, weight_cast, bias_cast = [
-        x.to(computation_dtype) if x is not None else x
+        x.to(computation_dtype).contiguous() if x is not None else x
         for x in (grad_out, input, weight, bias)
     ]
     assert grad_out_cast is not None
@@ -1138,9 +1161,9 @@ def native_layer_norm_backward(
     M = prod(outer_dims)  # type: ignore[arg-type]
     if M <= 0 or N <= 0:
         return (
-            input.new_zeros(input_shape),
-            input.new_zeros(input_shape[axis:]),
-            input.new_zeros(input_shape[axis:]),
+            input.new_zeros(input_shape) if output_mask[0] else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[2] else None,
         )
 
     x_hat = (input_cast - mean) * rstd
@@ -1171,7 +1194,7 @@ def native_layer_norm_backward(
         if len(outer_dim_indices) > 0:
             d_bias = torch.sum(grad_out_cast, outer_dim_indices, False)
         else:
-            d_bias = grad_out_cast
+            d_bias = grad_out_cast.clone()
 
     return (
         _maybe_cast(d_input, input.dtype),
@@ -1211,8 +1234,8 @@ def native_batch_norm(
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean = running_mean.to(dtype=computation_dtype)
-        running_var = running_var.to(dtype=computation_dtype)
+        running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+        running_var = running_var.to(dtype=computation_dtype, copy=True)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
@@ -1636,7 +1659,6 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
-
     idx = (slice(None),) * dim + (index,)
     torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
     return x
