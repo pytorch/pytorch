@@ -432,17 +432,17 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
 
     # Test case for no optional kwargs
     # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
-    yield SampleInput(make_arg((1, 2, 3)), args=(None, None), kwargs={'training': True})
+    yield SampleInput(make_arg((1, 2, 3)), args=(None, None, None, None), kwargs={'training': True})
 
 
 def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
-    samples_iter = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
-    sample = next(samples_iter)
-    args = sample.args
-    training = sample.kwargs.get('training', True)
-    momentum = sample.kwargs.get('momentum', 0.5)
-    eps = sample.kwargs.get('eps', 1e-5)
-    yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
+    samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
+    for sample in samples:
+        args = sample.args
+        training = sample.kwargs.get('training', True)
+        momentum = sample.kwargs.get('momentum', 0.5)
+        eps = sample.kwargs.get('eps', 1e-5)
+        yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
 
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
