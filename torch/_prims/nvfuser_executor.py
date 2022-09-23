@@ -62,23 +62,6 @@ def to_nvfuser_template_args(args):
     return tree_map(to_nvfuser, args)
 
 
-# Current implementation of in-place batch_norm in nvFuser implicitly adds a new
-# output to the fusion. We don't want to expose this tensor to the outer world,
-# so we count the number of outputs to be dropped. Each call to batch_norm adds
-# two outputs to the fusion that we need to drop.
-def _count_outputs_to_drop(gm):
-    return sum(
-        2
-        for node in gm.graph.nodes
-        if node.op == "call_function"
-        and node.target
-        in [
-            torch.ops.nvprims.native_batch_norm,
-            torch.ops.nvprims.native_batch_norm.default,
-        ]
-    )
-
-
 def _any_get_attr_used(call_function_nodes):
     return any(
         filter(
@@ -189,7 +172,7 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
         for o in flat_out:
             fd.add_output(o)
 
-    return fusion, unflatten_spec, _count_outputs_to_drop(gm)
+    return fusion, unflatten_spec
 
 
 def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
@@ -214,9 +197,9 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
             DEFAULT_NVFUSER_PYTHON_CONFIG["use_python_fusion_cache"],
         )
         if use_cache:
-            fusion, unflatten_spec, drop_output_count = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
+            fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
         else:
-            fusion, unflatten_spec, drop_output_count = make_nvfuser_fusion.__wrapped__(gm, *nv_template_args)  # type: ignore[misc]
+            fusion, unflatten_spec = make_nvfuser_fusion.__wrapped__(gm, *nv_template_args)  # type: ignore[misc]
 
         # Inputs to fusion.execute correspond to the same template/symbolic inputs
         # marked with `define_tensor/scalar`
@@ -225,7 +208,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
         )
 
         return tree_unflatten(
-            fusion.execute(concrete_fusion_inputs)[drop_output_count:],  # type: ignore[has-type]
+            fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
             unflatten_spec,  # type: ignore[has-type]
         )
     else:
