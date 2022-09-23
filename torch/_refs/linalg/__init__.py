@@ -59,6 +59,7 @@ from torch._decomp import register_decomposition
 
 
 # TODO: Defined as an alias in the OpInfo, but has different default arguments.
+# https://github.com/pytorch/pytorch/issues/85419
 def diagonal(
     input: TensorLikeType,
     *,

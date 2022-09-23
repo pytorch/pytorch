@@ -683,10 +683,6 @@ def lgamma(a):
     return prims.lgamma(a)
 
 
-# alias
-mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
-
-
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def log(a):
     return prims.log(a)
@@ -874,7 +870,8 @@ def sin(a):
     return prims.sin(a)
 
 
-sinc = torch.special.sinc  # alias
+# alias
+sinc = torch.special.sinc  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
