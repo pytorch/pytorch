@@ -403,7 +403,7 @@ class TestCommon(TestCase):
             skip_zero_dim = True
 
         # skip zero-dim tensors for some composites of reduction operations
-        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax"]
+        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax", "_refs.sum_to_size"]
         if executor == "nvfuser" and op.name in normalization_ops:
             skip_zero_dim = True
 
@@ -1670,6 +1670,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.isreal',
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
@@ -1689,6 +1690,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svd',
         '_refs.linalg.svdvals',
         '_refs.unflatten',
+        '_refs.sum_to_size',
         # ref implementation missing kwargs
         '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
@@ -1700,7 +1702,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
-        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
         '_refs.real',
@@ -1825,7 +1826,6 @@ fake_striding_skips = (
     "fft.rfftn",
     "svd",
     "linalg.svd",
-    "nn.functional.conv_transpose2d",
 )
 
 
