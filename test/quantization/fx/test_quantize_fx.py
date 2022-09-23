@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 from collections import OrderedDict
-import os
 import contextlib
 import torch
 import torch.nn.functional as F
@@ -155,6 +154,7 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
     test_only_train_fn,
     ModelForConvTransposeBNFusion,
+    get_supported_device_types,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -182,13 +182,6 @@ import operator
 import unittest
 import io
 from typing import Callable, Optional, List
-
-
-
-TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
-def get_supported_device_types():
-    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
