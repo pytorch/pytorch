@@ -28,6 +28,13 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      cuda-arch-list:
+        required: false
+        type: string
+        default: "5.2"
+        description: |
+          List of CUDA architectures CI build should target.
+
       test-matrix:
         required: false
         type: string
@@ -113,7 +120,7 @@ jobs:
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-          TORCH_CUDA_ARCH_LIST: 5.2
+          TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
