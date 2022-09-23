@@ -434,6 +434,17 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
     # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
     yield SampleInput(make_arg((1, 2, 3)), args=(None, None), kwargs={'training': True})
 
+
+def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
+    samples_iter = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
+    sample = next(samples_iter)
+    args = sample.args
+    training = sample.kwargs.get('training', True)
+    momentum = sample.kwargs.get('momentum', 0.5)
+    eps = sample.kwargs.get('eps', 1e-5)
+    yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
+
+
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -10541,6 +10552,27 @@ op_db: List[OpInfo] = [
                # possibly because of the welford implementation.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )),
+    OpInfo('native_batch_norm',
+           aten_name='native_batch_norm',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           sample_inputs_func=sample_inputs_native_batch_norm,
+           skips=(
+               # NotImplementedError: Could not run
+               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cpu"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
+               # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           )
+           ),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
