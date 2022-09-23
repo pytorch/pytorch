@@ -282,9 +282,10 @@ class TestModule(TestCase):
             # === Check that the inplace operation gives the same result ===
             input_arg_copy = deepcopy(input_args)
             input_arg_clone = tuple(i.clone() for i in input_arg_copy)
+            input_clone_version = input_arg_clone[0]._version
             with freeze_rng_state():
                 output_ip = m_inplace(*input_arg_clone, **input_kwargs)
-            self.assertNotEqual(input_arg_clone[0]._version, input_version)
+            self.assertNotEqual(input_arg_clone[0]._version, input_clone_version)
             self.assertEqual(output_op, output_ip)
 
             # === Check that the gradients are the same ===
