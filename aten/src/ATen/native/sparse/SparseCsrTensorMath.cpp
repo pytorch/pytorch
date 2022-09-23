@@ -147,7 +147,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
     // For the case of (0x0) result tensor, manually resize `result` tensor
     // to the size of `self` tensor
     if (result.numel() == 0) {
-      at::native::resize_as_sparse_csr_(result, self);
+      at::native::resize_as_sparse_compressed_(result, self);
     }
     // copy_sparse_compressed_ internally checks the sizes of result and self tensors
     // Hence no external size check required
@@ -615,21 +615,42 @@ Tensor& _sparse_csr_mm_out(
 }
 
 Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
-  Tensor result;
-  // If either input is strided result will be strided
-  if (mat1.layout() == kStrided) {
-    result = at::zeros({mat1.size(-2), mat2.size(-1)}, mat1.options());
-  } else if (mat2.layout() == kStrided) {
-    result = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
-  } else {
-    // Otherwise the result is sparse, result layout must be csr for resize of
-    // output to mat1/mat2 will be coerced to mm compatible layout if possible
-    result = at::empty(
-        {mat1.size(-2), mat2.size(-1)}, mat1.options().layout(kSparseCsr));
+  if (mat1.is_sparse_csr() && mat2.is_sparse_csr()) {
+    // Return sparse
+    // TODO: replace with at::zeros when it's implemented for sparse csr
+    return at::addmm(
+        at::empty({mat1.size(0), mat2.size(1)}, mat2.options()),
+        mat1,
+        mat2,
+        0.0,
+        1.0);
   }
-  // Let the implementation handle layout/order swaps and layout compatibility
-  // checks
-  return at::addmm(result, mat1, mat2, 0.0, 1.0);
+  if ((mat1.layout() == kSparseCsc || mat1.layout() == kSparseCsr) &&
+      (mat2.layout() == kSparseCsc || mat2.layout() == kSparseCsr)) {
+    // TODO: Expensive conversion to CSR. Should add native support for CSC.
+    // Covers CSC @ CSR
+    // Covers CSR @ CSC
+    // Covers CSC @ CSC
+    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2.to_sparse_csr());
+  }
+  if (mat1.layout() == kSparseCsc && mat2.layout() == c10::kStrided) {
+    // TODO: This is a costly conversion. We should have
+    // native support for CSC.
+    return _sparse_csr_mm(mat1.to_sparse_csr(), mat2);
+  }
+  // Default to taking options from mat1
+  auto result_options = mat1.options();
+  if (mat2.layout() == kStrided) {
+    // if either  arg is strided we return strided, so update the options if
+    // mat2 is strided.
+    result_options = result_options.layout(kStrided);
+  }
+  return at::addmm(
+      at::zeros({mat1.size(0), mat2.size(1)}, result_options),
+      mat1,
+      mat2,
+      0.0,
+      1.0);
 }
 
 Tensor _sparse_csr_addmm(
@@ -785,7 +806,7 @@ Tensor& add_out_sparse_csr_cpu(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
-    at::native::resize_as_sparse_csr_(out, self);
+    at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
   return out;
