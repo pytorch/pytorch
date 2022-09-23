@@ -193,7 +193,7 @@ class FakeTensorConverter(object):
         weakref.finalize(t, del_ten)
         self.tensor_memo[th] = v
 
-    def from_real_tensor(self, fake_mode, t, make_constant=False):
+    def from_real_tensor(self, fake_mode, t, make_constant=False, shape_env=None):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
@@ -202,7 +202,7 @@ class FakeTensorConverter(object):
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         with no_dispatch():
-            meta_t = self.meta_converter(t)
+            meta_t = self.meta_converter(t, shape_env=shape_env)
             if meta_t.device.type != "meta":
                 raise UnsupportedFakeTensorException("meta converter nyi")
             out = FakeTensor(
@@ -242,9 +242,13 @@ class FakeTensorConverter(object):
     # However, you're allowed to pass a meta tensor to be turned into a fake
     # tensor; although an odd thing to do, this can occur if you're doing
     # cross ref testing and the inner test is already operating on meta tensors
-    def __call__(self, fake_mode, t, device=None, *, make_constant=False):
+    def __call__(
+        self, fake_mode, t, device=None, *, make_constant=False, shape_env=None
+    ):
         if device is None:
-            return self.from_real_tensor(fake_mode, t, make_constant)
+            return self.from_real_tensor(
+                fake_mode, t, make_constant, shape_env=shape_env
+            )
         else:
             assert make_constant is False
             assert t.device.type == "meta"
@@ -265,11 +269,6 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
         return op_impl
 
     return impl_decorator
-
-
-@register_op_impl(aten._efficientzerotensor.default)
-def efficient_zero(fake_mode, func, *args, **kwargs):
-    return constructors(fake_mode, aten.zeros.default, *args, **kwargs)
 
 
 @register_op_impl(
@@ -330,7 +329,7 @@ def to_copy(fake_mode, func, *args, **kwargs):
 
     input_device = new_kwargs.pop("device", None)
     out_device = input_device if input_device else new_kwargs["input"].device
-    with no_dispatch():
+    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
         input = new_kwargs.pop("input").to("meta")
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
@@ -489,9 +488,7 @@ class FakeTensor(torch.Tensor):
 
     @staticmethod
     def from_tensor(t, fake_mode):
-        existing_device = t.device
-        # TODO: this should use meta converter
-        return FakeTensor(fake_mode, t.to(device="meta"), existing_device)
+        return fake_mode.from_tensor(t)
 
     # TODO: resolve error in default __repr__
     def __repr__(self):
@@ -730,7 +727,6 @@ class FakeTensorMode(TorchDispatchMode):
             aten.empty_strided.default,
             aten.as_strided.default,
             aten.zeros.default,
-            aten.clone.default,
             aten.detach.default,
         ]
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
@@ -905,8 +901,8 @@ class FakeTensorMode(TorchDispatchMode):
                 ):
                     self.fake_tensor_converter.invalidate_constant_aliases(v.constant)
 
-    def from_tensor(self, tensor):
-        return self.fake_tensor_converter(self, tensor)
+    def from_tensor(self, tensor, shape_env=None):
+        return self.fake_tensor_converter(self, tensor, shape_env=shape_env)
 
 
 # NB: returns fake tensors
