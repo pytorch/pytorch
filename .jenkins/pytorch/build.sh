@@ -171,7 +171,7 @@ fi
 # TORCH_CUDA_ARCH_LIST must be passed from an environment variable
 if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
   echo "TORCH_CUDA_ARCH_LIST must be defined"
-  exit -1
+  exit 1
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
