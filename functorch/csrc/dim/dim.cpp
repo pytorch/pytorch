@@ -1440,15 +1440,20 @@ py::object getname(PyCodeObject* code, _Py_CODEUNIT c) {
         case STORE_GLOBAL:
           names = code->co_names;
           break;
-#if PY_VERSION_HEX < 0x030b0000
-        // TODO: Re-enable this for Python-3.11
         case STORE_FAST:
+#if PY_VERSION_HEX < 0x030b0000
           names = code->co_varnames;
+#else
+          names = PyCode_GetVarnames(code);
+#endif
           break;
         case STORE_DEREF:
+#if PY_VERSION_HEX < 0x030b0000
           names = code->co_cellvars;
-          break;
+#else
+          names = PyCode_GetCellvars(code);
 #endif
+          break;
         default:
             return py::object();
     }
