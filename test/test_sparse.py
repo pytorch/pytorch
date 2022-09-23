@@ -42,10 +42,7 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
-        super(CrossRefSparseFakeMode, self).__init__(
-            self.ignore_op, check_strides=False,
-            check_aliasing=False,
-        )  # TODO: enable stride/alias checking
+        super(CrossRefSparseFakeMode, self).__init__(self.ignore_op, check_strides=False)  # TODO: enable stride checking
 
     # empty_like excluded for now due to sparse complex
     # aten._to_dense.default this one is getting called with csc
