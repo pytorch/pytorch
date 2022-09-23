@@ -108,8 +108,8 @@ def _test_addmm_addmv(
 
     if mode == "all_sparse":
         res1 = f(*map(convert_layout, (t, m, v)), alpha=alpha, beta=beta)
-        res1 = res1.to_dense()
         test_case.assertEqual(res1.layout, layout)
+        res1 = res1.to_dense()
     elif mode == "dense_result":
         res1 = f(t, convert_layout(m), convert_layout(v), alpha=alpha, beta=beta)
     else:
@@ -1054,18 +1054,17 @@ class TestSparseCSR(TestCase):
 
     @skipMeta
     @dtypes(torch.float, torch.bool)
-    @all_sparse_compressed_layouts('layout_a')
-    @all_sparse_compressed_layouts('layout_b')
-    def test_resize_as_sparse_compressed(self, device, dtype, layout_a, layout_b):
+    @all_sparse_compressed_layouts()
+    def test_resize_as_sparse_compressed(self, device, dtype, layout):
 
         def _check_resize_b_as_a(b, a, should_resize=True):
             br = b.clone()
             br.resize_as_sparse_(a)
 
-            # layout and shape are inherited from a
+            # shape is inherited from a
             self.assertEqual(a.shape, br.shape)
-            self.assertEqual(a.layout, br.layout)
             # other metadata is not affected
+            self.assertEqual(b.layout, br.layout)
             self.assertEqual(b.device, br.device)
             self.assertEqual(b.dtype, br.dtype)
 
@@ -1109,42 +1108,39 @@ class TestSparseCSR(TestCase):
             torch._validate_sparse_compressed_tensor_args(br_compressed_indices, br_plain_indices, br_values, br.shape,
                                                           br.layout)
 
-        a_block_sparse = layout_a in (torch.sparse_bsr, torch.sparse_bsc)
-        b_block_sparse = layout_b in (torch.sparse_bsr, torch.sparse_bsc)
+        block_sparse = layout in (torch.sparse_bsr, torch.sparse_bsc)
         shape = (2, 1, 6, 4)
         nnz = 4
-        blocksize_a = (2, 2) if a_block_sparse else ()
-        blocksize_b = (3, 2) if b_block_sparse else ()
+        blocksize = (2, 1) if block_sparse else ()
         for index_dtype in [torch.int32, torch.int64]:
             a = self.genSparseCompressedTensor(shape,
-                                               layout=layout_a,
+                                               layout=layout,
                                                device=device,
                                                index_dtype=index_dtype,
                                                dtype=dtype,
                                                nnz=nnz,
-                                               blocksize=blocksize_a)
-            # TODO: we could clone + convert but not all layouts are supported, so we generate from scratch
-            # same size, different layouts should trigger resize
+                                               blocksize=blocksize)
+
+            # same size, resize should not trigger
             b = self.genSparseCompressedTensor(shape,
-                                               layout=layout_b,
+                                               layout=layout,
                                                device=device,
                                                index_dtype=index_dtype,
                                                dtype=dtype,
                                                nnz=nnz,
-                                               blocksize=blocksize_a if
-                                               (a_block_sparse and b_block_sparse) else blocksize_b)
+                                               blocksize=blocksize)
 
             # This test will not always trigger a resize, if the layouts are the same nothing should happen to b
-            _check_resize_b_as_a(b, a, should_resize=layout_a != layout_b)
+            _check_resize_b_as_a(b, a, should_resize=False)
 
-            # same ndim, but bigger, more nnz, different dtype, different blocksize
+            # same ndim, but bigger, more nnz, different dtype, different blocksize if blocked
             b = self.genSparseCompressedTensor(tuple(s * 2 for s in shape),
-                                               layout=layout_b,
+                                               layout=layout,
                                                device=device,
                                                dtype=torch.chalf,
                                                index_dtype=torch.int64 if index_dtype == torch.int32 else torch.int32,
                                                nnz=nnz * 2,
-                                               blocksize=blocksize_b)
+                                               blocksize=tuple(2 * bi for bi in blocksize))
             _check_resize_b_as_a(b, a)
 
             # different device, only check on cuda pass as we know we are testing in an environment that has multiple devices
@@ -1163,6 +1159,14 @@ class TestSparseCSR(TestCase):
             with self.assertRaisesRegex(
                     RuntimeError, r'"resize_as_sparse_compressed_: self " expected sparse compressed tensor layout'):
                 b_strided.resize_as_sparse_(a)
+
+            # error if layout does not match, transpose induces layout flip
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"resize_as_sparse_compressed_tensor_: self and src must have the same layout"):
+                b.transpose(-2, -1).resize_as_sparse_(a)
+            with self.assertRaisesRegex(RuntimeError,
+                                        r"resize_as_sparse_compressed_tensor_: self and src must have the same layout"):
+                b.resize_as_sparse_(a.transpose(-2, -1))
 
     @skipMeta
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
