@@ -16321,11 +16321,11 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                         dtypes=(torch.complex32,), device_type='cpu'),
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
-                         dtypes=(torch.complex32,), device_type='cpu'),
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
-                         dtypes=(torch.complex32,), device_type='cpu'),
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
         )
@@ -17378,8 +17378,12 @@ python_ref_db = [
             # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.chalf,), device_type='cpu'),
-            # Reference result was farther (nan) from the precise computation than
-            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
+                         dtypes=(torch.chalf,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.chalf,), device_type='cpu'),
         ),
