@@ -752,6 +752,26 @@ class TestDecomp(TestCase):
             )
             self.assertFalse(includes_aten_to_copy)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_decomposition_data_dependent_control_flow(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+        x = torch.empty(2, 3, device=device).to(dtype=dtype)
+        mask = torch.ones_like(x).bool()
+        y = torch.tensor(0.3)  # cpu scalar tensor
+
+        def func(x, mask, y):
+            return torch.masked_fill(x, mask, y)
+
+        # mimicing real use-case for TorchRefsNvfuserCapabilityMode context
+        gm = make_fx(func, decomposition_table={})(x, mask, y)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(gm)(x, mask, y)
+
 
 instantiate_device_type_tests(TestDecomp, globals())
 
