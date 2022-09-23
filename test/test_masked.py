@@ -394,7 +394,7 @@ class TestMasked(TestCase):
 
 
         sparse = torch.masked._where(mask, input,
-                                      torch.tensor(fill_value, dtype=input.dtype, device=input.device))
+                                     torch.tensor(fill_value, dtype=input.dtype, device=input.device))
 
         if tmp.layout == torch.sparse_coo:
             expected_sparse = torch.sparse_coo_tensor(
