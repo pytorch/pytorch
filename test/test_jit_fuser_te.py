@@ -2679,7 +2679,9 @@ def f({', '.join(param_names)}):
                 trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
                 val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-                self.assertEqual(ref, val)
+                atol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                rtol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                self.assertEqual(ref, val, atol=atol, rtol=rtol)
 
             # https://github.com/pytorch/pytorch/issues/35600
             # each torch.jit.trace adds state to the _python_cu compilation unit
