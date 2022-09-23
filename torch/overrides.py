@@ -256,6 +256,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__hash__,
         Tensor.as_subclass,
         Tensor.eig,
+        Tensor.lstsq,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
@@ -654,7 +655,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.logsumexp: lambda input, names, keepdim=False, out=None: -1,
         torch.lstm: lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1,
         torch.lstm_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
-        torch.lstsq: lambda input, A, out=None: -1,
         torch.lt: lambda input, other, out=None: -1,
         torch.less: lambda input, other, out=None: -1,
         torch.lu: lambda A, pivot=True, get_infos=False, out=None: -1,
@@ -671,7 +671,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
-        torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,
         torch.linalg.matrix_rank: lambda input, tol=None, hermitian=False: -1,
         torch.linalg.multi_dot: lambda tensors, out=None: -1,
         torch.matrix_exp: lambda input: -1,
