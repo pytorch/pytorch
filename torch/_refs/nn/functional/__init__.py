@@ -236,6 +236,7 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return scale * torch.where(a > 0, a, rhs)
 
 
+# Forwarding alias: the functional variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
@@ -390,6 +391,7 @@ def l1_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+# Forwarding alias: the functional variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
     a: TensorLikeType,

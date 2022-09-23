@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 import torch
@@ -20,6 +21,7 @@ __all__ = [
     "i1e",
     "logit",
     "log_softmax",
+    "multigammaln",
     "softmax",
     "zeta",
 ]
@@ -61,6 +63,19 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
     return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
+@register_decomposition(torch.ops.aten.mvlgamma)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
+    c = 0.25 * p * (p - 1) * math.log(math.pi)
+    b = 0.5 * torch.arange(start=(1 - p), end=1, step=1, dtype=a.dtype, device=a.device)
+    return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
     a: TensorLikeType,
@@ -70,6 +85,7 @@ def log_softmax(
     return torch.log_softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
 
 
+# Forwarding alias: the special variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
@@ -80,7 +96,7 @@ def softmax(
 
 
 zeta = _make_elementwise_binary_reference(
-    prims.zeta,
+    prims.zeta,  # type: ignore[has-type]
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_zeta,
 )
