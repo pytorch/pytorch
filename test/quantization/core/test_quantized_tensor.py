@@ -10,8 +10,9 @@ from hypothesis import given
 from hypothesis import strategies as st
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TestCase
 import torch.testing._internal.hypothesis_utils as hu
+from torch.testing._internal.common_quantization import get_supported_device_types
 
 hu.assert_deadline_disabled()
 
@@ -66,9 +67,6 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
         nudged_zero_point = int(round(initial_zero_point))
 
     return [scale.astype(np.float32), int(nudged_zero_point)]
-
-def get_supported_device_types():
-    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 # Note we explicitly cast variables to np.float32 in a couple of places to avoid
 # the default casting in Python often resuling in double precision and to make
