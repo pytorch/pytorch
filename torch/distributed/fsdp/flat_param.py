@@ -38,44 +38,6 @@ __all__ = [
 ]
 
 
-class TensorFlattener:
-    """
-    This enables a pre-flatten and post-unflatten transform to be applied per
-    parameter. To do so, use :func:`_set_tensor_flattener` to set a custom
-    :class:`TensorFlattener` that implements the two transforms.
-    """
-
-    def pre_flatten_transform(
-        self, tensor: torch.Tensor
-    ) -> Tuple[Optional[Any], torch.Tensor]:
-        # E.g. Converting `ShardedTensor` to local tensor
-        ...
-
-    def post_unflatten_transform(
-        self, tensor: torch.Tensor, param_extension: Any
-    ) -> torch.Tensor:
-        # E.g. Converting local tensor to `ShardedTensor`
-        ...
-
-    def chunk_tensor(
-        self,
-        tensor: torch.Tensor,
-        rank: int,
-        world_size: int,
-        num_devices_per_node: int,
-        process_group: dist.ProcessGroup,
-    ):
-        ...
-
-
-_flattener: Optional[TensorFlattener] = None
-
-
-def _set_tensor_flattener(flattener: TensorFlattener) -> None:
-    global _flattener
-    _flattener = flattener
-
-
 class ParamInfo(NamedTuple):
     """Information for an original module parameter."""
 
