@@ -199,7 +199,7 @@ def _compare_ort_pytorch_outputs(
                         f"within acceptable range {acceptable_error_percentage}."
                     )
                     continue
-                else
+                else:
                     if ort_out.is_quantized and pt_out.is_quantized:
                         if ort_out.q_scale() != pt_out.q_scale():
                             warnings.warn("ONNX output and PyTorch output has scale difference") 
