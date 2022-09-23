@@ -1,5 +1,4 @@
 #include <ATen/Dispatch.h>
-#include <ATen/TensorIterator.h>
 #include <ATen/native/sparse/SparseFactories.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

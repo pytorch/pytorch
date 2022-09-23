@@ -86,7 +86,7 @@ struct MetadataBase {
   }
 
   void addMetadata(const std::string& key, const std::string& value) {
-    if (kineto_activity_ && !value.empty() && value != "\"\"") {
+    if (kineto_activity_ && !value.empty()) {
       torch::profiler::impl::kineto::addMetadata(kineto_activity_, key, value);
     }
   }
@@ -309,7 +309,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
             [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
             [](auto&) {}));
 
-        kineto_events_.emplace_back(e, config_.experimental_config.verbose);
+        kineto_events_.emplace_back(e);
         AddTensorboardFields add_tb(e, kineto_events_.back());
         AddGenericMetadata add_generic(e);
 
@@ -618,19 +618,16 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
 }
 
 KinetoEvent::KinetoEvent(
-    std::shared_ptr<const torch::profiler::impl::Result> result,
-    const bool verbose)
+    std::shared_ptr<const torch::profiler::impl::Result> result)
     : result_{result} {
   TORCH_INTERNAL_ASSERT(result != nullptr);
 
-  if (verbose) {
-    // Populate Python stack
-    auto parent = result_->parent_.lock();
-    while (parent != nullptr) {
-      parent->visit_if_base<PyExtraFieldsBase>(
-          [&](const auto& i) { python_stack_.push_back(parent->name()); });
-      parent = parent->parent_.lock();
-    }
+  // Populate Python stack
+  auto parent = result_->parent_.lock();
+  while (parent != nullptr) {
+    parent->visit_if_base<PyExtraFieldsBase>(
+        [&](const auto& i) { python_stack_.push_back(parent->name()); });
+    parent = parent->parent_.lock();
   }
 }
 

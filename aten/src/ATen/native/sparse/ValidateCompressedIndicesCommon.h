@@ -3,7 +3,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/sparse/Macros.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -14,10 +13,21 @@
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #endif
 
-#ifdef GPUCC
+#if defined(__CUDACC__) || defined(__HIPCC__)
+#define GPUCC
+#define FUNCAPI __host__ __device__
+#define INLINE __forceinline__
 #define NAME "compressed_index_invariance_checks_cuda"
 #else
+#define FUNCAPI
+#define INLINE inline
 #define NAME "compressed_index_invariance_checks_cpu"
+#endif
+
+#if defined(_WIN32) || defined(_WIN64)
+#define RESTRICT __restrict
+#else
+#define RESTRICT __restrict__
 #endif
 
 #define INVARIANT_CHECK_FUNC_API static INLINE FUNCAPI void

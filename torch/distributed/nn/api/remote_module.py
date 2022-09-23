@@ -28,7 +28,6 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
 
-__all__ = ["RemoteModule"]
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -390,7 +389,10 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True
     ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 

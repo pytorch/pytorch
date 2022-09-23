@@ -122,6 +122,21 @@ static inline void NCCL_CHECK(ncclResult_t result) {
   NCCL_CHECK(from_nccl_result(result));
 }
 
+struct AutoNcclGroup {
+  AutoNcclGroup() {
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+    NCCL_CHECK(ncclGroupStart());
+#endif
+  }
+  ~AutoNcclGroup() {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+    NCCL_CHECK(ncclGroupEnd());
+#endif
+    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
+  }
+};
+
 void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
@@ -295,20 +310,6 @@ void check_inputs(
 }
 
 } // namespace detail
-
-AutoNcclGroup::AutoNcclGroup() {
-  (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  detail::NCCL_CHECK(ncclGroupStart());
-#endif
-}
-
-AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-  detail::NCCL_CHECK(ncclGroupEnd());
-#endif
-  (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
-}
 
 bool is_available(TensorList tensors) {
 #ifdef USE_NCCL

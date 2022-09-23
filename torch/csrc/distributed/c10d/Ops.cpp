@@ -1,82 +1,73 @@
 #include <torch/csrc/distributed/c10d/Ops.hpp>
 
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/library.h>
 
 namespace c10d {
 namespace {
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_(
+c10::intrusive_ptr<ProcessGroup::Work> broadcast_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t root_tensor,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
-  auto work = process_group->broadcast(
+  return process_group->broadcast(
       tensor_vec,
       BroadcastOptions{
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      std::move(tensor_vec), work);
 }
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>
+allreduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t reduce_op,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
   auto work = process_group->allreduce(
       tensor_vec,
-      AllreduceOptions{*reduce_op.get(), std::chrono::milliseconds(timeout)});
+      AllreduceOptions{
+          static_cast<ReduceOp>(reduce_op),
+          std::chrono::milliseconds(timeout)});
 
   // Return input tensors as output tensors to make inplace allreduce look like
   // a functional API, so that make_fx can correctly build the dependencies in
   // the graph later.
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      std::move(tensor_vec), work);
+  return std::
+      tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
+          std::move(tensor_vec), work);
 }
 
-std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
-allgather_(
+c10::intrusive_ptr<ProcessGroup::Work> allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
-  auto work = process_group->allgather(
+  return process_group->allgather(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
       const_cast<std::vector<at::Tensor>&>(input_tensors),
       AllgatherOptions{std::chrono::milliseconds(timeout)});
-
-  // Copy output tensors (not storage) so that this can be used in a functional
-  // manner
-  return std::
-      tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>(
-          output_tensors, work);
 }
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
+c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t reduce_op,
     int64_t timeout) {
-  auto work = process_group->reduce_scatter(
+  return process_group->reduce_scatter(
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ReduceScatterOptions{
-          *reduce_op.get(), std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      output_tensors, work);
+          static_cast<ReduceOp>(reduce_op),
+          std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<Work> reduce_(
+c10::intrusive_ptr<ProcessGroup::Work> reduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t reduce_op,
     int64_t root_rank,
     int64_t root_tensor,
     int64_t timeout) {
@@ -84,13 +75,13 @@ c10::intrusive_ptr<Work> reduce_(
   return process_group->reduce(
       tensor_vec,
       ReduceOptions{
-          *reduce_op.get(),
+          static_cast<ReduceOp>(reduce_op),
           root_rank,
           root_tensor,
           std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<Work> gather_(
+c10::intrusive_ptr<ProcessGroup::Work> gather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -102,22 +93,19 @@ c10::intrusive_ptr<Work> gather_(
       GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
 }
 
-std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_(
+c10::intrusive_ptr<ProcessGroup::Work> scatter_(
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t root_rank,
     int64_t timeout) {
-  auto work = process_group->scatter(
+  return process_group->scatter(
       const_cast<std::vector<at::Tensor>&>(output_tensors),
       const_cast<std::vector<std::vector<at::Tensor>>&>(input_tensors),
       ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
-
-  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-      output_tensors, work);
 }
 
-c10::intrusive_ptr<Work> alltoall_(
+c10::intrusive_ptr<ProcessGroup::Work> alltoall_(
     at::TensorList output_tensors,
     at::TensorList input_tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -130,7 +118,7 @@ c10::intrusive_ptr<Work> alltoall_(
       AllToAllOptions{std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<Work> barrier(
+c10::intrusive_ptr<ProcessGroup::Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<int64_t>& device_ids,
     int64_t timeout) {
@@ -138,7 +126,7 @@ c10::intrusive_ptr<Work> barrier(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<Work> send(
+c10::intrusive_ptr<ProcessGroup::Work> send(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t dstRank,
@@ -148,7 +136,7 @@ c10::intrusive_ptr<Work> send(
       tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
 }
 
-c10::intrusive_ptr<Work> recv_(
+c10::intrusive_ptr<ProcessGroup::Work> recv_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t srcRank,
@@ -159,14 +147,14 @@ c10::intrusive_ptr<Work> recv_(
 }
 
 TORCH_LIBRARY(c10d, m) {
-  // The following ProcessGroup, Work, and ReduceOp definitions are more like
-  // declarations. They don't expose the details of the two classes into
-  // TorchScript.
+  // The following ProcessGroup and Work definations are more like declarations.
+  // They don't expose the details of the two classes into TorchScript.
   m.class_<ProcessGroup>("ProcessGroup").def(torch::init<int64_t, int64_t>());
-  m.class_<Work>("Work")
+  m.class_<ProcessGroup::Work>("Work")
       .def(torch::init<>())
-      .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
-  m.class_<ReduceOp>("ReduceOp").def(torch::init<>());
+      .def("wait", [](const c10::intrusive_ptr<ProcessGroup::Work>& self) {
+        self->wait();
+      });
   // It's important to register the op to the CompositeExplicitAutograd key to
   // enable
   // __torch_dispatch__.
@@ -204,120 +192,117 @@ TORCH_LIBRARY(c10d, m) {
 
 namespace ops {
 
-c10::intrusive_ptr<Work> broadcast(
+c10::intrusive_ptr<ProcessGroup::Work> broadcast(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const BroadcastOptions& opts) {
-  static auto op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("c10d::broadcast_", "")
-          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-              at::TensorList,
-              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-              int64_t,
-              int64_t,
-              int64_t)>();
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::broadcast_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t,
+                           int64_t)>();
   // It's awakward to unbox the opts here and box them again in the custom C++
   // op. But it's also complicated to make opts as a CustomClassHolder. Leave it
   // as it is now.
-  return std::get<1>(op.call(
+  return op.call(
       tensors,
       process_group,
       opts.rootRank,
       opts.rootTensor,
-      opts.timeout.count()));
+      opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> allreduce(
+c10::intrusive_ptr<ProcessGroup::Work> allreduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const AllreduceOptions& opts) {
-  static auto op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("c10d::allreduce_", "")
-          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-              at::TensorList,
-              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-              const c10::intrusive_ptr<::c10d::ReduceOp>&,
-              int64_t)>();
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::allreduce_", "")
+                       .typed<std::tuple<
+                           std::vector<at::Tensor>,
+                           c10::intrusive_ptr<ProcessGroup::Work>>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t)>();
 
   return std::get<1>(op.call(
       tensors,
       process_group,
-      c10::make_intrusive<ReduceOp>(opts.reduceOp),
+      static_cast<uint64_t>(opts.reduceOp),
       opts.timeout.count()));
 }
 
-c10::intrusive_ptr<Work> allgather(
+c10::intrusive_ptr<ProcessGroup::Work> allgather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const AllgatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allgather_", "")
-                       .typed<std::tuple<
-                           std::vector<std::vector<at::Tensor>>,
-                           c10::intrusive_ptr<Work>>(
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            const std::vector<std::vector<at::Tensor>>&,
                            const std::vector<at::Tensor>&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t)>();
-  return std::get<1>(op.call(
-      output_tensors, input_tensors, process_group, opts.timeout.count()));
+  return op.call(
+      output_tensors, input_tensors, process_group, opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> reduce_scatter(
+c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ReduceScatterOptions& opts) {
-  static auto op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("c10d::reduce_scatter_", "")
-          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-              const std::vector<at::Tensor>&,
-              const std::vector<std::vector<at::Tensor>>&,
-              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-              const c10::intrusive_ptr<::c10d::ReduceOp>&,
-              int64_t)>();
-  return std::get<1>(op.call(
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::reduce_scatter_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           const std::vector<at::Tensor>&,
+                           const std::vector<std::vector<at::Tensor>>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t)>();
+  return op.call(
       output_tensors,
       input_tensors,
       process_group,
-      c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
-      opts.timeout.count()));
+      static_cast<uint64_t>(opts.reduceOp),
+      opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> reduce(
+c10::intrusive_ptr<ProcessGroup::Work> reduce(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     const ReduceOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::reduce_", "")
-                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                           const c10::intrusive_ptr<::c10d::ReduceOp>&,
+                           int64_t,
                            int64_t,
                            int64_t,
                            int64_t)>();
   return op.call(
       tensors,
       process_group,
-      c10::make_intrusive<ReduceOp>(opts.reduceOp),
+      static_cast<uint64_t>(opts.reduceOp),
       opts.rootRank,
       opts.rootTensor,
       opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> gather(
+c10::intrusive_ptr<ProcessGroup::Work> gather(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
     const GatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::gather_", "")
-                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            const std::vector<std::vector<at::Tensor>>&,
                            const std::vector<at::Tensor>&,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
@@ -331,36 +316,35 @@ c10::intrusive_ptr<Work> gather(
       opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> scatter(
+c10::intrusive_ptr<ProcessGroup::Work> scatter(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ScatterOptions& opts) {
-  static auto op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("c10d::scatter_", "")
-          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
-              const std::vector<at::Tensor>&,
-              const std::vector<std::vector<at::Tensor>>&,
-              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-              int64_t,
-              int64_t)>();
-  return std::get<1>(op.call(
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::scatter_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           const std::vector<at::Tensor>&,
+                           const std::vector<std::vector<at::Tensor>>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t)>();
+  return op.call(
       output_tensors,
       input_tensors,
       process_group,
       opts.rootRank,
-      opts.timeout.count()));
+      opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> alltoall(
+c10::intrusive_ptr<ProcessGroup::Work> alltoall(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList output_tensors,
     at::TensorList input_tensors,
     const AllToAllOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::alltoall_", "")
-                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            at::TensorList,
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
@@ -369,26 +353,26 @@ c10::intrusive_ptr<Work> alltoall(
       output_tensors, input_tensors, process_group, opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> barrier(
+c10::intrusive_ptr<ProcessGroup::Work> barrier(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     const BarrierOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::barrier", "")
-                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            const std::vector<int64_t>&,
                            int64_t)>();
   return op.call(process_group, opts.device_ids, opts.timeout.count());
 }
 
-c10::intrusive_ptr<Work> send(
+c10::intrusive_ptr<ProcessGroup::Work> send(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     int64_t dstRank,
     int64_t tag) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::send", "")
-                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t,
@@ -396,14 +380,14 @@ c10::intrusive_ptr<Work> send(
   return op.call(tensors, process_group, dstRank, tag);
 }
 
-c10::intrusive_ptr<Work> recv(
+c10::intrusive_ptr<ProcessGroup::Work> recv(
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     at::TensorList tensors,
     int64_t srcRank,
     int64_t tag) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::recv_", "")
-                       .typed<c10::intrusive_ptr<::c10d::Work>(
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t,

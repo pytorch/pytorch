@@ -131,8 +131,6 @@ class TestModelDump(TestCase):
 
         with tempfile.NamedTemporaryFile() as tf:
             torch.jit.save(torch.jit.script(SimpleModel()), tf)
-            # Actually write contents to disk so we can read it below
-            tf.flush()
 
             stdout = io.StringIO()
             torch.utils.model_dump.main(

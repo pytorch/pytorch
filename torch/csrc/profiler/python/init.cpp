@@ -50,8 +50,7 @@ void initPythonBindings(PyObject* module) {
       .def(
           py::init<
               std::vector<std::string> /* profiler_metrics */,
-              bool /* profiler_measure_per_kernel */,
-              bool /* verbose */
+              bool /* profiler_measure_per_kernel */
               >(),
           "An experimental config for Kineto features. Please note that"
           "backward compatibility is not guaranteed.\n"
@@ -59,11 +58,9 @@ void initPythonBindings(PyObject* module) {
           "       to measure GPU performance events.\n"
           "       If this list contains values Kineto runs in CUPTI profiler mode\n"
           "    profiler_measure_per_kernel (bool) : whether to profile metrics per kernel\n"
-          "       or for the entire measurement duration.\n"
-          "    verbose (bool) : whether the trace file has `Call stack` field or not.",
+          "       or for the entire measurement duration.",
           py::arg("profiler_metrics") = std::vector<std::string>(),
-          py::arg("profiler_measure_per_kernel") = false,
-          py::arg("verbose") = true)
+          py::arg("profiler_measure_per_kernel") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
@@ -72,12 +69,11 @@ void initPythonBindings(PyObject* module) {
               py_metrics.append(mbytes);
             }
             /* Return a tuple that fully encodes the state of the config */
-            return py::make_tuple(
-                py_metrics, p.profiler_measure_per_kernel, p.verbose);
+            return py::make_tuple(py_metrics, p.profiler_measure_per_kernel);
           },
           [](py::tuple t) { // __setstate__
-            if (t.size() != 3) {
-              throw std::runtime_error("Expected 3 values in state");
+            if (t.size() != 2) {
+              throw std::runtime_error("Expected 2 values in state");
             }
 
             py::list py_metrics = t[0].cast<py::list>();
@@ -87,8 +83,7 @@ void initPythonBindings(PyObject* module) {
               metrics.push_back(py::str(py_metric));
             }
 
-            return ExperimentalConfig(
-                std::move(metrics), t[1].cast<bool>(), t[2].cast<bool>());
+            return ExperimentalConfig(std::move(metrics), t[1].cast<bool>());
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")

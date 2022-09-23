@@ -45,7 +45,8 @@ void _dim_apply(
           return;
         }
 
-        for (const auto i C10_UNUSED : c10::irange(n)) {
+        for (const auto i : c10::irange(n)) {
+          (void)i; //Suppress unused variable warning
           f(
             reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,

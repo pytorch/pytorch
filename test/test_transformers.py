@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import unittest
 from unittest.mock import patch
-import math
 
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -90,8 +89,7 @@ class TestTransformers(NNTestCase):
     @parametrize("device", device_list)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
-    @parametrize("use_autocast", [True, False])
-    def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor, use_autocast):
+    def test_transformerencoder_fastpath(self, device, use_torchscript, enable_nested_tensor):
         """
         Test TransformerEncoder fastpath output matches slowpath output
         """
@@ -161,25 +159,23 @@ class TestTransformers(NNTestCase):
             ) for pair in input_mask_pairs
         ]
 
-        maybe_autocast = torch.autocast("cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
-        with maybe_autocast:
-            for input, src_key_padding_mask in input_mask_pairs:
-                with torch.no_grad():
-                    fastpath_output = model(input, src_key_padding_mask=src_key_padding_mask)
-                slowpath_output = model(input, src_key_padding_mask=src_key_padding_mask)  # reference
+        for input, src_key_padding_mask in input_mask_pairs:
+            with torch.no_grad():
+                fastpath_output = model(input, src_key_padding_mask=src_key_padding_mask)
+            slowpath_output = model(input, src_key_padding_mask=src_key_padding_mask)  # reference
 
-                # Make sure fastpath_output is same shape as slowpath_output and mask.
-                # When enable_nested_tensor=true, fastpath_output may be smaller than input tensor.
-                # Eg if input bs=1, seqlen=6, and we mask out 2 tokens, fastpath_output will have bs=1, seqlen=4.
-                # Expand back to old size to match.
-                bs, true_seqlen, embed_dim = fastpath_output.shape
-                expanded_seqlen = src_key_padding_mask.shape[1]
-                fastpath_output_expanded = torch.zeros(bs, expanded_seqlen, embed_dim, device=device)
-                fastpath_output_expanded[:, :true_seqlen, :] = fastpath_output
-                # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
-                fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-                slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
-                torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=1e-7, atol=1e-5)
+            # Make sure fastpath_output is same shape as slowpath_output and mask.
+            # When enable_nested_tensor=true, fastpath_output may be smaller than input tensor.
+            # Eg if input bs=1, seqlen=6, and we mask out 2 tokens, fastpath_output will have bs=1, seqlen=4.
+            # Expand back to old size to match.
+            bs, true_seqlen, embed_dim = fastpath_output.shape
+            expanded_seqlen = src_key_padding_mask.shape[1]
+            fastpath_output_expanded = torch.zeros(bs, expanded_seqlen, embed_dim, device=device)
+            fastpath_output_expanded[:, :true_seqlen, :] = fastpath_output
+            # no garauntees on output corresponding to masked tokens, so they may vary between slow/fast path. set all to 0.
+            fastpath_output_expanded = fastpath_output_expanded.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+            slowpath_output = slowpath_output.masked_fill(src_key_padding_mask.unsqueeze(-1), 0)
+            torch.testing.assert_close(fastpath_output_expanded, slowpath_output, rtol=1e-7, atol=1e-5)
 
     @parametrize("with_no_grad", [True, False])
     @parametrize("training", [True, False])
@@ -733,26 +729,6 @@ class TestTransformers(NNTestCase):
     @parametrize("device", device_list)
     def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
         # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
-        def sdp_ref(q,
-                    k,
-                    v,
-                    attn_mask=None,
-                    dropout_p=0.0):
-            B, Nt, E = q.shape
-            q = q / math.sqrt(E)
-            # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-            if attn_mask is not None:
-                attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
-            else:
-                attn = torch.bmm(q, k.transpose(-2, -1))
-
-            attn = torch.nn.functional.softmax(attn, dim=-1)
-            if dropout_p > 0.0:
-                attn = torch.nn.functional.dropout(attn, p=dropout_p)
-            # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
-            output = torch.bmm(attn, v)
-            return output, attn
-
         dtypes = [torch.double, torch.float]
         for dtype in dtypes:
 
@@ -789,7 +765,8 @@ class TestTransformers(NNTestCase):
                 a = attn_mask_float
                 if a is not None and attn_mask_dim > 3:
                     a = a.view(-1, L, S)
-                expected = sdp_ref(q, k, v, attn_mask=a, dropout_p=dropout_p)
+                expected = F._scaled_dot_product_attention(
+                    q, k, v, attn_mask=a, dropout_p=dropout_p)
                 if input_dim > 3:
                     expected = (expected[0].view(-1, N_prime, L, E), expected[1].view(-1, N_prime, L, S))
 

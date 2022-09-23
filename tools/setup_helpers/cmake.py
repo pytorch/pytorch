@@ -230,7 +230,6 @@ class CMake:
                     "OPENSSL_ROOT_DIR",
                     "STATIC_DISPATCH_BACKEND",
                     "SELECTED_OP_LIST",
-                    "TRACING_BASED",
                 )
             }
         )

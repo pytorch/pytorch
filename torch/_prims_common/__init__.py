@@ -43,12 +43,9 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
-# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
-# TODO: This needs a lot more type annotations
-# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
 NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
+Number = (bool, int, float, complex)
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
@@ -126,10 +123,8 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     if check_strides:
         same_strides, idx = check_significant_strides(a, b)
         if not same_strides:
-            msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                    a.stride(), b.stride(), idx
-                )
+            msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                a.stride(), b.stride(), idx
             )
             raise RuntimeError(msg)
 
@@ -448,9 +443,8 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
     assert ex_idx > 0 and ex_idx <= rank
 
 
-# "Wraps" a dim (up to one time) for the given rank, allowing dims to be
-# specified using negative indices. For scalar tensors with rank 0, then idx
-# must be in the range [-1, 0]. Otherwise, idx should be in the range [-rank, rank-1].
+# "Wraps" a dim (up to one time) for the given rank, allowing
+# dims to be specified using negative indices
 def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
     if rank < 0:
         msg = f"Rank cannot be negative but got {rank}"
@@ -680,16 +674,12 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
             newsize *= d
         else:
             check(False, lambda: f"invalid shape dimension {d}")
-    check(
-        numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
-        lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
-    )
+    check(numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
+          lambda: f"shape '{list(shape)}' is invalid for input of size {numel}")
     if dim is not None:
-        check(
-            newsize != 0,
-            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
-            f"unspecified dimension size -1 can be any value and is ambiguous",
-        )
+        check(newsize != 0,
+              lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+                      f"unspecified dimension size -1 can be any value and is ambiguous")
         shape = list(shape)
         shape[dim] = numel // newsize
     return tuple(shape)
@@ -770,29 +760,6 @@ def dtype_to_type(dtype: torch.dtype) -> type:
         return float
     if dtype in _complex_dtypes:
         return complex
-
-    raise ValueError("Invalid dtype!")
-
-
-def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]:
-    """
-    Computes the corresponding Python type constructor for the
-    given dtype.
-    """
-    from torch.fx.experimental.symbolic_shapes import sym_float
-
-    assert isinstance(dtype, torch.dtype)
-
-    if dtype is torch.bool:
-        return lambda x: bool(x)
-    if dtype in _integer_dtypes:
-        # TODO: type error here is real, replace with sym_int
-        return lambda x: int(x)  # type: ignore[arg-type]
-    if dtype in _float_dtypes:
-        return sym_float
-    if dtype in _complex_dtypes:
-        # TODO: type error here is real, replace with sym_complex
-        return lambda x: complex(x)  # type: ignore[arg-type]
 
     raise ValueError("Invalid dtype!")
 
@@ -1079,16 +1046,6 @@ class RETURN_TYPE(Enum):
     INPLACE = (2,)
 
 
-# TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
-    if isinstance(x, torch.SymIntNode):
-        return int
-    elif isinstance(x, torch.SymFloatNode):
-        return float
-    else:
-        return type(x)
-
-
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1193,7 +1150,7 @@ def elementwise_dtypes(
             raise ValueError(msg)
 
         if isinstance(x, Number):
-            highest_type = get_higher_type(highest_type, number_type(x))
+            highest_type = get_higher_type(highest_type, type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1509,20 +1466,6 @@ def prod(xs: Sequence[NumberType]) -> NumberType:
     return reduce(operator.mul, xs, 1)
 
 
-def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
-    """Checks if a shape can be expanded to another shape.
-    This is equivalent to checking if the two shapes are broadcastable.
-    """
-    # This is a Python implementation of
-    # aten/src/ATen/ExpandUtils.h:is_expandable_to
-    if len(shape) > len(desired):
-        return False
-    for i in range(len(shape)):
-        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
-            return False
-    return True
-
-
 def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
     """
     Similar to torch.where(mask, t, 0) but if t is boolean,
@@ -1534,15 +1477,3 @@ def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
         return mask.logical_and(t)
     else:
         return torch.where(mask, t, 0)
-
-
-def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
-    return dtype if dtype is not None else torch.get_default_dtype()
-
-
-def device_or_default(device: Optional[torch.device]) -> torch.device:
-    return device if device is not None else torch.device("cpu")
-
-
-def layout_or_default(layout: Optional[torch.layout]) -> torch.layout:
-    return layout if layout is not None else torch.strided

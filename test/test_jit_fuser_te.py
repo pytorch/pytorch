@@ -1388,18 +1388,13 @@ class TestTEFuser(JitTestCase):
                 F.hardswish,
                 F.softplus,
                 F.silu,
-                F.mish,
-                F.elu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,
-                # TODO broken on int8 since
-                # https://github.com/pytorch/pytorch/pull/85144
-                # RuntimeError: Invalid integral op_type: 23
-                # torch.ceil,
-                # torch.floor,
-                # torch.round,
-                # torch.trunc,
+                torch.ceil,
+                torch.floor,
+                torch.round,
+                torch.trunc,
                 torch.frac,
                 # TODO: broken on ROCm?
                 # F.hardshrink,

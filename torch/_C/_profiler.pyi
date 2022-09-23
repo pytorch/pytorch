@@ -35,7 +35,6 @@ class _ExperimentalConfig:
         self,
         profiler_metrics: List[str] = ...,
         profiler_measure_per_kernel: bool = ...,
-        verbose: bool = ...,
     ) -> None: ...
     ...
 

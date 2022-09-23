@@ -213,7 +213,7 @@ static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "storage_offset");
   }
   auto& self = THPVariable_Unpack(self_);
-  return py::cast(self.sym_storage_offset()).release().ptr();
+  return wrap(self.storage_offset());
   END_HANDLE_TH_ERRORS
 }
 
@@ -920,10 +920,6 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
         "Can't call map_() on Variable that requires grad. Use "
         "var.detach().map_() instead.");
   }
-  TORCH_CHECK(
-      !self_.unsafeGetTensorImpl()->is_python_dispatch() && !other.unsafeGetTensorImpl()->is_python_dispatch(),
-      ".map_ is not supported for tensor subclasses.");
-
   return THPVariable_Wrap(torch::utils::map_(self_, other, r.pyobject(1)));
   END_HANDLE_TH_ERRORS
 }
@@ -949,9 +945,6 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
         "Can't call map2_() on Variable that requires grad. Use "
         "var.detach().map2_() instead.");
   }
-  TORCH_CHECK(
-      !x.unsafeGetTensorImpl()->is_python_dispatch() && !y.unsafeGetTensorImpl()->is_python_dispatch(),
-      ".map2_ is not supported for tensor subclasses.");
   return THPVariable_Wrap(torch::utils::map2_(self_, x, y, r.pyobject(2)));
   END_HANDLE_TH_ERRORS
 }
@@ -1142,7 +1135,7 @@ static PyObject* THPVariable_set_(
           "set_(Storage source)",
           "set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
           "set_(Tensor source)",
-          "set_(Tensor source, SymInt storage_offset, SymIntArrayRef size, SymIntArrayRef stride=None)",
+          "set_(Tensor source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
       },
       /*traceable=*/false);
 
@@ -1210,14 +1203,14 @@ static PyObject* THPVariable_set_(
       at::Tensor storage = _r.tensor(0);
       auto dispatch_set_ = [](const Tensor& self,
                               const Tensor& source,
-                              c10::SymInt storage_offset,
-                              c10::SymIntArrayRef size,
-                              c10::SymIntArrayRef stride) -> Tensor {
+                              int64_t storage_offset,
+                              IntArrayRef size,
+                              IntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set__symint(source, storage_offset, size, stride);
+        return self.set_(source, storage_offset, size, stride);
       };
       return wrap(dispatch_set_(
-          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
+          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
     }
   }
   Py_RETURN_NONE;

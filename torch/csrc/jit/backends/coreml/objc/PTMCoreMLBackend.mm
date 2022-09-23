@@ -143,12 +143,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     PTMCoreMLExecutor *executor = model_wrapper->executor;
     [executor setInputs:inputs];
 
-    NSError *error;
-    id<MLFeatureProvider> outputsProvider = [executor forward:&error];
-    if (!outputsProvider) {
-      TORCH_CHECK(false, [[error description] UTF8String]);
-    }
-
+    id<MLFeatureProvider> outputsProvider = [executor forward];
     return pack_outputs(model_wrapper->outputs, outputsProvider);
   }
 
@@ -167,7 +162,7 @@ static auto cls = torch::jit::backend<CoreMLBackend>("coreml");
 
 struct PTMCoreMLContext : public ContextInterface {
   void setModelCacheDirectory(std::string dir) override {
-    [PTMCoreMLCompiler setCacheDirectory:dir];
+    [PTMCoreMLCompiler setModelCacheDirectory:dir];
   }
 };
 

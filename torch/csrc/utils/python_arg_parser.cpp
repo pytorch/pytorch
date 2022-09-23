@@ -92,7 +92,6 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "sub",          "sub_",          "sub_out",
       "subtract",     "subtract_",     "subtract_out", // alias of sub
       "true_divide",  "true_divide_",  "true_divide_out",
-      "to",           "_to_copy",      "copy_",
       "floor_divide", "floor_divide_", "floor_divide_out"};
   return allowed.find(name) != allowed.end();
 }
@@ -377,15 +376,8 @@ auto handle_torch_function_no_python_arg_parser(
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
-    ss << "no implementation found for '";
-    if (module_name && func_name) {
-      ss << module_name << "." << func_name;
-    } else {
-      py::handle fn = torch_api_function;
-      ss << py::str(fn.attr("__module__")) << "."
-         << py::str(fn.attr("__name__"));
-    }
-    ss << "' on types that implement " << torch_function_name_str << ": [";
+    ss << "no implementation found for '" << module_name << "." << func_name
+       << "' on types that implement " << torch_function_name_str << ": [";
     for (auto& arg : overloaded_args) {
       ss << py::repr(get_type_of_overloaded_arg(arg.ptr()));
       if (!arg.is(overloaded_args.back())) {
@@ -740,12 +732,7 @@ auto FunctionParameter::check(
       if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
         return true;
       }
-      if (allow_numbers_as_tensors) {
-        return THPUtils_checkScalar(obj) ||
-            torch::is_symint_node(py::handle(obj)) ||
-            torch::is_symfloat_node(py::handle(obj));
-      }
-      return false;
+      return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
     }
     case ParameterType::SCALAR:
     case ParameterType::COMPLEX:
@@ -1488,7 +1475,6 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     return THPVariable_Unpack(obj);
   }
 
-  bool save_symint = false;
   at::Scalar scalar;
   if (PyBool_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackBool(obj));
@@ -1498,15 +1484,6 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
   } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
-  } else if (torch::is_symint_node(py::handle(obj))) {
-    save_symint = true;
-    // This scalar value doesn't matter, it shouldn't ever actually
-    // get read out.  Make it a big and weird looking number to help
-    // people figure out if there's aproblem.
-    scalar = at::Scalar(7777777);
-  } else if (torch::is_symfloat_node(py::handle(obj))) {
-    save_symint = true;
-    scalar = at::Scalar(std::numeric_limits<double>::quiet_NaN());
   } else {
     // NB: Are you here because you passed None to a Variable method,
     // and you expected an undefined tensor to be returned?   Don't add
@@ -1521,14 +1498,6 @@ at::Tensor PythonArgs::tensor_slow(int i) {
 
   at::Tensor tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-
-  if (save_symint) {
-    auto py_tensor = py::cast(tensor);
-    if (PyObject_SetAttrString(py_tensor.ptr(), "_wrapped_number", obj) < 0) {
-      throw python_error();
-    }
-  }
-
   return tensor;
 }
 

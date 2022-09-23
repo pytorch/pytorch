@@ -6,9 +6,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface PTMCoreMLCompiler : NSObject
 
-+ (void)setCacheDirectory:(const std::string&)dir;
++ (void)setModelCacheDirectory:(const std::string&)dir;
 
-+ (NSString*)cacheDirectory;
++ (NSString*)modelCacheDirectory;
 
 + (BOOL)compileModel:(const std::string&)modelSpecs
              modelID:(const std::string&)modelID;

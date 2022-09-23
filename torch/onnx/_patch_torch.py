@@ -10,17 +10,15 @@ from torch._C import _onnx as _C_onnx
 # Import utils to get _params_dict because it is a global that is accessed by c++ code
 from torch.onnx import _deprecation, utils
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
 # TODO(#78694): Refactor the patching process to make it more transparent to users.
-@_beartype.beartype
 def _graph_op(
     g: _C.Graph,
     opname: str,
-    *raw_args: Union[torch.Tensor, _C.Value],
+    *raw_args: _C.Value,
     outputs: int = 1,
     **kwargs,
 ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
@@ -78,7 +76,6 @@ def _graph_op(
     return tuple(n.outputs())
 
 
-@_beartype.beartype
 def _const_if_tensor(g: _C.Graph, arg):
     if arg is None:
         return arg
@@ -88,7 +85,6 @@ def _const_if_tensor(g: _C.Graph, arg):
 
 
 # Generate an ONNX ATen op node.
-@_beartype.beartype
 def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwargs):
     return _graph_op(
         g,
@@ -100,19 +96,17 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
     )
 
 
-@_beartype.beartype
-def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
+def _block_op(b: _C.Block, opname: str, *args, **kwargs):
     if "::" in opname:
-        namespace, op = opname.split("::")
+        aten = False
+        ns_opname = opname
     else:
-        namespace = "onnx"
-        op = opname
-
-    n = block.addNode(f"{namespace}::{op}", args)
-    aten = namespace == "aten"
-    skip_attrs = {"inplace", "aten"}
+        aten = kwargs.pop("aten", False)
+        ns = "aten" if aten else "onnx"
+        ns_opname = ns + "::" + opname
+    n = b.addNode(ns_opname, args)
     for k, v in sorted(kwargs.items()):
-        if k in skip_attrs:
+        if k == "inplace":
             continue
         _add_attribute(n, k, v, aten=aten)
     outputs = tuple(n.outputs())
@@ -121,9 +115,8 @@ def _block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
     return outputs
 
 
-@_beartype.beartype
 def _new_node(
-    g: _C.Graph, namespace: str, op: str, outputs: int, *args: _C.Value, **kwargs
+    g: _C.Graph, namespace: str, op: str, outputs: int, *args, **kwargs
 ) -> _C.Node:
     """Creates a new node in the graph.
 
@@ -136,17 +129,15 @@ def _new_node(
     Returns:
         The new node.
     """
-    aten = namespace == "aten"
+    aten = kwargs.pop("aten", False)
     node = g.create(f"{namespace}::{op}", args, outputs)
-    skip_attrs = {"inplace", "aten"}
     for k, v in sorted(kwargs.items()):
-        if k in skip_attrs:
+        if k == "inplace":
             continue
         _add_attribute(node, k, v, aten=aten)
     return node
 
 
-@_beartype.beartype
 def _is_onnx_list(value):
     return (
         not isinstance(value, torch._six.string_classes)
@@ -155,29 +146,26 @@ def _is_onnx_list(value):
     )
 
 
-@_beartype.beartype
 def _scalar(x: torch.Tensor):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
     return x[0]
 
 
-@_beartype.beartype
-def _is_caffe2_aten_fallback() -> bool:
+def _is_caffe2_aten_fallback():
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
         and _C_onnx._CAFFE2_ATEN_FALLBACK
     )
 
 
-@_beartype.beartype
 def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
     r"""Initializes the right attribute based on type of value."""
     m = _ATTR_PATTERN.match(key)
     if m is None:
         raise ValueError(
             f"Invalid attribute specifier '{key}' names "
-            "must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
+            " must be suffixed with type, e.g. 'dim_i' or 'dims_i'"
         )
     name, kind = m.group(1), m.group(2)
     if _is_onnx_list(value):
@@ -200,7 +188,6 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
 @_deprecation.deprecated(
     "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
 )
-@_beartype.beartype
 def _graph_constant(
     g,
     value,

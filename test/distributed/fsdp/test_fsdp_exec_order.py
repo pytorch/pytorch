@@ -36,7 +36,6 @@ class Model(torch.nn.Module):
     when flattened, which means that their corresponding all-gathers and
     reduce-scatters may be silently matched if we do not perform any checks.
     """
-
     def __init__(self) -> None:
         super().__init__()
         self.layer0 = torch.nn.Linear(5, 6)
@@ -55,11 +54,8 @@ class Model(torch.nn.Module):
         # `layer0` -> `layer1` (normal)
         # `layer0` -> `layer2` (alternate)
         z = self.relu(self.layer0(x))
-        z = (
-            self.relu(self.layer2(z))
-            if self.use_alt_path
+        z = self.relu(self.layer2(z)) if self.use_alt_path \
             else self.relu(self.layer1(z))
-        )
         return z
 
     def get_input(self, device: torch.device):
@@ -72,12 +68,10 @@ class Model(torch.nn.Module):
         loss.backward()
 
     def flip_path(self):
-        params_to_freeze = (
-            self.layer2.parameters() if self.use_alt_path else self.layer1.parameters()
-        )
-        params_to_unfreeze = (
-            self.layer1.parameters() if self.use_alt_path else self.layer2.parameters()
-        )
+        params_to_freeze = self.layer2.parameters() if self.use_alt_path \
+            else self.layer1.parameters()
+        params_to_unfreeze = self.layer1.parameters() if self.use_alt_path \
+            else self.layer2.parameters()
         for param in params_to_freeze:
             param.requires_grad = False
         for param in params_to_unfreeze:
@@ -112,7 +106,6 @@ class TestFSDPExecOrder(FSDPTest):
     ):
         """Tests that FSDP errors if the all-gather order differs across ranks
         in the first iteration."""
-        dist.set_debug_level(dist.DebugLevel.INFO)
         # Rank 0 runs the forward pass in one order and all other ranks run in
         # different order
         dist.set_debug_level(dist.DebugLevel.INFO)
@@ -148,19 +141,12 @@ class TestFSDPExecOrder(FSDPTest):
             loss = fsdp_model.module.get_loss(inp, output).to(self.device)
             fsdp_model.module.run_backward(loss)
         # Match the warning message with the following prefix
-        regex = (
-            "^(Forward order differs from that of the first iteration "
-            f"on rank {self.rank}. Collectives are unchecked and may give "
+        regex = "^(Forward order differs from that of the first iteration " \
+            f"on rank {self.rank} -- collectives are unchecked and may give " \
             "incorrect results or hang)"
-        )
-        context = (
-            self.assertWarnsRegex(
-                expected_warning=UserWarning,
-                expected_regex=regex,
-            )
-            if self.rank != 0
-            else suppress()
-        )
+        context = self.assertWarnsRegex(
+            expected_warning=UserWarning, expected_regex=regex,
+        ) if self.rank != 0 else suppress()
         if self.rank != 0:
             fsdp_model.flip_path()
         inp = fsdp_model.module.get_input(self.device)
@@ -203,9 +189,7 @@ class TestFSDPExecOrder(FSDPTest):
         warning_prefix = "Forward order differs"
         for warning in w:
             if str(warning.message).startswith(warning_prefix):
-                raise AssertionError(
-                    f"Warning was incorrectly issued: {warning.message}"
-                )
+                raise AssertionError(f"Warning was incorrectly issued: {warning.message}")
         # If we still validate the forward execution order in eval mode, then
         # an `AssertionError` will be raised above for both sharding strategies
 
