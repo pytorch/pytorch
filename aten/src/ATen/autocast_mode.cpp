@@ -600,12 +600,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  &ADD_NS(geqrf)>::type::call)));
 
-  m.impl(TORCH_SELECTIVE_NAME("aten::lstsq"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 &ADD_NS(lstsq)>::type::call)));
-
   m.impl(TORCH_SELECTIVE_NAME("aten::_lu_with_info"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
                                  std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
