@@ -3004,15 +3004,6 @@ See :func:`torch.logsumexp`
 )
 
 add_docstr_all(
-    "lstsq",
-    r"""
-lstsq(A) -> (Tensor, Tensor)
-
-See :func:`torch.lstsq`
-""",
-)
-
-add_docstr_all(
     "lt",
     r"""
 lt(other) -> Tensor
@@ -6496,5 +6487,13 @@ Example::
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
 
+""",
+)
+
+add_docstr_all(
+    "to_padded_tensor",
+    r"""
+to_padded_tensor(padding, output_size=None) -> Tensor
+See :func:`torch.nested.to_padded_tensor`
 """,
 )
