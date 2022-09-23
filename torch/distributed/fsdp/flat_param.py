@@ -816,12 +816,12 @@ class FlatParamHandle:
                     # in _wait_for_post_backward.
                     if (
                         self._config.keep_low_precision_grads
-                        and flat_param._saved_grad_shard.dtype
+                        and flat_param._saved_grad_shard.dtype  # type: ignore[attr-defined]
                         != flat_param._local_shard.dtype  # type: ignore[attr-defined]
                     ):
                         flat_param._saved_grad_shard = flat_param._saved_grad_shard.to(  # type: ignore[attr-defined]
-                            flat_param._local_shard.dtype
-                        )  # type: ignore[attr-defined]
+                            flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                        )
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
