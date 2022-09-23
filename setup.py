@@ -844,6 +844,13 @@ def configure_extension_build():
             extra_compile_args += ['-g']
             extra_link_args += ['-g']
 
+    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
+    if pytorch_extra_install_requirements:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
+        extra_install_requires += pytorch_extra_install_requirements.split(";")
+
+
     # Cross-compile for M1
     if IS_DARWIN:
         macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
@@ -1107,6 +1114,7 @@ def main():
         'include/torch/csrc/onnx/*.h',
         'include/torch/csrc/profiler/*.h',
         'include/torch/csrc/profiler/orchestration/*.h',
+        'include/torch/csrc/profiler/stubs/*.h',
         'include/torch/csrc/utils/*.h',
         'include/torch/csrc/tensor/*.h',
         'include/torch/csrc/lazy/backend/*.h',
