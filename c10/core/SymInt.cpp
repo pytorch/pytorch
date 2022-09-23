@@ -52,6 +52,14 @@ static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
 }
 #endif
 
+int64_t SymInt::guard_int(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymIntNode a = toSymIntNodeImpl();
+  return a->guard_int(file, line);
+}
+
 SymInt SymInt::operator+(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return SymInt(data_ + sci.data_);
@@ -140,6 +148,10 @@ void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
 }
 
+void SymInt::operator+=(SymInt sci) {
+  *this = *this + sci;
+}
+
 bool SymInt::operator<(int64_t sci) const {
   return *this < c10::SymInt(sci);
 }
@@ -166,6 +178,15 @@ bool SymInt::operator!=(int64_t sci) const {
 
 SymInt SymInt::operator*(int64_t sci) const {
   return *this * c10::SymInt(sci);
+}
+
+std::ostream& operator<<(std::ostream& os, SymInt s) {
+  if (s.is_symbolic()) {
+    os << s.toSymIntNodeImpl()->str();
+  } else {
+    os << s.as_int_unchecked();
+  }
+  return os;
 }
 
 } // namespace c10

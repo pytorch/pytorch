@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 from collections.abc import Sequence
+import enum
 from functools import partial
 import warnings
 import unittest
@@ -68,6 +69,29 @@ from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+@enum.unique
+class CtxTestMode(enum.Enum):
+    REF_OP = enum.auto()
+    OP_OP = enum.auto()
+    REF_OP_ALIASES = enum.auto()
+    OP_ALIASES = enum.auto()
+
+
+class CtxTestInput(object):
+    @classmethod
+    def same(cls, x):
+        cls.ctx = x
+        cls.no_ctx = x
+        return cls
+
+    @classmethod
+    def different(cls, ctx, no_ctx):
+        cls.ctx = ctx
+        cls.no_ctx = no_ctx
+        return cls
+
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -199,7 +223,18 @@ class TestCommon(TestCase):
                         self.assertTrue(isinstance(b, FakeTensor))
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False, skip_bfloat=False):
+    def _ref_test_helper(
+        self,
+        ctx,
+        device,
+        dtype,
+        op,
+        ctx_test_mode,
+        skip_zero_numel=False,
+        skip_zero_dim=False,
+        skip_bfloat=False,
+        skip_view_consistency=False,
+    ):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
@@ -228,38 +263,73 @@ class TestCommon(TestCase):
             ):
                 continue
 
-            # Note: this deliberately uses 'op.torch_opinfo' in both cases
-            # because 'op.aliases' is empty.  When the aliases are executed
-            # within the context, they will behave as refs.  This is done to
-            # check for compatibility between all APIs.
-            aliases = op.torch_opinfo.aliases if op.test_aliases else ()
-            with ctx():
-                ref_results = [f(sample.input, *sample.args, **sample.kwargs)
-                               for f in itertools.chain((op,), aliases)]
-            torch_results = [f(sample.input, *sample.args, **sample.kwargs)
-                             for f in itertools.chain((op.torch_opinfo,), aliases)]
+            # Check op behavior and API compatibility inside and outside ctx.
+            # For example, with TorchRefsMode(strict=True) as the context, a
+            # function with torch.foo in it will call refs.foo instead.
 
-            for ref_result, torch_result in zip(ref_results, torch_results):
+            # Check for this first because there's no catch-all case below.
+            self.assertTrue(isinstance(ctx_test_mode , CtxTestMode))
+
+            if ctx_test_mode is CtxTestMode.OP_OP:
+                # Check *the same* op inside and outside the context.  This is
+                # the entrypoint that users will actually be executing in either
+                # case.
+                test_inputs = (CtxTestInput.same(op.torch_opinfo),)
+            elif ctx_test_mode is CtxTestMode.OP_ALIASES:
+                # Check *the same* aliases inside and outside the context.  This
+                # is the entrypoint that users will actually be executing in
+                # either case.
+                test_inputs = tuple(CtxTestInput.same(x) for x in op.torch_opinfo.aliases)
+            elif ctx_test_mode is CtxTestMode.REF_OP_ALIASES:
+                # Directly call each ref alias (in the context) and test it
+                # against the corresponding alias op (outside of the context).
+                # This test calls *different* entrypoints.  Users are not
+                # expected to call the ref alias directly, this is only done to
+                # check for compatibility issues.
+
+                # The output of zip is determined by the shortest input
+                # iterable, so make sure both inputs have the same length.
+                self.assertTrue(len(op.aliases) == len(op.torch_opinfo.aliases),
+                                msg="Ref and op aliases have different lengths")
+
+                test_inputs = tuple(
+                    CtxTestInput.different(ctx=ctx, no_ctx=no_ctx)
+                    for ctx, no_ctx
+                    in zip(op.aliases, op.torch_opinfo.aliases))  # ref aliases, op aliases
+            elif ctx_test_mode is CtxTestMode.REF_OP:  # default
+                # Directly call each ref (in the context) and test it against
+                # the corresponding op (outside of the context).  This test
+                # calls *different* entrypoints.  Users are not expected to call
+                # the ref directly, this is only done to check for compatibility
+                # issues.
+                test_inputs = (CtxTestInput.different(ctx=op, no_ctx=op.torch_opinfo),)  # ref, op
+
+            for test_input in test_inputs:
+                with ctx():
+                    ref_result = test_input.ctx(sample.input, *sample.args, **sample.kwargs)
+                torch_result = test_input.no_ctx(sample.input, *sample.args, **sample.kwargs)
+
                 for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(torch_result)[0]):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         prims.utils.compare_tensor_meta(a, b)
-                        if getattr(op, 'validate_view_consistency', True):
-                            self.assertEqual(a._is_view(), b._is_view())
+                        if getattr(op, 'validate_view_consistency', True) and not skip_view_consistency:
+                            msg = (f"The torch implementation {'returns' if b._is_view() else 'does not return'} "
+                                   f"a view, while the reference {'does' if a._is_view() else 'does not'}")
+                            self.assertEqual(a._is_view(), b._is_view(), msg)
 
-            # Computes the dtype the more precise computation would occur in
-            precise_dtype = torch.bool
-            if prims.utils.is_integer_dtype(dtype):
-                # Note: bool and integer dtypes do not have more
-                # precise dtypes -- they simply must be close
-                precise_dtype = dtype
-            if prims.utils.is_float_dtype(dtype):
-                precise_dtype = torch.double
-            if prims.utils.is_complex_dtype(dtype):
-                precise_dtype = torch.cdouble
+                # Computes the dtype the more precise computatino would occur in
+                precise_dtype = torch.bool
+                if prims.utils.is_integer_dtype(dtype):
+                    # Note: bool and integer dtypes do not have more
+                    # precise dtypes -- they simply must be close
+                    precise_dtype = dtype
+                if prims.utils.is_float_dtype(dtype):
+                    precise_dtype = torch.double
+                if prims.utils.is_complex_dtype(dtype):
+                    precise_dtype = torch.cdouble
 
-            # Checks if the results are close
-            try:
-                for ref_result, torch_result in zip(ref_results, torch_results):
+                # Checks if the results are close
+                try:
                     self.assertEqual(
                         ref_result,
                         torch_result,
@@ -268,45 +338,44 @@ class TestCommon(TestCase):
                         exact_layout=True,
                         exact_is_coalesced=True,
                     )
-            except AssertionError as e:
-                # Raises the error if the precise dtype comparison wouldn't be
-                # different
-                if dtype is precise_dtype:
-                    raise e
+                except AssertionError as e:
+                    # Raises the error if the precise dtype comparison wouldn't be
+                    # different
+                    if dtype is precise_dtype:
+                        raise e
 
-                ex = e
+                    ex = e
 
 
-            # Goes to next sample if these results are close
-            if not ex:
-                continue
+                # Goes to next sample if these results are close
+                if not ex:
+                    continue
 
-            # If the results are not close, checks that the
-            # reference is more accurate than the torch op
-            def _make_precise(x):
-                if isinstance(x, torch.dtype):
-                    return precise_dtype
-                if isinstance(x, torch.Tensor) and x.dtype is dtype:
-                    return x.to(precise_dtype)
-                return x
+                # If the results are not close, checks that the
+                # reference is more accurate than the torch op
+                def _make_precise(x):
+                    if isinstance(x, torch.dtype):
+                        return precise_dtype
+                    if isinstance(x, torch.Tensor) and x.dtype is dtype:
+                        return x.to(precise_dtype)
+                    return x
 
-            precise_sample = sample.transform(_make_precise)
-            precise_result = op.torch_opinfo(precise_sample.input, *precise_sample.args, **precise_sample.kwargs)
+                precise_sample = sample.transform(_make_precise)
+                precise_result = op.torch_opinfo(precise_sample.input, *precise_sample.args, **precise_sample.kwargs)
 
-            def _distance(a, b):
-                # Special-cases boolean comparisons
-                if prims.utils.is_boolean_dtype(a.dtype):
-                    assert b.dtype is torch.bool
-                    return (a ^ b).sum()
+                def _distance(a, b):
+                    # Special-cases boolean comparisons
+                    if prims.utils.is_boolean_dtype(a.dtype):
+                        assert b.dtype is torch.bool
+                        return (a ^ b).sum()
 
-                same = (a == b)
-                if prims.utils.is_float_dtype(a.dtype) or prims.utils.is_complex_dtype(a.dtype):
-                    same = torch.logical_or(same, torch.logical_and(torch.isnan(a), torch.isnan(b)))
+                    same = (a == b)
+                    if prims.utils.is_float_dtype(a.dtype) or prims.utils.is_complex_dtype(a.dtype):
+                        same = torch.logical_or(same, torch.logical_and(torch.isnan(a), torch.isnan(b)))
 
-                actual_error = torch.where(same, 0, torch.abs(a - b)).sum()
-                return actual_error
+                    actual_error = torch.where(same, 0, torch.abs(a - b)).sum()
+                    return actual_error
 
-            for ref_result, torch_result in zip(ref_results, torch_results):
                 ref_distance = 0
                 for a, b in zip(tree_flatten(ref_result)[0], tree_flatten(precise_result)[0]):
                     ref_distance = ref_distance + _distance(a, b)
@@ -335,7 +404,29 @@ class TestCommon(TestCase):
         # In this test, primTorch refs call into the refs namespace
         # For example, a ref with torch.foo in it will calls refs.foo instead
         # Direct calls to refs and prims are not affected
-        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op)
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
+                              ctx_test_mode=CtxTestMode.REF_OP)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @ops(python_ref_db)
+    def test_python_ref_mode_op_op(self, device, dtype, op):
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
+                              ctx_test_mode=CtxTestMode.OP_OP)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @ops(python_ref_db)
+    def test_python_ref_mode_ref_op_aliases(self, device, dtype, op):
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
+                              ctx_test_mode=CtxTestMode.REF_OP_ALIASES)
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @ops(python_ref_db)
+    def test_python_ref_mode_op_aliases(self, device, dtype, op):
+        self._ref_test_helper(lambda: TorchRefsMode(strict=True), device, dtype, op,
+                              ctx_test_mode=CtxTestMode.OP_ALIASES)
 
     # Tests that experimental Python References perform the same computation
     # as the operators they reference, when operator calls in the torch
@@ -347,7 +438,8 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
+        self._ref_test_helper(contextlib.nullcontext, device, dtype, op,
+                              ctx_test_mode=CtxTestMode.REF_OP)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
@@ -373,7 +465,7 @@ class TestCommon(TestCase):
             skip_zero_dim = True
 
         # skip zero-dim tensors for some composites of reduction operations
-        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax"]
+        normalization_ops = ["_refs.softmax", "_refs.logsumexp", "_refs.log_softmax", "_refs.sum_to_size"]
         if executor == "nvfuser" and op.name in normalization_ops:
             skip_zero_dim = True
 
@@ -387,9 +479,13 @@ class TestCommon(TestCase):
             device,
             dtype,
             op,
+            ctx_test_mode=CtxTestMode.REF_OP,
             skip_zero_numel=("nvfuser" in executor),  # nvfuser doesn't support zero-sized tensors
             skip_zero_dim=skip_zero_dim,
             skip_bfloat=("nvfuser" in executor),  # nvfuser doesn't support bfloat tensors for pre-11 cuda TK
+            # # nvfuser doesn't support view consistency
+            # https://github.com/pytorch/pytorch/issues/84863
+            skip_view_consistency=("nvfuser" in executor),
         )
 
     @skipMeta
@@ -1570,25 +1666,12 @@ class TestRefsOpsInfo(TestCase):
 
     import_paths = ["_refs", "_refs.special", "_refs.nn.functional", "_refs.fft", "_refs.linalg"]
     module_alls = [(path, import_module(f"torch.{path}").__all__) for path in import_paths]
-    ref_ops_names = tuple(itertools.chain.from_iterable(
+    ref_ops_names = set(itertools.chain.from_iterable(
         [f"{path}.{op}" for op in module_all] for path, module_all in module_alls))
-    ref_ops_names_set = set(ref_ops_names)
     # 'set' filters out repeated ref names (such as those with variants)
-    ref_db_names_set = set(ref_op.name for ref_op in python_ref_db)
-    # sort to always use the same order
-    ref_db_names = sorted(ref_db_names_set)
-    # Note: this deliberately uses 'op.torch_opinfo' because 'op.aliases' is
-    # empty.
-    # TODO: some refs (like 'ops.nvprims.var_mean') don't use the '_refs'
-    # prefix.  Those are skipped here since it's not clear how to check
-    # those yet.
-    ref_alias_names_set = set(
-        "_refs." + alias.name
-        for op in python_ref_db
-        for alias in op.torch_opinfo.aliases
-    )
-    # sort to always use the same order
-    ref_alias_names = sorted(ref_alias_names_set)
+    ref_db_names = set(ref_op.name for ref_op in python_ref_db)
+    # ref aliases defined in PythonRefInfo
+    ref_alias_names = set(alias.name for op in python_ref_db for alias in op.aliases)
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
@@ -1612,14 +1695,21 @@ class TestRefsOpsInfo(TestCase):
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',
+        # These should be tested with their out-of-place counterparts
+        '_refs.index_add_',
+        '_refs.index_copy_',
+        '_refs.index_fill_',
     }
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
         '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
+        '_refs.norm',
         '_refs.var',
         '_refs.rsub',
+        # duplicated due to efficiency concerns of the ref vs the decomp
+        '_refs.index_add_',
         # these are not aten ops?
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
@@ -1647,6 +1737,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.hstack',
         '_refs.isclose',
         '_refs.isfinite',
+        '_refs.isreal',
         '_refs.log_softmax',
         '_refs.movedim',
         '_refs.narrow',
@@ -1674,22 +1765,18 @@ class TestRefsOpsInfo(TestCase):
         '_refs.linalg.svdvals',
         '_refs.log_softmax',
         '_refs.unflatten',
+        '_refs.sum_to_size',
         # ref implementation missing kwargs
-        '_refs.empty',  # missing "pin_memory"
-        '_refs.empty_like',  # missing "layout"
         '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
-        '_refs.ones',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
-        '_refs.zeros',  # missing "layout"
         '_refs.zeros_like',  # missing "layout"
         # other
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
-        '_refs.clone',  # test_meta.py: view size is not compatible with input tensor's size and stride
         '_refs.equal',  # 'bool' object has no attribute 'dtype'
         '_refs.conj',  # Calls _prims.conj
         '_refs.real',
@@ -1701,9 +1788,9 @@ class TestRefsOpsInfo(TestCase):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
         # skip aliases since we don't want them defined in the ref db
-        if op in self.ref_alias_names_set:
+        if op in self.ref_alias_names:
             return
-        self.assertIn(op, self.ref_db_names_set)
+        self.assertIn(op, self.ref_db_names)
 
     # like 'test_refs_are_in_python_ref_db' but check in the other direction,
     # this includes aliases since those are not allowed in 'ref_db_names'
@@ -1711,24 +1798,25 @@ class TestRefsOpsInfo(TestCase):
     def test_python_refs_are_in_ops_names(self, op):
         # TODO: skip nvfuser refs since those don't have __all__ and it's not
         # clear at the moment what would be the best way to check those
+        # https://github.com/pytorch/pytorch/issues/85081
         if op.startswith("ops.nvprims"):
             return
-        self.assertIn(op, self.ref_ops_names_set)
+        self.assertIn(op, self.ref_ops_names)
 
     @parametrize("op", ref_db_names)
     def test_ref_db_has_no_aliases(self, op):
-        self.assertTrue(op not in self.ref_alias_names_set,
+        self.assertTrue(op not in self.ref_alias_names,
                         f"Alias {op} in python_ref_db, which is not allowed, "
                         f"aliases are tested automatically")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):
         # skip aliases since those will be registered via their respective ops
-        if op in self.ref_alias_names_set:
+        if op in self.ref_alias_names:
             # also make sure aliases are not added to the list of decomp skips
-            self.assertTrue(op not in self.not_in_decomp_table,
-                            f"Alias {op} in not_in_decomp_table, which is not "
-                            f"allowed, aliases must never register decomps")
+            self.assertNotIn(op, self.not_in_decomp_table,
+                             f"Alias {op} in not_in_decomp_table, which is not "
+                             f"allowed, aliases must never register decomps")
             return
         path = op.split('.')
         module_path = '.'.join(path[:-1])
@@ -1736,11 +1824,11 @@ class TestRefsOpsInfo(TestCase):
         op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
 
         if op in self.not_in_decomp_table:
-            self.assertFalse(op_impl in torch._decomp.decomposition_table.values(),
+            self.assertNotIn(op_impl, torch._decomp.decomposition_table.values(),
                              f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
         else:
-            self.assertTrue(op_impl in torch._decomp.decomposition_table.values(),
-                            f"Did not find {op} in torch._decomp.decomposition_table.values()")
+            self.assertIn(op_impl, torch._decomp.decomposition_table.values(),
+                          f"Did not find {op} in torch._decomp.decomposition_table.values()")
 
 
 fake_skips = (
@@ -1840,7 +1928,6 @@ fake_striding_skips = (
     "fft.rfftn",
     "svd",
     "linalg.svd",
-    "nn.functional.conv_transpose2d",
 )
 
 

@@ -6,7 +6,7 @@ import warnings
 
 from collections.abc import Iterable
 from enum import Enum
-from functools import partial, reduce, wraps
+from functools import partial, reduce, singledispatch, wraps
 from typing import Callable, List, Optional, overload, Sequence, Tuple, Union
 
 import torch
@@ -81,20 +81,29 @@ __all__ = [
     "fix",
     "floor",
     "frac",
+    "index_add",
+    "index_add_",
+    "index_copy",
+    "index_copy_",
+    "index_select",
+    "index_fill",
+    "index_fill_",
     "isfinite",
     "isinf",
     "isnan",
     "isneginf",
     "isposinf",
+    "isreal",
     "i0",
     "lgamma",
     "log",
     "log1p",
     "log2",
     "log10",
-    "logit",
     "log_softmax",
+    "logit",
     "logsumexp",
+    "mvlgamma",
     "nan_to_num",
     "neg",
     "negative",
@@ -102,9 +111,11 @@ __all__ = [
     "reciprocal",
     "round",  # TODO: model kwargs
     "sigmoid",
+    "sgn",
     "sign",
     "signbit",
     "sin",
+    "sinc",
     "sinh",
     "softmax",
     "sqrt",
@@ -208,6 +219,7 @@ __all__ = [
     "std_mean",
     "var_mean",
     "sum",
+    "sum_to_size",
     "prod",
     "var",
     #
@@ -227,6 +239,7 @@ __all__ = [
     "broadcast_to",
     "cat",
     "concat",
+    "concatenate",
     "chunk",
     "column_stack",
     "conj",
@@ -281,12 +294,15 @@ __all__ = [
     #
     # Tensor Creation
     #
+    "arange",
     "empty",
     "empty_like",
     "empty_strided",
     "eye",
     "full",
     "full_like",
+    "linspace",
+    "logspace",
     "new_empty",
     "new_empty_strided",
     "new_full",
@@ -294,12 +310,10 @@ __all__ = [
     "new_zeros",
     "ones",
     "ones_like",
+    "randn",
     "scalar_tensor",
     "zeros",
     "zeros_like",
-    "arange",
-    "linspace",
-    "logspace",
     #
     # Randomness References
     #
@@ -312,6 +326,7 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 
 def _broadcast_shapes(*_shapes):
@@ -368,10 +383,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
                 return x
 
             if not utils.same_shape(x.shape, common_shape):
-                common_rank = len(common_shape) + 1
-                start = common_rank - (len(x.shape) + 1)
-                dims = tuple(range(start, len(x.shape) + start))
-                return prims.broadcast_in_dim(x, common_shape, dims)
+                return x.expand(common_shape)
 
             return x
         else:
@@ -499,7 +511,7 @@ def ceil(a):
 @register_decomposition(torch.ops.aten.conj_physical)
 @out_wrapper()
 def conj_physical(input: TensorLikeType):
-    if not input.dtype.is_complex:
+    if not utils.is_complex_dtype(input.dtype):
         return input
     return prims.conj_physical(input)
 
@@ -648,6 +660,16 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
     return prims.ne(a, a)
 
 
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    aten_op=None,  # CompositeImplicitAutograd
+)
+def isreal(a: TensorLikeType) -> TensorLikeType:
+    if utils.is_complex_dtype(a.dtype):
+        return torch.imag(a) == 0
+    return torch.ones_like(a, dtype=torch.bool)
+
+
 # TODO: if this is special maybe it should be defined there and imported here?
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0
@@ -659,6 +681,10 @@ def i0(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def lgamma(a):
     return prims.lgamma(a)
+
+
+# alias
+mvlgamma = torch.special.multigammaln  # type: ignore[has-type]
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -719,6 +745,18 @@ def logsumexp(
         # This case covers boolean and integer dtypes and we use non-stabilized computation
         result = log(sum(exp(a), dim, keepdim=keepdim))
     return result
+
+
+@register_decomposition(torch.ops.aten.mvlgamma)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def mvlgamma(a: TensorLikeType, p: int) -> TensorLikeType:
+    c = 0.25 * p * (p - 1) * math.log(math.pi)
+    b = 0.5 * torch.arange(start=(1 - p), end=1, step=1, dtype=a.dtype, device=a.device)
+    return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
 
 
 @register_decomposition(torch.ops.aten.nan_to_num)
@@ -813,6 +851,15 @@ def sigmoid(a: TensorLikeType) -> TensorLikeType:
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def sgn(a):
+    if utils.is_complex_dtype(a.dtype):
+        a_abs = a.abs()
+        return torch.where(a_abs == 0, 0, a / a_abs)
+    else:
+        return a.sign()
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def sign(a):
     return prims.sign(a)
 
@@ -825,6 +872,9 @@ def signbit(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def sin(a):
     return prims.sin(a)
+
+
+sinc = torch.special.sinc  # alias
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -855,7 +905,7 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def trunc(a):
     return prims.trunc(a)
 
@@ -952,7 +1002,7 @@ def add(
 
 # TODO: add docstring
 atan2 = _make_elementwise_binary_reference(
-    prims.atan2,
+    prims.atan2,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -964,33 +1014,33 @@ arctan2 = torch.atan2  # alias
 
 # TODO: add docstring
 bitwise_and = _make_elementwise_binary_reference(
-    prims.bitwise_and,
+    prims.bitwise_and,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_left_shift = _make_elementwise_binary_reference(
-    prims.shift_left,
+    prims.shift_left,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_left_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 bitwise_or = _make_elementwise_binary_reference(
-    prims.bitwise_or,
+    prims.bitwise_or,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 bitwise_right_shift = _make_elementwise_binary_reference(
-    prims.shift_right_arithmetic,
+    prims.shift_right_arithmetic,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.bitwise_right_shift,  # prim/aten name mismatch
 )
 
 # TODO: add docstring
 bitwise_xor = _make_elementwise_binary_reference(
-    prims.bitwise_xor,
+    prims.bitwise_xor,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
@@ -1050,7 +1100,7 @@ divide = torch.div  # alias
 
 # TODO: add docstring
 eq = _make_elementwise_binary_reference(
-    prims.eq,
+    prims.eq,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1214,7 +1264,7 @@ floor_divide = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmax = _make_elementwise_binary_reference(
-    prims.fmax,
+    prims.fmax,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmax,
     supports_lhs_python_scalar=False,
@@ -1223,7 +1273,7 @@ fmax = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmin = _make_elementwise_binary_reference(
-    prims.fmin,
+    prims.fmin,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmin,
     supports_lhs_python_scalar=False,
@@ -1232,7 +1282,7 @@ fmin = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 fmod = _make_elementwise_binary_reference(
-    prims.fmod,
+    prims.fmod,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.fmod,
     supports_lhs_python_scalar=False,
@@ -1241,7 +1291,7 @@ fmod = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 gcd = _make_elementwise_binary_reference(
-    prims.gcd,
+    prims.gcd,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.gcd,
     supports_lhs_python_scalar=False,
@@ -1250,7 +1300,7 @@ gcd = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 ge = _make_elementwise_binary_reference(
-    prims.ge,
+    prims.ge,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1261,7 +1311,7 @@ greater_equal = torch.ge  # alias
 
 # TODO: add docstring
 gt = _make_elementwise_binary_reference(
-    prims.gt,
+    prims.gt,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1287,21 +1337,21 @@ heaviside = _make_elementwise_binary_reference(
 )
 
 hypot = _make_elementwise_binary_reference(
-    prims.hypot,
+    prims.hypot,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 
 igamma = _make_elementwise_binary_reference(
-    prims.igamma,
+    prims.igamma,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
 )
 
 igammac = _make_elementwise_binary_reference(
-    prims.igammac,
+    prims.igammac,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1406,7 +1456,7 @@ lcm = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
-    prims.le,
+    prims.le,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1472,7 +1522,7 @@ logical_xor = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 lt = _make_elementwise_binary_reference(
-    prims.lt,
+    prims.lt,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1483,19 +1533,19 @@ less = torch.lt  # alias
 
 # TODO: add docstring
 maximum = _make_elementwise_binary_reference(
-    prims.maximum,
+    prims.maximum,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 minimum = _make_elementwise_binary_reference(
-    prims.minimum,
+    prims.minimum,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
 # TODO: add docstring
 mul = _make_elementwise_binary_reference(
-    prims.mul,
+    prims.mul,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
@@ -1505,7 +1555,7 @@ multiply = torch.mul  # alias
 
 # TODO: add docstring
 ne = _make_elementwise_binary_reference(
-    prims.ne,
+    prims.ne,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
 )
@@ -1516,7 +1566,7 @@ not_equal = torch.ne  # alias
 
 # TODO: add docstring
 nextafter = _make_elementwise_binary_reference(
-    prims.nextafter,
+    prims.nextafter,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
@@ -1524,7 +1574,7 @@ nextafter = _make_elementwise_binary_reference(
 
 # TODO: add docstring
 remainder = _make_elementwise_binary_reference(
-    prims.remainder,
+    prims.remainder,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=torch.ops.aten.remainder,
 )
@@ -1588,7 +1638,7 @@ subtract = torch.sub  # alias
 
 # TODO: add docstring
 true_divide = _make_elementwise_binary_reference(
-    prims.div,
+    prims.div,  # type: ignore[has-type]
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # CompositeImplicitAutograd
 )
@@ -1734,6 +1784,7 @@ def where(
 #
 # Data Movement References
 #
+@register_decomposition(torch.ops.aten.clone.default)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
@@ -1766,49 +1817,167 @@ def item(a: TensorLikeType) -> NumberType:
     return number_type(prims.item(a))
 
 
-# TODO: extend to device and layout similar to
-# aten/src/ATen/native/TensorConversions.cpp:to_will_alias
+# fast path when `to` returns an alias to input. This mimics the same function in aten
 def _to_will_alias(
     a: TensorLikeType,
-    dtype: torch.dtype,
-    copy: bool,
-    memory_format: torch.memory_format,
+    device: Optional[torch.device] = None,
+    dtype: Optional[torch.dtype] = None,
+    copy: Optional[bool] = None,
+    layout: Optional[torch.layout] = None,
+    memory_format: Optional[torch.memory_format] = None,
+    pin_memory: Optional[bool] = False,
+    non_blocking: bool = False,  # not using non_blocking
 ) -> bool:
     return (
         not copy
-        and a.dtype == dtype
+        and (device is None or a.device == device)
+        and (dtype is None or a.dtype == dtype)
+        and (layout is None or a.layout == layout)
+        # is_pinned issue #84925
+        # and (pin_memory is None or pin_memory == a.is_pinned())
         and (
-            memory_format == torch.preserve_format
-            or a.is_contiguous(memory_format=memory_format)
+            memory_format is None
+            or memory_format == torch.preserve_format
+            or utils.is_contiguous_for_memory_format(a, memory_format=memory_format)
         )
     )
 
 
-# TODO: there are multiple overloads of to, but we only support one here
-# aten/src/ATen/native/native_functions.yaml lists all overloads
-# Missing overloads:
-# to.dtype_layout
-# to.device
-# to.other
-# https://github.com/pytorch/pytorch/issues/84264
-def to(
-    a: TensorLikeType,
+@singledispatch
+def _to_dispatch(*args, **kwargs):
+    raise NotImplementedError
+
+
+@_to_dispatch.register
+def _to_device(
+    device: torch.device,
     dtype: torch.dtype,
     non_blocking: bool = False,
     copy: bool = False,
-    memory_format: torch.memory_format = torch.preserve_format,
-) -> TensorLikeType:
-    if _to_will_alias(a, dtype, copy, memory_format):
+    memory_format: Optional[torch.memory_format] = None,
+):
+    kwargs = {
+        "device": device,
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+@_to_dispatch.register
+def _to_device_str(
+    device: str,
+    dtype: torch.dtype,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    kwargs = {
+        "device": torch.device(device),
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+@_to_dispatch.register
+def _to_dtype(
+    dtype: torch.dtype,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    kwargs = {
+        "dtype": dtype,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+@_to_dispatch.register
+def _to_other(
+    other: Tensor,
+    non_blocking: bool = False,
+    copy: bool = False,
+    memory_format: Optional[torch.memory_format] = None,
+):
+    device = other.device
+    dtype = other.dtype
+    layout = other.layout
+    # is_pinned issue #84925
+    # pin_memory = other.is_pinned()
+    kwargs = {
+        "device": device,
+        "dtype": dtype,
+        "layout": layout,
+        "non_blocking": non_blocking,
+        "copy": copy,
+        "memory_format": memory_format,
+    }
+    return kwargs
+
+
+# remove to_kwargs that is already present in `a`
+def canonicalize_to_arguments(a: Tensor, to_kwargs: dict):
+    options_to_check = ["dtype", "device", "layout", "memory_format"]
+    # "device" option could be passed a str instead torch.device
+    if "device" in to_kwargs and isinstance(to_kwargs["device"], str):
+        to_kwargs["device"] = torch.device(to_kwargs["device"])
+
+    for kw in options_to_check:
+        if kw in to_kwargs:
+            if (
+                (kw == "memory_format" and to_kwargs[kw] is torch.preserve_format)
+                or (
+                    kw == "device"
+                    and to_kwargs[kw].type == a.device.type
+                    and (
+                        not to_kwargs[kw].index or to_kwargs[kw].index == a.device.index
+                    )
+                )
+                or (
+                    getattr(a, kw, None) == to_kwargs[kw]
+                )  # this also handles {"memory_format": None}
+            ):
+                to_kwargs.pop(kw)
+
+
+def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
+    # handled dispatch via positional arguments
+    if len(args) != 0:
+        kwargs = _to_dispatch(*args, **kwargs)
+
+    # TODO: is_pinned is not currently supported in refs or fake_tensor
+    # https://github.com/pytorch/pytorch/issues/84925
+    assert "pin_memory" not in kwargs
+    canonicalize_to_arguments(a, kwargs)
+
+    if _to_will_alias(a, **kwargs):
         return a
+
+    copy = kwargs.pop("copy") if "copy" in kwargs else False
+    non_blocking = kwargs.pop("non_blocking") if "non_blocking" in kwargs else False
+
+    # short-circuit to `prims.convert_element_type` when `to` is just a dtype change
     if (
-        (copy is True or dtype != a.dtype)
-        and memory_format == torch.preserve_format
-        and non_blocking is False
+        (copy or (kwargs.get("dtype", a.dtype) != a.dtype))
+        and (not non_blocking)
+        and ("memory_format" not in kwargs)
+        and ("device" not in kwargs)
+        and ("layout" not in kwargs)
+        # is_pinned issue #84925
+        # and ("pin_memory" not in kwargs)
     ):
-        return prims.convert_element_type(a, dtype)
-    result = torch.empty_like(
-        a, dtype=dtype, requires_grad=a.requires_grad, memory_format=memory_format
-    )
+        return prims.convert_element_type(a, kwargs.get("dtype", a.dtype))
+
+    result = torch.empty_like(a, **kwargs)
+    # TODO: non_blocking should be handled by `copy_to`
     copy_to(result, a)
     return result
 
@@ -1897,11 +2066,10 @@ def all(
     # Computes nelem
     if isinstance(dim, int):
         dim = (dim,)  # type: ignore[assignment]
-    dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
-    nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
 
     a_ = _maybe_convert_to_dtype(a, torch.bool)
-    result = eq(sum(a_, dim=dim, keepdim=keepdim), nelem)  # type: ignore[arg-type]
+    # avoid comparison with symbolic number of elements to make this op symint friendly
+    result = eq(sum(logical_not(a_), dim=dim, keepdim=keepdim), 0)
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
@@ -1957,6 +2125,28 @@ def sum(
         out=out,
         output_dtype_kind=REDUCTION_OUTPUT_TYPE_KIND.SAME,
     )
+
+
+def sum_to_size(
+    a: Tensor,
+    *shape,
+) -> Tensor:
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    utils.check(
+        utils.is_expandable_to(shape, a.shape),
+        lambda: f'sum_to_size: size "{shape}" is not expandable to size "{a.shape}"',
+    )
+    # In ATen scalar tensors are sent through sum and the result is returned as
+    # type promoted
+    if utils.is_same_shape(shape, a.shape) and len(shape) > 0:
+        return prims.view_of(a)
+    leading_dims = a.ndim - len(shape)
+    reduce_dims = tuple(range(leading_dims)) + tuple(
+        i
+        for i in range(leading_dims, len(shape))
+        if shape[i - leading_dims] == 1 and a.shape[i] != 1
+    )
+    return torch.sum(a, dim=reduce_dims, keepdim=True, dtype=None)
 
 
 @register_decomposition(torch.ops.aten.prod)
@@ -2298,7 +2488,11 @@ def broadcast_shapes(*shapes) -> ShapeType:
     return torch.Size(_broadcast_shapes(*shapes))
 
 
+@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@torch.ops.aten.broadcast_tensors.default.py_impl(DispatchKey.Meta)
 def broadcast_tensors(*tensors) -> List[TensorLikeType]:
+    if len(tensors) == 1 and not isinstance(tensors[0], Tensor):
+        tensors = tensors[0]
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 
@@ -2347,6 +2541,9 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 concat = torch.cat  # alias
 
 
+concatenate = torch.cat  # alias
+
+
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
@@ -2357,7 +2554,7 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 def conj(input: TensorLikeType) -> TensorLikeType:
-    if not input.dtype.is_complex:
+    if not utils.is_complex_dtype(input.dtype):
         return input
     if input.is_sparse:
         return torch.conj_physical(input)
@@ -3060,6 +3257,114 @@ def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
     )
 
 
+@register_decomposition(torch.ops.aten.index_copy)
+@out_wrapper()
+def index_copy(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    return x.clone().index_copy_(dim, index, tensor)
+
+
+@register_decomposition(torch.ops.aten.index_copy_)
+def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    # Treat scalars as elements of \R^1
+    y = x.unsqueeze(0) if x.ndim == 0 else x
+    idx = (slice(None),) * dim + (index,)
+    y[idx] = tensor
+    return x
+
+
+@register_decomposition(torch.ops.aten.index_fill)
+def index_fill(
+    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
+):
+    return x.clone().index_fill_(dim, index, value)  # type: ignore[arg-type]
+
+
+@register_decomposition(torch.ops.aten.index_fill_)
+def index_fill_(
+    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
+):
+    if isinstance(value, TensorLike):
+        utils.check(
+            value.ndim == 0,
+            lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
+            f"Got a tensor with {value.ndim} dimensions.",
+        )  # type: ignore[arg-type]
+        return x.clone().index_copy_(dim, index, value)
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    idx = (slice(None),) * dim + (index,)
+    # Treat scalars as elements of \R^1
+    y = x.unsqueeze(0) if x.ndim == 0 else x
+    y[idx] = value  # type: ignore[assignment]
+    return x
+
+
+@register_decomposition(torch.ops.aten.index_add)
+@out_wrapper()
+def index_add(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
+
+
+# The decomposition of this function dispatches to aten.index_put_ for efficiency
+# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
+# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
+def index_add_(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    if alpha != 1:
+        python_type = utils.dtype_to_type(x.dtype)
+        utils.check(
+            utils.is_weakly_lesser_type(type(alpha), python_type),
+            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        )
+        tensor = prims.mul(tensor, alpha)
+    # Treat scalars as elements of \R^1
+    y = x.unsqueeze(0) if x.ndim == 0 else x
+    idx = (slice(None),) * dim + (index,)
+    y[idx] += tensor
+    return x
+
+
+@register_decomposition(torch.ops.aten.index_select, disable_meta=True)
+@out_wrapper()
+def index_select(x: TensorLike, dim: int, index: TensorLike):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    # Treat scalars as elements of \R^1
+    if x.ndim == 0:
+        return x.unsqueeze(0)[index].squeeze(0).clone()
+    idx = (slice(None),) * dim + (index,)
+    return x[idx]
+
+
 # Note: although squeeze is documented as having the out= kwarg it doesn't
 @register_decomposition(torch.ops.aten.squeeze, disable_meta=True)
 def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
@@ -3424,6 +3729,7 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
+@register_decomposition(torch.ops.aten.empty)
 @out_wrapper()
 def empty(
     *shape,
@@ -3514,6 +3820,32 @@ def new_empty_strided(
     )
 
 
+@register_decomposition(torch.ops.aten.zeros)
+@out_wrapper()
+def zeros(
+    *size,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    size = utils.extract_shape_from_varargs(size)
+
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    return torch.full(
+        size,
+        False if dtype == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
+
+
 @register_decomposition(torch.ops.aten.new_zeros)
 def new_zeros(
     a: TensorLikeType,
@@ -3523,12 +3855,47 @@ def new_zeros(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    return torch.full(
+        size,
+        False if dtype == torch.bool else 0,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
-    r.zero_()
-    return r
+
+
+@register_decomposition(torch.ops.aten.ones)
+@out_wrapper()
+def ones(
+    *size,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+) -> TensorLikeType:
+    size = utils.extract_shape_from_varargs(size)
+
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    return torch.full(
+        size,
+        True if dtype == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
 
 
 @register_decomposition(torch.ops.aten.new_ones)
@@ -3540,32 +3907,49 @@ def new_ones(
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    return torch.full(
+        size,
+        True if dtype == torch.bool else 1,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
     )
-    r.fill_(1)
-    return r
 
 
 @register_decomposition(torch.ops.aten.new_full)
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: NumberType,
+    fill_value: Union[int, float, bool],
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-    r = a.new_empty(
-        size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
+    dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
+    device = a.device if device is None else device
+
+    return torch.full(
+        size,
+        fill_value,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
     )
-    r.fill_(fill_value)  # type: ignore[arg-type]
-    return r
 
 
+@register_decomposition(torch.ops.aten.empty_like)
 def empty_like(
     a: TensorLikeType,
     *,
@@ -3606,37 +3990,6 @@ def empty_like(
     )
 
 
-@overload
-def arange(
-    end: NumberType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    layout: torch.layout = torch.strided,
-    pin_memory: bool = False,
-    requires_grad: bool = False,
-) -> TensorLikeType:
-    pass
-
-
-@overload
-def arange(
-    start: NumberType,
-    end: NumberType,
-    step: NumberType = 1,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    layout: torch.layout = torch.strided,
-    pin_memory: bool = False,
-    requires_grad: bool = False,
-) -> TensorLikeType:
-    pass
-
-
-# See https://github.com/pytorch/pytorch/issues/82364
-# @register_decomposition(torch.ops.aten.arange)
-# @out_wrapper()
 @register_decomposition(
     [
         torch.ops.aten.arange.default,
@@ -3644,9 +3997,10 @@ def arange(
         torch.ops.aten.arange.start_step,
     ]
 )
+@out_wrapper()
 def arange(
-    a: Optional[NumberType] = None,
-    b: Optional[NumberType] = None,
+    start: NumberType = 0,
+    end: Optional[NumberType] = None,
     step: NumberType = 1,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -3655,31 +4009,22 @@ def arange(
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    assert (a is not None and b is not None) or (a is not None and b is None)
-    if a is not None and b is not None:
-        return prims.arange(
-            a,
-            b,
-            step,
-            dtype=dtype,
-            device=device,
-            # layout=layout,
-            # pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-    elif a is not None and b is None:
-        return prims.arange(
-            0,
-            a,
-            step,
-            dtype=dtype,
-            device=device,
-            # layout=layout,
-            # pin_memory=pin_memory,
-            requires_grad=requires_grad,
-        )
-    else:
-        raise AssertionError()
+    assert not pin_memory
+    assert layout == torch.strided
+    # Case: torch.arange(5)
+    if end is None:
+        end = start
+        start = 0
+    return prims.arange(
+        start,
+        end,
+        step,
+        dtype=dtype,
+        device=device,
+        # layout=layout,
+        # pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
 
 
 @register_decomposition(torch.ops.aten.linspace)
@@ -4005,25 +4350,39 @@ def eye(
     if dtype is torch.bool:
         return cond
     else:
-        # TODO: pin_memory=pin_memory, layout=layout
-        one = torch.ones(1, dtype=dtype, device=device, requires_grad=False)
+        one = torch.ones(
+            (1,),
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=False,
+        )
         return torch.where(cond, one, 0)
     # TODO: Use requires_grad.  All refs taking the requires_grad kwarg must
     # return a leaf tensor.
     # result.requires_grad_(requires_grad)
 
 
-# TODO: missing kwargs (e.g. layout)
 @out_wrapper()
 def full(
     shape: ShapeType,
     fill_value: NumberType,
     *,
-    dtype: torch.dtype,
-    device: torch.device,
-    requires_grad: bool,
+    dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
+    device: Optional[torch.device] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
 ) -> TensorLikeType:
-    e = empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    e = empty(
+        shape,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
     return fill(e, fill_value)
 
 
@@ -4039,9 +4398,36 @@ def full_like(
     return fill(e, fill_value)
 
 
-ones = partial(full, fill_value=True)
-
 ones_like = partial(full_like, fill_value=True)
+
+# TODO: add pin_memory support
+@register_decomposition(torch.ops.aten.randn)
+@out_wrapper()
+def randn(
+    *shape,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
+    requires_grad: bool = False,
+    pin_memory: Optional[bool] = None,
+) -> TensorLikeType:
+
+    check(pin_memory is None, lambda: "pin_memory parameter is not supported!")
+
+    shape_ = utils.extract_shape_from_varargs(shape)
+
+    dtype = utils.dtype_or_default(dtype)
+    device = utils.device_or_default(device)
+    layout = utils.layout_or_default(layout)
+
+    return prims.normal(
+        shape_,
+        mean=0.0,
+        std=1.0,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+    )
 
 
 # TODO: missing kwargs (e.g. layout)
@@ -4056,9 +4442,11 @@ def scalar_tensor(
     return prims.scalar_tensor(a, dtype=dtype, device=device)
 
 
-zeros = partial(full, fill_value=False)
-
 zeros_like = partial(full_like, fill_value=False)
+
+#
+# Randomness References
+#
 
 
 @register_decomposition(torch.ops.aten.uniform)
@@ -4164,7 +4552,10 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
-@register_decomposition(torch.ops.aten.norm)
+# TODO: Cannot register as decomp here due to incompatible signatures between
+# the Python frontend and ATen:
+# https://github.com/pytorch/pytorch/issues/83931
+# Also, torch.norm is deprecated in regular PyTorch.
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,

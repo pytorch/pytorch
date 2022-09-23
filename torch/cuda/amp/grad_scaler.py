@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from .common import amp_definitely_not_available
 
 
+__all__ = ["OptState", "GradScaler"]
+
 class _MultiDeviceReplicator(object):
     """
     Lazily serves copies of a tensor to requested devices.  Copies are cached per-device.

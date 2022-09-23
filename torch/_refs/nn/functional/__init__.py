@@ -241,9 +241,7 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return scale * torch.where(a > 0, a, rhs)
 
 
-sigmoid = torch.sigmoid  # alias
-
-
+# Forwarding alias: the functional variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
@@ -257,6 +255,9 @@ def softmax(
     # users how to update their calls.
     check(dim is not None, lambda: "implicit dim not supported, use dim=X")
     return torch.softmax(a=a, dim=dim, dtype=dtype)  # type: ignore[call-overload]
+
+
+sigmoid = torch.sigmoid  # alias
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -398,6 +399,7 @@ def l1_loss(
     return _apply_loss_reduction(loss, reduction)
 
 
+# Forwarding alias: the functional variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
     a: TensorLikeType,

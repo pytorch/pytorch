@@ -1,3 +1,4 @@
+import math
 from typing import Optional
 
 import torch
@@ -33,9 +34,11 @@ __all__ = [
     "logit",
     "log_softmax",
     "logsumexp",
+    "multigammaln",
     "psi",
-    "softmax",
     "round",
+    "sinc",
+    "softmax",
     "zeta",
 ]
 
@@ -112,6 +115,10 @@ def logit(input: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
 log1p = torch.log1p  # alias
 
 
+multigammaln = torch.mvlgamma  # alias
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def log_softmax(
     a: TensorLikeType,
@@ -124,6 +131,15 @@ def log_softmax(
 logsumexp = torch.logsumexp  # alias
 
 
+# Autograd note: This will give the right first derivative at zero (by chance),
+# but not the right second derivative
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sinc(a):
+    a = math.pi * a
+    return torch.where(a == 0, 1, torch.sin(a) / a)
+
+
+# Forwarding alias: the special variant doesn't support the out kwarg
 # CompositeImplicitAutograd - don't register decomp
 def softmax(
     a: TensorLikeType,
@@ -140,7 +156,7 @@ round = torch.round  # alias
 
 
 zeta = _make_elementwise_binary_reference(
-    prims.zeta,
+    prims.zeta,  # type: ignore[has-type]
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_zeta,
 )
