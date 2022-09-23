@@ -285,10 +285,31 @@ struct ConcretePyInterpreterVTable final
     concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>(event);
   }
   void trace_kernel_launch(
-      const c10::FunctionSchema& schema,
-      std::vector<uintptr_t>& inputs,
-      std::vector<uintptr_t>& outputs) const override {
-    concrete_trace_cuda<trace_kernel_launch>(schema, inputs, outputs);
+      const c10::OperatorHandle& op,
+      std::vector<c10::IValue>& inputs,
+      std::vector<c10::IValue>& outputs) const override {
+    nd11::gil_scoped_acquire gil;
+    at::impl::MaybeSetTLSOnEntryGuard guard;
+
+    auto args_kwargs = parseIValuesToPyArgsKwargs(op, inputs);
+    py::object args = std::move(args_kwargs.first);
+    py::dict kwargs = std::move(args_kwargs.second);
+    std::vector<py::object> output_objects;
+
+    for (auto& ivalue: ou tputs) {
+      output_objects.push_back(torch::jit::toPyObject(ivalue));
+    }
+
+    if (Py_IsInitialized()) {
+      try {
+        py::module mod = py::module::import("torch.utils._cuda_trace");
+        py::object hook = mod
+            attr(trace_kernel_launch_fn_name).attr("fire_callbacks");
+        hook(op.schema(), args, kwargs, output_objects);
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Trace kernel launch hook execution failed: " << e.what();
+      }
+    }
   }
 
   static ConcretePyInterpreterVTable* instance() {
@@ -2658,3 +2679,4 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
 }
 
 } // anonymous namespace
+    
