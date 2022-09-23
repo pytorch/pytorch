@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
@@ -1705,5 +1706,16 @@ std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   }
   return outs;
 }
+
+Tensor test_test(const Tensor& x, const Tensor& y) {
+  auto m = x.size(-2);
+  auto n = y.size(-1);
+  auto sizes = at::DimVector(y.sizes().slice(0, y.dim() - 2));
+  sizes.push_back(m);
+  sizes.push_back(n);
+  auto result = at::empty(sizes, y.options());
+  return _compressed_row_strided_mm_out(x, y, result);
+}
+
 } // namespace native
 } // namespace at

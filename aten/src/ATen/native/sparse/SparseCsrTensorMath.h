@@ -5,6 +5,9 @@
 
 namespace at {
 namespace native {
+
+TORCH_API Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& strided, Tensor& result);
+
 namespace sparse {
 namespace impl {
 
