@@ -1808,7 +1808,7 @@ def _run_symbolic_function(
             if op_name == "PythonOp":
                 inputs = (node, *inputs)
             return dispatch.symbolics(symbolic_function_name)(
-                graph_context, inputs, attrs
+                graph_context, *inputs, **attrs
             )
 
         attrs = {
