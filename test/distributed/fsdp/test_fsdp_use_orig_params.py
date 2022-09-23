@@ -150,6 +150,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         ddp_optim: torch.optim.Optimizer,
         fsdp_model: FSDP,
         fsdp_optim: torch.optim.Optimizer,
+        set_to_none: bool,
         num_iters: int = 10,
     ):
         """Checks training parity between DDP and FSDP."""
@@ -158,11 +159,15 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             iter_losses = []
             for model, optim in ((ddp_model, ddp_optim), (fsdp_model, fsdp_optim)):
                 module = model.module
-                optim.zero_grad()
+                # Test two different `zero_grad()` timings
+                if i % 2 == 0:
+                    optim.zero_grad(set_to_none=set_to_none)  # pre-forward
                 inp = module.get_input(device)
                 output = model(*inp)
                 loss = module.get_loss(inp, output).to(device)
                 iter_losses.append(loss)
+                if i % 2 == 1:
+                    optim.zero_grad(set_to_none=set_to_none)  # pre-backward
                 module.run_backward(loss)
                 # Perform the DDP optimizer step on CPU to match FSDP if needed
                 if model is ddp_model and fsdp_model.cpu_offload.offload_params:
@@ -209,6 +214,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                 "init_optim_before_wrap": [False, True],
                 "optim_class": [torch.optim.Adam, torch.optim.AdamW],
                 "multi_tensor": [False, True],
+                "set_to_none": [False, True],
                 "backward_prefetch": [
                     None,
                     BackwardPrefetch.BACKWARD_PRE,
@@ -238,6 +244,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             init_optim_before_wrap=False,
             optim_class=torch.optim.Adam,
             multi_tensor=False,
+            set_to_none=False,
             backward_prefetch=BackwardPrefetch.BACKWARD_PRE,
             cpu_offload=CPUOffload(offload_params=True),
             sharding_strategy=sharding_strategy,
@@ -249,6 +256,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         init_optim_before_wrap: bool,
         optim_class: Type[torch.optim.Optimizer],
         multi_tensor: bool,
+        set_to_none: bool,
         backward_prefetch: Optional[BackwardPrefetch],
         cpu_offload: CPUOffload,
         sharding_strategy: ShardingStrategy,
@@ -277,7 +285,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             backward_prefetch=backward_prefetch,
             cpu_offload=cpu_offload,
         )
-        self._check_train_parity(ddp_model, ddp_optim, fsdp_model, fsdp_optim)
+        self._check_train_parity(ddp_model, ddp_optim, fsdp_model, fsdp_optim, set_to_none)
 
     @skip_if_lt_x_gpu(2)
     def test_diff_trainability(self):
@@ -324,7 +332,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         for param_name, param in fsdp_model.named_parameters():
             if "bias" in param_name:
                 param.requires_grad_(False)
-        self._check_train_parity(ddp_model, ddp_optim, fsdp_model, fsdp_optim)
+        self._check_train_parity(ddp_model, ddp_optim, fsdp_model, fsdp_optim, False)
 
 
 class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):

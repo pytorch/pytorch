@@ -25,6 +25,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from ._tensor_flattener import _tf_post_unflatten_transform, _tf_pre_flatten_transform
 from ._utils import (
     _alloc_storage,
     _free_storage,
@@ -44,34 +45,6 @@ __all__ = [
     "HandleShardingStrategy",
     "HandleTrainingState",
 ]
-
-
-class _TensorFlattener:
-    """
-    This enables a pre-flatten and post-unflatten transform to be applied per
-    parameter. To do so, use :func:`_set_tensor_flattener` to set a custom
-    :class:`_TensorFlattener` that implements the two transforms.
-    """
-
-    def pre_flatten_transform(
-        self, tensor: torch.Tensor
-    ) -> Tuple[Optional[Any], torch.Tensor]:
-        # E.g. Converting `ShardedTensor` to local tensor
-        ...
-
-    def post_unflatten_transform(
-        self, tensor: torch.Tensor, param_extension: Any
-    ) -> torch.Tensor:
-        # E.g. Converting local tensor to `ShardedTensor`
-        ...
-
-
-_flattener: Optional[_TensorFlattener] = None
-
-
-def _set_tensor_flattener(flattener: _TensorFlattener) -> None:
-    global _flattener
-    _flattener = flattener
 
 
 class ParamInfo(NamedTuple):
@@ -395,10 +368,8 @@ class FlatParamHandle:
                             "`FlatParameter` requires uniform dtype but got "
                             f"{dtype} and {param.dtype}"
                         )
-                    if dtype is None:
-                        is_floating_point = param.is_floating_point()
-                        if not is_floating_point:
-                            raise ValueError("Integer parameters are unsupported")
+                    if dtype is None and not param.is_floating_point():
+                        raise ValueError("Integer parameters are unsupported")
                     if (
                         requires_grad is not None
                         and param.requires_grad != requires_grad
@@ -406,11 +377,7 @@ class FlatParamHandle:
                         raise ValueError(
                             "`FlatParameter` requires uniform `requires_grad`"
                         )
-                    extension = None
-                    if _flattener is not None:
-                        extension, new_param = _flattener.pre_flatten_transform(param)
-                        if extension is not None:
-                            param = new_param
+                    param, extension = _tf_pre_flatten_transform(param)
                     param_extensions.append(extension)
                     dtype = param.dtype
                     requires_grad = param.requires_grad
@@ -923,12 +890,13 @@ class FlatParamHandle:
                     # _post_backward_hook and assign back in full precision
                     # in _wait_for_post_backward.
                     if (
-                        self._config.keep_low_precision_grads and
-                        flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                        self._config.keep_low_precision_grads
+                        and flat_param._saved_grad_shard.dtype  # type: ignore[attr-defined]
+                        != flat_param._local_shard.dtype  # type: ignore[attr-defined]
                     ):
-                        flat_param._saved_grad_shard = (  # type: ignore[attr-defined]
-                            flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)  # type: ignore[attr-defined]
-                        )
+                        flat_param._saved_grad_shard = flat_param._saved_grad_shard.to(  # type: ignore[attr-defined]
+                            flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                        )  # type: ignore[attr-defined]
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
@@ -1134,10 +1102,8 @@ class FlatParamHandle:
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
-            if _flattener is not None:
-                param_extension = self.flat_param._param_extensions[i]
-                if param_extension is not None:
-                    view = _flattener.post_unflatten_transform(view, param_extension)
+            param_extension = self.flat_param._param_extensions[i]
+            view = _tf_post_unflatten_transform(view, param_extension)
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if self._use_orig_params and as_params:
@@ -1321,60 +1287,67 @@ class FlatParamHandle:
                 # (e.g. during model checkpointing)
                 continue
             in_sharded_flat_param = i >= start and i <= end
-            if in_sharded_flat_param:
-                param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
-                numel_in_shard = param_end - param_start + 1
-                # Check for parameter writeback
-                param_changed = getattr(module, param_name) is not param
-                needs_param_writeback = (
-                    param_changed  # changed parameter variable itself
-                    or not _same_storage(param, flat_param)  # changed `.data`
-                )
-                if param_changed:
-                    # NOTE: After a parameter change, the gradient is not
-                    # preserved.
-                    param = getattr(module, param_name)
-                    flat_param._params[i] = param
-                if needs_param_writeback:
-                    # TODO (awgu): Should we relax this to just having the same
-                    # numel? Then, we just flatten and writeback.
-                    expected_shape = torch.Size([numel_in_shard])
-                    if self._debug_level == [dist.DebugLevel.INFO, dist.DebugLevel.DETAIL]:
-                        rank = self.rank if hasattr(self, "rank") else dist.get_rank()
-                        print(
-                            f"[Rank {rank}] needs writeback in {self._training_state}; "
-                            f"expected shape={expected_shape} shape={param.shape} "
-                            f"expected device={flat_param.device} device={param.device}"
-                        )
-                    if param.shape != expected_shape:
-                        raise RuntimeError(
-                            "Cannot writeback when the parameter shape changes\n"
-                            f"Expects {expected_shape} but got {param.shape}"
-                        )
-                    flat_param[offset : offset + numel_in_shard].copy_(param)
-                    wroteback = True
-                # Check for gradient writeback
-                # NOTE: Since this method is called in the pre-unshard, which
-                # is only called in the pre-forward or pre-backward, the
-                # sharded gradient should be guaranteed to be in `.grad`, not
-                # in `._saved_grad_shard`.
-                if param.grad is None and flat_param.grad is not None:
+            if not in_sharded_flat_param:
+                continue
+            param_start, param_end = flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
+            numel_in_shard = param_end - param_start + 1
+            # Check for parameter writeback
+            param_changed = getattr(module, param_name) is not param
+            needs_param_writeback = (
+                param_changed  # changed parameter variable itself
+                or not _same_storage(param, flat_param)  # changed `.data`
+            )
+            if param_changed:
+                # NOTE: After a parameter change, the gradient is not
+                # preserved.
+                param = getattr(module, param_name)
+                flat_param._params[i] = param
+            if needs_param_writeback:
+                # TODO (awgu): Should we relax this to just having the same
+                # numel? Then, we just flatten and writeback.
+                expected_shape = torch.Size([numel_in_shard])
+                if self._debug_level == dist.DebugLevel.DETAIL:
+                    rank = self.rank if hasattr(self, "rank") else dist.get_rank()
                     warnings.warn(
-                        "Setting an original parameter's `.grad` to `None` "
-                        "does not set the underlying `FlatParameter`'s `.grad` "
-                        "to `None`."
+                        f"[Rank {rank}] Needs writeback in {self._training_state}\n"
+                        f"expected shape={expected_shape} shape={param.shape} "
+                        f"expected device={flat_param.device} device={param.device}"
                     )
-                elif param.grad is not None:
-                    needs_grad_writeback = (
-                        flat_param.grad is None
-                        or not _same_storage(param.grad, flat_param.grad)
+                if param.shape != expected_shape:
+                    raise RuntimeError(
+                        "Cannot writeback when the parameter shape changes\n"
+                        f"Expects {expected_shape} but got {param.shape}"
                     )
-                    # TODO (awgu): Allocate a new zeroed sharded gradient for
-                    # `flat_param.grad` if it is `None`, and write the data
-                    # into the appropriate view.
-                    if needs_grad_writeback:
-                        raise NotImplementedError("Gradient writeback is not implemented")
-                offset += numel_in_shard
+                flat_param[offset : offset + numel_in_shard].copy_(param)
+                wroteback = True
+            # Check for gradient writeback
+            # NOTE: Since this method is called in the pre-unshard, which
+            # is only called in the pre-forward or pre-backward, the
+            # sharded gradient should be guaranteed to be in `.grad`, not
+            # in `._saved_grad_shard`.
+            if (
+                param.grad is None
+                and flat_param.grad is not None
+                and self._debug_level == dist.DebugLevel.DETAIL
+            ):
+                prefixed_param_name = flat_param._prefixed_param_names[i]
+                rank = self.rank if hasattr(self, "rank") else dist.get_rank()
+                warnings.warn(
+                    f"[Rank {rank}] Setting the original parameter {prefixed_param_name}'s "
+                    "`.grad` to `None` does not set the underlying `FlatParameter`'s "
+                    "`.grad` to `None`."
+                )
+            elif param.grad is not None:
+                needs_grad_writeback = (
+                    flat_param.grad is None
+                    or not _same_storage(param.grad, flat_param.grad)
+                )
+                # TODO (awgu): Allocate a new zeroed sharded gradient for
+                # `flat_param.grad` if it is `None`, and write the data
+                # into the appropriate view.
+                if needs_grad_writeback:
+                    raise NotImplementedError("Gradient writeback is not implemented")
+            offset += numel_in_shard
         # TODO (awgu): Shared parameters could become no longer shared??
         assert flat_param._shared_param_infos is not None
         for i, (param, (param_name, module, _, _, _, _)) in enumerate(
@@ -1388,6 +1361,20 @@ class FlatParamHandle:
             if param_changed:
                 flat_param._shared_params[i] = getattr(module, param_name)  # type: ignore[index]
         return wroteback
+
+    def _clear_grads_if_needed(self):
+        """
+        When ``use_orig_params=True``, sets the underlying ``flat_param.grad``
+        to ``None`` if *all* of the original parameters' ``.grad`` are
+        ``None``. This is targeting ``optim.zero_grad(set_to_none=True)``, in
+        which case we want to free the gradients early before the pre-unshard.
+        """
+        if not self._use_orig_params:
+            return
+        flat_param = self.flat_param
+        assert flat_param._params is not None
+        if all(param.grad is None for param in flat_param._params):
+            flat_param.grad = None
 
     def _deregister_orig_params(self):
         for (param_name, module, _) in self.flat_param._param_infos:

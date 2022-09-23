@@ -66,7 +66,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._shard_utils import _create_chunk_sharded_tensor
+from ._tensor_flattener import _tf_chunk_tensor, _tf_pre_load_state_dict_transform
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -2311,11 +2311,11 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _create_chunk_sharded_tensor(
+                state_dict[f"{prefix}{fqn}"] = _tf_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
-                    device_per_node=torch.cuda.device_count(),
+                    num_devices_per_node=torch.cuda.device_count(),
                     pg=self.process_group
                 )  # type: ignore[assignment]
         if not self._use_orig_params:
@@ -2561,8 +2561,13 @@ class FullyShardedDataParallel(nn.Module):
             param = state_dict.pop(fqn)
 
             # All-gather the param (ShardedTensor)
-            shards = param.local_shards()
-            local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
+            param, shards = _tf_pre_load_state_dict_transform(param)
+            assert len(shards) < 2, f"Expects 0 or 1 shard per rank but got {len(shards)} shards"
+            if shards:
+                local_tensor = shards[0].flatten()
+            else:
+                # May have no shards, e.g. shape (1, 1, 756)
+                local_tensor = torch.tensor([], dtype=param.dtype, device=self.compute_device)
             dim_0_size = param.size()[0]
             param_numel = param.size().numel()
             chunk_size = (
@@ -2841,8 +2846,20 @@ class FullyShardedDataParallel(nn.Module):
             return args, kwargs
         self._wait_for_previous_optim_step()
         self._needs_pre_forward_unshard.clear()
+        self._clear_grads_if_needed()
         args, kwargs = self._cast_forward_inputs(*args, **kwargs)
         return args, kwargs
+
+    def _clear_grads_if_needed(self):
+        """
+        Iterates over all handles to clear original parameter gradients if
+        needed. See :meth:`FlatParamHandle._clear_grads_if_needed` for details.
+        """
+        if not self._use_orig_params or not self._is_root:
+            return
+        for fsdp_module in self.fsdp_modules(self):
+            for handle in fsdp_module._handles:
+                handle._clear_grads_if_needed()
 
     @staticmethod
     @contextlib.contextmanager
@@ -3191,6 +3208,7 @@ class FullyShardedDataParallel(nn.Module):
                 # that it is called after all backward calls complete
                 if self._is_root and not self._post_backward_callback_queued:
                     self._queue_wait_for_post_backward()
+                    self._clear_grads_if_needed()
                 elif _handles_key:
                     self._assert_state([TrainingState_.IDLE])
                 self.training_state = TrainingState_.BACKWARD_PRE
