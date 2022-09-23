@@ -20,6 +20,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
 #ifdef USE_KINETO_MIN_CHANGE
   void start(bool withStack) override {
+    printf("CHAEDEBUG --- start\n");
     ProfilerConfig cfg {
       ProfilerState::KINETO_ONDEMAND,
           /*report_input_shapes=*/reportInputShapes_,
@@ -45,6 +46,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
   }
 
   void stop() override {
+    printf("CHAEDEBUG --- stop\n");
     (void)disableProfiler();
   }
 
@@ -57,14 +59,13 @@ class LibKinetoClient : public libkineto::ClientInterface {
 } // namespace impl
 } // namespace profiler
 
-#ifdef ENABLE_LIBKINETO_CLIENT
 struct RegisterLibKinetoClient {
   RegisterLibKinetoClient() {
     static profiler::impl::LibKinetoClient client;
     libkineto::api().registerClient(&client);
   }
 } register_libkineto_client;
-#endif // ENABLE_LIBKINETO_CLIENT
 
 } // namespace torch
 #endif // USE_KINETO
+
