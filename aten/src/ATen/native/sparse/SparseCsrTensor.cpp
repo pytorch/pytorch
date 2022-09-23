@@ -272,8 +272,7 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
     dispatch_key = DispatchKey::SparseCsrCPU;
   }
 
-  return detail::make_tensor<SparseCsrTensorImpl>(
-      DispatchKeySet(dispatch_key), layout, options.dtype());
+  return detail::make_tensor<SparseCsrTensorImpl>(DispatchKeySet(dispatch_key), options.device(), layout, options.dtype());
 }
 
 
@@ -376,7 +375,7 @@ DimVector _estimate_sparse_compressed_tensor_size(
         size.push_back(compressed_dim_size * blocksize[1]);
       });
   for (int i=0; i<dense_ndim; i++) {
-    int64_t j = batch_ndim + 1 + base_ndim + i;
+    int64_t j = batch_ndim + 1 + block_ndim + i;
     size.push_back((j < values.dim() ? values.size(j) : 1));
   }
   TORCH_CHECK(

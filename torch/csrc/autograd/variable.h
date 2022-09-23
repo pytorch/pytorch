@@ -687,37 +687,26 @@ inline Variable make_variable_differentiable_view(
     CreationMeta creation_meta,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    // If we already did a TensorImpl allocation for data, just reuse it.
-    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as
-    // input), we have to use shallow_copy_and_detach to create a new TensorImpl
-    // to avoid moving leaf node into graph interior. This guarantees only 1
-    // TensorImpl allocation happens in view ops.
-    if (data.getIntrusivePtr().unique() &&
-        data.getIntrusivePtr()->unique_version()) {
-      at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
-      data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-          data_impl,
-          std::move(backward_info),
-          std::move(forward_info),
-          shared_view_info,
-          creation_meta));
-      return data;
-    } else {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      c10::intrusive_ptr<at::TensorImpl> data_impl_copy =
-          data.getIntrusivePtr()->shallow_copy_and_detach(
-              /*version_counter=*/0,
-              /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      data_impl_copy->set_autograd_meta(
-          std::make_unique<DifferentiableViewMeta>(
-              data_impl_copy.get(),
-              std::move(backward_info),
-              std::move(forward_info),
-              shared_view_info,
-              creation_meta));
-      return Variable(data_impl_copy);
-    }
+    TORCH_CHECK(
+        data.getIntrusivePtr()->autograd_meta() == nullptr,
+        "Attempted to make a tensor into a differentiable view, but the "
+        "tensor already had autograd metadata associated with it.  If you are "
+        "using a __torch_dispatch__ mode, the most common cause for this "
+        "problem is that you used torch.overrides.enable_reentrant_dispatch() "
+        "improperly; tensors created within the extent of reentrant dispatch "
+        "MUST NOT be directly returned from __torch_dispatch__; instead, they "
+        "must be wrapped into fresh tensors that serve as the output.  If you "
+        "are not using wrappers, you probably don't need reentrant dispatch.  "
+        "If this doesn't seem applicable, please file a bug to PyTorch.");
+    at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
+    data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+        data_impl,
+        std::move(backward_info),
+        std::move(forward_info),
+        shared_view_info,
+        creation_meta));
+    return data;
   }
   return Variable();
 }

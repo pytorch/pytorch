@@ -2311,12 +2311,24 @@ Alias of :func:`torch.cat`.
 )
 
 add_docstr(
+    torch.concatenate,
+    r"""
+concatenate(tensors, axis=0, out=None) -> Tensor
+
+Alias of :func:`torch.cat`.
+""",
+)
+
+add_docstr(
     torch.ceil,
     r"""
 ceil(input, *, out=None) -> Tensor
 
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. math::
     \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil
@@ -4154,6 +4166,9 @@ floor(input, *, out=None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. math::
     \text{out}_{i} = \left\lfloor \text{input}_{i} \right\rfloor
@@ -6338,96 +6353,6 @@ Example::
 )
 
 add_docstr(
-    torch.lstsq,
-    r"""
-lstsq(input, A, *, out=None) -> (Tensor, Tensor)
-
-Computes the solution to the least squares and least norm problems for a full
-rank matrix :math:`A` of size :math:`(m \times n)` and a matrix :math:`B` of
-size :math:`(m \times k)`.
-
-If :math:`m \geq n`, :func:`lstsq` solves the least-squares problem:
-
-.. math::
-
-   \begin{array}{ll}
-   \min_X & \|AX-B\|_2.
-   \end{array}
-
-If :math:`m < n`, :func:`lstsq` solves the least-norm problem:
-
-.. math::
-
-   \begin{array}{llll}
-   \min_X & \|X\|_2 & \text{subject to} & AX = B.
-   \end{array}
-
-Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
-rows of :math:`X` contains the solution. If :math:`m \geq n`, the residual sum of squares
-for the solution in each column is given by the sum of squares of elements in the
-remaining :math:`m - n` rows of that column.
-
-.. warning::
-
-    :func:`torch.lstsq` is deprecated in favor of :func:`torch.linalg.lstsq`
-    and will be removed in a future PyTorch release. :func:`torch.linalg.lstsq`
-    has reversed arguments and does not return the QR decomposition in the returned tuple,
-    (it returns other information about the problem).
-    The returned `solution` in :func:`torch.lstsq` stores the residuals of the solution in the
-    last `m - n` columns in the case `m > n`. In :func:`torch.linalg.lstsq`, the residuals
-    are in the field 'residuals' of the returned named tuple.
-
-    Unpacking the solution as ``X = torch.lstsq(B, A).solution[:A.size(1)]`` should be replaced with
-
-    .. code:: python
-
-        X = torch.linalg.lstsq(A, B).solution
-
-.. note::
-    The case when :math:`m < n` is not supported on the GPU.
-
-Args:
-    input (Tensor): the matrix :math:`B`
-    A (Tensor): the :math:`m` by :math:`n` matrix :math:`A`
-
-Keyword args:
-    out (tuple, optional): the optional destination tensor
-
-Returns:
-    (Tensor, Tensor): A namedtuple (solution, QR) containing:
-
-        - **solution** (*Tensor*): the least squares solution
-        - **QR** (*Tensor*): the details of the QR factorization
-
-.. note::
-
-    The returned matrices will always be transposed, irrespective of the strides
-    of the input matrices. That is, they will have stride `(1, m)` instead of
-    `(m, 1)`.
-
-Example::
-
-    >>> A = torch.tensor([[1., 1, 1],
-    ...                   [2, 3, 4],
-    ...                   [3, 5, 2],
-    ...                   [4, 2, 5],
-    ...                   [5, 4, 3]])
-    >>> B = torch.tensor([[-10., -3],
-    ...                   [ 12, 14],
-    ...                   [ 14, 12],
-    ...                   [ 16, 16],
-    ...                   [ 18, 16]])
-    >>> X, _ = torch.lstsq(B, A)
-    >>> X
-    tensor([[  2.0000,   1.0000],
-            [  1.0000,   1.0000],
-            [  1.0000,   2.0000],
-            [ 10.9635,   4.8501],
-            [  8.9332,   5.2418]])
-""",
-)
-
-add_docstr(
     torch.lt,
     r"""
 lt(input, other, *, out=None) -> Tensor
@@ -6601,51 +6526,6 @@ Example::
             [False, False, False, True]])
     >>> torch.masked_select(x, mask)
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
-""".format(
-        **common_args
-    ),
-)
-
-add_docstr(
-    torch.matrix_rank,
-    r"""
-matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor
-
-Returns the numerical rank of a 2-D tensor. The method to compute the
-matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
-then :attr:`input` is assumed to be symmetric, and the computation of the
-rank is done by obtaining the eigenvalues.
-
-:attr:`tol` is the threshold below which the singular values (or the eigenvalues
-when :attr:`symmetric` is ``True``) are considered to be 0. If :attr:`tol` is not
-specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is the
-singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
-is the epsilon value for the datatype of :attr:`input`.
-
-.. warning::
-
-    :func:`torch.matrix_rank` is deprecated in favor of :func:`torch.linalg.matrix_rank`
-    and will be removed in a future PyTorch release. The parameter :attr:`symmetric` was
-    renamed in :func:`torch.linalg.matrix_rank` to :attr:`hermitian`.
-
-Args:
-    input (Tensor): the input 2-D tensor
-    tol (float, optional): the tolerance value. Default: ``None``
-    symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
-                               Default: ``False``
-
-Keyword args:
-    {out}
-
-Example::
-
-    >>> a = torch.eye(10)
-    >>> torch.matrix_rank(a)
-    tensor(10)
-    >>> b = torch.eye(10)
-    >>> b[0, 0] = 0
-    >>> torch.matrix_rank(b)
-    tensor(9)
 """.format(
         **common_args
     ),
@@ -8072,7 +7952,7 @@ returned tensor and :attr:`input` tensor share the same underlying storage.
 Args:
     input (Tensor): the tensor to narrow
     dim (int): the dimension along which to narrow
-    start (int): the starting dimension
+    start (Tensor or int): the starting dimension
     length (int): the distance to the ending dimension
 
 Example::
@@ -8085,6 +7965,52 @@ Example::
     tensor([[ 2,  3],
             [ 5,  6],
             [ 8,  9]])
+""",
+)
+
+add_docstr(
+    torch.narrow_copy,
+    r"""
+narrow_copy(input, dim, start, length, *, out=None) -> Tensor
+
+Same as :meth:`Tensor.narrow` except this returns a copy rather
+than shared storage. This is primarily for sparse tensors, which
+do not have a shared-storage narrow method.
+
+Args:
+    input (Tensor): the tensor to narrow
+    dim (int): the dimension along which to narrow
+    start (int): the starting offset
+    length (int): the distance to the ending dimension
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    >>> torch.narrow_copy(x, 0, 0, 2)
+    tensor([[ 1,  2,  3],
+            [ 4,  5,  6]])
+    >>> torch.narrow_copy(x, 1, 1, 2)
+    tensor([[ 2,  3],
+            [ 5,  6],
+            [ 8,  9]])
+    >>> s = torch.arange(16).reshape(2, 2, 2, 2).to_sparse(2)
+    >>> torch.narrow_copy(s, 0, 0, 1)
+    tensor(indices=tensor([[0, 0],
+                        [0, 1]]),
+        values=tensor([[[0, 1],
+                        [2, 3]],
+
+                        [[4, 5],
+                        [6, 7]]]),
+        size=(1, 2, 2, 2), nnz=2, layout=torch.sparse_coo)
+
+.. seealso::
+
+        :func:`torch.narrow` for a non copy variant
+
 """,
 )
 
@@ -9156,8 +9082,11 @@ Keyword args:
 
 add_docstr(
     torch.randn,
-    r"""
-randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+    """
+randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -9179,6 +9108,7 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
@@ -9575,6 +9505,9 @@ add_docstr(
 round(input, *, decimals=0, out=None) -> Tensor
 
 Rounds elements of :attr:`input` to the nearest integer.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. note::
     This function implements the "round half to even" to
@@ -10622,7 +10555,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input, dim=None, *, out=None) -> Tensor
+squeeze(input, dim=None) -> Tensor
 
 Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
 
@@ -10646,9 +10579,6 @@ Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
-
-Keyword args:
-    {out}
 
 Example::
 
@@ -11954,6 +11884,9 @@ trunc(input, *, out=None) -> Tensor
 
 Returns a new tensor with the truncated integer values of
 the elements of :attr:`input`.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 Args:
     {input}
