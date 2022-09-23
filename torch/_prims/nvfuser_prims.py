@@ -212,6 +212,14 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 def _native_batch_norm_nvfuser(
     fd, input, weight, bias, running_mean, running_var, training, momentum, eps
 ):
+    if weight is None:
+        weight = fd.define_null_tensor()
+    if bias is None:
+        bias = fd.define_null_tensor()
+    if running_mean is None:
+        running_mean = fd.define_null_tensor()
+    if running_var is None:
+        running_var = fd.define_null_tensor()
     return fd.ops.batch_norm(
         input,
         weight,

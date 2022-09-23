@@ -896,6 +896,41 @@ struct TensorRecord : RecordFunctor {
   bool is_cpu_;
 };
 
+struct NullTensorRecord : RecordFunctor {
+  NullTensorRecord(std::vector<State> _outputs)
+      : RecordFunctor(
+            {},
+            std::move(_outputs),
+            "null_tensor",
+            RecordType::Tensor) {}
+  virtual ~NullTensorRecord() = default;
+  virtual RecordFunctor* clone() final {
+    return new NullTensorRecord(*this);
+  }
+
+  //! Nothing extra necessary in hash
+  //! Child specific hash function in lower 32 bits.
+  //! | 31 ---------------------------------------  0 |
+  //! | None                                          |
+  virtual size_t hash() const final {
+    auto result = RecordFunctor::hash();
+    return result;
+  }
+
+  virtual bool operator==(const RecordFunctor& other) const final {
+    auto result = false;
+    if (auto child_ptr = dynamic_cast<const NullTensorRecord*>(&other)) {
+      result = RecordFunctor::operator==(other);
+    }
+    return result;
+  }
+
+  virtual void operator()(FusionDefinition& fd) final {
+    Nvf::TensorView* tv = nullptr;
+    fd.setFusionState(outputs_.at(0).index, tv);
+  }
+};
+
 //! Specialized Record Functor for recording FusionDefinition outputs.
 
 template <class OutputType>
