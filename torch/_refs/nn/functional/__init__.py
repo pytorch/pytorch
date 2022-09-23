@@ -1,3 +1,5 @@
+from functools import reduce
+import operator
 from typing import Optional, Union
 
 import torch
