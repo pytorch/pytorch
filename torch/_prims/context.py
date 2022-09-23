@@ -1,6 +1,7 @@
 import functools
 from contextlib import nullcontext
 from typing import Any, Callable, Dict, Sequence, Union
+from warnings import warn
 
 import torch
 
@@ -231,6 +232,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             and "aten.var_mean" in str(func)
         )
 
+    def _is_rand_like(self, func):
+        result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
+            func == torch.ops.aten.rand_like or func == torch.ops.aten.rand_like.default
+        )
+        return result
+
     def __torch_function__(
         self,
         orig_func: Callable,
@@ -243,5 +250,9 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
+        if self._is_rand_like(orig_func):
+            if len(kwargs) > 0:
+                warn("rand_like has ignored kwars!")
+            return torch.ops.nvprims.rand_like(*args)
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)
