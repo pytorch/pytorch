@@ -2327,6 +2327,9 @@ ceil(input, *, out=None) -> Tensor
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
+
 .. math::
     \text{out}_{i} = \left\lceil \text{input}_{i} \right\rceil
 """
@@ -4163,6 +4166,9 @@ floor(input, *, out=None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. math::
     \text{out}_{i} = \left\lfloor \text{input}_{i} \right\rfloor
@@ -9211,8 +9217,11 @@ Keyword args:
 
 add_docstr(
     torch.randn,
-    r"""
-randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+    """
+randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -9234,6 +9243,7 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
@@ -9630,6 +9640,9 @@ add_docstr(
 round(input, *, decimals=0, out=None) -> Tensor
 
 Rounds elements of :attr:`input` to the nearest integer.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 .. note::
     This function implements the "round half to even" to
@@ -10677,7 +10690,7 @@ Example::
 add_docstr(
     torch.squeeze,
     r"""
-squeeze(input, dim=None, *, out=None) -> Tensor
+squeeze(input, dim=None) -> Tensor
 
 Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
 
@@ -10701,9 +10714,6 @@ Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
-
-Keyword args:
-    {out}
 
 Example::
 
@@ -12009,6 +12019,9 @@ trunc(input, *, out=None) -> Tensor
 
 Returns a new tensor with the truncated integer values of
 the elements of :attr:`input`.
+
+For integer inputs, follows the array-api convention of returning a
+copy of the input tensor.
 
 Args:
     {input}
