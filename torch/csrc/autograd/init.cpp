@@ -28,7 +28,7 @@
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
-#include <ATen/SavedTensorHooks.cpp>
+#include <ATen/SavedTensorHooks.h>
 
 #include <set>
 #include <unordered_set>
