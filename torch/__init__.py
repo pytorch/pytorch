@@ -962,6 +962,7 @@ from ._linalg_utils import (  # type: ignore[misc]
     solve,
     lstsq,
 )
+from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
 
 def _register_device_module(device_type, module):
