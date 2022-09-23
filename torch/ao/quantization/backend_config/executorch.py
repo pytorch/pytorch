@@ -10,6 +10,11 @@ from ._common_operator_config_utils import _Conv2dMetadata
 from ..fuser_method_mappings import reverse_sequential_wrapper2
 
 
+__all__ = [
+    "get_executorch_backend_config",
+]
+
+
 # ===================
 # |  DTYPE CONFIGS  |
 # ===================
@@ -210,7 +215,3 @@ def get_executorch_backend_config() -> BackendConfig:
         .set_backend_pattern_configs(_get_binary_ops_configs()) \
         .set_backend_pattern_configs(_get_share_qparams_ops_configs()) \
         .set_backend_pattern_configs(_get_bn_configs())
-
-__all__ = [
-    "get_executorch_backend_config",
-]
