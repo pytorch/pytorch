@@ -1271,8 +1271,6 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });
-  py_module.def(
-      "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
   py_module.def("_add_meta_to_tls_dispatch_include", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
