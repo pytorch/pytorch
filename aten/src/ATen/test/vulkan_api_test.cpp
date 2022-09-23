@@ -147,16 +147,13 @@ static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vec
 }
 
 static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
-  auto op_handle = at::Dispatcher::singleton().findOp(c10::OperatorName{"aten::slice", "Tensor"});
-  auto s = op_handle->dumpComputedTable();
-  TORCH_CHECK(false, s);
   // Arrange
   const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
 
   // Act
-  const auto out_cpu = at::native::slice(in_cpu, dim, start, end, step);
-  const auto out_vulkan = at::native::slice(in_vulkan, dim, start, end, step);
+  const auto out_cpu = at::slice(in_cpu, dim, start, end, step);
+  const auto out_vulkan = at::slice(in_vulkan, dim, start, end, step);
 
   // Assert
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
