@@ -17,6 +17,7 @@ from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
 import weakref
+import operator
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from torch._subclasses import FakeTensor
@@ -441,7 +442,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-        return proxy_call(self, func, args, kwargs)
+        out = proxy_call(self, func, args, kwargs)
+        return out
 
 
 SymInt = torch.SymIntNode
@@ -483,6 +485,14 @@ class ProxySymDispatchMode(SymDispatchMode):
     def __sym_dispatch__(self, func, types, args, kwargs):
         if not self.enable_tracing:
             return func(*args, **kwargs)
+
+        # Peephole optimize multiply by one
+        if func == operator.mul:
+            if isinstance(args[1], PySymInt) and args[1].constant == 1:
+                return args[0]
+            elif isinstance(args[0], PySymInt) and args[0].constant == 1:
+                return args[1]
+
         # For speed, we assume there are no nested data structures
         # (otherwise we could use tree_map)
         # We also assume there are no keyword arguments.
@@ -594,22 +604,17 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         sym_mode = proxy_mode.sym_mode
 
         # todo: Figure out a more informative name for symints
-        def wrap_fake_symbolic(x, sym_shape):
+        def wrap_fake_symbolic(x):
             if isinstance(x, torch.Tensor):
-                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta", requires_grad=x.requires_grad), x.device)
-                return val
+                return fake_tensor_mode.from_tensor(x, shape_env=shape_env)
             return x
 
         wrap_fn_map = {
             "real": lambda x: x,
             "fake": wrap_fake_concrete,
+            "symbolic": wrap_fake_symbolic,
         }
-        if tracing_mode == "symbolic":
-            flat_shapes = shape_env.create_shapes_for_args(args)
-            flat_args, spec = pytree.tree_flatten(args)
-            args = pytree.tree_unflatten(list(map(lambda a: wrap_fake_symbolic(a[0], a[1]), zip(flat_args, flat_shapes))), spec)
-        else:
-            args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
+        args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
         if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
             # FX doesn't support varargs, so we gotta fake up a wrapper
