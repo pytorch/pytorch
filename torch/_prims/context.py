@@ -68,25 +68,6 @@ def torch_to_refs_map():
 
 
 @functools.lru_cache(None)
-def nvfuser_decomp_table():
-    """
-    decomposition table needed for nvfuser
-    """
-    aten = torch.ops.aten
-    nvfuser_decompositions: Sequence[
-        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-    ] = {  # type: ignore[assignment]
-        # AMP calls `to` in C++, which is not handled by torch mapping
-        aten._to_copy,
-    }
-
-    from torch._decomp import get_decompositions
-
-    decomp_table = get_decompositions(nvfuser_decompositions)
-    return decomp_table
-
-
-@functools.lru_cache(None)
 def all_prims():
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
@@ -170,13 +151,19 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
 
+        skip_decomposition_table: Sequence[
+            Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+        ] = {
+            # control-flow dependent decomposition. See Issue #85517
+            torch.ops.aten.masked_fill.Tensor,
+        }
         # For torch.ops.aten.*, use registered decompositions from torch._decomp
         # torch._decomp.decomposition_table provides a mapping from
         # torch.ops.aten.* to torch._refs or torch._decomp.decompositions
         # implementations.
         # There're other ways to implement this functionality,
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
-        if func is None and isinstance(orig_func, torch._ops.OpOverload):
+        if func is None and isinstance(orig_func, torch._ops.OpOverload) and orig_func not in skip_decomposition_table:
             func = torch._decomp.decomposition_table.get(orig_func, None)
 
         if func is not None:
