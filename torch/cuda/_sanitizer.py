@@ -22,7 +22,6 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
 
 import torch
 import torch.utils._cuda_trace as cuda_trace
-from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 
@@ -523,10 +522,31 @@ class ArgumentHandler:
         )
 
 
-class CUDASanitizerDispatchMode(TorchDispatchMode):
+class CUDASanitizer:
+    """When enabled, traces all kernel launches, tensor allocations, etc."""
+
     def __init__(self):
         self.event_handler = EventHandler()
         torch._C._activate_cuda_trace()
+
+    def _parse_kernel_launch(self, schema, args, kwargs, outputs):
+        argument_handler = ArgumentHandler()
+        argument_handler.parse_inputs(schema, args, kwargs)
+        argument_handler.parse_outputs(outputs)
+
+        errors = self.event_handler._handle_kernel_launch(
+            torch.cuda.current_stream().cuda_stream,
+            list(argument_handler.dataptrs_read - argument_handler.dataptrs_written),
+            list(argument_handler.dataptrs_written),
+            schema,
+            argument_handler.tensor_names,
+        )
+        if errors:
+            for error in errors:
+                print(error, file=sys.stderr)
+            raise CUDASanitizerErrors(errors)
+
+    def enable(self):
         cuda_trace.register_callback_for_cuda_event_creation(
             self.event_handler._handle_event_creation
         )
@@ -557,52 +577,7 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         cuda_trace.register_callback_for_cuda_event_synchronization(
             self.event_handler._handle_event_synchronization
         )
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
-
-        argument_handler = ArgumentHandler()
-        argument_handler.parse_inputs(func._schema, args, kwargs)
-
-        outputs = func(*args, **kwargs)
-
-        argument_handler.parse_outputs(outputs)
-        errors = self.event_handler._handle_kernel_launch(
-            torch.cuda.current_stream().cuda_stream,
-            list(argument_handler.dataptrs_read - argument_handler.dataptrs_written),
-            list(argument_handler.dataptrs_written),
-            func._schema,
-            argument_handler.tensor_names,
-        )
-        if errors:
-            for error in errors:
-                print(error, file=sys.stderr)
-            raise CUDASanitizerErrors(errors)
-
-        return outputs
-
-
-class CUDASanitizer:
-    """Manages the lifetime of a CUDASanitizer dispatch mode object.
-
-    The CUDASanitizer class wraps the entering/exiting functions of the dispatch mode
-    context manager in the enable function/destructor, respectively. This is to
-    explicitly set the lifetime of the dispatch mode object to that of the application.
-    This approach was deemed more elegant than using the atexit module.
-    """
-
-    def __init__(self):
-        self.dispatch = CUDASanitizerDispatchMode()
-        self.enabled = False
-
-    def enable(self):
-        self.dispatch.__enter__()
-        self.enabled = True
-
-    def __del__(self):
-        if self.enabled:
-            self.dispatch.__exit__(None, None, None)
+        cuda_trace.register_callback_for_kernel_launch(self._parse_kernel_launch)
 
 
 def enable_cuda_sanitizer():
