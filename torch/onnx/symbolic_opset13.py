@@ -1,7 +1,9 @@
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+# see Note [Edit Symbolic Files] in README.md
 
 # This file exports ONNX ops for opset 13
+import functools
+
 import torch
 import torch._C._onnx as _C_onnx
 from torch.onnx import (
@@ -12,9 +14,24 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
+from torch.onnx._internal import _beartype, registration
 
 
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)
+
+
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
+@_onnx_symbolic("aten::softmax")
 @symbolic_helper.parse_args("v", "i", "none")
+@_beartype.beartype
 def softmax(g, input, dim, dtype=None):
     softmax = g.op("Softmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != "prim::Constant":
@@ -26,7 +43,9 @@ def softmax(g, input, dim, dtype=None):
     return softmax
 
 
+@_onnx_symbolic("aten::log_softmax")
 @symbolic_helper.parse_args("v", "i", "none")
+@_beartype.beartype
 def log_softmax(g, input, dim, dtype=None):
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != "prim::Constant":
@@ -37,7 +56,9 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
+@_onnx_symbolic("aten::frobenius_norm")
 @symbolic_helper.parse_args("v", "v", "i")
+@_beartype.beartype
 def frobenius_norm(g, self, dim=None, keepdim=False):
     dim_val = symbolic_helper._maybe_get_const(dim, "is")
     if not symbolic_helper._is_value(dim_val) and len(dim_val) == 0:
@@ -47,7 +68,9 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
     return g.op("Sqrt", sumsqr)
 
 
+@_onnx_symbolic("aten::split")
 @symbolic_helper.parse_args("v", "v", "i", "i")
+@_beartype.beartype
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
@@ -103,19 +126,27 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
+@_onnx_symbolic("aten::split_with_sizes")
+@_beartype.beartype
 def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split(g, self, split_sizes, dim, _outputs)
 
 
+@_onnx_symbolic("aten::unsafe_split")
+@_beartype.beartype
 def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
     return split(g, self, split_size_or_sizes, dim, _outputs)
 
 
+@_onnx_symbolic("aten::unsafe_split_with_sizes")
+@_beartype.beartype
 def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split_with_sizes(g, self, split_sizes, dim, _outputs)
 
 
+@_onnx_symbolic("aten::tensor_split")
 @symbolic_helper.parse_args("v", "v", "i", "i")
+@_beartype.beartype
 def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
     axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
     axis = opset11.unsqueeze(g, axis, 0)
@@ -246,7 +277,9 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
         return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
+@_onnx_symbolic("aten::unbind")
 @symbolic_helper.parse_args("v", "i", "i")
+@_beartype.beartype
 def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
         return g.op(
@@ -267,12 +300,16 @@ def unbind(g, self, dim=0, _outputs=None):
     return squeezed_outputs
 
 
+@_onnx_symbolic("aten::nonzero_numpy")
 # Emitted from `torch.nonzero(x, as_tuple=True)`
+@_beartype.beartype
 def nonzero_numpy(g, input, _outputs=None):
     return unbind(g, opset9.nonzero(g, input), 1, _outputs=_outputs)
 
 
+@_onnx_symbolic("aten::where")
 @symbolic_helper.parse_args("v", "v", "v", "i")
+@_beartype.beartype
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if not symbolic_helper._is_bool(condition):
@@ -285,7 +322,9 @@ def where(g, condition, self=None, other=None, _outputs=None):
     return g.op("Where", condition, self, other)
 
 
+@_onnx_symbolic("aten::fake_quantize_per_channel_affine")
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i")
+@_beartype.beartype
 def fake_quantize_per_channel_affine(
     g, inputs, scale, zero_point, axis, quant_min=-128, quant_max=127
 ):
@@ -313,7 +352,9 @@ def fake_quantize_per_channel_affine(
     return g.op("DequantizeLinear", quantized, scale, zero_point, axis_i=axis)
 
 
+@_onnx_symbolic("aten::fake_quantize_per_tensor_affine")
 @symbolic_helper.parse_args("v", "v", "v", "i", "i")
+@_beartype.beartype
 def fake_quantize_per_tensor_affine(
     g, inputs, scale, zero_point, quant_min=-128, quant_max=127
 ):
@@ -342,7 +383,9 @@ def fake_quantize_per_tensor_affine(
     return g.op("DequantizeLinear", quantized, scale, zero_point)
 
 
+@_beartype.beartype
 def _reduce_op_symbolic(onnx_op_name):
+    @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = opset9._maybe_cast_reduce_op_input(g, self)
         if dim is None:
@@ -355,12 +398,19 @@ def _reduce_op_symbolic(onnx_op_name):
     return symbolic
 
 
+@_onnx_symbolic(
+    "aten::sum",
+    decorate=[_apply_params("ReduceSum", "sum")],
+)
+@_beartype.beartype
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
 
     @opset9.overload_by_arg_count
+    @_beartype.beartype
     def reduce(g, *args, **kwargs):
         @symbolic_helper.parse_args("v", "none")
+        @_beartype.beartype
         def reduce_nodim(g, self, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -372,6 +422,7 @@ def _reduce_with_dtype(onnx_op, name):
             return symbolic(g, self)
 
         @symbolic_helper.parse_args("v", "v", "i", "none")
+        @_beartype.beartype
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -387,11 +438,9 @@ def _reduce_with_dtype(onnx_op, name):
     return reduce
 
 
-# TODO(justinchuby): Rename the op to avoid colliding with the builtin sum.
-sum = _reduce_with_dtype("ReduceSum", "sum")
-
-
+@_onnx_symbolic("aten::unsafe_chunk")
 @symbolic_helper.parse_args("v", "i", "i", "i")
+@_beartype.beartype
 def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if _outputs is None:
         return g.op(
@@ -418,6 +467,8 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
+@_onnx_symbolic("aten::repeat_interleave")
+@_beartype.beartype
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     final_dim = dim
@@ -550,7 +601,9 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     return loop_out
 
 
+@_onnx_symbolic("aten::diagonal")
 @symbolic_helper.parse_args("v", "i", "i", "i")
+@_beartype.beartype
 def diagonal(g, self, offset, dim1, dim2):
     dim1_size = opset9.size(
         g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1]))
@@ -666,75 +719,72 @@ def diagonal(g, self, offset, dim1, dim2):
     return if_op
 
 
-class Quantized:
-    """
-    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
-    """
+# Quantized ops
 
-    domain = "quantized"
 
-    @staticmethod
-    def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale, axis
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+@_onnx_symbolic("quantized::linear")
+@_beartype.beartype
+def quantized_linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-        output = opset9.linear(g, input, weight, bias)
+    output = opset9.linear(g, input, weight, bias)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    def conv2d(
-        g,
-        q_input,
-        q_weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        groups,
-        op_scale,
-        op_zero_point,
-    ):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale, axis
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-        output = opset9.conv2d(
-            g, input, weight, bias, stride, padding, dilation, groups
-        )
+@_onnx_symbolic("quantized::conv2d")
+@_beartype.beartype
+def quantized_conv2d(
+    g,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
 
-    @staticmethod
-    def conv2d_relu(
-        g,
-        q_input,
-        q_weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        groups,
-        op_scale,
-        op_zero_point,
-    ):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale, axis
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        output = opset9.conv2d(
-            g, input, weight, bias, stride, padding, dilation, groups
-        )
-        output = opset9.relu(g, output)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+@_onnx_symbolic("quantized::conv2d_relu")
+@_beartype.beartype
+def quantized_conv2d_relu(
+    g,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
