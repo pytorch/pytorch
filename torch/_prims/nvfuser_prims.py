@@ -15,6 +15,7 @@ from torch._prims_common import (
     getnvFuserDtype,
     ShapeType,
     TensorLikeType,
+    _torch_dtype_to_nvfuser_dtype_map,
 )
 
 from torch._prims_common.wrappers import (
@@ -97,6 +98,7 @@ nvprim_names = [
 ]
 
 _nvfuser_impls: Dict[str, Any] = {}
+_nvfuser_skip: Dict[str, Any] = {}
 
 _nvfuser_unary_ops = {
     "abs",
@@ -305,6 +307,11 @@ _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
 
+def _check_dtype(node):
+    return (_torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None)
+
+_nvfuser_skip["convert_element_type"] = _check_dtype
+
 
 def register_var_mean():
     """This function is used to register the var_mean function in torch.ops.nvprims module."""
@@ -423,3 +430,4 @@ def register_nvprims():
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
+            p.skip_nvfuser = _nvfuser_skip.get(name)
