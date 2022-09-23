@@ -16,10 +16,11 @@ Tensor = torch.Tensor
 from torch import _VF
 
 # Set a global declaring that we have opt_einsum
-from importlib.util import find_spec as _find_spec
-if _find_spec('opt_einsum') is not None:
+# Reasons for not being able to import include opt_einsum not being found
+# OR numpy (an opt_einsum dependency) not being found
+try:
     import opt_einsum as _opt_einsum  # type: ignore[import]
-else:
+except ModuleNotFoundError:
     _opt_einsum = None
 
 

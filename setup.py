@@ -968,6 +968,7 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
+        'opt-einsum>=3.3',
     ]
 
     # Parse the command line and check the arguments before we proceed with
@@ -988,10 +989,6 @@ def main():
     extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
 
     install_requires += extra_install_requires
-
-    extras_require = {
-        'opt-einsum': ['opt-einsum>=3.3']
-    }
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
@@ -1172,7 +1169,6 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
-        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,
