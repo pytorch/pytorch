@@ -1,5 +1,5 @@
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+# see Note [Edit Symbolic Files] in README.md
 
 # This file exports ONNX ops for opset 13
 import functools
