@@ -1,4 +1,5 @@
 import functools
+import operator
 from enum import Enum
 from itertools import product
 from typing import Callable, Iterable, List, Optional, Tuple
@@ -8,9 +9,11 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import TensorSequenceType
+from torch._prims_common import NumberType, TensorLike, TensorSequenceType
 from torch._prims_common.wrappers import out_wrapper
 from torch.utils._pytree import tree_flatten, tree_map
+
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -754,23 +757,37 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
         return (input, torch.ones_like(input, dtype=torch.bool))
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._softmax)
-@pw_cast_for_opmath
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     unnormalized = torch.exp(x - x_max)
-    return unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    result = unnormalized / torch.sum(unnormalized, dim, keepdim=True)
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
-# TODO: Correct the type promotion semantics
 @register_decomposition(aten._log_softmax)
-@pw_cast_for_opmath
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    if half_to_float:
+        assert x.dtype == torch.half
+    computation_dtype, result_dtype = utils.elementwise_dtypes(
+        x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+    x = x.to(computation_dtype)
     x_max = torch.amax(x, dim, keepdim=True)
     shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
-    return shifted - shifted_logsumexp
+    result = shifted - shifted_logsumexp
+    if not half_to_float:
+        result = result.to(result_dtype)
+    return result
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
@@ -1275,11 +1292,9 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(
-    [aten.detach, aten.lift, aten.lift_fresh, aten.alias], disable_meta=True
-)
+@register_decomposition([aten.detach, aten.lift, aten.lift_fresh], disable_meta=True)
 def nop_decomposition(x):
-    return x
+    return aten.alias(x)
 
 
 @register_decomposition(aten.cudnn_batch_norm)
@@ -1547,6 +1562,32 @@ def adaptive_avg_pool2d(input: Tensor, output_size: Tuple[int, int]):
     return ret / (length_h * length_w)
 
 
+@register_decomposition(aten.index_add_)
+def index_add_(
+    x: TensorLike,
+    dim: int,
+    index: TensorLike,
+    tensor: TensorLike,
+    *,
+    alpha: NumberType = 1,
+):
+    dim = utils.canonicalize_dims(x.ndim, dim)
+    utils.check(
+        index.ndim <= 1,
+        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    )
+    if alpha != 1:
+        python_type = utils.dtype_to_type(x.dtype)
+        utils.check(
+            utils.is_weakly_lesser_type(type(alpha), python_type),
+            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        )
+        tensor = tensor * alpha
+    idx = (slice(None),) * dim + (index,)
+    torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
+    return x
+
+
 def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
     ndim = self.dim()
     wrapped_dims = utils.canonicalize_dims(ndim, dims)
@@ -1555,20 +1596,6 @@ def _squeeze_multiple(self: Tensor, dims: List[int]) -> Tensor:
         if idx in wrapped_dims:
             self = self.squeeze(idx)
     return self
-
-
-@register_decomposition(aten.logsumexp.default)
-@pw_cast_for_int_to_real
-def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
-    if self.numel() == 0:
-        return torch.sum(torch.exp(self), dim, keepdim).log()
-    maxes = torch.amax(self, dim, keepdim=True)
-    maxes_squeezed = maxes if keepdim else _squeeze_multiple(maxes, dim)
-    maxes_squeezed = torch.masked_fill(
-        maxes_squeezed, maxes_squeezed.abs() == float("inf"), 0
-    )
-    result = torch.sum(torch.exp(self - maxes), dim, keepdim)
-    return result.log().add(maxes_squeezed)
 
 
 # nb: Should use acc_t, not op_math
@@ -1992,3 +2019,131 @@ def binary_cross_entropy_with_logits(
         loss = loss * weight
 
     return apply_loss_reduction(loss, reduction)
+
+
+def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
+    dim_tensor1 = tensor1.ndim
+    if dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
+        t1_sizes_ptr = tensor1.shape
+        t1_strides = tensor1.stride()
+        if (
+            dim_tensor1 == 3
+            and dim_tensor2 == 2
+            and t1_strides[-1] != 1
+            and t1_strides[0] == t1_sizes_ptr[1] * t1_sizes_ptr[2]
+        ):
+            # First dim is slowest moving, and then the following two dims are
+            # transposed. This can happen for example by permute(0, 2, 1).
+            # First 2 dims could be folded to use mm but would require permutation
+            # with actual data movement, which can be instead handled by BMM with each
+            # GEMM transposed.
+            # This can be generalized to a tensor with dim X + Y + Z where X, Y, and Z
+            # dims are contiguous, Y dims and Z dims are transposed, and X, Y, Z > 0.
+            # For example, this can happen by permute(0, 1, 5, 2, 3, 4), where X = 2,
+            # Y = 3, and Z = 1.
+            return False
+        else:
+            return True
+    else:
+        return False
+
+
+@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+def matmul(tensor1, tensor2):
+    dim_tensor1 = tensor1.dim()
+    dim_tensor2 = tensor2.dim()
+    assert dim_tensor1 != 0 and dim_tensor2 != 0
+    if dim_tensor1 == 1 and dim_tensor2 == 1:
+        return torch.dot(tensor1, tensor2)
+    elif dim_tensor1 == 2 and dim_tensor2 == 1:
+        return torch.mv(tensor1, tensor2)
+    elif dim_tensor1 == 1 and dim_tensor2 == 2:
+        return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
+    elif dim_tensor1 == 2 and dim_tensor2 == 2:
+        # if tensor1.shape[1] != tensor2.shape[0]:
+        #     breakpoint()
+        return torch.mm(tensor1, tensor2)
+    elif should_fold(tensor1, dim_tensor2) or should_fold(tensor2, dim_tensor1):
+        # NB: Much of this was written with Copilot! (although still had to fix a bunch of issues)
+
+        # dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
+        # dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
+        # and some condition on the strides is fulfilled
+
+        # optimization: use mm instead of bmm by folding the batch of the larger tensor
+        # into its leading matrix dimension
+        transpose = dim_tensor2 > dim_tensor1
+        t1 = tensor2.mT if transpose else tensor1
+        t2 = (
+            tensor2 if not transpose else (tensor1.t() if dim_tensor1 == 2 else tensor1)
+        )
+        # Invariant: t1.dim() >= 3 && (t2.dim() == 1 || t2.dim() == 2)
+        #            and t1 and t2 are matmul-compatible
+
+        # Why not t1.view(-1, sizes_1[-1])?
+        # If the last dim is 0, then view(-1, 0) won't work because the -1 becomes ambiguous.
+        # This can happen in e.g. [3, 5, 0] @ [0, 0].
+        sizes_1 = t1.shape
+        output_shape = list(sizes_1[:-1])
+        folded_dim1 = functools.reduce(operator.mul, output_shape)
+
+        # Readjust output_shape if we are multiplying by a matrix
+        t2_is_matrix = t2.dim() == 2
+        if t2_is_matrix:
+            output_shape.append(t2.shape[1])
+        # HACK: We need reshape with symint support
+        t1 = t1.contiguous()
+        t1_folded = t1.view(folded_dim1, sizes_1[-1])
+        if t2_is_matrix:
+            # FIXME This path always does an unnecessary copy when transpose == True as the returned
+            # result from BLAS is already C-transposed
+            output = t1_folded.mm(t2).view(output_shape)
+            return output.mT.contiguous() if transpose else output
+        else:
+            return t1_folded.mv(t2).view(output_shape)
+
+    elif dim_tensor1 >= 1 and dim_tensor2 >= 1:
+        # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
+        # we track m1 vs m2 separately even though they must match for nicer error messages
+        n = tensor1.size(-2) if dim_tensor1 > 1 else 1
+        m1 = tensor1.size(-1)
+        batch_tensor1 = tensor1.shape[:-2]
+        m2 = tensor2.size(-2) if dim_tensor2 > 1 else tensor2.size(-1)
+        p = tensor2.size(-1) if dim_tensor2 > 1 else 1
+        batch_tensor2: List[int] = []
+        # TODO: handling of slice
+        for i in range(dim_tensor2 - 2):
+            batch_tensor2.append(tensor2.size(i))
+
+        # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
+        expand_batch_portion = list(
+            torch.broadcast_shapes(batch_tensor1, batch_tensor2)
+        )
+
+        tensor1_expand_size = expand_batch_portion + [n, m1]
+        tensor2_expand_size = expand_batch_portion + [m2, p]
+
+        expand_batch_product = prod(expand_batch_portion)
+
+        # HACK: We need reshape with symint support
+        tensor1_expanded = (
+            tensor1.expand(tensor1_expand_size)
+            .contiguous()
+            .view(expand_batch_product, n, m1)
+        )
+        tensor2_expanded = (
+            tensor2.expand(tensor2_expand_size)
+            .contiguous()
+            .view(expand_batch_product, m2, p)
+        )
+
+        output_shape = expand_batch_portion
+        if dim_tensor1 > 1:
+            output_shape.append(n)
+
+        if dim_tensor2 > 1:
+            output_shape.append(p)
+
+        return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
+    else:
+        utils.check(False, lambda: "both arguments to matmul need to be at least 1D")

@@ -793,9 +793,6 @@ class OpInfo(object):
 
     test_neg_view: bool = True
 
-    # whether to test aliases of the operator (like arccosh for acosh)
-    test_aliases: bool = True
-
     # assert that jit shape analysis fully propagates shape
     assert_jit_shape_analysis: bool = False
 
