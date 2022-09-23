@@ -19,6 +19,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE pybind::pybind11)
 
 set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY
       ${CMAKE_BINARY_DIR}/functorch)
+set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "${_rpath_portable_origin}/../torch/lib")
 
 # Copy-pasted prefix/suffix logic for Python extensions from
 # https://github.com/pytorch/pytorch/blob/33bb8ae350611760139457b85842b1d7edf9aa11/caffe2/CMakeLists.txt#L1975

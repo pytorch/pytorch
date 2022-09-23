@@ -203,9 +203,48 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   return result;
 }
 
-Tensor& set_(Tensor& result, const Tensor& storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  c10::SymDimVector contiguous_strides;
+  if (stride.data() == nullptr) {
+    // TODO: dedupe this with empty() symbolic logic
+    int64_t dim = size.size();
+    contiguous_strides.resize(dim);
+    if (dim > 0) {
+      const auto last_idx = dim - 1;
+      contiguous_strides.at(last_idx) = 1;
+      for (auto i = last_idx - 1; i >= 0; --i) {
+        // TODO: max with 1
+        contiguous_strides.at(i) = contiguous_strides.at(i+1) * size.at(i+1);
+      }
+    }
+    stride = contiguous_strides;
+  }
+
+  // Run this before storage setting so we can access numel
+  result.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride, storage_offset);
+
+  // Matches maybe_resize_storage_cpu no-numel behavior
+  if (result.sym_numel() != 0) {
+    // maybe_resize_storage_cpu can handle no storage exists at all but
+    // that should never be the case here
+    TORCH_INTERNAL_ASSERT(storage);
+    TORCH_CHECK(storage.resizable(), "Trying to resize storage that is not resizable");
+    // All meta data pointers are the same, so we don't have to "re" allocate
+    // it.  TODO: Actually this might not quite be correct if we use special
+    // pointers to track whether or not fake cuda tensors are pinned or not
+    const auto itemsize = result.dtype().itemsize();
+    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
+        size, stride, itemsize, storage_offset);
+    storage.set_nbytes(size_bytes);
+  }
+  return result;
+}
+
+Tensor& set__symint(Tensor& result, const Tensor& storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
   TORCH_CHECK(storage.is_contiguous(), "passed in tensor to be used as storage must be contiguous");
-  return result.set_(storage.storage(), storage_offset + storage.storage_offset(), size, stride);
+  return result.set__symint(storage.storage(), storage_offset + storage.sym_storage_offset(), size, stride);
 }
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
@@ -426,6 +465,23 @@ Tensor & concat_out(TensorList tensors, int64_t dim, Tensor & result) {
 }
 
 Tensor concat(TensorList tensors, int64_t dim) {
+  return at::cat(tensors, dim);
+}
+
+// torch.concatenate, alias for torch.cat
+Tensor& concatenate_out(TensorList tensors, Dimname dim, Tensor& result) {
+  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor concatenate(TensorList tensors, Dimname dim) {
+  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor& concatenate_out(TensorList tensors, int64_t dim, Tensor & result) {
+  return at::cat_out(result, tensors, dim);
+}
+
+Tensor concatenate(TensorList tensors, int64_t dim) {
   return at::cat(tensors, dim);
 }
 
@@ -880,10 +936,27 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 }
 
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+  TORCH_INTERNAL_ASSERT(!self.is_mps(), "as_strided_tensorimpl does not work with MPS; call self.as_strided(...) instead");
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
   setStrided(result, size, stride, storage_offset);
+  return result;
+}
+
+Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
+  auto storage_offset = storage_offset_.value_or(self.storage_offset());
+  auto result = at::detail::make_tensor<TensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+  setStrided(result, size, stride, storage_offset);
+  return result;
+}
+
+Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
+  auto sym_storage_offset = sym_storage_offset_.value_or(self.sym_storage_offset());
+  auto result = at::detail::make_tensor<TensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+  setStrided(result, sym_size, sym_stride, sym_storage_offset);
   return result;
 }
 
@@ -2102,6 +2175,10 @@ Tensor slice(
     auto quantizer = create_subtensor_quantizer(self, false, start_val, end_val, dim, step);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
+    // NB: it is extremely important to perform a redispatch here for
+    // the MPS backend; if you call directly to as_strided_tensorimpl,
+    // the necessary metadata for MPS will not get setup and you will
+    // get silently wrong results
     result = self.as_strided(sizes, strides, storage_offset);
   }
   namedinference::propagate_names(result, self);
@@ -3491,12 +3568,12 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     slice.copy_(src);
     return output;
 }
-at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
+at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // See Note [as_strided_scatter backward support]
     TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
     auto output = self.clone();
-    auto slice = output.as_strided(size, stride, storage_offset);
-    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    auto slice = output.as_strided_symint(size, stride, storage_offset);
+    TORCH_CHECK(slice.sym_sizes() == src.sym_sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sym_sizes(), ", slice size = ", slice.sym_sizes());
     slice.copy_(src);
     return output;
 }
@@ -3555,8 +3632,8 @@ at::Tensor& _neg_view_copy_out(const at::Tensor & self, at::Tensor & out) {
 }
 
 
-at::Tensor& as_strided_copy_out(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset, at::Tensor & out) {
-  auto tmp = self.as_strided(size, stride, storage_offset);
+at::Tensor& as_strided_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset, at::Tensor & out) {
+  auto tmp = self.as_strided_symint(size, stride, storage_offset);
   out.copy_(tmp);
   return out;
 }
