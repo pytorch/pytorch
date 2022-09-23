@@ -9,6 +9,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include "c10/util/Exception.h"
 
 namespace at {
 namespace native {
@@ -161,12 +162,17 @@ bool NestedTensor_nested_tensor_from_mask_left_aligned(const Tensor& t, const Te
     return sizes.equal(nums);
 }
 
-Tensor nested_tensor(
+Tensor nested_tensor_constructor(
     TensorList list,
+    bool nested_tensor_is_leaf,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<bool> requires_grad) {
+  TORCH_INTERNAL_ASSERT(
+    !requires_grad.has_value() || nested_tensor_is_leaf,
+    "requires_grad should not be set if constructing a leaf nested tensor.");
   for (const auto i : c10::irange(list.size())) {
     if (i > 0) {
       int64_t dim_i = list[i].dim();
@@ -187,10 +193,12 @@ Tensor nested_tensor(
   }
   return impl::wrap_tensor_node(
       impl::TensorNode(list),
+      nested_tensor_is_leaf,
       dtype,
       layout,
       device,
-      pin_memory);
+      pin_memory,
+      requires_grad);
 }
 
 

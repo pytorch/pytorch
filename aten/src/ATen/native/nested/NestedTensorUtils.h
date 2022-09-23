@@ -252,26 +252,42 @@ inline TensorNode get_nested_tensor_structure(at::Tensor tensor) {
 
 inline Tensor wrap_tensor_node(
     TensorNode tensor_node,
+    bool nested_tensor_is_leaf,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory,
+    c10::optional<bool> requires_grad) {
+  TORCH_CHECK(
+    !requires_grad.has_value() || nested_tensor_is_leaf,
+    "requires_grad should not be set unless constructing a leaf nested tensor.");
   TORCH_CHECK(
       !tensor_node.is_leaf(), "Expected TensorNode to wrap a list of Tensors.");
   TensorOptions options_ =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
   if (tensor_node.degree() == 0) {
-    return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
+    if (nested_tensor_is_leaf) {
+      return wrap_buffer(ones({0}, dtype, layout, device, requires_grad), ones({}));
+    }
+     return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
   }
   std::vector<Tensor> sizes;
   std::vector<Tensor> flat_tensors;
   for (const auto i : c10::irange(tensor_node.degree())) {
-    flat_tensors.push_back(tensor_node.children(i).reshape(-1).contiguous());
+    TORCH_WARN("CHILE", tensor_node.children(i));
+    auto elem = tensor_node.children(i).reshape(-1).contiguous();
+    if (nested_tensor_is_leaf) {
+      elem = elem.detach();
+    }
+    flat_tensors.push_back(elem);
     sizes.push_back(tensor(c10::IntArrayRef(tensor_node.children(i).sizes())));
   }
 
   TensorOptions options = flat_tensors[0].options().merge_in(options_);
+  if (nested_tensor_is_leaf) {
+    options.requires_grad(requires_grad);
+  }
 
   return wrap_buffer(
       at::cat(flat_tensors).to(options), at::native::stack(sizes));
@@ -285,6 +301,7 @@ template <class F, class... A>
 inline at::Tensor map_nested_tensor(F&& fn, A... a) {
   return wrap_tensor_node(
       impl::map(std::forward<F>(fn), impl::get_nested_tensor_structure(a)...),
+      false,   // result should not be a leaf
       c10::nullopt,
       c10::nullopt,
       c10::nullopt,

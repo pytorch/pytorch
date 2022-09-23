@@ -137,5 +137,10 @@ at::Tensor asarray(
     c10::optional<c10::Device> device,
     c10::optional<bool> copy,
     bool requires_grad);
+
+at::Tensor nested_tensor_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r);
 } // namespace utils
 } // namespace torch

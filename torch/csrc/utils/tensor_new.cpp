@@ -1491,6 +1491,29 @@ Tensor tensor_ctor(
   throw std::runtime_error("tensor(): invalid arguments");
 }
 
+Tensor nested_tensor_ctor(
+    c10::DispatchKey dispatch_key,
+    at::ScalarType scalar_type,
+    PythonArgs& r) {
+  if (r.idx == 0) {
+    at::TensorList list = r.tensorlist(0);
+    bool pin_memory = r.toBool(3);
+    bool args_requires_grad = r.toBool(4);
+    auto deviceOptional = r.deviceOptional(2);
+    auto new_tensor = at::_nested_tensor(
+      list,
+      true,  // nested_tensor_is_leaf
+      r.scalartypeWithDefault(1, scalar_type),
+      c10::nullopt,  // layout
+      deviceOptional,
+      pin_memory,
+      args_requires_grad
+    );
+    return new_tensor;
+  }
+  throw std::runtime_error("nested_tensor(): invalid arguments");
+}
+
 Tensor as_tensor(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,

@@ -12712,11 +12712,11 @@
   variants: function
   python_module: nn
 
-- func: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _nested_tensor(Tensor[] list, bool is_leaf, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool? req_grad=False) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: nested_tensor
-  autogen: nested_tensor.out
+    CompositeExplicitAutograd: nested_tensor_constructor
+  autogen: _nested_tensor.out
 
 - func: _fw_primal_copy(Tensor self, int level) -> Tensor
   variants: function

@@ -2708,7 +2708,7 @@
   self: grad.reshape(self.sizes())
 
 # Nested Tensor
-- name: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- name: _nested_tensor(Tensor[] list, bool is_leaf, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, bool? req_grad=False) -> Tensor
   list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
 
 - name: _nested_tensor_from_mask(Tensor t, Tensor mask, bool mask_check=True) -> Tensor

@@ -314,6 +314,32 @@ static PyObject* THPVariable_tensor(
   END_HANDLE_TH_ERRORS
 }
 
+// implemented on python object so in future we allow nestedtensor to be constructed with
+// arbitrarily nested python objects - list, tuple, np array, scalar, etc.
+static PyObject* THPVariable_nested_tensor(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+      "tensor(TensorList data, *, ScalarType dtype=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
+  });
+
+  constexpr int ctor_num_args = 5;
+  ParsedArgs<ctor_num_args> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPVariableFunctionsModule, "torch");
+  }
+  jit::tracer::warn("torch.nested_tensor", jit::tracer::WARN_CONSTRUCTOR);
+  return THPVariable_Wrap(torch::utils::nested_tensor_ctor(
+      torch::tensors::get_default_dispatch_key(),
+      torch::tensors::get_default_scalar_type(),
+      r));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable_get_device(
     PyObject* self_,
     PyObject* args,
@@ -613,6 +639,10 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"numel",
      castPyCFunctionWithKeywords(THPVariable_numel),
+     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
+     nullptr},
+    {"nested_tensor",
+     castPyCFunctionWithKeywords(THPVariable_nested_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
 };
