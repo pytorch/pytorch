@@ -552,6 +552,10 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
+            # Pre-existing condition (calls .item); needs to be fixed
+            DecorateInfo(
+                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
+            ),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.expectedFailure,
@@ -561,14 +565,6 @@ op_db: List[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
-            ),
-            # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestDecomp",
-                "test_comprehensive",
-                dtypes=(torch.bfloat16,),
-                device_type="cpu",
             ),
         ),
         # Can reuse the same inputs; dim is required in both

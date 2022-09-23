@@ -52,6 +52,9 @@ jobs:
     with:!{{ upload.binary_env_as_input(config) }}
       build_name: !{{ config["build_name"] }}
       build_environment: !{{ build_environment }}
+      {%- if config.pytorch_extra_install_requirements is defined %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
+      {%- endif %}
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
