@@ -285,7 +285,6 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   std::shared_ptr<c10::SafePyObject> pyobj_ = nullptr;
 };
 
-
 SymFloatNode PythonSymIntNodeImpl::truediv(const SymIntNode& other) {
   auto pother = dynamic_cast<PythonSymIntNodeImpl*>(other.get());
   TORCH_CHECK(pother);

@@ -181,11 +181,21 @@
   dispatch:
     CUDA: _use_cudnn_ctc_loss
 
+- func: _use_cudnn_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also _cudnn_ctc_loss
+  dispatch:
+    CUDA: _use_cudnn_ctc_loss_tensor
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
   dispatch:
     CUDA: _cudnn_ctc_loss
   autogen: _cudnn_ctc_loss.out
+
+- func: _cudnn_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
+  dispatch:
+    CUDA: _cudnn_ctc_loss_tensor
 
 - func: _use_cudnn_rnn_flatten_weight() -> bool
 
@@ -1770,11 +1780,19 @@
     CUDA: ctc_loss_gpu
   autogen: _ctc_loss.out
 
+- func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU, CUDA: ctc_loss_tensor
+
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
   autogen: _ctc_loss_backward.out
+
+- func: _ctc_loss_backward.Tensor(Tensor grad, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
+  dispatch:
+    CPU, CUDA: ctc_loss_backward_tensor
 
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   variants: function, method
@@ -3220,10 +3238,6 @@
   dispatch:
     CompositeImplicitAutograd: matmul_out
     NestedTensorCPU, NestedTensorCUDA: matmul_out_nested
-
-- func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
-
-- func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
 
 # Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
@@ -8108,17 +8122,6 @@
 
 - func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, float label_smoothing=0.0) -> Tensor
   python_module: nn
-
-- func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
-  dispatch:
-    CPU: legacy_lstsq_out
-    CUDA: legacy_lstsq_out_cuda
-
-- func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  variants: method, function
-  dispatch:
-    CPU: legacy_lstsq
-    CUDA: legacy_lstsq_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
@@ -13165,7 +13168,9 @@
   autogen: _native_multi_head_attention.out
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=True, bool is_causal=False) -> (Tensor, Tensor)
+  python_module: nn
   variants: function
+  autogen: _scaled_dot_product_attention.out
 
 - func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
   variants: function

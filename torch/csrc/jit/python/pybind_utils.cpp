@@ -155,7 +155,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (torch::is_symfloat_node(obj.ptr())) {
         return py::cast<c10::SymFloat>(obj);
       }
-      return py::cast<int64_t>(obj);
+      return py::cast<double>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
         throw py::cast_error(
