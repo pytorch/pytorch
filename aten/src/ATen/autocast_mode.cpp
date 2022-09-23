@@ -530,7 +530,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(cholesky_solve), "cholesky_solve", Tensor(const Tensor &, const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(inverse), "inverse", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(lu_solve), "lu_solve", Tensor(const Tensor &, const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(matrix_rank), "matrix_rank", Tensor(const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(orgqr), "orgqr", Tensor(const Tensor &, const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(ormqr), "ormqr", Tensor(const Tensor &, const Tensor &, const Tensor &, bool, bool), fp32)
   KERNEL_CPU(ADD_NS(pinverse), "pinverse", Tensor(const Tensor &, double), fp32)
@@ -600,12 +599,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  &ADD_NS(geqrf)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::lstsq"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 &ADD_NS(lstsq)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::_lu_with_info"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
