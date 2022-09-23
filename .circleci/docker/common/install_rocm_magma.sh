@@ -27,4 +27,3 @@ LANG=C.UTF-8 make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
 make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
 popd
 mv magma /opt/rocm
-
