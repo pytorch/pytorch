@@ -172,10 +172,18 @@ def setup_onnx_logging(verbose: bool):
             torch.onnx.disable_log()
 
 
+@contextlib.contextmanager
 @_beartype.beartype
 def setup_onnx_diagnostic():
     engine = diagnostics.engine
-    return engine.start_new_run(diagnostics.ExportDiagnosticTool())
+    _previous_context = diagnostics.context
+    diagnostics.context = engine.start_diagnostic_context(
+        diagnostics.ExportDiagnosticTool()
+    )
+    try:
+        yield diagnostics.context
+    finally:
+        diagnostics.context = _previous_context
 
 
 @contextlib.contextmanager
@@ -1693,15 +1701,6 @@ def _add_input_to_block(block: _C.Block):
 def _add_output_to_block(block: _C.Block, value: _C.Value):
     new_output = block.registerOutput(value)  # type: ignore[attr-defined]
     return new_output
-
-
-# Note [Export inplace]
-# ~~~~~~~~~~~~~~~~~~~~~
-# In abstract, it would be better for us to export inplace annotations,
-# than to not export them, since it is useful information that can
-# help the target of an ONNX export export more efficiently.  However,
-# ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
-# inplace annotations, but we are losing information this way.
 
 
 @_beartype.beartype

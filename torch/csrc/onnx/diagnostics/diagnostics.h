@@ -35,6 +35,10 @@ inline py::object _PyEngine() {
   return _PyDiagnostics().attr("engine");
 }
 
+inline py::object _PyContext() {
+  return _PyDiagnostics().attr("context");
+}
+
 inline py::object _PyRule(Rule rule) {
   return _PyDiagnostics().attr("rules").attr(
       kPyRuleNames[static_cast<uint32_t>(rule)]);
@@ -51,12 +55,12 @@ inline void Diagnose(
     std::vector<std::string> messageArgs = {}) {
   py::object py_rule = _PyRule(rule);
   py::object py_level = _PyLevel(level);
-  py::object py_engine = _PyEngine();
+  py::object py_context = _PyContext();
 
   py::dict kwargs = py::dict();
   // TODO: statically check that size of messageArgs matches with rule.
   kwargs["message_args"] = messageArgs;
-  py_engine.attr("diagnose")(py_rule, py_level, **kwargs);
+  py_context.attr("diagnose")(py_rule, py_level, **kwargs);
 }
 
 } // namespace diagnostics

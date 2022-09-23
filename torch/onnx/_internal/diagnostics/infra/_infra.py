@@ -305,7 +305,7 @@ class Diagnostic:
         return self
 
 
-@dataclasses.dataclass()
+@dataclasses.dataclass
 class RuleCollection:
     _rule_id_name_set: FrozenSet[Tuple[str, str]] = dataclasses.field(init=False)
 
@@ -359,7 +359,10 @@ class DiagnosticTool:
         self._rules = rules
         self._triggered_rules = set()
         if not issubclass(diagnostic_type, Diagnostic):
-            raise TypeError("diagnostic_type must be a subclass of Diagnostic")
+            raise TypeError(
+                "Expected diagnostic_type to be a subclass of Diagnostic, "
+                f"but got {diagnostic_type}"
+            )
         self._diagnostic_type = diagnostic_type
 
     def sarif(self) -> sarif_om.Tool:
@@ -412,14 +415,40 @@ class DiagnosticTool:
         return self._diagnostic_type(rule, level, message_args, **kwargs)
 
 
-class Run:
+class Invocation:
+    _sarif_invocation: sarif_om.Invocation
+    # TODO: Implement this.
+
+
+@dataclasses.dataclass
+class DiagnosticOptions:
+    """
+    Options for diagnostic context.
+    """
+
+
+class DiagnosticContext:
     _sarif_run: sarif_om.Run
     _diagnostics: List[Diagnostic]
     _tool: DiagnosticTool
+    _options: DiagnosticOptions
+    _invocation: Invocation
+    _is_active: bool
 
-    def __init__(self, tool: DiagnosticTool) -> None:
+    def __init__(
+        self, tool: DiagnosticTool, options: Optional[DiagnosticOptions]
+    ) -> None:
         self._tool = tool
         self._diagnostics = []
+        self._is_active = True
+        self._invocation = Invocation()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end()
+        return True
 
     def sarif(self) -> sarif_om.Run:
         """Returns the SARIF Run object."""
@@ -427,30 +456,21 @@ class Run:
         self._sarif_run.results = [
             diagnostic.sarif() for diagnostic in self._diagnostics
         ]
-
         return self._sarif_run
 
     @property
-    def diagnostics(self) -> List[Diagnostic]:
-        """The diagnostics captured."""
+    def diagnostics(self) -> Sequence[Diagnostic]:
+        """The diagnostics collected in the context."""
         return self._diagnostics
 
-    @diagnostics.setter
-    def diagnostics(
-        self,
-        new_diagnostics: List[Diagnostic],
-    ):
-        """Sets the diagnostics captured."""
-        self._diagnostics = new_diagnostics
-
-    def add_diagnostic(
+    def diagnose(
         self,
         rule: Rule,
         level: Level,
         message_args: Optional[Tuple[Any, ...]] = None,
         **kwargs,
     ) -> Diagnostic:
-        """Adds a diagnostic for the given arguments.
+        """Creates a diagnostic for the given arguments.
 
         Args:
             rule: The rule that triggered the diagnostic.
@@ -462,8 +482,19 @@ class Run:
             The created diagnostic.
 
         Raises:
+            RuntimeError: If the context is not active.
             ValueError: If the rule is not supported by the tool.
         """
+        if not self._is_active:
+            raise RuntimeError("The diagnostics context is not active.")
+
         diagnostic = self._tool.create_diagnostic(rule, level, message_args, **kwargs)
         self._diagnostics.append(diagnostic)
         return diagnostic
+
+    def end(self) -> None:
+        """Ends the context."""
+        print("end is called on DiagnosticContext")
+        self._is_active = False
+        # TODO: Update info in invocation.
+        # TODO: Emit report.

@@ -3,8 +3,7 @@
 from typing import Any, Optional, Tuple
 
 import torch
-from torch.onnx._internal import diagnostics
-from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics import _rules, infra
 
 levels = infra.Level
 
@@ -58,9 +57,36 @@ class ExportDiagnosticTool(infra.DiagnosticTool):
         super().__init__(
             name="torch.onnx.export",
             version=torch.__version__,
-            rules=diagnostics.rules,
+            rules=_rules.rules,
             diagnostic_type=ExportDiagnostic,
         )
 
 
-engine = infra.DiagnosticEngine()
+class ExportDiagnosticEngine(infra.DiagnosticEngine):
+    """PyTorch ONNX Export diagnostic engine.
+
+    The only purpose of this class is to provide a background context for export diagnose calls.
+    Since diagnostic context is currently being accessed as a global variable, we need to provide a default background context
+    to fallback to.
+    """
+
+    _background_context: infra.DiagnosticContext
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._background_context = infra.DiagnosticContext(
+            ExportDiagnosticTool(), options=None
+        )
+
+    @property
+    def background_context(self) -> infra.DiagnosticContext:
+        return self._background_context
+
+    def sarif_log(self):
+        runs = [context.sarif() for context in self._contexts]
+        runs.append(self._background_context.sarif())
+        return self._sarif_log(runs)
+
+
+engine = ExportDiagnosticEngine()
+context = engine.background_context

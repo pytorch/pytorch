@@ -1,25 +1,25 @@
 from ._infra import (
     Diagnostic,
+    DiagnosticContext,
+    DiagnosticOptions,
     DiagnosticTool,
     Level,
     Location,
     Rule,
     RuleCollection,
-    Run,
     Stack,
 )
 from .engine import DiagnosticEngine
-from .options import DiagnosticOptions
 
 __all__ = [
     "Diagnostic",
-    "DiagnosticOptions",
+    "DiagnosticContext",
     "DiagnosticEngine",
+    "DiagnosticOptions",
     "DiagnosticTool",
     "Level",
     "Location",
     "Rule",
     "RuleCollection",
-    "Run",
     "Stack",
 ]

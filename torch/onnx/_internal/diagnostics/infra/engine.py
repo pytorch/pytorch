@@ -1,28 +1,19 @@
 """A diagnostic engine based on SARIF."""
 
-import contextlib
-from typing import Any, List, Optional, Tuple
+from typing import List, Optional
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif_om
-from torch.onnx._internal.diagnostics.infra.options import (
-    DiagnosticOptions,  # class import for readability
-)
 from torch.onnx._internal.diagnostics.infra.sarif_om import version as sarif_version
 
 
 class DiagnosticEngine:
     """A generic diagnostic engine based on SARIF.
 
-    This class is the main interface for diagnostics. It manages the start and finish of diagnostic runs.
-    A Run can have multiple Diagnostics. Each run is powered by a DiagnosticTool.
-    See infra.Run and infra.DiagnosticTool for more details.
-
-    Attributes:
-
-        options (DiagnosticOptions): The options for the diagnostic engine.
-        sarif_log (sarif_om.Log): The SARIF log object.
-
+    This class is the main interface for diagnostics. It manages the start and finish of diagnostic contexts.
+    A DiagnosticContext provides the entry point for emitting Diagnostics.
+    Each DiagnosticContext is powered by a DiagnosticTool, which can be customized with custom RuleCollection and Diagnostic type.
+    See infra.DiagnosticContext and infra.DiagnosticTool for more details.
 
     Examples:
         Step 1: Create a set of rules.
@@ -45,89 +36,54 @@ class DiagnosticEngine:
         Step 3: Create a diagnostic engine.
         >>> engine = DiagnosticEngine()
 
-        Step 4: Start a new diagnostic run.
-        >>> with engine.start_new_run(tool):
+        Step 4: Start a new diagnostic context.
+        >>> with engine.start_diagnostic_context(tool) as context:
 
-        Step 5: Add diagnostics to the run.
-        ...     engine.diagnose(rules.rule1, infra.Level.ERROR)
+        Step 5: Add diagnostics in your code.
+        ...     context.diagnose(rules.rule1, infra.Level.ERROR)
 
-        Step 6: End the diagnostic run and get the SARIF log.
-        >>> sarif_log = engine.sarif_log
+        Step 6: Afterwards, get the SARIF log.
+        >>> sarif_log = engine.sarif_log()
     """
 
-    _runs: List[infra.Run]
-    _current_run: Optional[infra.Run]
-    _options: DiagnosticOptions
+    _contexts: List[infra.DiagnosticContext]
     _sarif_version: str = sarif_version.SARIF_VERSION
     _sarif_schema_uri: str = sarif_version.SARIF_SCHEMA_LINK
 
     def __init__(self) -> None:
-        self._initialize()
+        self._contexts = []
 
-    @property
-    def options(self) -> DiagnosticOptions:
-        """The options for the diagnostic engine."""
-        return self._options
-
-    @options.setter
-    def options(self, new_options: DiagnosticOptions) -> None:
-        """Set the options for the diagnostic engine."""
-        self._options = new_options
-
-    @property
-    def sarif_log(self) -> sarif_om.SarifLog:
+    def _sarif_log(self, runs: List[sarif_om.Run]) -> sarif_om.SarifLog:
         return sarif_om.SarifLog(
-            runs=[run.sarif() for run in self._runs],
             version=self._sarif_version,
             schema_uri=self._sarif_schema_uri,
+            runs=runs,
         )
 
-    def diagnose(
-        self,
-        rule: infra.Rule,
-        level: infra.Level,
-        message_args: Optional[Tuple[Any, ...]] = None,
-        **additional_kwargs,
-    ) -> infra.Diagnostic:
-        if not self._current_run:
-            raise RuntimeError(
-                "Cannot add diagnostic to run. No run is currently active. "
-                "Use start_new_run() to start a new run."
-            )
-
-        return self._current_run.add_diagnostic(
-            rule=rule,
-            level=level,
-            message_args=message_args,
-        )
+    def sarif_log(self) -> sarif_om.SarifLog:
+        return self._sarif_log([context.sarif() for context in self._contexts])
 
     def __str__(self) -> str:
+        # TODO: pretty print.
         return self.to_json()
 
-    def pretty_print(self) -> str:
-        # TODO: Implement this.
+    def __repr__(self) -> str:
         return self.to_json()
 
     def to_json(self) -> str:
-        return formatter.sarif_to_json(self.sarif_log)
+        return formatter.sarif_to_json(self.sarif_log())
 
-    def reset(self) -> None:
-        self._initialize()
+    def clear(self) -> None:
+        """Clears all diagnostic contexts."""
+        for context in self._contexts:
+            context.end()
+        self._contexts = []
 
-    def _initialize(self, options: Optional[DiagnosticOptions] = None) -> None:
-        self.options = options if options else DiagnosticOptions()
-        self._runs = []
-        self._current_run = None
-
-    @contextlib.contextmanager
-    def start_new_run(self, tool: infra.DiagnosticTool):
-        previous_run = self._current_run
-        self._current_run = infra.Run(tool)
-        self._runs.append(self._current_run)
-        try:
-            yield
-        finally:
-            self._end_current_run(previous_run)
-
-    def _end_current_run(self, previous_run=None) -> None:
-        self._current_run = previous_run
+    def start_diagnostic_context(
+        self,
+        tool: infra.DiagnosticTool,
+        options: Optional[infra.DiagnosticOptions] = None,
+    ) -> infra.DiagnosticContext:
+        context = infra.DiagnosticContext(tool, options)
+        self._contexts.append(context)
+        return context

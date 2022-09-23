@@ -16,7 +16,7 @@ def _assert_has_diagnostics(
     engine: infra.DiagnosticEngine,
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
-    sarif_log = engine.sarif_log
+    sarif_log = engine.sarif_log()
     unseen_pairs = {(rule.id, level.value) for rule, level in rule_level_pairs}
     actual_results = []
     for run in sarif_log.runs:
@@ -108,7 +108,7 @@ class TestONNXDiagnostics(common_utils.TestCase):
 
     def setUp(self):
         engine = diagnostics.engine
-        engine.reset()
+        engine.clear()
         return super().setUp()
 
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
@@ -164,8 +164,19 @@ class TestONNXDiagnostics(common_utils.TestCase):
                 opset_version=9,
             )
 
+    def test_diagnose_outside_export_is_recorded_in_background(self):
+        sample_rule = diagnostics.rules.missing_custom_symbolic_function
+        sample_level = diagnostics.levels.ERROR
+        with assertDiagnostic(
+            self,
+            diagnostics.engine,
+            sample_rule,
+            sample_level,
+        ):
+            diagnostics.context.diagnose(sample_rule, sample_level, ("foo",))
 
-@dataclasses.dataclass()
+
+@dataclasses.dataclass
 class _RuleCollectionForTest(infra.RuleCollection):
     rule_without_message_args: infra.Rule = dataclasses.field(
         default=infra.Rule(
@@ -184,8 +195,8 @@ class TestDiagnosticsInfra(common_utils.TestCase):
         self.rules = _RuleCollectionForTest()
         self.diagnostic_tool = infra.DiagnosticTool("test_tool", "1.0.0", self.rules)
         with contextlib.ExitStack() as stack:
-            self.default_run_ctx = stack.enter_context(
-                self.engine.start_new_run(self.diagnostic_tool)
+            self.context = stack.enter_context(
+                self.engine.start_diagnostic_context(self.diagnostic_tool)
             )
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
@@ -198,33 +209,31 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             f"Rule '{rule_id}:{rule_name}' is not supported by this tool "
             f"'{self.diagnostic_tool.name} {self.diagnostic_tool.version}'.",
         ):
-            self.engine.diagnose(
+            self.context.diagnose(
                 infra.Rule(id=rule_id, name=rule_name, message_default_template=""),
                 infra.Level.WARNING,
             )
 
     def test_diagnostics_records_accordingly_in_nested_runs(self):
-        with self.engine.start_new_run(self.diagnostic_tool):
-            self.engine.diagnose(
-                self.rules.rule_without_message_args, infra.Level.WARNING
-            )
-            sarif_log = self.engine.sarif_log
+        with self.engine.start_diagnostic_context(self.diagnostic_tool) as context:
+            context.diagnose(self.rules.rule_without_message_args, infra.Level.WARNING)
+            sarif_log = self.engine.sarif_log()
             self.assertEqual(len(sarif_log.runs), 2)
             self.assertEqual(len(sarif_log.runs[0].results), 0)
             self.assertEqual(len(sarif_log.runs[1].results), 1)
-        self.engine.diagnose(self.rules.rule_without_message_args, infra.Level.ERROR)
-        sarif_log = self.engine.sarif_log
+        self.context.diagnose(self.rules.rule_without_message_args, infra.Level.ERROR)
+        sarif_log = self.engine.sarif_log()
         self.assertEqual(len(sarif_log.runs), 2)
         self.assertEqual(len(sarif_log.runs[0].results), 1)
         self.assertEqual(len(sarif_log.runs[1].results), 1)
 
-    def test_diagnose_raises_runtime_error_when_outside_of_run(self):
-        self.engine._end_current_run()
+    def test_diagnose_raises_runtime_error_when_context_is_inactive(self):
+        self.engine.clear()
         with self.assertRaisesRegex(
             RuntimeError,
-            "No run is currently active.",
+            "The diagnostics context is not active.",
         ):
-            self.engine.diagnose(
+            self.context.diagnose(
                 self.rules.rule_without_message_args, infra.Level.WARNING
             )
 
@@ -245,11 +254,11 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             ],
         )
 
-        with self.engine.start_new_run(
+        with self.engine.start_diagnostic_context(
             tool=infra.DiagnosticTool(
                 name="custom_tool", version="1.0", rules=custom_rules
             )
-        ):
+        ) as diagnostic_context:
             with assertAllDiagnostics(
                 self,
                 self.engine,
@@ -258,9 +267,21 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                     (custom_rules.custom_rule_2, infra.Level.ERROR),  # type: ignore[attr-defined]
                 },
             ):
-                self.engine.diagnose(
+                diagnostic_context.diagnose(
                     custom_rules.custom_rule, infra.Level.WARNING  # type: ignore[attr-defined]
                 )
-                self.engine.diagnose(
+                diagnostic_context.diagnose(
                     custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
                 )
+
+    def test_invalid_diagnostic_type_raises_type_error(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "Expected diagnostic_type to be a subclass of Diagnostic, " "but got",
+        ):
+            _ = infra.DiagnosticTool(
+                "custom_tool",
+                "1.0",
+                self.rules,
+                diagnostic_type=int,
+            )

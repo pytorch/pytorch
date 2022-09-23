@@ -11,7 +11,7 @@ import dataclasses
 from torch.onnx._internal.diagnostics import infra
 
 
-@dataclasses.dataclass()
+@dataclasses.dataclass
 class _POERules(infra.RuleCollection):
     node_missing_onnx_shape_inference: infra.Rule = dataclasses.field(
         default=infra.Rule.from_sarif(

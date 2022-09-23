@@ -78,14 +78,14 @@ def gen_diagnostics_python(
         install_dir=out_py_dir, template_dir=template_dir, dry_run=False
     )
     fm.write_with_template(
-        "rules.py",
+        "_rules.py",
         "rules.py.in",
         lambda: {
             "generated_comment": _RULES_GENERATED_COMMENT,
             "rules": textwrap.indent("\n".join(rule_lines), " " * 4),
         },
     )
-    _lint_file(os.path.join(out_py_dir, "rules.py"))
+    _lint_file(os.path.join(out_py_dir, "_rules.py"))
 
 
 def gen_diagnostics_cpp(

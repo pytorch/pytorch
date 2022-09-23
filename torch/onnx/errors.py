@@ -59,7 +59,7 @@ class UnsupportedOperatorError(OnnxExporterError):
                     f"Support for this operator was added in version {supported_version}, "
                     "try exporting with this version."
                 )
-                diagnostics.engine.diagnose(
+                diagnostics.context.diagnose(
                     diagnostics.rules.operator_supported_in_newer_opset_version,
                     diagnostics.levels.ERROR,
                     message_args=(
@@ -71,7 +71,7 @@ class UnsupportedOperatorError(OnnxExporterError):
             else:
                 msg += "Please feel free to request support or submit a pull request on PyTorch GitHub: "
                 msg += _constants.PYTORCH_GITHUB_ISSUES_URL
-                diagnostics.engine.diagnose(
+                diagnostics.context.diagnose(
                     diagnostics.rules.missing_standard_symbolic_function,
                     diagnostics.levels.ERROR,
                     message_args=(
@@ -86,7 +86,7 @@ class UnsupportedOperatorError(OnnxExporterError):
                 "If you are trying to export a custom operator, make sure you registered "
                 "it with the right domain and version."
             )
-            diagnostics.engine.diagnose(
+            diagnostics.context.diagnose(
                 diagnostics.rules.missing_custom_symbolic_function,
                 diagnostics.levels.ERROR,
                 message_args=(f"{domain}::{op_name}",),
