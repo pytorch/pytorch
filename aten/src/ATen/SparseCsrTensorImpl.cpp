@@ -150,20 +150,37 @@ void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
       "resize_as_sparse_compressed_tensor_ called on tensor with symbolic shape");
-  set_layout(src.layout());
+
+  // We cannot resize as other layout and preserve the invariants for self
+  // layout
+  TORCH_CHECK(
+      src.layout() == layout_,
+      "resize_as_sparse_compressed_tensor_: self and src must have the same layout, but got: self (",
+      layout_,
+      ") and source (",
+      src.layout(),
+      ")");
+
   Tensor compressed_indices;
   Tensor plain_indices;
   std::tie(compressed_indices, plain_indices) =
       sparse_csr::getCompressedPlainIndices(src);
-
-  // NOTE: clone indices as empty_like will produce a tensor which is not valid
-  // under the invariants compressed indices are always crow_indices_ on the
-  // impl
-  crow_indices_ = compressed_indices.to(crow_indices_.options());
-  // plain indices are always col_indices_ on the impl
-  col_indices_ = plain_indices.to(col_indices_.options());
-  // Values are initializd empty
-  values_ = at::empty(src.values().sizes(), values_.options());
+  // reuse self indices storage
+  if (crow_indices_.sizes() != compressed_indices.sizes()) {
+    crow_indices_.resize_as_(compressed_indices);
+  }
+  if (col_indices_.sizes() != plain_indices.sizes()) {
+    col_indices_.resize_as_(plain_indices);
+  }
+  // Update indices data to ensure result is valid under invariants check
+  if ((sizes() != src.sizes()) || (dense_dim() != src.dense_dim())) {
+    crow_indices_.copy_(compressed_indices);
+    col_indices_.copy_(plain_indices);
+  }
+  // Reuse values storage
+  if (values_.sizes() != src.values().sizes()) {
+    values_.resize_as_(src.values());
+  }
   sizes_and_strides_.set_sizes(src.sizes());
   refresh_numel();
 }
