@@ -1929,7 +1929,7 @@ class TestFakeTensor(TestCase):
                 aten.is_same_size.default,
             )
 
-            # TODO: enable check_aliasing, too many failures :/
+            # TODO: enable check_aliasing, batch norm fails
             with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=False):
                 with warnings.catch_warnings(), context():
                     composite_compliance.compute_expected_grads(
