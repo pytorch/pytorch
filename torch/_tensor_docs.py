@@ -3004,15 +3004,6 @@ See :func:`torch.logsumexp`
 )
 
 add_docstr_all(
-    "lstsq",
-    r"""
-lstsq(A) -> (Tensor, Tensor)
-
-See :func:`torch.lstsq`
-""",
-)
-
-add_docstr_all(
     "lt",
     r"""
 lt(other) -> Tensor
@@ -3416,11 +3407,7 @@ add_docstr_all(
     r"""
 narrow_copy(dimension, start, length) -> Tensor
 
-Same as :meth:`Tensor.narrow` except returning a copy rather
-than shared storage.  This is primarily for sparse tensors, which
-do not have a shared-storage narrow method.  Calling ``narrow_copy``
-with ``dimemsion > self.sparse_dim()`` will return a copy with the
-relevant dense dimension narrowed, and ``self.shape`` updated accordingly.
+See :func:`torch.narrow_copy`.
 """,
 )
 
@@ -6500,5 +6487,13 @@ Example::
     >>> csr.col_indices()
     tensor([0, 1, 2, 3, 4], dtype=torch.int32)
 
+""",
+)
+
+add_docstr_all(
+    "to_padded_tensor",
+    r"""
+to_padded_tensor(padding, output_size=None) -> Tensor
+See :func:`torch.nested.to_padded_tensor`
 """,
 )
