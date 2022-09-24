@@ -975,7 +975,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto& runner = block_runners[!condition];
 
             auto output = runner({});
-            if (!output.isTuple()) {
+            // If we are returning a tuple, we are either returning
+            // multiple unpacked values or all of the values wrapped
+            // in a single tuple. The second condition handles the
+            // the latter case.
+            if (!output.isTuple() || p_node->num_outputs() == 1) {
               p_node->Output(0) = std::move(output);
               return;
             }
