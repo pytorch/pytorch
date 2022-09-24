@@ -3,7 +3,7 @@
 #include <ATen/native/ufunc/${name}.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 ${cuda_headers}
 
 namespace at {

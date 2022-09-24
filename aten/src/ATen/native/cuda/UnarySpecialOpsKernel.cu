@@ -13,7 +13,7 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/NumericUtils.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/complex.h>
 

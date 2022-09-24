@@ -13,7 +13,7 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at { namespace native {
 namespace {

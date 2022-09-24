@@ -5,7 +5,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at {
 namespace native {

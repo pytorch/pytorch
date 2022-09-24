@@ -4,7 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/Fill.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at { namespace native {
 

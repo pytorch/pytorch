@@ -5,7 +5,7 @@
 #include <ATen/native/TransposeType.h>
 #include <c10/util/complex.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at {
 namespace native {

@@ -13,7 +13,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at { namespace native {
 

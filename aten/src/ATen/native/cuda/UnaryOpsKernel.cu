@@ -15,7 +15,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/OpMathType.h>
 #include <c10/cuda/CUDAMathCompat.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/util/complex.h>
 
 namespace at {

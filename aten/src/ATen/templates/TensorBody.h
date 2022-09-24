@@ -13,7 +13,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/QScheme.h>
 #include <c10/core/Stream.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/core/Storage.h>

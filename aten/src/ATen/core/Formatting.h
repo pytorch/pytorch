@@ -3,7 +3,7 @@
 #include <ostream>
 #include <string>
 
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <ATen/core/Tensor.h>
 
 namespace c10 {

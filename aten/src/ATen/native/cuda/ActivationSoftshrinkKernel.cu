@@ -10,7 +10,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/TensorBase.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <ATen/cuda/ApplyGridUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>

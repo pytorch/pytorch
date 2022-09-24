@@ -3,7 +3,7 @@
 #include <ostream>
 #include <vector>
 
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/lazy/core/hash.h>
 

@@ -14,7 +14,7 @@
 #include <ATen/core/symbol.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/core/TensorImpl.h>

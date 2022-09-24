@@ -6,7 +6,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/LinearAlgebra.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at { namespace native {
 

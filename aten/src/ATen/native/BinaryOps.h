@@ -2,7 +2,7 @@
 
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/DispatchStub.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at {
 struct TensorIterator;

@@ -20,7 +20,7 @@
 
 #include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/util/irange.h>
 
 namespace at {

@@ -5,7 +5,7 @@
 
 // The only #includes we need are for custom classes that have defaults in the C++ API
 #include <c10/core/MemoryFormat.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <ATen/core/Reduction.h>
 
 // Forward declarations of any types needed in the operator signatures.

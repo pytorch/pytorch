@@ -19,7 +19,7 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/OptionalArrayRef.h>

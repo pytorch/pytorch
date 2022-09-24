@@ -9,7 +9,7 @@
   the specific operator from <ATen/ops/{my_operator}_ops.h>
 #endif
 
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <ATen/Tensor.h>
 #include <c10/core/Storage.h>
 #include <ATen/core/Generator.h>

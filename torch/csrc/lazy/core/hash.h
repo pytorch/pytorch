@@ -5,7 +5,7 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/util/int128.h>
 #include <torch/csrc/Export.h>
 #include <cstring>

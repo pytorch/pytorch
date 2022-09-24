@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/Optional.h>

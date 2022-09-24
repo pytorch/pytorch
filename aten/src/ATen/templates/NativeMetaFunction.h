@@ -2,7 +2,7 @@
 
 // ${generated_comment}
 
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 #include <c10/core/Storage.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>

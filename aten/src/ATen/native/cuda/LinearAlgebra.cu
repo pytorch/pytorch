@@ -7,7 +7,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOps.h>
-#include <c10/core/Scalar.h>
+#include <ATen/core/Scalar.h>
 
 namespace at { namespace native {
 
