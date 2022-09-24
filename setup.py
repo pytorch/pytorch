@@ -989,6 +989,10 @@ def main():
 
     install_requires += extra_install_requires
 
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
+
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
         long_description = f.read()
@@ -1168,6 +1172,7 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,

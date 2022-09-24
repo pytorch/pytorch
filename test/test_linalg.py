@@ -3776,9 +3776,9 @@ class TestLinalg(TestCase):
 
         def test(n=10,                       # how many tests to generate
                  n_labels=5,                 # how many labels available
-                 min_ops=1, max_ops=3,       # min and max number of operands per test
+                 min_ops=1, max_ops=4,       # min and max number of operands per test
                  min_dims=1, max_dims=3,     # min and max number of dimensions per operand
-                 min_size=1, max_size=8,    # min and max size of each dimension
+                 min_size=1, max_size=8,     # min and max size of each dimension
                  max_out_dim=3,              # max number of dimensions for the output
                  enable_diagonals=True,      # controls if labels can be repeated for diagonals
                  ellipsis_prob=0.5,          # probability of including ellipsis in operand
@@ -3867,7 +3867,7 @@ class TestLinalg(TestCase):
                 args.append(out_sublist)
                 self._check_einsum(*args, np_args=(equation, *np_operands))
 
-        test(100)
+        test(500)
 
     def test_einsum_corner_cases(self, device):
         def check(equation, *operands, expected_output):
@@ -3935,8 +3935,10 @@ class TestLinalg(TestCase):
         check('a->aa', [x], regex=r'output subscript a appears more than once in the output')
         check('a->i', [x], regex=r'output subscript i does not appear in the equation for any input operand')
         check('aa', [y], regex=r'subscript a is repeated for operand 0 but the sizes don\'t match, 3 != 2')
-        check('a, ba', [x, y], regex=r'operands do not broadcast with remapped shapes \[original->remapped\]: '
-              r'\[2\]->\[1, 2\] \[2, 3\]->\[2, 3\]')
+        check('...,...', [x, y], regex=r'does not broadcast')
+        check('a,a', [x, make_tensor((3,), dtype=torch.float32, device=device)], regex=r'does not broadcast')
+        check('a, ba', [x, y], regex=r'subscript a has size 3 for operand 1 which does not broadcast with previously'
+              r' seen size 2')
 
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
         check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)

@@ -43,7 +43,7 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=12)
 
 
 @_beartype.beartype
-def _einsum_helper(g, equation, tensors):
+def _einsum_helper(g, equation, tensors, path=None):
     if not tensors:
         raise RuntimeError("Einsum inputs are empty.")
     # ONNX does not support bool for Einsum inputs.
@@ -54,19 +54,19 @@ def _einsum_helper(g, equation, tensors):
         ]
         return g.op(
             "Cast",
-            g.op("Einsum", *tensors, equation_s=equation),
+            g.op("Einsum", *tensors, equation_s=equation, path_is=path),
             to_i=_C_onnx.TensorProtoDataType.BOOL,
         )
     else:
-        return g.op("Einsum", *tensors, equation_s=equation)
+        return g.op("Einsum", *tensors, equation_s=equation, path_is=path)
 
 
 @_onnx_symbolic("aten::einsum")
-@symbolic_helper.parse_args("s", "v")
+@symbolic_helper.parse_args("s", "v", "is")
 @_beartype.beartype
-def einsum(g, equation, tensor_list):
+def einsum(g, equation, tensor_list, path=None):
     tensors = symbolic_helper._unpack_list(tensor_list)
-    return _einsum_helper(g, equation, tensors)
+    return _einsum_helper(g, equation, tensors, path)
 
 
 @_onnx_symbolic("aten::outer")
