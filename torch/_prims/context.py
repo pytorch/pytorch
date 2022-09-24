@@ -153,7 +153,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
         skip_decomposition_table: Sequence[
             Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-        ] = {
+        ] = {  # type: ignore[assignment]
             # control-flow dependent decomposition. See Issue #85517
             torch.ops.aten.masked_fill.Tensor,
         }
@@ -163,7 +163,11 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # implementations.
         # There're other ways to implement this functionality,
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
-        if func is None and isinstance(orig_func, torch._ops.OpOverload) and orig_func not in skip_decomposition_table:
+        if (
+            func is None
+            and isinstance(orig_func, torch._ops.OpOverload)
+            and orig_func not in skip_decomposition_table
+        ):
             func = torch._decomp.decomposition_table.get(orig_func, None)
 
         if func is not None:
