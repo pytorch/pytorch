@@ -48,6 +48,7 @@ class GraphContext(_WithOp):
         params_dict: Mapping from graph initializer name to IValue.
         env: Mapping from Torch domain graph Value to ONNX domain graph Value.
     """
+
     graph: _C.Graph
     block: _C.Block
     opset: int

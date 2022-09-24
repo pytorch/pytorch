@@ -1749,8 +1749,8 @@ def _run_symbolic_function(
 
     graph_context = torchscript.GraphContext(
         graph=graph,
+        block=block,
         opset=opset_version,
-        onnx_block=block,
         original_node=node,
         params_dict=_params_dict,
         env=env,
