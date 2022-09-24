@@ -4,25 +4,24 @@
 # them to the user.
 
 import dataclasses
-import numbers
 import re
-from typing import Any, Dict, Iterable, Iterator, List, Tuple, Union
+from typing import Any, Dict, Iterable, Sequence, Union
 
 from typing_extensions import Protocol, runtime_checkable
 
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
-from torch.onnx import _deprecation
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype
 
 _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
+_SKIP_NODE_ATTRIBUTES = {"inplace", "aten"}
 
 
 @runtime_checkable
-class GraphLike(Protocol):
-    """Implements all methods defined in torch.Graph, as well as `op()` and `at()`."""
+class _WithOp(Protocol):
+    """A protocol for classes that implements the op method for create a node in a graph."""
 
     def op(
         self,
@@ -30,96 +29,38 @@ class GraphLike(Protocol):
         *raw_args: Union[torch.Tensor, _C.Value],
         outputs: int = 1,
         **kwargs,
-    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
-        ...
-
-    def at(
-        self, operator: str, *args, overload_name: str = "", **kwargs
-    ) -> Union[_C.Value, Tuple[_C.Value, ...]]:
-        ...
-
-    def inputs(self) -> List[_C.Value]:
-        ...
-
-    def outputs(self) -> List[_C.Value]:
-        ...
-
-    def nodes(self) -> Iterator[_C.Node]:
-        ...
-
-    def param_node(self) -> _C.Node:
-        ...
-
-    def return_node(self) -> _C.Node:
-        ...
-
-    def addInput(self, name: str) -> _C.Value:
-        ...
-
-    def eraseInput(self, i: int) -> None:
-        ...
-
-    def registerOutput(self, n: _C.Value) -> int:
-        ...
-
-    def eraseOutput(self, i: int) -> None:
-        ...
-
-    def create(self, name: str, args, num_outputs: int) -> _C.Node:
-        ...
-
-    def appendNode(self, n: _C.Node) -> _C.Node:
-        ...
-
-    def prependNode(self, n: _C.Node) -> _C.Node:
-        ...
-
-    def insertNode(self, n: _C.Node) -> _C.Node:
-        ...
-
-    def block(self) -> _C.Block:
-        ...
-
-    def setInsertPoint(self, n: Union[_C.Block, _C.Node]) -> None:
-        ...
-
-    def insert_point_guard(self, n: Union[_C.Block, _C.Node]):
-        ...
-
-    def insertPoint(self) -> _C.Node:
-        ...
-
-    def insertGraph(self, callee: _C.Graph, inputs: List[_C.Value]) -> List[_C.Value]:
-        ...
-
-    def makeMultiOutputIntoTuple(self) -> None:
+    ):
         ...
 
 
 @dataclasses.dataclass
-class GraphContext(GraphLike):
+class GraphContext(_WithOp):
     """Extra context for symbolic functions with all methods from torch.Graph.
+
+    NOTE: This class is not meant for external consumption. Please do not depend on
+    it outside of torch.onnx as the interface may evolve.
+
     Attributes:
-        graph: The graph being constructed.
+        graph: The _C.Graph being constructed.
+        block: The current _C.Block being constructed.
         opset: The opset version.
         original_node: Current node that is being converted from.
-        onnx_block: Current ONNX block that converted nodes are being appended to.
         params_dict: Mapping from graph initializer name to IValue.
+        env: Mapping from Torch domain graph Value to ONNX domain graph Value.
     """
-
     graph: _C.Graph
+    block: _C.Block
     opset: int
     original_node: _C.Node
-    onnx_block: _C.Block
     params_dict: Dict[str, "_C.IValue"]
     env: Dict[_C.Value, _C.Value]
-    # FIXME(justinchuby): What should we call env?
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
     # a _C.Graph
     def __getattr__(self, name: str) -> Any:
         return getattr(self.graph, name)
 
+    @_beartype.beartype
     def op(
         self,
         opname: str,
@@ -135,7 +76,6 @@ class GraphContext(GraphLike):
         This function is monkey-patched onto Graph.
 
         Args:
-            g: The Torch graph.
             opname: The ONNX operator name, e.g., `Abs` or `Add`, or an operator qualified
                 with a namespace, e.g., `aten::add`.
             raw_args: The inputs to the operator; usually provided
@@ -158,19 +98,28 @@ class GraphContext(GraphLike):
             keyword argument for multi-return nodes).
         """
         # FIXME(justinchuby): Add the return type back once we know how to handle mypy
-        return graph_op(self.graph, opname, *raw_args, outputs=outputs, **kwargs)
+        return _add_op(self, opname, *raw_args, outputs=outputs, **kwargs)
 
-    def at(self, operator: str, *args, overload_name: str = "", **kwargs):
-        return aten_op(
-            self.graph, operator, *args, overload_name=overload_name, **kwargs
+    @_beartype.beartype
+    def aten_op(self, operator: str, *args, overload_name: str = "", **kwargs):
+        """Generates an ONNX ATen op node.
+
+        This function is for backward compatibility with the old symbolic functions.
+        """
+        return self.op(
+            "aten::ATen",
+            *args,
+            operator_s=operator,
+            overload_name_s=overload_name,
+            **kwargs,
         )
 
 
 @_beartype.beartype
-def graph_op(
-    g: _C.Graph,
+def _add_op(
+    graph_context: GraphContext,
     opname: str,
-    *raw_args: Union[torch.Tensor, _C.Value],
+    *args: Union[torch.Tensor, _C.Value],
     outputs: int = 1,
     **kwargs,
 ):
@@ -182,10 +131,10 @@ def graph_op(
     This function is monkey-patched onto Graph.
 
     Args:
-        g: The Torch graph.
+        g: The Torch Graph or Block.
         opname: The ONNX operator name, e.g., `Abs` or `Add`, or an operator qualified
             with a namespace, e.g., `aten::add`.
-        raw_args: The inputs to the operator; usually provided
+        args: The inputs to the operator; usually provided
             as arguments to the `symbolic` definition.
         outputs: The number of outputs this operator returns.
             By default an operator is assumed to return a single output.
@@ -205,98 +154,76 @@ def graph_op(
         The node representing the single output of this operator (see the `outputs`
         keyword argument for multi-return nodes).
     """
+    inputs = [_const_if_tensor(graph_context, arg) for arg in args]
     # Filter out None attributes, this can be convenient client side because
     # now they can pass through None attributes, and have them not show up
-    kwargs = {k: v for k, v in kwargs.items() if v is not None}
+    attributes = {k: v for k, v in kwargs.items() if v is not None}
 
-    args = [_const_if_tensor(g, arg) for arg in raw_args]
+    if "::" not in opname:
+        opname = "onnx::" + opname
 
-    if "::" in opname:
-        namespace, op = opname.split("::")
-    else:
-        namespace = "onnx"
-        op = opname
-
-    n = g.insertNode(_new_node(g, namespace, op, outputs, *args, **kwargs))
-
-    if GLOBALS.onnx_shape_inference:
-        # Import utils to get _params_dict because it is a global that is accessed by c++ code
-        from torch.onnx import utils
-
-        _C._jit_pass_onnx_node_shape_type_inference(
-            n, utils._params_dict, GLOBALS.export_onnx_opset_version
-        )
+    node = _create_node(
+        graph_context.graph,
+        opname,
+        inputs,
+        attributes,
+        params_dict=graph_context.params_dict,
+        opset_version=graph_context.opset,
+        n_outputs=outputs,
+        shape_inference=GLOBALS.onnx_shape_inference,
+    )
 
     if outputs == 1:
-        return n.output()
-    return tuple(n.outputs())
+        return node.output()
+    return tuple(node.outputs())
 
 
 @_beartype.beartype
-def _const_if_tensor(g: _C.Graph, arg):
+def _const_if_tensor(graph_context: GraphContext, arg):
     if arg is None:
         return arg
     if isinstance(arg, _C.Value):
         return arg
-    return graph_op(g, "Constant", value_z=arg)
+
+    return _add_op(graph_context, "onnx::Constant", value_z=arg)
 
 
-# Generate an ONNX ATen op node.
-@_beartype.beartype
-def aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwargs):
-    return graph_op(
-        g,
-        "aten::ATen",
-        *args,
-        operator_s=operator,
-        overload_name_s=overload_name,
-        **kwargs,
-    )
-
-
-@_beartype.beartype
-def block_op(block: _C.Block, opname: str, *args: _C.Value, **kwargs):
-    if "::" in opname:
-        namespace, op = opname.split("::")
-    else:
-        namespace = "onnx"
-        op = opname
-
-    n = block.addNode(f"{namespace}::{op}", args)
-    aten = namespace == "aten"
-    skip_attrs = {"inplace", "aten"}
-    for k, v in sorted(kwargs.items()):
-        if k in skip_attrs:
-            continue
-        _add_attribute(n, k, v, aten=aten)
-    outputs = tuple(n.outputs())
-    if len(outputs) == 1:
-        return n.output()
-    return outputs
-
-
-@_beartype.beartype
-def _new_node(
-    g: _C.Graph, namespace: str, op: str, outputs: int, *args: _C.Value, **kwargs
+def _create_node(
+    graph_or_block: Union[_C.Graph, _C.Block],
+    domain_op: str,
+    inputs: Sequence,
+    attributes: dict,
+    params_dict: dict,
+    opset_version: int,
+    n_outputs: int,
+    shape_inference: bool = True,
 ) -> _C.Node:
-    """Creates a new node in the graph.
+    """Creates an node 'opname', taking "args" as inputs and attributes 'kwargs'."""
+    if isinstance(graph_or_block, _C.Graph):
+        graph = graph_or_block
+        node = graph.create(domain_op, inputs, n_outputs)
+        node = graph.insertNode(node)
+    elif isinstance(graph_or_block, _C.Block):
+        block = graph_or_block
+        node = block.addNode(domain_op, inputs)
 
-    Args:
-        g: The graph to create the operator on.
-        namespace: The namespace of the operator. E.g., "aten", "onnx".
-        op: The name of the operator to create.
-        outputs: The number of the outputs of the node.
+        # Block does not have create defined, so we need to add outputs manually
+        if n_outputs > 1:
+            for _ in range(1, n_outputs):
+                node.addOutput()
 
-    Returns:
-        The new node.
-    """
-    aten = namespace == "aten"
-    node = g.create(f"{namespace}::{op}", args, outputs)
-    skip_attrs = {"inplace", "aten"}
-    for k, v in sorted(kwargs.items()):
-        if k in skip_attrs:
+    node_ouputs = tuple(node.outputs())
+    assert len(node_ouputs) == n_outputs
+
+    aten = domain_op.startswith("aten::")
+
+    # Add all attributes
+    for key, value in sorted(attributes.items()):
+        if key in _SKIP_NODE_ATTRIBUTES:
             continue
-        _add_attribute(node, k, v, aten=aten)
+        _add_attribute(node, key, value, aten=aten)
+    if shape_inference:
+        _C._jit_pass_onnx_node_shape_type_inference(node, params_dict, opset_version)
     return node
 
 
@@ -348,76 +275,3 @@ def _add_attribute(node: _C.Node, key: str, value: Any, aten: bool):
             else:
                 kind = "i"
     return getattr(node, f"{kind}_")(name, value)
-
-
-# TODO(#76254): Remove the deprecated function.
-@_deprecation.deprecated(
-    "1.13", "1.14", "Use 'g.op()' to create a constant node instead."
-)
-@_beartype.beartype
-def graph_constant(
-    g,
-    value,
-    dims,
-    type_: str,
-    *args,
-    **kwargs,
-):
-    """This helper function can create either constant tensor or constant scalar.
-
-    If dims is None or 0 or [0], generate a 0-d tensor (scalar).
-    """
-    assert isinstance(value, numbers.Number)
-    assert type_ is not None
-    isscalar = False
-    if dims is None or dims == 0 or set(dims) == {0}:
-        dims = [1]
-        isscalar = True
-    type_ = type_.lower()
-    tensor: Union[
-        torch.CharTensor,
-        torch.ShortTensor,
-        torch.IntTensor,
-        torch.LongTensor,
-        torch.HalfTensor,
-        torch.FloatTensor,
-        torch.DoubleTensor,
-    ]
-    if type_ == "char":
-        tensor = torch.CharTensor(*dims)
-    elif type_ == "short":
-        tensor = torch.ShortTensor(*dims)
-    elif type_ == "int":
-        tensor = torch.IntTensor(*dims)
-    elif type_ == "long":
-        tensor = torch.LongTensor(*dims)
-    elif type_ == "half":
-        tensor = torch.HalfTensor(*dims)
-    elif type_ == "float":
-        tensor = torch.FloatTensor(*dims)
-    elif type_ == "double":
-        tensor = torch.DoubleTensor(*dims)
-    else:
-        raise ValueError(
-            "Unknown type, type should be one of the following strings: "
-            "char, short, int, long, half, float, double"
-        )
-    tensor.fill_(value)  # type: ignore[call-overload]
-    if isscalar:
-        return g.op("Constant", *args, value_z=tensor, **kwargs)
-    return g.op("Constant", *args, value_t=tensor, **kwargs)
-
-
-# TODO(#76254): Remove the deprecated function.
-@_deprecation.deprecated(
-    "1.13",
-    "1.14",
-    "Internally use '_node_get' in symbolic_helper instead.",
-)
-def node_getitem(self, k):
-    """Gets attributes of a node which is polymorphic over return type.
-
-    This is monkey-patched onto Node.
-    """
-    sel = self.kindOf(k)
-    return getattr(self, sel)(k)
