@@ -10,12 +10,12 @@ from typing import Any, Dict, Optional
 import torch
 
 from torch._prims_common import (
+    _torch_dtype_to_nvfuser_dtype_map,
     DimsSequenceType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
     ShapeType,
     TensorLikeType,
-    _torch_dtype_to_nvfuser_dtype_map,
 )
 
 from torch._prims_common.wrappers import (
@@ -307,8 +307,10 @@ _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
 
+
 def _check_dtype(node):
-    return (_torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None)
+    return _torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None
+
 
 _nvfuser_skip["convert_element_type"] = _check_dtype
 
