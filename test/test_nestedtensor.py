@@ -993,7 +993,7 @@ class TestNestedTensorDeviceType(TestCase):
             r"matmul: Expected size for the 1st dimension of 2nd input tensor to be: [0-9]+ but got: [0-9]+.",
             lambda: torch.matmul(nt1, nt0)
         )
-        # error case: incompatible generalized batch size
+        # error case: incompatible (wrong) batch sizes that shouldn't even broadcast?
         nt0 = torch.nested_tensor([torch.randn((2, 2, 4)),
                                    torch.randn((2, 3, 4))],
                                   device=device, dtype=dtype)
@@ -1002,23 +1002,26 @@ class TestNestedTensorDeviceType(TestCase):
                                   device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"matmul: For nested tensors, no broadcasting is currently performed: "
-            r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
-            r"have mismatching sizes [0-9]+ and [0-9]+",
+            "matmul(): For nested tensors, batch dimensions must have the same sizes,",
             lambda: torch.matmul(nt0, nt1)
         )
+        # error case: incompatible batch sizes that should technically broadcast
+        nt0 = torch.nested_tensor([torch.randn((2, 2, 4)),
+                                   torch.randn((1, 3, 4))],
+                                  device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((1, 4, 6)),
+                                   torch.randn((3, 4, 5))],
+                                  device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"matmul: For nested tensors, no broadcasting is currently performed: "
-            r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
-            r"have mismatching sizes [0-9]+ and [0-9]+",
-            lambda: torch.matmul(nt1, nt0)
+            "matmul(): For nested tensors, batch dimensions must have the same sizes,",
+            lambda: torch.matmul(nt0, nt1)
         )
         # error case: underlying matrices cannot be multiplied
         nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"0-th nested matrices in batch cannot be multiplied \(2x4 and 2x4\)",
+            "matmul(): Nested tensors cannot be matrix multiplied",
             lambda: torch.matmul(nt0, nt0)
         )
         # normal nested tensor: 3D
@@ -1027,11 +1030,11 @@ class TestNestedTensorDeviceType(TestCase):
         actual = torch.nested.to_padded_tensor(torch.matmul(nt0, nt1), 0.0)
         expect = torch.matmul(torch.nested.to_padded_tensor(nt0, 0.0), torch.nested.to_padded_tensor(nt1, 0.0))
         self.assertEqual(actual, expect)
-        # normal nested tensor: 4D
-        nt0 = torch.nested_tensor([torch.randn((8, 2, 4)),
+        # normal nested tensor: 4D (with testing for batch_size=1)
+        nt0 = torch.nested_tensor([torch.randn((1, 2, 4)),
                                    torch.randn((8, 3, 7))],
                                   device=device, dtype=dtype)
-        nt1 = torch.nested_tensor([torch.randn((8, 4, 6)),
+        nt1 = torch.nested_tensor([torch.randn((1, 4, 6)),
                                    torch.randn((8, 7, 5))],
                                   device=device, dtype=dtype)
         actual = torch.nested.to_padded_tensor(torch.matmul(nt0, nt1), 0.0)

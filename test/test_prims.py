@@ -208,6 +208,24 @@ class TestPrims(TestCase):
         self.assertEqual(includes_aten_to_copy, not nvprim_support_flag)
         self.assertEqual(includes_nvprim_convert_element_type, nvprim_support_flag)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_rand_like_fusion(self, device):
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.rand_like(a)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a)
+
+        out = execute(gm, a, executor="strictly_nvfuser")
+        self.assertEqual(out.size(), a.size())
+
     @skipCUDAMemoryLeakCheckIf(True)  # https://github.com/pytorch/pytorch/issues/84529
     @onlyCUDA
     @skipCUDAIfRocm
