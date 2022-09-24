@@ -149,6 +149,8 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._seed = None
 
     def __getstate__(self):
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
         state = (
             self.datapipe,
             self.buffer_size,
@@ -159,8 +161,6 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):

@@ -31,11 +31,7 @@ class Reduction(Enum):
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
 # We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
-def type_casts(
-    f: Callable,
-    type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND,
-    compute_dtype_only: bool = False,
-):
+def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [
@@ -59,19 +55,11 @@ def type_casts(
                 return x
 
         r = f(*tree_map(increase_prec, args), **tree_map(increase_prec, kwargs))
-        if compute_dtype_only:
-            return r
-        else:
-            return tree_map(decrease_prec, r)
+        return tree_map(decrease_prec, r)
 
     return inner
 
 
-compute_only_pw_cast_for_opmath = functools.partial(
-    type_casts,
-    type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    compute_dtype_only=True,
-)
 pw_cast_for_opmath = functools.partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 )
@@ -623,35 +611,24 @@ def diagonal_backward(
     return torch.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
 
-def _cast_grad_to_input_dtype(
-    grad_output: Tensor, grad_input: Tensor, input_dtype: torch.dtype
-):
-    if grad_output.dtype != input_dtype:
-        grad_input = grad_input.to(input_dtype)
-    return grad_input
-
-
 @register_decomposition(aten._softmax_backward_data)
-@compute_only_pw_cast_for_opmath
+@pw_cast_for_opmath
 def _softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
 ):
-    new_grad_output = grad_output * output
-    grad_input = new_grad_output - output * torch.sum(
-        new_grad_output, dim=dim, keepdim=True
-    )
-    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
+    new_grad = grad_output * output
+    return new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
 
 
 @register_decomposition(aten._log_softmax_backward_data)
-@compute_only_pw_cast_for_opmath
+@pw_cast_for_opmath
 def _log_softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
 ):
     grad_input = grad_output - torch.exp(output) * torch.sum(
         grad_output, dim=dim, keepdim=True
     )
-    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
+    return grad_input
 
 
 @register_decomposition(aten.im2col)
