@@ -163,7 +163,7 @@ def _add_op(
         opname = "onnx::" + opname
 
     node = _create_node(
-        graph_context.graph,
+        graph_context.block,
         opname,
         inputs,
         attributes,
