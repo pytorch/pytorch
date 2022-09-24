@@ -10,10 +10,12 @@
 #include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/SymFloat.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
+#include <c10/util/intrusive_ptr.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-int-float-conversion")
@@ -34,18 +36,19 @@ class C10_API Scalar {
  public:
   Scalar() : Scalar(int64_t(0)) {}
 
-#define DEFINE_IMPLICIT_CTOR(type, name) \
-  Scalar(type vv) : Scalar(vv, true) {}
-
   void destroy() {
-    if (Tag::HAS_si == tag) {
-      v.si.release_();
+    if (Tag::HAS_si == tag || Tag::HAS_sd == tag) {
+      raw::intrusive_ptr::decref(v.p);
+      v.p = nullptr;
     }
   }
 
   ~Scalar() {
     destroy();
   }
+
+#define DEFINE_IMPLICIT_CTOR(type, name) \
+  Scalar(type vv) : Scalar(vv, true) {}
 
   AT_FORALL_SCALAR_TYPES_AND3(Half, BFloat16, ComplexHalf, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
@@ -60,36 +63,48 @@ class C10_API Scalar {
       typename std::enable_if<std::is_same<T, bool>::value, bool>::type* =
           nullptr>
   Scalar(T vv) : tag(Tag::HAS_b) {
-    v.u.i = convert<int64_t, bool>(vv);
+    v.i = convert<int64_t, bool>(vv);
   }
 
 #define DEFINE_ACCESSOR(type, name)                                     \
   type to##name() const {                                               \
     if (Tag::HAS_d == tag) {                                            \
-      return checked_convert<type, double>(v.u.d, #type);               \
+      return checked_convert<type, double>(v.d, #type);               \
     } else if (Tag::HAS_z == tag) {                                     \
-      return checked_convert<type, c10::complex<double>>(v.u.z, #type); \
+      return checked_convert<type, c10::complex<double>>(v.z, #type); \
     }                                                                   \
     if (Tag::HAS_b == tag) {                                            \
-      return checked_convert<type, bool>(v.u.i, #type);                 \
+      return checked_convert<type, bool>(v.i, #type);                 \
     } else if (Tag::HAS_i == tag) {                                     \
-      return checked_convert<type, int64_t>(v.u.i, #type);              \
+      return checked_convert<type, int64_t>(v.i, #type);              \
     } else if (Tag::HAS_si == tag) {                                    \
-      TORCH_CHECK(false)                                                \
+      TORCH_CHECK(false, "tried to get " #name " out of SymInt")        \
+    } else if (Tag::HAS_sd == tag) {                                    \
+      TORCH_CHECK(false, "tried to get " #name " out of SymFloat")      \
     }                                                                   \
     TORCH_CHECK(false)                                                  \
   }
 
+  // TODO: Support ComplexHalf accessor
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ACCESSOR)
+
+#undef DEFINE_ACCESSOR
+
   SymInt toSymInt() const {
     if (Tag::HAS_si == tag) {
-      return v.si;
+      return c10::SymInt::toSymInt(intrusive_ptr<SymIntNodeImpl>::reclaim_copy(static_cast<SymIntNodeImpl*>(v.p)));
     } else {
       return toLong();
     }
   }
 
-  // TODO: Support ComplexHalf accessor
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ACCESSOR)
+  SymFloat toSymFloat() const {
+    if (Tag::HAS_sd == tag) {
+      return c10::SymFloat::toSymFloat(intrusive_ptr<SymFloatNodeImpl>::reclaim_copy(static_cast<SymFloatNodeImpl*>(v.p)));
+    } else {
+      return toLong();
+    }
+  }
 
   // also support scalar.to<int64_t>();
   // Deleted for unsupported types, but specialized below for supported types
@@ -98,13 +113,12 @@ class C10_API Scalar {
 
   // audit uses of data_ptr
   const void* data_ptr() const {
-    // error on symint
+    TORCH_INTERNAL_ASSERT(!isSymbolic());
     return static_cast<const void*>(&v);
   }
 
-#undef DEFINE_ACCESSOR
   bool isFloatingPoint() const {
-    return Tag::HAS_d == tag;
+    return Tag::HAS_d == tag || Tag::HAS_sd == tag;
   }
 
   C10_DEPRECATED_MESSAGE(
@@ -123,9 +137,17 @@ class C10_API Scalar {
   bool isBoolean() const {
     return Tag::HAS_b == tag;
   }
-  // nb: does not include normal ints
+
+  // you probably don't actually want these; they're mostly for testing
   bool isSymInt() const {
     return Tag::HAS_si == tag;
+  }
+  bool isSymFloat() const {
+    return Tag::HAS_sd == tag;
+  }
+
+  bool isSymbolic() const {
+    return Tag::HAS_si == tag || Tag::HAS_sd == tag;
   }
 
   C10_ALWAYS_INLINE Scalar& operator=(Scalar&& other) {
@@ -156,17 +178,21 @@ class C10_API Scalar {
       typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
-      auto val = v.u.z;
+      TORCH_INTERNAL_ASSERT(!isSymbolic());
+      auto val = v.z;
       return (val.real() == num) && (val.imag() == T());
     } else if (isFloatingPoint()) {
-      return v.u.d == num;
+      TORCH_CHECK(!isSymbolic(), "NYI SymFloat equality");
+      return v.d == num;
     } else if (isIntegral(/*includeBool=*/false)) {
-      // test if symint or not
-      // guard on bool
-      return v.u.i == num;
-    } else {
+      TORCH_CHECK(!isSymbolic(), "NYI SymInt equality");
+      return v.i == num;
+    } else if (isBoolean()) {
       // boolean scalar does not equal to a non boolean value
+      TORCH_INTERNAL_ASSERT(!isSymbolic());
       return false;
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
     }
   }
 
@@ -175,21 +201,27 @@ class C10_API Scalar {
       typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
   bool equal(T num) const {
     if (isComplex()) {
-      return v.u.z == num;
+      TORCH_INTERNAL_ASSERT(!isSymbolic());
+      return v.z == num;
     } else if (isFloatingPoint()) {
-      return (v.u.d == num.real()) && (num.imag() == T());
+      TORCH_CHECK(!isSymbolic(), "NYI SymFloat equality");
+      return (v.d == num.real()) && (num.imag() == T());
     } else if (isIntegral(/*includeBool=*/false)) {
-      // test symint here
-      return (v.u.i == num.real()) && (num.imag() == T());
-    } else {
+      TORCH_CHECK(!isSymbolic(), "NYI SymInt equality");
+      return (v.i == num.real()) && (num.imag() == T());
+    } else if (isBoolean()) {
       // boolean scalar does not equal to a non boolean value
+      TORCH_INTERNAL_ASSERT(!isSymbolic());
       return false;
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
     }
   }
 
   bool equal(bool num) const {
     if (isBoolean()) {
-      return static_cast<bool>(v.u.i) == num;
+      TORCH_INTERNAL_ASSERT(!isSymbolic());
+      return static_cast<bool>(v.i) == num;
     } else {
       return false;
     }
@@ -213,57 +245,57 @@ class C10_API Scalar {
     moveFrom(std::move(rhs));
   }
 
-  Scalar(const Scalar& rhs) : Scalar(rhs.v, rhs.tag) {}
-
-  Scalar(c10::SymInt si) : tag(Tag::HAS_si) {
-    // test if int and turn to int
-    v.si = si;
-  }
-
-  C10_ALWAYS_INLINE void moveFrom(Scalar&& rhs) noexcept {
-    if (rhs.tag == Tag::HAS_si) {
-      new (&v.si) c10::SymInt(std::move(rhs.v.si));
-      rhs.v.si.release_();
-    } else {
-      v.u = rhs.v.u;
+  Scalar(const Scalar& rhs) : tag(rhs.tag), v(rhs.v) {
+    if (isSymbolic()) {
+      c10::raw::intrusive_ptr::incref(v.p);
     }
-    tag = rhs.tag;
-    rhs.clearToInt();
   }
 
-  void clearToInt() noexcept {
-    v.u.i = 0;
-    tag = Tag::HAS_i;
+  Scalar(c10::SymInt si) {
+    if (si.is_symbolic()) {
+      tag = Tag::HAS_si;
+      v.p = std::move(si).release();
+    } else {
+      tag = Tag::HAS_i;
+      v.i = si.as_int_unchecked();
+    }
+  }
+
+  Scalar(c10::SymFloat sd) {
+    if (sd.is_symbolic()) {
+      tag = Tag::HAS_sd;
+      v.p = std::move(sd).release();
+    } else {
+      tag = Tag::HAS_d;
+      v.d = sd.as_float_unchecked();
+    }
   }
 
   // We can't set v in the initializer list using the
   // syntax v{ .member = ... } because it doesn't work on MSVC
  private:
-  enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_si, HAS_sf };
+  enum class Tag { HAS_d, HAS_i, HAS_z, HAS_b, HAS_sd, HAS_si };
 
-  union Payload {
-    // See [TriviallyCopyablePayload] in IValue.h,
-    union TriviallyCopyablePayload {
-      TriviallyCopyablePayload() : i(0) {}
-      double d;
-      int64_t i;
-      c10::complex<double> z;
-    } u;
-    Payload() : u() {}
-    ~Payload() {}
-    c10::SymInt si;
-  } v;
-
-  Tag tag;
-  Payload payload;
-
-  Scalar(const Payload& p, Scalar::Tag t) : tag(t) {
-    if (t == Tag::HAS_si) {
-      v.si = p.si;
-    } else {
-      v.u = p.u;
+  // NB: assumes that self has already been cleared
+  C10_ALWAYS_INLINE void moveFrom(Scalar&& rhs) noexcept {
+    v = rhs.v;
+    tag = rhs.tag;
+    if (rhs.tag == Tag::HAS_si || rhs.tag == Tag::HAS_sd) {
+      // Move out of scalar
+      rhs.tag = Tag::HAS_i;
+      rhs.v.i = 0;
     }
   }
+
+  Tag tag;
+
+  union v_t {
+    double d;
+    int64_t i;
+    c10::complex<double> z;
+    c10::intrusive_ptr_target* p;
+    v_t() {} // default constructor
+  } v;
 
   template <
       typename T,
@@ -271,7 +303,7 @@ class C10_API Scalar {
           std::is_integral<T>::value && !std::is_same<T, bool>::value,
           bool>::type* = nullptr>
   Scalar(T vv, bool) : tag(Tag::HAS_i) {
-    v.u.i = convert<decltype(v.u.i), T>(vv);
+    v.i = convert<decltype(v.i), T>(vv);
   }
 
   template <
@@ -280,14 +312,14 @@ class C10_API Scalar {
           !std::is_integral<T>::value && !c10::is_complex<T>::value,
           bool>::type* = nullptr>
   Scalar(T vv, bool) : tag(Tag::HAS_d) {
-    v.u.d = convert<decltype(v.u.d), T>(vv);
+    v.d = convert<decltype(v.d), T>(vv);
   }
 
   template <
       typename T,
       typename std::enable_if<c10::is_complex<T>::value, bool>::type* = nullptr>
   Scalar(T vv, bool) : tag(Tag::HAS_z) {
-    v.u.z = convert<decltype(v.u.z), T>(vv);
+    v.z = convert<decltype(v.z), T>(vv);
   }
 };
 

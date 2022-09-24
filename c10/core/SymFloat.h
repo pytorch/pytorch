@@ -22,6 +22,10 @@ class C10_API SymFloat {
     return ptr_.get();
   }
 
+  SymFloatNodeImpl* release() && {
+    return std::move(ptr_).release();
+  }
+
   SymFloatNode toSymFloatNodeImpl() const;
   static c10::SymFloat toSymFloat(SymFloatNode sin);
 

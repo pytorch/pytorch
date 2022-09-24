@@ -7,17 +7,22 @@ Scalar Scalar::operator-() const {
       !isBoolean(),
       "torch boolean negative, the `-` operator, is not supported.");
   if (isFloatingPoint()) {
-    return Scalar(-v.u.d);
+    TORCH_CHECK(!isSymbolic(), "NYI negate symbolic float");
+    return Scalar(-v.d);
   } else if (isComplex()) {
-    return Scalar(-v.u.z);
-  } else {
-    return Scalar(-v.u.i);
+    TORCH_INTERNAL_ASSERT(!isSymbolic());
+    return Scalar(-v.z);
+  } else if (isIntegral(false)) {
+    TORCH_CHECK(!isSymbolic(), "NYI negate symbolic int");
+    return Scalar(-v.i);
   }
+  TORCH_INTERNAL_ASSERT(false, "unknown ivalue tag ", static_cast<int>(tag));
 }
 
 Scalar Scalar::conj() const {
   if (isComplex()) {
-    return Scalar(std::conj(v.u.z));
+    TORCH_INTERNAL_ASSERT(!isSymbolic());
+    return Scalar(std::conj(v.z));
   } else {
     return *this;
   }
@@ -25,12 +30,16 @@ Scalar Scalar::conj() const {
 
 Scalar Scalar::log() const {
   if (isComplex()) {
-    return std::log(v.u.z);
+    TORCH_INTERNAL_ASSERT(!isSymbolic());
+    return std::log(v.z);
   } else if (isFloatingPoint()) {
-    return std::log(v.u.d);
-  } else {
-    return std::log(v.u.i);
+    TORCH_CHECK(!isSymbolic(), "NYI log symbolic float");
+    return std::log(v.d);
+  } else if (isIntegral(false)) {
+    TORCH_CHECK(!isSymbolic(), "NYI log symbolic int");
+    return std::log(v.i);
   }
+  TORCH_INTERNAL_ASSERT(false, "unknown ivalue tag ", static_cast<int>(tag));
 }
 
 } // namespace c10

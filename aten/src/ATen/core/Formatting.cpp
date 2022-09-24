@@ -26,6 +26,9 @@ std::ostream& operator<<(std::ostream & out, Scalar s) {
   if (s.isSymInt()) {
     return out << (s.toSymInt());
   }
+  if (s.isSymFloat()) {
+    return out << (s.toSymFloat());
+  }
   if (s.isIntegral(false)) {
     return out << s.toLong();
   }
