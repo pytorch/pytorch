@@ -10,17 +10,18 @@ import torch
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
 import weakref
+import operator
 
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
-import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch.fx import Proxy
 
 __all__ = ["PythonKeyTracer", "dispatch_trace", "make_fx", "DecompositionInterpreter", "get_proxy", "has_proxy"]
@@ -104,25 +105,35 @@ def set_meta(proxy, val):
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
     return proxy
 
+def thunkify(f, *args, **kwargs):
+    """
+    Delays computation of f until it's called again
+    Also caches the result
+    """
+    return functools.lru_cache(1)(functools.partial(f, *args, **kwargs))
 
 def track_tensor(tensor, proxy, *, constant, tracer):
+    def try_set_proxy_slot(outer_s, proxy_callable, *args):
+        assert callable(proxy_callable)
+        if isinstance(outer_s, SymInt):
+            inner_s = outer_s.get_pyobj()
+            assert isinstance(inner_s, PySymInt)
+
+            set_proxy_slot(inner_s, tracer, thunkify(proxy_callable, inner_s, *args))
+
     # The basic idea is that we need to associate each tensor/SymInt
     # with a Proxy.  How do we setup this association?  We just store
     # the proxy on the proxy slot of the object, keyed on the tracer
     # (so that if we have multiple tracers at the same time, they
     # don't clobber each other.)
     for i, s in enumerate(tensor.shape):
-        if isinstance(s, SymInt):
-            inner_s = s.get_pyobj()
-            assert isinstance(inner_s, PySymInt)
-            # TODO: improve naming
-            # TODO: lazily insert this into the graph only on first
-            # use?  Maybe complicated and DCE is a better idea
-            s_proxy = torch.ops.aten.sym_size(proxy, i)
-            set_meta(s_proxy, inner_s)
-            set_proxy_slot(inner_s, tracer, s_proxy)
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_size(proxy, i), x), i)
 
-        # TODO: also do stride/numel
+    for i, s in enumerate(tensor.stride()):
+        try_set_proxy_slot(s, lambda x, i: set_meta(torch.ops.aten.sym_stride(proxy, i), x), i)
+
+    try_set_proxy_slot(tensor.numel(), lambda x: set_meta(torch.ops.aten.sym_numel(proxy), x))
+    try_set_proxy_slot(tensor.storage_offset(), lambda x: set_meta(torch.ops.aten.sym_storage_offset(proxy), x))
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
@@ -176,7 +187,7 @@ def fetch_sym_proxy(tracer):
             return n.constant
         else:
             # NB: we REQUIRE all symints to be tracked
-            return get_proxy_slot(n, tracer)
+            return get_proxy_slot(n, tracer)()
     return inner
 
 
@@ -200,17 +211,12 @@ def proxy_call(proxy_mode, func, args, kwargs):
             if r is not NotImplemented:
                 return r
 
-    # Some of these are not "real" aten ops and will fail if we
-    # call _dispatch_has_kernel_for_dispatch_key on them.
-    # This list is probably incomplete
-    if func not in [torch.ops.aten.size.default]:
-        with proxy_mode.restore():
-            r = func.decompose(*args, **kwargs)
-            if r is not NotImplemented:
-                return r
+    with proxy_mode.restore():
+        r = func.decompose(*args, **kwargs)
+        if r is not NotImplemented:
+            return r
 
     tracer = proxy_mode.tracer
-
     f_args, f_kwargs = pytree.tree_map_only(torch.Tensor, fetch_tensor_proxy(tracer), (args, kwargs))
 
     # If there are SymInts, we also should not consider this constant.
@@ -235,7 +241,6 @@ def proxy_call(proxy_mode, func, args, kwargs):
             "It appears that you're trying to get value out of a tracing tensor - erroring out! "
             "It's likely that this is caused by data-dependent control flow or similar."
         )
-
     proxy_args, proxy_kwargs = pytree.tree_map_only(
         (SymInt, SymFloat),
         fetch_sym_proxy(proxy_mode.tracer),
@@ -434,23 +439,10 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if not self.enable_tracing:
             return func(*args, **kwargs)
 
-        if symbolic_shapes.is_symbolic_op(func):
-            with self.restore():
-                return symbolic_shapes.handle_symbolic_op(func, args, kwargs)
-
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
         out = proxy_call(self, func, args, kwargs)
-
-        def assert_proxy_tensor(e):
-            assert has_proxy_slot(e, self.tracer), \
-                f"Internal Error: make_fx is incorrectly baking a tensor constant into the graph: {str(e)}"
-
-        # When we trace factory functions, we expect that tensor outputs are *always* tracked.
-        # (Except for torch.tensor() constants handled through lift(), which is handled
-        # specially further up).
-        pytree.tree_map_only(torch.Tensor, assert_proxy_tensor, out)
         return out
 
 
@@ -476,24 +468,41 @@ class ProxySymDispatchMode(SymDispatchMode):
         finally:
             self.enable_tracing = old
 
+    def _compute_proxy(self, func, args, out):
+        n_args = tuple(
+            get_proxy_slot(a, self.tracer)().node if a.constant is None else a.constant
+            if isinstance(a, (PySymInt, PySymFloat)) else a
+            for a in args
+        )
+
+        # func doesn't have a __torch_function__ that Proxy can interpose, so
+        # we gotta do it manually
+        n_out = self.tracer.create_node("call_function", func, n_args, {})
+        p_out = fx.Proxy(n_out, self.tracer)
+        set_meta(p_out, out)
+        return p_out
+
     def __sym_dispatch__(self, func, types, args, kwargs):
         if not self.enable_tracing:
             return func(*args, **kwargs)
-        p_args, p_kwargs = pytree.tree_map_only(
-            (PySymInt, PySymFloat),
-            lambda s: get_proxy_slot(s, self.tracer) if s.constant is None else s.constant,
-            (args, kwargs)
-        )
-        # func doesn't have a __torch_function__ that Proxy can interpose, so
-        # we gotta do it manually
-        n_args, n_kwargs = pytree.tree_map_only(fx.Proxy, lambda p: p.node, (p_args, p_kwargs))
 
-        n_out = self.tracer.create_node("call_function", func, n_args, n_kwargs)
-        p_out = fx.Proxy(n_out, self.tracer)
+        # Peephole optimize multiply by one
+        if func == operator.mul:
+            if isinstance(args[1], PySymInt) and args[1].constant == 1:
+                return args[0]
+            elif isinstance(args[0], PySymInt) and args[0].constant == 1:
+                return args[1]
+
+        # For speed, we assume there are no nested data structures
+        # (otherwise we could use tree_map)
+        # We also assume there are no keyword arguments.
+        assert not kwargs
         out = func(*args, **kwargs)
-        set_meta(p_out, out)
         assert isinstance(out, (PySymInt, PySymFloat)), f"{func}(*{args}, **{kwargs}) = {out}"
-        set_proxy_slot(out, self.tracer, p_out)
+
+        # Delays tracing out the proxies on this op until we actually need it
+        p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
+        set_proxy_slot(out, self.tracer, p_out_thunk)
         return out
 
 
@@ -579,6 +588,10 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
+        python_dispatcher_mode: Any = nullcontext()
+        if tracing_mode == "symbolic":
+            python_dispatcher_mode = enable_python_dispatcher()
+
         proxy_mode = ProxyTorchDispatchMode(fx_tracer)
 
         def wrap_fake_concrete(x):
@@ -591,22 +604,17 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         sym_mode = proxy_mode.sym_mode
 
         # todo: Figure out a more informative name for symints
-        def wrap_fake_symbolic(x, sym_shape):
+        def wrap_fake_symbolic(x):
             if isinstance(x, torch.Tensor):
-                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta", requires_grad=x.requires_grad), x.device)
-                return val
+                return fake_tensor_mode.from_tensor(x, shape_env=shape_env)
             return x
 
         wrap_fn_map = {
             "real": lambda x: x,
             "fake": wrap_fake_concrete,
+            "symbolic": wrap_fake_symbolic,
         }
-        if tracing_mode == "symbolic":
-            flat_shapes = shape_env.create_shapes_for_args(args)
-            flat_args, spec = pytree.tree_flatten(args)
-            args = pytree.tree_unflatten(list(map(lambda a: wrap_fake_symbolic(a[0], a[1]), zip(flat_args, flat_shapes))), spec)
-        else:
-            args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
+        args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
         if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
             # FX doesn't support varargs, so we gotta fake up a wrapper
@@ -617,7 +625,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
-        with decompose(decomposition_table), fake_tensor_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
              sym_mode, proxy_mode, disable_autocast_cache():  # type: ignore[attr-defined]
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 

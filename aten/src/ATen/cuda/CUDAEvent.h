@@ -157,6 +157,10 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   // Note: cudaEventSynchronize can be safely called from any device
   void synchronize() const {
     if (is_created_) {
+      const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+      if (C10_UNLIKELY(interp)) {
+          (*interp)->trace_gpu_event_synchronization(reinterpret_cast<uintptr_t>(event_));
+      }
       AT_CUDA_CHECK(cudaEventSynchronize(event_));
     }
   }
