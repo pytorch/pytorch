@@ -1638,8 +1638,7 @@ class OneCycleLR(_LRScheduler):
             if last_epoch == -1:
                 for m_momentum, b_momentum, group in zip(max_momentums, base_momentums, optimizer.param_groups):
                     if self.use_beta1:
-                        _, beta2 = group['betas']
-                        group['betas'] = (m_momentum, beta2)
+                        group['betas'] = (m_momentum, *group['betas'][1:])
                     else:
                         group['momentum'] = m_momentum
                     group['max_momentum'] = m_momentum
@@ -1693,8 +1692,7 @@ class OneCycleLR(_LRScheduler):
             lrs.append(computed_lr)
             if self.cycle_momentum:
                 if self.use_beta1:
-                    _, beta2 = group['betas']
-                    group['betas'] = (computed_momentum, beta2)
+                    group['betas'] = (computed_momentum, *group['betas'][1:])
                 else:
                     group['momentum'] = computed_momentum
 

@@ -850,7 +850,7 @@ class GitHubPR:
     def merge_ghstack_into(
         self,
         repo: GitRepo,
-        force: bool,
+        skip_mandatory_checks: bool,
         comment_id: Optional[int] = None,
         land_check_commit: Optional[str] = None
     ) -> None:
@@ -877,7 +877,7 @@ class GitHubPR:
                 find_matching_merge_rule(
                     pr,
                     repo,
-                    force=force,
+                    skip_mandatory_checks=skip_mandatory_checks,
                     skip_internal_checks=can_skip_internal_checks(self, comment_id),
                     land_check_commit=land_check_commit)
 
@@ -897,7 +897,7 @@ class GitHubPR:
         return msg
 
     def merge_into(self, repo: GitRepo, *,
-                   force: bool = False,
+                   skip_mandatory_checks: bool = False,
                    dry_run: bool = False,
                    comment_id: Optional[int] = None,
                    land_check_commit: Optional[str] = None) -> None:
@@ -905,18 +905,20 @@ class GitHubPR:
         find_matching_merge_rule(
             self,
             repo,
-            force=force,
+            skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
             land_check_commit=land_check_commit)
-        self.merge_changes(repo, force, comment_id, land_check_commit=land_check_commit)
+        self.merge_changes(repo, skip_mandatory_checks, comment_id, land_check_commit=land_check_commit)
 
         repo.push(self.default_branch(), dry_run)
         if not dry_run:
+            if land_check_commit:
+                self.delete_land_time_check_branch(repo)
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
     def merge_changes(self,
                       repo: GitRepo,
-                      force: bool = False,
+                      skip_mandatory_checks: bool = False,
                       comment_id: Optional[int] = None,
                       land_check_commit: Optional[str] = None,
                       branch: Optional[str] = None) -> None:
@@ -930,15 +932,25 @@ class GitHubPR:
             repo._run_git("merge", "--squash", pr_branch_name)
             repo._run_git("commit", f"--author=\"{self.get_author()}\"", "-m", msg)
         else:
-            self.merge_ghstack_into(repo, force, comment_id=comment_id, land_check_commit=land_check_commit)
+            self.merge_ghstack_into(
+                repo,
+                skip_mandatory_checks,
+                comment_id=comment_id,
+                land_check_commit=land_check_commit
+            )
 
     def create_land_time_check_branch(self,
                                       repo: GitRepo,
                                       branch: str,
-                                      force: bool = False,
+                                      skip_mandatory_checks: bool = False,
                                       comment_id: Optional[int] = None,) -> str:
         orig_branch = repo.current_branch()
-        self.merge_changes(repo, branch=branch, force=force, comment_id=comment_id)
+        self.merge_changes(
+            repo,
+            branch=branch,
+            skip_mandatory_checks=skip_mandatory_checks,
+            comment_id=comment_id
+        )
         land_check_branch = f'landchecks/{self.pr_num}'
         try:
             repo._run_git('branch', "-D", land_check_branch)
@@ -951,6 +963,11 @@ class GitHubPR:
         if repo.current_branch() != orig_branch:
             repo.checkout(orig_branch)
         return commit
+
+    def delete_land_time_check_branch(self,
+                                      repo: GitRepo) -> None:
+        land_check_branch = f'landchecks/{self.pr_num}'
+        repo._run_git('push', 'origin', '-d', land_check_branch)
 
 
 class MandatoryChecksMissingError(Exception):
@@ -1002,7 +1019,7 @@ def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[Me
 
 def find_matching_merge_rule(pr: GitHubPR,
                              repo: Optional[GitRepo] = None,
-                             force: bool = False,
+                             skip_mandatory_checks: bool = False,
                              skip_internal_checks: bool = False,
                              land_check_commit: Optional[str] = None,
                              ) -> MergeRule:
@@ -1021,7 +1038,14 @@ def find_matching_merge_rule(pr: GitHubPR,
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
 
-    #  Used to determine best rejection reason
+    # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
+    # If it fails all rules, we need to find the rule that it came closest to passing and report
+    # that to the dev.
+    #
+    # reject_reason_score ranks rules by relevancy. The higher the score, the more relevant the
+    # rule & rejection reason, and we only care about the most relevant rule/reason
+    #
+    # reject_reason_score intrepretation:
     # Score 0 to 10K - how many files rule matched
     # Score 10K - matched all files, but no overlapping approvers
     # Score 20K - matched all files and approvers, but mandatory checks are pending
@@ -1031,6 +1055,8 @@ def find_matching_merge_rule(pr: GitHubPR,
         rule_name = rule.name
         patterns_re = patterns_to_regex(rule.patterns)
         non_matching_files = []
+
+        # Does this rule apply to all the files?
         for fname in changed_files:
             if not patterns_re.match(fname):
                 non_matching_files.append(fname)
@@ -1038,16 +1064,21 @@ def find_matching_merge_rule(pr: GitHubPR,
             num_matching_files = len(changed_files) - len(non_matching_files)
             if num_matching_files > reject_reason_score:
                 reject_reason_score = num_matching_files
-                reject_reason = (f"{num_matching_files} files matched rule {rule_name}, but there are still non-matching files: " +
-                                 f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}")
+                reject_reason = "\n".join((
+                    f"Not all files match rule `{rule_name}`."
+                    f"{num_matching_files} files matched, but there are still non-matching files:"
+                    f"{','.join(non_matching_files[:5])}{', ...' if len(non_matching_files) > 5 else ''}"
+                ))
             continue
+
         # If rule needs approvers but PR has not been reviewed, skip it
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"Matched rule {rule_name}, but PR #{pr.pr_num} has not been reviewed yet"
+                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet (Rule {rule_name})"
             continue
 
+        # Does the PR have the required approvals for this rule?
         rule_approvers_set = set()
         for approver in rule.approved_by:
             if "/" in approver:
@@ -1060,34 +1091,43 @@ def find_matching_merge_rule(pr: GitHubPR,
         if len(approvers_intersection) == 0 and len(rule_approvers_set) > 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of: " +
-                                 f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
+                reject_reason = "\n".join((
+                    f"Approval needed from one of the following (Rule '{rule_name}'):",
+                    f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
+                ))
             continue
+
+        # Does the PR pass the checks required by this rule?
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-        required_checks = filter(lambda x: force is False or "CLA Check" in x, mandatory_checks)
+        required_checks = filter(lambda x: skip_mandatory_checks is False or "CLA Check" in x, mandatory_checks)
         [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
+        hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
-                reject_reason = (
-                    f"[View failures on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
-                    + f"Refusing to merge as mandatory check(s) {checks_to_str(failed_checks)} failed for "
-                    + f"rule {rule_name}."
-                )
+                reject_reason = "\n".join((
+                    f"The following mandatory check(s) failed (Rule `{rule_name}`):",
+                    *checks_to_markdown_bullets(failed_checks),
+                    "",
+                    f"Dig deeper by [viewing the failures on hud]({hud_link})"
+                ))
             continue
         elif len(pending_checks) > 0:
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
-                reject_reason = (
-                    f"[View pending jobs on hud](https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}). "
-                    + f"Refusing to merge as mandatory check(s) {checks_to_str(pending_checks)} are pending/not yet run for "
-                    + f"rule {rule_name}."
-                )
+                reject_reason = "\n".join((
+                    f"The following mandatory check(s) are pending/not yet run (Rule `{rule_name}`):",
+                    *checks_to_markdown_bullets(pending_checks),
+                    "",
+                    f"Dig deeper by [viewing the pending checks on hud]({hud_link})"
+                ))
             continue
+
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
+
         return rule
 
     if reject_reason_score == 20000:
@@ -1123,6 +1163,10 @@ def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> Dict[s
 
 def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+
+
+def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
+    return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks]
 
 def get_combined_checks_from_pr_and_land_validation(
     pr: GitHubPR,
@@ -1182,7 +1226,7 @@ def validate_revert(repo: GitRepo, pr: GitHubPR, *,
     skip_internal_checks = can_skip_internal_checks(pr, comment_id)
 
     # Raises exception if matching rule is not found, but ignores all status checks
-    find_matching_merge_rule(pr, repo, force=True, skip_internal_checks=skip_internal_checks)
+    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True, skip_internal_checks=skip_internal_checks)
     commit_sha = pr.get_merge_commit()
     if commit_sha is None:
         commits = repo.commits_resolving_gh_pr(pr.pr_num)
@@ -1224,8 +1268,8 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-def check_for_sev(org: str, project: str, force: bool) -> None:
-    if force:
+def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
+    if skip_mandatory_checks:
         return
     response = cast(
         Dict[str, Any],
@@ -1274,7 +1318,7 @@ def categorize_checks(check_runs: Dict[str, WorkflowCheckState],
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
-          force: bool = False,
+          skip_mandatory_checks: bool = False,
           comment_id: Optional[int] = None,
           mandatory_only: bool = False,
           on_green: bool = False,
@@ -1285,34 +1329,54 @@ def merge(pr_num: int, repo: GitRepo,
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
-    explainer = TryMergeExplainer(force, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
+    explainer = TryMergeExplainer(skip_mandatory_checks, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
     on_green, land_checks = explainer.get_flags()
     land_check_commit = None
 
-    check_for_sev(org, project, force)
+    check_for_sev(org, project, skip_mandatory_checks)
 
-    if force or can_skip_internal_checks(pr, comment_id):
+    if skip_mandatory_checks or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message())
-        return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+        return pr.merge_into(
+            repo,
+            dry_run=dry_run,
+            skip_mandatory_checks=skip_mandatory_checks,
+            comment_id=comment_id
+        )
 
-    if land_checks:
-        land_check_commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
+    # Important: check for merge rule once before starting land checks
+    # because we want to make sure that only approved PRs can start CI
+    # jobs. If there's missing approval, a RuntimeError will be raised
+    # here to stop the merge process right away
+    find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+
+    if land_checks and not dry_run:
+        land_check_commit = pr.create_land_time_check_branch(
+            repo,
+            'viable/strict',
+            skip_mandatory_checks=skip_mandatory_checks,
+            comment_id=comment_id
+        )
 
     gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(land_check_commit))
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+        if land_checks and not dry_run:
+            pr.delete_land_time_check_branch(repo)
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
-        check_for_sev(org, project, force)
+        check_for_sev(org, project, skip_mandatory_checks)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
         if initial_commit_sha != pr.last_commit()['oid']:
+            if land_checks and not dry_run:
+                pr.delete_land_time_check_branch(repo)
             raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
             find_matching_merge_rule(pr, repo)
@@ -1336,15 +1400,27 @@ def merge(pr_num: int, repo: GitRepo,
             if land_checks and land_check_commit is not None:
                 validate_land_time_checks(org, project, land_check_commit)
 
-            return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id, land_check_commit=land_check_commit)
+            return pr.merge_into(
+                repo,
+                dry_run=dry_run,
+                skip_mandatory_checks=skip_mandatory_checks,
+                comment_id=comment_id,
+                land_check_commit=land_check_commit
+            )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
             time.sleep(5 * 60)
+        except RuntimeError:
+            if land_checks and not dry_run:
+                pr.delete_land_time_check_branch(repo)
+            raise
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
     if not dry_run:
+        if land_checks:
+            pr.delete_land_time_check_branch(repo)
         gh_add_labels(org, project, pr_num, ["land-failed"])
     raise RuntimeError(msg)
 
@@ -1403,7 +1479,7 @@ def main() -> None:
     try:
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
-              force=args.force,
+              skip_mandatory_checks=args.force,
               comment_id=args.comment_id,
               on_green=args.on_green,
               mandatory_only=args.on_mandatory,

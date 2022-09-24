@@ -7,13 +7,15 @@
 #include <utility>
 
 #include <ATen/Context.h>
-#include <c10/core/DeviceType.h>
+#include <c10/core/Device.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/strong_type.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/profiler/orchestration/python_tracer.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
@@ -31,6 +33,51 @@ enum class EventType : uint8_t {
   Kineto
 };
 
+// ============================================================================
+// == Value (Tensor, Scalar) summary ==========================================
+// ============================================================================
+
+// We use a Tensor's TensorImpl adress and StorageImpl data start to build the
+// data flow graph. We do not hold a reference so we wrap them in strong types
+// to prevent direct access.
+using TensorImplAddress = strong::type<
+    const c10::TensorImpl*,
+    struct TensorImplAddress_,
+    strong::regular,
+    strong::hashable>;
+
+using StorageImplData = strong::
+    type<void*, struct StorageImplData_, strong::regular, strong::hashable>;
+
+struct TensorMetadata {
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  TensorImplAddress impl_;
+  StorageImplData data_;
+
+  // Device is separated into DeviceType and DeviceIndex as Device
+  // doesn't have a default initializer (which the std::array initializer needs)
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+
+  c10::ScalarType dtype_;
+  c10::Layout layout_;
+  uint32_t dim_;
+};
+
+struct Inputs {
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::vector<int64_t>> strides_;
+  std::vector<c10::IValue> ivalues_;
+  std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
+};
+
+// ============================================================================
+// == ExtraFields =============================================================
+// ============================================================================
 template <EventType>
 struct ExtraFields;
 
@@ -46,25 +93,6 @@ struct TorchOpBasicFields {
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
-};
-
-struct TensorMetadata {
-  void* ptr_;
-  // Device is separated into DeviceType and DeviceIndex as Device
-  // doesn't have a default initializer (which the std::array initializer needs)
-  c10::DeviceType device_type_;
-  c10::DeviceIndex device_index_;
-  c10::ScalarType dtype_;
-  uint32_t dim_;
-  c10::Layout layout_;
-};
-
-struct Inputs {
-  std::vector<std::vector<int64_t>> shapes_;
-  std::vector<std::vector<int64_t>> strides_;
-  std::vector<c10::IValue> ivalues_;
-  std::vector<std::string> dtypes_;
-  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -364,51 +392,6 @@ class InputOutputEncoder final {
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
 };
 
-class RecordQueue;
-namespace python_tracer {
-/*
-Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
-when we call the profiler from libtorch_python we need the profiler to be able
-to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
-
-In order to solve this dependency issue we define a virtual base and a function
-to register a getter. The python tracer then implements these functions and
-exposes itself by calling `registerTracer` from `torch/csrc/autograd/init.cpp`.
-This pattern of registration for faux python dependencies in libtorch is common
-in the PyTorch codebase.
-*/
-
-using TraceKey = strong::type<
-    uint64_t,
-    struct TraceKey_,
-    strong::regular,
-    strong::hashable,
-    strong::ostreamable>;
-
-struct CompressedEvent {
-  TraceKey key_;
-  uint64_t system_tid_;
-  kineto::DeviceAndResource kineto_info_;
-  time_t enter_t_;
-};
-
-struct TORCH_API PythonTracerBase {
-  static PythonTracerBase& get();
-  virtual ~PythonTracerBase() = default;
-
-  virtual void start(RecordQueue* queue) = 0;
-  virtual void stop() = 0;
-  virtual std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)> time_converter,
-      std::vector<CompressedEvent>& enters,
-      time_t end_time_ns) = 0;
-  virtual void clear() = 0;
-};
-
-using GetFn = PythonTracerBase& (*)();
-TORCH_API void registerTracer(GetFn get_tracer);
-} // namespace python_tracer
-
 class TORCH_API ThreadLocalSubqueue {
  public:
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
@@ -532,6 +515,7 @@ class TORCH_API RecordQueue {
   ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>>
       sub_queues_;
   std::mutex sub_queue_mutex_;
+  std::unique_ptr<python_tracer::PythonTracerBase> python_tracer_;
 };
 
 } // namespace impl

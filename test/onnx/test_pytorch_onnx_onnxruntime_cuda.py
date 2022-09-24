@@ -2,7 +2,10 @@
 
 import unittest
 
+import onnx_test_common
+
 import onnxruntime  # noqa: F401
+import parameterized
 
 import torch
 from pytorch_test_common import (
@@ -11,18 +14,22 @@ from pytorch_test_common import (
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
 )
-from test_pytorch_onnx_onnxruntime import TestONNXRuntime
+from test_pytorch_onnx_onnxruntime import (
+    _parameterized_class_attrs_and_values,
+    MAX_ONNX_OPSET_VERSION,
+    MIN_ONNX_OPSET_VERSION,
+)
 from torch.cuda.amp import autocast
-from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
 
 
-class TestONNXRuntime_cuda(common_utils.TestCase):
-
-    opset_version = GLOBALS.export_onnx_opset_version
-    keep_initializers_as_inputs = True
-    onnx_shape_inference = True
-
+@parameterized.parameterized_class(
+    **_parameterized_class_attrs_and_values(
+        MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION
+    ),
+    class_name_func=onnx_test_common.parameterize_class_name,
+)
+class TestONNXRuntime_cuda(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipIfNoCuda
     def test_gelu_fp16(self):
@@ -144,9 +151,6 @@ class TestONNXRuntime_cuda(common_utils.TestCase):
         y = torch.randn(3, 3, device=torch.device("cuda"))
         self.run_test(Model(), (x, y))
 
-
-TestONNXRuntime_cuda.setUp = TestONNXRuntime.setUp
-TestONNXRuntime_cuda.run_test = TestONNXRuntime.run_test
 
 if __name__ == "__main__":
     common_utils.run_tests()

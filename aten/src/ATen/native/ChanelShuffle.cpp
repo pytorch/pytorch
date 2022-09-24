@@ -1,3 +1,4 @@
+#include <ATen/Functions.h>
 #include <ATen/native/TensorTransformations.h>
 
 #include <ATen/NamedTensorUtils.h>
