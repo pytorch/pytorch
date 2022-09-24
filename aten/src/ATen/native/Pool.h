@@ -218,7 +218,7 @@ pool3d_shape_check(
 
   for (const auto i : c10::irange(1, ndim)) {
     TORCH_CHECK(input.size(i) > 0,
-                fn_name, "Expected input to have non-zero size for non-batch dimensions, but got",
+                fn_name, ": Expected input to have non-zero size for non-batch dimensions, but got: ",
                 input.sizes(), " with dimension ", i, " being empty.");
   }
 
