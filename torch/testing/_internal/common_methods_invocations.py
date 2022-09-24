@@ -291,22 +291,20 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
 
     # input shape, output shape, output stride, output storage offset
     test_cases = [
-        ((1,), (1,), (1,), 0),
-        ((3, 3), (2, 2), (1, 2), 0),
-        ((3, 3), (2, 2), (1, 2), 1),
-        ((16,), (2, 2, 2, 2), (1, 1, 1, 1), 0),
-        ((16,), (2, 1, 1, 2), (1, 7, 7, 1), 0),
+        # ((1,), (1,), (1,), 0),
+        # ((3, 3), (2, 2), (1, 2), 0),
+        # ((3, 3), (2, 2), (1, 2), 1),
+        # Example from docs
+        ((3, 3), (2, 2), (2, 1), 0),
+        # ((16,), (2, 2, 2, 2), (1, 1, 1, 1), 0),
+        # ((16,), (2, 1, 1, 2), (1, 7, 7, 1), 0),
     ]
-
-    samples = []
 
     for input_shape, output_shape, stride, storage_offset in test_cases:
         input_t = make_arg(input_shape)
         input_src = make_arg(output_shape)
         kwargs = dict(storage_offset=storage_offset)
-        samples.append(SampleInput(input_t, args=(input_src, output_shape, stride), kwargs=kwargs))
-
-    return samples
+        yield SampleInput(input_t, args=(input_src, output_shape, stride), kwargs=kwargs)
 
 def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
     inputs = (
@@ -10525,9 +10523,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # AssertionError: Tensor-likes are not close! (new_empty_strided.default)
                DecorateInfo(unittest.skip("Expected: new_empty_strided is not comparable"), 'TestDecomp', 'test_comprehensive'),
-               DecorateInfo(
-                   unittest.skip("Some stride values write multiple values to the same location e.g. (1,1,1,1)"),
-                   'TestCommon', 'test_compare_cpu'),)),
+            #    DecorateInfo(
+            #        unittest.skip("Some stride values write multiple values to the same location e.g. (1,1,1,1)"),
+            #        'TestCommon', 'test_compare_cpu'),
+                   )),
     OpInfo('native_layer_norm',
            aten_name='native_layer_norm',
            ref=reference_native_layer_norm,
