@@ -16,7 +16,7 @@ _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 
 
 # TODO(#78694): Remove this file after PyTorch 1.14.
-# Add functions in this file are deprecated and should not be used
+# All functions in this file are deprecated and should not be used
 
 
 @_deprecation.deprecated(
@@ -118,7 +118,7 @@ def _aten_op(g: _C.Graph, operator: str, *args, overload_name: str = "", **kwarg
 @_deprecation.deprecated(
     "1.13",
     "1.14",
-    "note 'b.op()' is to be removed from torch.Graph. Please open a"
+    "note 'b.op()' is to be removed from torch.Block. Please open a"
     " GitHub issue if you need this functionality.",
 )
 @_beartype.beartype
