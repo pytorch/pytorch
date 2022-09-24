@@ -1,4 +1,5 @@
 #include <type_traits>
+#include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
@@ -9,9 +10,18 @@
 #include <ATen/ops/_nested_from_padded.h>
 #endif
 
+// TODO Consider moving all flash_attention code, nested tensor included to
+// Transformer library
+
+#ifdef USE_FLASH_ATTENTION
+#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#endif
+
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorMath.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+
+#include <ATen/cuda/CUDAContext.h>
 
 namespace at {
 namespace native {
@@ -205,6 +215,38 @@ Tensor NestedTensor_to_padded_tensor_cuda(
     return output;
   }
   return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
+}
+
+Tensor flash_scaled_dot_product_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool causal) {
+#if defined(USE_FLASH_ATTENTION)
+  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  std::vector<Tensor> output = fmha::mha_fwd(
+      query,
+      key,
+      value,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      dropout_p,
+      softmax_scale,
+      false,
+      causal,
+      false,
+      c10::nullopt);
+  return output[0];
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return Tensor{};
 }
 
 } // namespace native

@@ -47,7 +47,7 @@ from collections import namedtuple
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
-from functorch._C import reshape_dim_into, reshape_dim_outof
+from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
 
 FALLBACK_REGEX = 'There is a performance drop'
@@ -3194,9 +3194,13 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__'),  # dynamic mask
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
+        xfail('unique', ''),  # dynamic op
+        xfail('unique_consecutive', ''),  # dynamic op
         xfail('allclose'),  # returns a boolean
+        xfail('uniform'),  # randomness is tested separately
         xfail('rand_like'),  # randomness is tested separately
         xfail('randint_like'),  # randomness is tested separately
         xfail('randn_like'),  # randomness is tested separately
@@ -3219,6 +3223,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
+        xfail('ones', ''),  # test runner can't handle factory functions
+        xfail('zeros', ''),  # test runner can't handle factory functions
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
@@ -3243,6 +3249,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
+        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
@@ -3275,7 +3282,9 @@ class TestVmapOperatorsOpInfo(TestCase):
              {torch.float32: tol(atol=1e-04, rtol=1e-02)}, device_type='cuda'),
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
-    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
+        xfail('cat'),
+    }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = (
@@ -3291,23 +3300,27 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('cat'),
         xfail('complex'),
         xfail('copysign'),
-        xfail('eig'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
         xfail('nanmean'),
+        xfail('scatter_reduce', 'sum'),
+        xfail('scatter_reduce', 'mean'),
+        xfail('scatter_reduce', 'amax'),
+        xfail('scatter_reduce', 'amin'),
         # `index_put` OpInfo in pytorch/pytorch has
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
+        xfail('narrow_copy'),  # hit the vmap fallback which is currently disabled
         xfail('ormqr'),
         xfail('put'),
         xfail('quantile'),
@@ -3323,6 +3336,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('count_nonzero'),
         xfail('nanmean'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -3364,6 +3378,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd_lowrank', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
+        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
@@ -3410,7 +3425,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
         xfail('linalg.vander', ''),
         xfail('segment_reduce', 'lengths'),
-        xfail('linalg.lu_solve', ''),
+        xfail('lu_solve', ''),
         xfail('special.bessel_y1'),
         xfail('special.hermite_polynomial_he'),
         xfail('special.scaled_modified_bessel_k0'),
@@ -3828,6 +3843,8 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
+        xfail('linalg.norm'),  # can accept vector inputs
+        xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
         xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
