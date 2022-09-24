@@ -6525,7 +6525,7 @@ def prim_loop(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
 @_beartype.beartype
 def prim_if(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     n = g.original_node
-    block = g.onnx_block
+    block = g.block
     env = g.env
     params_dict = g.params_dict
 
@@ -6647,7 +6647,7 @@ def prim_constant(g: torchscript.GraphContext, *inputs, **attrs):
 @_beartype.beartype
 def onnx_placeholder(g: torchscript.GraphContext, *inputs, **attrs):
     node = g.original_node
-    block = g.onnx_block
+    block = g.block
     env = g.env
 
     return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
