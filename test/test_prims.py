@@ -190,8 +190,8 @@ class TestPrims(TestCase):
             return x.to(dtype)
 
         with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(func)(a, a, a)
-            execute(gm, a, a, a, executor="nvfuser")
+            gm = make_fx(func)(a, dtype)
+            execute(gm, a, dtype, executor="nvfuser")
 
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         includes_aten_to_copy = any(
