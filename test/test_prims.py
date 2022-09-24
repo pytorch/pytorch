@@ -177,16 +177,18 @@ class TestPrims(TestCase):
         self.assertEqual(out, (a, a, a))
 
     @onlyCUDA
-    @dtypes(torch.float32, torch.float16, torch.uint8)
+    @dtypes(torch.float16, torch.uint8)
     def test_nvprim_conditional_lowering(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
         from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
 
-        a = torch.randn(3, 3, device=device)
+        # initialize input as float32, which is different from `dtype` in the argument.
+        # this ensures that tracing will have a _to_copy node.
+        a = torch.randn(3, 3, device=device, dtype=torch.float32)
 
-        def func(a, dtype):
+        def func(x, dtype):
             return x.to(dtype)
 
         with TorchRefsNvfuserCapabilityMode():
