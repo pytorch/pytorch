@@ -9,7 +9,7 @@ import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM
+    DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -25,7 +25,6 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex, all_types_and_complex_and, floating_and_complex_types,
     floating_and_complex_types_and, integral_types, floating_types_and,
 )
-from torch.utils._python_dispatch import TorchDispatchMode
 
 if TEST_SCIPY:
     import scipy.sparse
@@ -41,44 +40,25 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and LooseVersion(torch.version.cuda) > "11.2"
 ) or (not IS_WINDOWS and CUDA11OrLater)
 
-class CrossRefSparseFakeMode(TorchDispatchMode):
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
+class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
+    def __init__(self):
+        super(CrossRefSparseFakeMode, self).__init__(self.ignore_op, check_strides=False)  # TODO: enable stride checking
 
-        def on_tensor(f):
-            def go(t):
-                if isinstance(t, torch.Tensor):
-                    return f(t)
-                else:
-                    return t
-            return go
-
-        # empty_like excluded for now due to sparse complex
-        # aten._to_dense.default this one is getting called with csc
-        if (
-            func not in [
-                torch.ops.aten.lift_fresh.default,
-                torch.ops.aten.empty_like.default,
-                torch.ops.aten.set_.source_Storage_storage_offset,
-                torch.ops.aten.sspaddmm.out,
-                torch.ops.aten._spdiags.default,
-                torch.ops.aten._to_dense.default
-            ]
-            and torch.Tag.dynamic_output_shape not in func.tags
-            and torch.Tag.inplace_view not in func.tags
-            and torch.Tag.data_dependent_output not in func.tags
-        ):
-            from torch._subclasses.fake_tensor import FakeTensorMode, UnsupportedFakeTensorException
-            from torch.utils._pytree import tree_map
-            try:
-                with FakeTensorMode(allow_meta=True) as fake_mode:
-                    fake_args, fake_kwargs = tree_map(on_tensor(fake_mode.from_tensor), (args, kwargs))
-                    fake_r = func(*fake_args, **fake_kwargs)
-            except UnsupportedFakeTensorException:
-                pass
-
-        r = func(*args, **kwargs)
-        return r
+    # empty_like excluded for now due to sparse complex
+    # aten._to_dense.default this one is getting called with csc
+    @staticmethod
+    def ignore_op(func):
+        return func in (
+            torch.ops.aten.empty_like.default,
+            torch.ops.aten.set_.source_Storage_storage_offset,
+            torch.ops.aten.sspaddmm.out,
+            torch.ops.aten._spdiags.default,
+            torch.ops.aten._to_dense.default,
+            torch.ops.aten.indices.default,
+            torch.ops.aten._indices.default,
+            torch.ops.aten.values.default,
+            torch.ops.aten._values.default,
+        )
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -909,6 +889,7 @@ class TestSparse(TestSparseBase):
         test_shape(10, 20, 0, 0)
         test_shape(10, 20, 0, 20)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1166")
     @dtypes(torch.double, torch.cdouble)
     def test_t_empty(self, device, dtype):
         def test_in_place(x):
@@ -3330,6 +3311,7 @@ class TestSparse(TestSparseBase):
                 J[i] = g.to_dense() if g.is_sparse else g
             return J
 
+        @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1166")
         def test_op(sparse_dims, nnz, with_size, coalesced):
             if isinstance(with_size, Number):
                 with_size = [with_size] * sparse_dims

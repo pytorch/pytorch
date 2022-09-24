@@ -5,8 +5,8 @@ to determine if they are synchronized or not. When enabled in a python program a
 possible data race is detected, a detailed warning will be printed and the program
 will exit.
 
-It can be enabled either by importing this module and using
-:func:`enable_cuda_sanitizer()` or by exporting ``TORCH_CUDA_SANITIZER``
+It can be enabled either by importing this module and calling
+:func:`enable_cuda_sanitizer()` or by exporting the ``TORCH_CUDA_SANITIZER``
 environment variable.
 """
 
@@ -25,6 +25,8 @@ import torch.utils._cuda_trace as cuda_trace
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
+
+DEFAULT_STREAM_ID = 0
 
 TK = TypeVar("TK")
 TVa = TypeVar("TVa")
@@ -56,14 +58,16 @@ class Access:
         stream: the stream id of the stream executing the kernel.
         operator: the schema of the launched kernel, which lists the
             arguments and return type.
-        names: the arguments in the schema this access corresponds to.
+        aliases: the arguments in the schema this access corresponds to.
+        is_output: Whether the tensor was an output of the kernel.
         stack_trace: the stack summary object captured during access.
     """
     type: AccessType
     seq_num: SeqNum
     stream: StreamId
     operator: str
-    names: List[str]
+    aliases: List[str]
+    is_output: bool
     stack_trace: traceback.StackSummary
 
 
@@ -89,6 +93,18 @@ class UnsynchronizedAccessError(SynchronizationError):
         self.previous_access = previous_access
 
     def __str__(self):
+        def format_access(access: Access):
+            message.write(f"{access.operator}\n{access.type}")
+            if access.aliases:
+                message.write(" argument(s) " + ", ".join(access.aliases))
+                if access.is_output:
+                    message.write(", and to")
+            if access.is_output:
+                message.write(" the output")
+            message.write(
+                f"\nWith stack trace:\n{''.join(access.stack_trace.format())}\n"
+            )
+
         with io.StringIO() as message:
             message.write(
                 textwrap.dedent(
@@ -96,24 +112,16 @@ class UnsynchronizedAccessError(SynchronizationError):
                     ============================
                     CSAN detected a possible data race on tensor with data pointer {self.data_ptr}
                     Access by stream {self.current_access.stream} during kernel:
-                    {self.current_access.operator}
-                    {self.current_access.type} argument: {', '.join(self.current_access.names)}
-                    With stack trace:
                     """
                 )
             )
-            message.write(f"{''.join(self.current_access.stack_trace.format())}\n")
+            format_access(self.current_access)
+
             message.write(
-                textwrap.dedent(
-                    f"""\
-                    Previous access by stream {self.previous_access.stream} during kernel:
-                    {self.previous_access.operator}
-                    {self.previous_access.type} argument: {', '.join(self.previous_access.names)}
-                    With stack trace:
-                    """
-                )
+                f"Previous access by stream {self.previous_access.stream} during kernel:\n"
             )
-            message.write(f"{''.join(self.previous_access.stack_trace.format())}\n")
+            format_access(self.previous_access)
+
             if self.allocation_stack_trace:
                 message.write(
                     "Tensor was allocated with stack trace:\n"
@@ -219,6 +227,8 @@ class StreamSynchronizations:
     def __init__(self):
         self.current_sync_states: Dict[StreamId, Dict[StreamId, SeqNum]] = {}
         self.recorded_sync_states: Dict[EventId, Dict[StreamId, SeqNum]] = {}
+        self.host_sync_state: Dict[StreamId, SeqNum] = {}
+        self.create_stream(DEFAULT_STREAM_ID)
 
     def _ensure_stream_exists(self, stream: StreamId) -> None:
         if stream not in self.current_sync_states:
@@ -272,7 +282,8 @@ class StreamSynchronizations:
                 )
             )
         else:
-            self.current_sync_states[stream] = {}
+            self.host_sync_state[stream] = 0
+            self.current_sync_states[stream] = self.host_sync_state.copy()
 
     def create_event(self, event: EventId) -> None:
         self._ensure_event_does_not_exist(event)
@@ -291,13 +302,43 @@ class StreamSynchronizations:
         self._ensure_stream_exists(stream)
         self.recorded_sync_states[event] = self.current_sync_states[stream].copy()
 
-    def state_wait_for_event(self, stream: StreamId, event: EventId) -> None:
-        self._ensure_event_exists(event)
+    def _state_wait_for_other(
+        self, state: Dict[StreamId, SeqNum], other: Dict[StreamId, SeqNum]
+    ) -> None:
+        for stream, seq_num in other.items():
+            state[stream] = max(state.get(stream, -1), seq_num)
+
+    def stream_wait_for_event(self, stream: StreamId, event: EventId) -> None:
         self._ensure_stream_exists(stream)
-        for other_stream, seq_num in self.recorded_sync_states[event].items():
-            self.current_sync_states[stream][other_stream] = max(
-                self.current_sync_states[stream].get(other_stream, -1), seq_num
-            )
+        self._ensure_event_exists(event)
+        self._state_wait_for_other(
+            self.current_sync_states[stream], self.recorded_sync_states[event]
+        )
+
+    def all_streams_wait_for_event(self, event: EventId) -> None:
+        self._ensure_event_exists(event)
+        for stream in self.current_sync_states.keys():
+            self.stream_wait_for_event(stream, event)
+
+        self._state_wait_for_other(
+            self.host_sync_state, self.recorded_sync_states[event]
+        )
+
+    def all_streams_wait_for_stream(self, stream: StreamId) -> None:
+        self._ensure_stream_exists(stream)
+        for state in self.current_sync_states.values():
+            self._state_wait_for_other(state, self.current_sync_states[stream])
+
+        self._state_wait_for_other(
+            self.host_sync_state, self.current_sync_states[stream]
+        )
+
+    def sync_all_streams(self) -> None:
+        for stream, state in self.current_sync_states.items():
+            self.host_sync_state[stream] = state[stream]
+
+        for state in self.current_sync_states.values():
+            self._state_wait_for_other(state, self.host_sync_state)
 
     def is_ordered_after(
         self, current_stream: StreamId, seq_num: SeqNum, other_stream: StreamId
@@ -323,10 +364,11 @@ class EventHandler:
     def _handle_kernel_launch(
         self,
         stream: StreamId,
-        read_only: List[DataPtr],
-        read_write: List[DataPtr],
+        read_only: Set[DataPtr],
+        read_write: Set[DataPtr],
+        outputs: Set[DataPtr],
         operator: str,
-        tensor_names: Dict[int, List[str]],
+        tensor_aliases: Dict[int, List[str]],
     ) -> List[SynchronizationError]:
         def check_conflict(
             data_ptr: DataPtr, current_access: Access, previous_access: Optional[Access]
@@ -351,6 +393,9 @@ class EventHandler:
         stack_trace = traceback.StackSummary.extract(
             traceback.walk_stack(None), lookup_lines=False
         )
+        # The stack trace generated in this way is in the inverse order, so it must be
+        # reversed.
+        stack_trace.reverse()
 
         for data_ptr in read_only:
             self.tensors_accessed.ensure_tensor_exists(data_ptr)
@@ -359,7 +404,8 @@ class EventHandler:
                 self.seq_num,
                 stream,
                 operator,
-                tensor_names[data_ptr],
+                tensor_aliases[data_ptr],
+                data_ptr in outputs,
                 stack_trace,
             )
             check_conflict(
@@ -374,7 +420,8 @@ class EventHandler:
                 self.seq_num,
                 stream,
                 operator,
-                tensor_names[data_ptr],
+                tensor_aliases[data_ptr],
+                data_ptr in outputs,
                 stack_trace,
             )
             if self.tensors_accessed.were_there_reads_since_last_write(data_ptr):
@@ -398,15 +445,19 @@ class EventHandler:
         self.syncs.record_state(event, stream)
 
     def _handle_event_wait(self, event: EventId, stream: StreamId) -> None:
-        self.syncs.state_wait_for_event(stream, event)
+        self.syncs.stream_wait_for_event(stream, event)
 
     def _handle_memory_allocation(self, data_ptr: DataPtr) -> None:
         self.tensors_accessed.ensure_tensor_does_not_exist(data_ptr)
+        stack_trace = traceback.StackSummary.extract(
+            traceback.walk_stack(None), lookup_lines=False
+        )
+        # The stack trace generated in this way is in the inverse order, so it must be
+        # reversed.
+        stack_trace.reverse()
         self.tensors_accessed.create_tensor(
             data_ptr,
-            traceback.StackSummary.extract(
-                traceback.walk_stack(None), lookup_lines=False
-            ),
+            stack_trace,
         )
 
     def _handle_memory_deallocation(self, data_ptr: DataPtr) -> None:
@@ -415,6 +466,15 @@ class EventHandler:
 
     def _handle_stream_creation(self, stream: StreamId) -> None:
         self.syncs.create_stream(stream)
+
+    def _handle_device_synchronization(self) -> None:
+        self.syncs.sync_all_streams()
+
+    def _handle_stream_synchronization(self, stream: StreamId) -> None:
+        self.syncs.all_streams_wait_for_stream(stream)
+
+    def _handle_event_synchronization(self, event: EventId) -> None:
+        self.syncs.all_streams_wait_for_event(event)
 
 
 def zip_by_key(a: Dict[TK, TVa], b: Dict[TK, TVb]) -> Iterator[Tuple[TK, TVa, TVb]]:
@@ -437,18 +497,30 @@ def zip_arguments(
 
 class ArgumentHandler:
     def __init__(self):
-        self.dataptrs_read: Set[int] = set()
-        self.dataptrs_written: Set[int] = set()
-        self.tensor_names: Dict[int, List[str]] = dict()
+        self.dataptrs_read: Set[DataPtr] = set()
+        self.dataptrs_written: Set[DataPtr] = set()
+        self.tensor_aliases: Dict[DataPtr, List[str]] = dict()
+        self.outputs: Set[DataPtr] = set()
 
-    def _handle_argument(self, value: Any, is_write: bool, name: str) -> None:
+    def _handle_argument(
+        self,
+        value: Any,
+        is_write: bool,
+        name: Optional[str] = None,
+        is_output: bool = False,
+    ) -> None:
         if isinstance(value, torch.Tensor) and value.is_cuda:
             data_ptr = value.data_ptr()
             if is_write:
                 self.dataptrs_written.add(data_ptr)
             else:
                 self.dataptrs_read.add(data_ptr)
-            self.tensor_names.setdefault(data_ptr, []).append(name)
+
+            self.tensor_aliases.setdefault(data_ptr, [])
+            if name is not None:
+                self.tensor_aliases[data_ptr].append(name)
+            if is_output:
+                self.outputs.add(data_ptr)
 
     def parse_inputs(
         self,
@@ -467,7 +539,7 @@ class ArgumentHandler:
 
     def parse_outputs(self, outputs: Any) -> None:
         tree_map(
-            functools.partial(self._handle_argument, is_write=True, name="output"),
+            functools.partial(self._handle_argument, is_write=True, is_output=True),
             outputs,
         )
 
@@ -497,6 +569,15 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         cuda_trace.register_callback_for_cuda_stream_creation(
             self.event_handler._handle_stream_creation
         )
+        cuda_trace.register_callback_for_cuda_device_synchronization(
+            self.event_handler._handle_device_synchronization
+        )
+        cuda_trace.register_callback_for_cuda_stream_synchronization(
+            self.event_handler._handle_stream_synchronization
+        )
+        cuda_trace.register_callback_for_cuda_event_synchronization(
+            self.event_handler._handle_event_synchronization
+        )
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
@@ -510,10 +591,11 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         argument_handler.parse_outputs(outputs)
         errors = self.event_handler._handle_kernel_launch(
             torch.cuda.current_stream().cuda_stream,
-            list(argument_handler.dataptrs_read - argument_handler.dataptrs_written),
-            list(argument_handler.dataptrs_written),
+            argument_handler.dataptrs_read - argument_handler.dataptrs_written,
+            argument_handler.dataptrs_written,
+            argument_handler.outputs,
             func._schema,
-            argument_handler.tensor_names,
+            argument_handler.tensor_aliases,
         )
         if errors:
             for error in errors:
