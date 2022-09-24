@@ -452,7 +452,8 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     const int64_t t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-      const auto index = i * ndim + t;
+      // note: this index could overflow in int64_t as `t` itself can be close to the max.
+      const uint64_t index = static_cast<uint64_t>(i) * ndim + t;
       CUDA_KERNEL_ASSERT(index >= 0);
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;
     }
