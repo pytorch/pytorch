@@ -1342,6 +1342,7 @@ def embedding_bag(
     )
     loop = g.op("Loop", loop_len, loop_condition)
 
+    # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
     loop_block = utils._add_block(loop.node())
     block_input_iter = utils._add_input_to_block(loop_block)
     cond = utils._add_input_to_block(loop_block)
