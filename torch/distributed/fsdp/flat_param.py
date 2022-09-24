@@ -927,7 +927,7 @@ class FlatParamHandle:
             if flat_param._post_backward_called:  # type: ignore[attr-defined]
                 flat_param.grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
                 if self._config.keep_low_precision_grads:
-                    assert flat_param.grad is not None
+                    assert flat_param.grad is not None  # mypy
                     flat_param.grad.data = flat_param.grad.to(self._config.param_dtype)
         else:
             p_assert(
