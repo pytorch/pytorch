@@ -202,9 +202,8 @@ def _compare_ort_pytorch_outputs(
                 else:
                     if ort_out.is_quantized and pt_out.is_quantized:
                         if ort_out.q_scale() != pt_out.q_scale():
-                            warnings.warn("ONNX output and PyTorch output has scale difference") 
-
-                         if ort_out.q_zero_point() != pt_out.q_zero_point():
+                            warnings.warn("ONNX output and PyTorch output has scale difference")      
+                        if ort_out.q_zero_point() != pt_out.q_zero_point():
                             warnings.warn("ONNX output and PyTorch output has zero point difference") 
                     else:
                         if ort_out.is_quantized != True:
