@@ -789,9 +789,7 @@ class TestOperators(TestCase):
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
         tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
-        tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=1e-4)}, device_type='cpu'),
+             {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1226,11 +1224,6 @@ class TestOperators(TestCase):
         xfail('half'),  # required rank 4 tensor to use channels_last format
         xfail('index_reduce'),  # Forward AD not implemented and no decomposition
         xfail('linalg.eig'),  # vmap over torch.allclose isn't supported yet.
-        # AssertionError: Tensor-likes are not close!
-        # Mismatched elements: 2 / 120 (1.7%)
-        # Greatest absolute difference: 0.09438323974609375
-        # Greatest relative difference: 0.00115722746596277
-        xfail('linalg.householder_product', device_type='cuda'),
         xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
         xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
@@ -1292,7 +1285,7 @@ class TestOperators(TestCase):
         tol1('linalg.svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.householder_product',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+             {torch.float32: tol(atol=5e-03, rtol=5e-03)}),
         tol1('linalg.multi_dot',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('svd',
