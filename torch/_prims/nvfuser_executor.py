@@ -213,7 +213,7 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
             and getattr(node.target, "impl_nvfuser", None) is not None
             and (
                 (getattr(node.target, "skip_nvfuser", None) is None)
-                or node.target.skip_nvfuser(node)
+                or node.target.skip_nvfuser(node)  # type: ignore[union-attr]
             )
             or "getitem" in node.name  # getitem is a special case
         )
