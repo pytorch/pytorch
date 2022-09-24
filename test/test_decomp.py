@@ -288,7 +288,6 @@ CROSS_REF_EXCLUDE_SET = {
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
     # Backward formula is not as precise as the custom CUDA kernel
-    ("cuda", torch.float16, "nn.functional.embedding"),
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
 }
 
