@@ -3084,7 +3084,7 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_max_pool1d(op_info, device, **kwargs):
     # error inputs when pad is negative
-    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    x = torch.rand([0, 1, 49], device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
 
@@ -3093,32 +3093,49 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                      error_regex='pad should be at most half of kernel size')
 
     # error inputs for input tensor
-    yield ErrorInput(SampleInput(torch.tensor(0), kwargs={'kernel_size': 1}),
-                     error_regex='Expected 2D or 3D input tensor, but got')
+    yield ErrorInput(SampleInput(torch.tensor(0, device=device), kwargs={'kernel_size': 1}),
+                     error_regex=r'Expected 2D or 3D \(batch mode\) tensor with optional')
 
     # error inputs for empty input
-    yield ErrorInput(SampleInput(torch.tensor([]), kwargs={'kernel_size': 1}),
-                     error_regex='Expected 2D or 3D input tensor, but got')
+    yield ErrorInput(SampleInput(torch.tensor([], device=device), kwargs={'kernel_size': 1}),
+                     error_regex=r'Expected 2D or 3D \(batch mode\) tensor with optional')
 
     # error inputs for empty input with stride=0
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 0}),
-                     error_regex='stride must be greater than zero, but got 0')
+    # NOTE: CPU and CUDA error messages are different
+    error_msg = 'stride must be greater than zero, but got 0' if torch.device(
+        device).type == 'cpu' else 'stride should not be zero'
+    yield ErrorInput(SampleInput(torch.randn(3, 3, 3, device=device), kwargs={'kernel_size': 1, 'stride': 0}),
+                     error_regex=error_msg)
 
     # error inputs for empty input with dilation=0
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
-                     error_regex='dilation must be greater than zero, but got 0')
+    # NOTE: CPU and CUDA error messages are different
+    error_msg = 'dilation must be greater than zero, but got 0' if torch.device(
+        device).type == 'cpu' else 'dilation should be greater than zero, but got dilation'
+    yield ErrorInput(SampleInput(torch.randn(3, 3, 3, device=device),
+                                 kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
+                     error_regex=error_msg)
 
     # error inputs for invalied output size
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
-                     error_regex='Invalid computed output size: -4')
+    # NOTE: CPU and CUDA error messages are different
+    error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' else \
+        r'Given input size: \(2x1x2\). Calculated output size: \(2x1x-2\). Output size is too small'
+    yield ErrorInput(SampleInput(torch.randn(2, 2, 2, device=device),
+                                 kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
+                     error_regex=error_msg)
 
     # error inputs when kernel_size=0
+    # NOTE: CPU and CUDA error messages are different
+    error_msg = 'kernel_size must be greater than zero' if torch.device(
+        device).type == 'cpu' else r'stride should not be zero'
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
-                     error_regex='kernel_size must be greater than zero')
+                     error_regex=error_msg)
 
     # error inputs for strides > 0
+    # NOTE: CPU and CUDA error messages are different
+    error_msg = 'stride must be greater than zero' if torch.device(
+        device).type == 'cpu' else r'stride should not be zero'
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
-                     error_regex='stride must be greater than zero')
+                     error_regex=error_msg)
 
 def error_inputs_max_pool2d(op_info, device, **kwargs):
     # error inputs when pad is negative
