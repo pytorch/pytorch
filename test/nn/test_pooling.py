@@ -714,7 +714,7 @@ torch.cuda.synchronize()
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
 
-        msg = "Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input"
+        msg = r"Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input"
         with self.assertRaisesRegex(RuntimeError, msg):
             empty_tensor = torch.empty((2, 0, 1), device=device, dtype=dtype)
             check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
@@ -731,33 +731,33 @@ torch.cuda.synchronize()
     def test_max_pool_invalid_0_size(self, device, dtype, requires_grad):
         # MaxPool1D
         mp = torch.nn.MaxPool1d(3)
-        msg = "Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input"
+        msg = r"Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input"
         # Unbatched Input
         with self.assertRaisesRegex(RuntimeError, msg):
             mp(torch.randn(0, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-        
+
         # Batched Input
         with self.assertRaisesRegex(RuntimeError, msg):
             mp(torch.randn(3, 3, 0, device=device, dtype=dtype, requires_grad=requires_grad))
 
         # MaxPool2D
         mp = torch.nn.MaxPool2d(3)
-        msg = "Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input"
+        msg = r"Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input"
         # Unbatched Input
         with self.assertRaisesRegex(RuntimeError, msg):
             mp(torch.randn(0, 3, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-        
+
         # Batched Input
         with self.assertRaisesRegex(RuntimeError, msg):
             mp(torch.randn(3, 3, 0, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-        
+
         # MaxPool3D
         mp = torch.nn.MaxPool3d(3)
-        msg = "Expected input to have non-zero size for non-batch dimensions, but got"
+        msg = r"Expected input to have non-zero size for non-batch dimensions, but got"
         # Unbatched Input
         with self.assertRaisesRegex(RuntimeError, msg):
             mp(torch.randn(3, 0, 3, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-        
+
         # Batched Input
         with self.assertRaisesRegex(RuntimeError, msg):
             mp(torch.randn(2, 0, 3, 3, 3, device=device, dtype=dtype, requires_grad=requires_grad))
