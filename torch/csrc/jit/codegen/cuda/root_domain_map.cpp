@@ -1005,6 +1005,10 @@ void ComputeAtRootDomainMapBuilder::mapAllPendingMappings(
   }
 }
 
+void ComputeAtRootDomainMapBuilder::handle(RNGOp* rop) {
+  handle(rop->output(0)->as<TensorView>());
+}
+
 void ComputeAtRootDomainMapBuilder::handle(TensorView* tv) {
   const TensorDomain* td = tv->domain();
   const auto rfactor = TensorDomain::noReductions(td->getMaybeRFactorDomain());
