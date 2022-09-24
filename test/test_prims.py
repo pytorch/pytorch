@@ -176,6 +176,36 @@ class TestPrims(TestCase):
         out = execute(gm, a, a, a, executor="nvfuser")
         self.assertEqual(out, (a, a, a))
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float16, torch.uint8)
+    def test_nvprim_conditional_lowering(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a, dtype):
+            return x.to(dtype)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a, a, a)
+            execute(gm, a, a, a, executor="nvfuser")
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_aten_to_copy = any(
+            torch.ops.aten._to_copy.default == node.target
+            for node in call_function_nodes
+        )
+        includes_nvprim_convert_element_type = any(
+            torch.ops.nvprims.convert_element_type.default == node.target
+            for node in call_function_nodes
+        )
+        nvprim_support_flag = _torch_dtype_to_nvfuser_dtype_map.get(dtype) is not None
+        self.assertEqual(includes_aten_to_copy, not nvprim_support_flag)
+        self.assertEqual(includes_nvprim_convert_element_type, nvprim_support_flag)
+
     @skipCUDAMemoryLeakCheckIf(True)  # https://github.com/pytorch/pytorch/issues/84529
     @onlyCUDA
     @skipCUDAIfRocm
@@ -439,6 +469,8 @@ class TestPrims(TestCase):
                 self.assertFalse(node.target == torch.ops.prims.add.default)
                 self.assertFalse(node.target == torch.ops.aten.add.default)
 
+    # decomposition of native_batch_norm_backward uses a casting, which prevents nvprim lowering on CPU build
+    @onlyCUDA
     @dtypes(torch.float32, torch.float16)
     def test_batch_norm_backward_nvprims(self, device, dtype):
         # This test verifies that the backward pass of batch norm is correctly decomposed into nvprims
