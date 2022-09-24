@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import json
+import glob
 from typing import Dict, Optional, List, cast, Any
 
 import torch
@@ -64,7 +65,9 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    all_py_files = list(cwd.glob('**/test_*.py'))
+    # This supports symlinks, so we can link domain library tests like functorch
+    # to PyTorch test directory
+    all_py_files = [pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)]
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
     if sys.platform == "win32":
@@ -321,19 +324,7 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
-
-
-def discover_functorch_tests():
-    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
-    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
-    result = discover_tests(pathlib.Path(functorch_test_dir))
-    result = [os.path.join(functorch_test_dir, r) for r in result]
-
-    # Sanity check
-    assert len(result) >= 8
-    return result
-
-FUNCTORCH_TESTS = discover_functorch_tests()
+FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -742,6 +733,7 @@ CUSTOM_HANDLERS = {
     "test_ops": run_test_ops,
     "test_ops_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
+    "functorch/test_ops": run_test_ops,
 }
 
 
@@ -980,6 +972,9 @@ def get_selected_tests(options):
 
     if options.functorch:
         selected_tests = FUNCTORCH_TESTS
+    else:
+        # Exclude all functorch tests otherwise
+        options.exclude.extend(FUNCTORCH_TESTS)
 
     # process reordering
     if options.bring_to_front:
