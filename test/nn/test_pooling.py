@@ -726,6 +726,7 @@ torch.cuda.synchronize()
         with self.assertRaisesRegex(RuntimeError, msg):
             check([[[]]], (2, 1, 1, 2, False, True), [[[]]])
 
+    @onlyNativeDeviceTypes  # Fails with error not raised on XLA
     @dtypes(torch.float)
     @parametrize_test("requires_grad", [True, False])
     def test_max_pool_invalid_0_size(self, device, dtype, requires_grad):
