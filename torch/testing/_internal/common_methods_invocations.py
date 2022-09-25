@@ -7170,7 +7170,7 @@ def error_inputs_gaussian_nll_loss(op_info, device, **kwargs):
         # input, args, kwargs, error_type, error_regex
         # invalid reduction value
         (make_input(10, 2, 3), (make_input(10, 2, 3), make_input((10, 2, 3), low=0)), dict(reduction="abc"),
-         ValueError, "is not a valid value for reduction"),
+         ValueError, "abc is not a valid value for reduction"),
 
         # var is of incorrect shape
         (make_input(10, 2, 3), (make_input(10, 2, 3), make_input((10, 2, 2), low=0)), dict(),

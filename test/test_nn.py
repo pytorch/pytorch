@@ -6816,7 +6816,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                          F.gaussian_nll_loss(input, target, var, reduction='sum'))
         self.assertEqual(torch.mean(component_wise_loss),
                          F.gaussian_nll_loss(input, target, var, reduction='mean'))
-        with self.assertRaisesRegex(ValueError, 'is not valid'):
+        with self.assertRaisesRegex(ValueError, 'total is not a valid value for reduction'):
             F.gaussian_nll_loss(input, target, var, reduction='total')
 
     def test_gaussian_nll_loss_broadcasting(self):
