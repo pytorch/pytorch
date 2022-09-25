@@ -11,6 +11,7 @@ import operator
 import itertools
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
+from torch.utils._python_dispatch import TorchDispatchMode
 
 aten = torch.ops.aten
 
@@ -340,6 +341,27 @@ class TestPySymInt(TestCase):
         a0 = shape_env.create_symint("a0", 2)
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
 
+    @skipIfNoSympy
+    def test_symint_as_scalar(self):
+        shape_env = ShapeEnv()
+        a0 = shape_env.create_symint("a0", 2)
+
+        sym_int_encountered = False
+
+        class TestSymInt(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                assert func == torch.ops.aten.add.Tensor
+
+                nonlocal sym_int_encountered
+                sym_int_encountered = kwargs["alpha"] is a0
+                kwargs["alpha"] = 0
+                return func(*args)
+
+        x = torch.rand([4, 4])
+        with TestSymInt():
+            y = torch.add(x, x, alpha=a0)
+
+        self.assertTrue(sym_int_encountered)
 
 if __name__ == '__main__':
     run_tests()
