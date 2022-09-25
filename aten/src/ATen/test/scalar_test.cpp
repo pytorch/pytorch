@@ -22,7 +22,7 @@
 #endif
 
 #ifdef __clang__
-#pragma clang diagnostic ignored "-Wself-assign-overloade"
+#pragma clang diagnostic ignored "-Wself-assign-overloaded"
 #endif
 
 using std::cout;

@@ -102,7 +102,6 @@ inline bool is_symfloat_node(py::handle obj) {
 
 } // namespace torch
 
-
 namespace pybind11 {
 namespace detail {
 template <>
@@ -168,7 +167,8 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
   }
 #endif
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
-      torch::is_symint_node(py::handle(obj)) || torch::is_symfloat_node(py::handle(obj));
+      torch::is_symint_node(py::handle(obj)) ||
+      torch::is_symfloat_node(py::handle(obj));
 }
 
 namespace torch {
