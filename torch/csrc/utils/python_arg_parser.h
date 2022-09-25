@@ -80,6 +80,16 @@
 
 namespace torch {
 
+inline bool is_symint_node(py::handle obj) {
+  auto static tp_symn = py::type::of<c10::SymIntNodeImpl>();
+  if (py::isinstance(obj, tp_symn)) {
+    TORCH_CHECK(
+        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
+    return true;
+  }
+  return false;
+}
+
 inline bool is_symfloat_node(py::handle obj) {
   auto static tp_symn = py::type::of<c10::SymFloatNodeImpl>();
   if (py::isinstance(obj, tp_symn)) {
@@ -89,7 +99,9 @@ inline bool is_symfloat_node(py::handle obj) {
   }
   return false;
 }
+
 } // namespace torch
+
 
 namespace pybind11 {
 namespace detail {
@@ -148,6 +160,16 @@ struct type_caster<c10::SymFloat> {
 };
 } // namespace detail
 } // namespace pybind11
+
+inline bool THPUtils_checkScalar(PyObject* obj) {
+#ifdef USE_NUMPY
+  if (torch::utils::is_numpy_scalar(obj)) {
+    return true;
+  }
+#endif
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
+      torch::is_symint_node(py::handle(obj)) || torch::is_symfloat_node(py::handle(obj));
+}
 
 namespace torch {
 

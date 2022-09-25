@@ -1568,6 +1568,10 @@ at::Scalar PythonArgs::scalar_slow(PyObject* arg) {
     return at::Scalar(py::cast<c10::SymInt>(arg));
   }
 
+  if (torch::is_symfloat_node(arg)) {
+    return at::Scalar(py::cast<c10::SymFloat>(arg));
+  }
+
   return at::Scalar(THPUtils_unpackDouble(arg));
 }
 

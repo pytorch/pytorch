@@ -13,6 +13,18 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 
+// We intentionally test self assignment/move in this file, suppress warnings
+// on them
+#ifndef _MSC_VER
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wself-move"
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wself-assign-overloade"
+#endif
+
 using std::cout;
 using namespace at;
 
@@ -200,11 +212,8 @@ TEST(TestSymInt, Basic) {
   foo2 = SymInt(4);
   ASSERT_FALSE(foo2.isSymInt());
   ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wself-assign-overloade"
   // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   foo2 = foo2;
-#pragma GCC diagnostic pop
   ASSERT_FALSE(foo2.isSymInt());
   ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
 
