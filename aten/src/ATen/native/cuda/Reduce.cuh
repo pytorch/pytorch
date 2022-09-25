@@ -1135,14 +1135,16 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
-  // at::Half overflows easily as it's range is very small.
-  // So when scalar_t and out_scalar_t are at::Half, we
+  // at::Half/at::ComplexHalf overflows easily as it's range is very small.
+  // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
   // set can_accumulate_in_output to False.
-  static constexpr bool is_inp_out_type_half =
-      std::is_same<at::Half, scalar_t>::value &&
-      std::is_same<at::Half, out_scalar_t>::value;
+  static constexpr bool is_inp_out_type_half_or_chalf =
+      (std::is_same<at::Half, scalar_t>::value &&
+       std::is_same<at::Half, out_scalar_t>::value) ||
+      (std::is_same<at::ComplexHalf, scalar_t>::value &&
+       std::is_same<at::ComplexHalf, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
-      std::is_convertible<arg_t, out_scalar_t>::value && !is_inp_out_type_half;
+      std::is_convertible<arg_t, out_scalar_t>::value && !is_inp_out_type_half_or_chalf;
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
@@ -1233,14 +1235,16 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   //TODO - this will be different for more complicated reductions, but for now reductions using
   //func_wrapper all have arg_t = opmath
   using arg_t = at::opmath_type<scalar_t>;
-  // at::Half overflows easily as it's range is very small.
-  // So when scalar_t and out_scalar_t are at::Half, we
+  // at::Half/at::ComplexHalf overflows easily as it's range is very small.
+  // So when scalar_t and out_scalar_t are at::Half/at::ComplexHalf, we
   // set can_accumulate_in_output to False.
-  static constexpr bool is_inp_out_type_half =
-      std::is_same<at::Half, scalar_t>::value &&
-      std::is_same<at::Half, out_scalar_t>::value;
+  static constexpr bool is_inp_out_type_half_or_chalf =
+      (std::is_same<at::Half, scalar_t>::value &&
+       std::is_same<at::Half, out_scalar_t>::value) ||
+      (std::is_same<at::ComplexHalf, scalar_t>::value &&
+       std::is_same<at::ComplexHalf, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
-      std::is_convertible<arg_t, out_scalar_t>::value && !is_inp_out_type_half;
+      std::is_convertible<arg_t, out_scalar_t>::value && !is_inp_out_type_half_or_chalf;
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
