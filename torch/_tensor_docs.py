@@ -35,8 +35,11 @@ new_common_args = parse_kwargs(
 
 add_docstr_all(
     "new_tensor",
-    r"""
-new_tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_tensor(data, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a new Tensor with :attr:`data` as the tensor data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -59,9 +62,13 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -113,17 +120,26 @@ Example::
 
 add_docstr_all(
     "new_empty",
-    r"""
-new_empty(size, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_empty(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, /
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` filled with uninitialized data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
 :class:`torch.device` as this tensor.
 
 Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
@@ -139,17 +155,26 @@ Example::
 
 add_docstr_all(
     "new_empty_strided",
-    r"""
-new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False) -> Tensor
+    """
+new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 
 Returns a Tensor of size :attr:`size` and strides :attr:`stride` filled with
 uninitialized data. By default, the returned Tensor has the same
 :class:`torch.dtype` and :class:`torch.device` as this tensor.
 
 Args:
+    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
+        shape of the output tensor.
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
+    {layout}
+    {pin_memory}
 
 Example::
 
