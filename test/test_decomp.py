@@ -156,10 +156,13 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
     tol_table = {
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
+        (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()

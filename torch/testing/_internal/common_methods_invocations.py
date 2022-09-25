@@ -8256,7 +8256,9 @@ op_db: List[OpInfo] = [
                     supports_two_python_scalars=True,
                     decorators=(
                         DecorateInfo(
-                            toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0)}),
+                            toleranceOverride({torch.float16: tol(atol=1e-2, rtol=0),
+                                               torch.bfloat16: tol(atol=1e-5, rtol=5e-3),
+                                               torch.complex32: tol(atol=1e-5, rtol=1e-3)}),
                             'TestBinaryUfuncs', 'test_reference_numerics'),
                         DecorateInfo(
                             toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=0)}),
@@ -8425,6 +8427,8 @@ op_db: List[OpInfo] = [
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                            "TestCommon", "test_out")
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -9579,6 +9583,8 @@ op_db: List[OpInfo] = [
                         # The following tests fails on some jobs
                         DecorateInfo(unittest.skip('Skipped!'), 'TestBinaryUfuncs', 'test_reference_numerics_extremal_values',
                                      dtypes=(torch.float16,)),
+                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=5e-3)}),
+                                     'TestBinaryUfuncs', 'test_reference_numerics'),
                     )),
     UnaryUfuncInfo('frexp',
                    op=torch.frexp,
@@ -10788,7 +10794,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
-                   toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
+                   toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing'
                ),
                DecorateInfo(

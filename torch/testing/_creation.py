@@ -23,7 +23,6 @@ def _uniform_random(t: torch.Tensor, low: float, high: float):
         return t.uniform_(low, high)
 
 
-
 def make_tensor(
     *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
     dtype: torch.dtype,
