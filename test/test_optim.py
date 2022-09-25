@@ -2131,6 +2131,20 @@ class TestLRScheduler(TestCase):
             adam_opt = optim.Adam(self.net.parameters())
             scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
 
+    def test_cycle_lr_removed_after_out_of_scope(self):
+        import gc
+        import weakref
+        gc.disable()
+
+        def test():
+            adam_opt = optim.Adam(self.net.parameters())
+            scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
+            return weakref.ref(scheduler)
+
+        ref = test()
+        assert ref() is None
+        gc.enable()
+
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):
             scheduler = OneCycleLR(self.opt, max_lr=1e-3, total_steps=10, anneal_strategy="CATS")
