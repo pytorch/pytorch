@@ -31,7 +31,6 @@ env:
 
 jobs:
   build:
-    if: github.repository_owner == 'pytorch'
     runs-on: macos-12
     timeout-minutes: 240
     steps:
