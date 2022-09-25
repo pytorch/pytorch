@@ -4,7 +4,8 @@ import copy
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-from typing import Dict, List, Set
+import torch.utils._pytree as pytree
+from typing import Dict, List, Set, Any
 
 __all__ = ['SubgraphMatcher', 'InternalMatch']
 
@@ -124,7 +125,27 @@ class SubgraphMatcher:
                         nodes_matched.add(gn)
         return non_overlapping_matches
 
+    def _match_args(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
+        assert not(isinstance(pn, Node) and isinstance(gn, Node)), "pn and gn cannot both be Node"
+
+        if isinstance(pn, Node) and not isinstance(gn, Node):
+            if pn.op == "placeholder":
+                # Check if we've already matched these nodes in the current
+                # traversal
+                if pn in match.nodes_map:
+                    return match.nodes_map[pn] == gn
+
+                match.nodes_map[pn] = gn
+                return True
+            else:
+                return False
+        elif not isinstance(pn, Node) and isinstance(gn, Node):
+            return False
+        else:
+            return type(gn) == type(pn) and gn == pn
+
     def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
+        assert isinstance(pn, Node) and isinstance(gn, Node), "pn and gn must be Node"
 
         # Check if we've already matched these nodes in the current
         # traversal
@@ -146,9 +167,23 @@ class SubgraphMatcher:
 
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
-        match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes) and
-                       all(self._match_nodes(pn_, gn_, match) for pn_, gn_
-                           in zip(pn.all_input_nodes, gn.all_input_nodes)))
+        match_found = True
+
+        pn_flatten_args, _ = pytree.tree_flatten(pn.args)
+        gn_flatten_args, _ = pytree.tree_flatten(gn.args)
+
+        if len(pn_flatten_args) == len(gn_flatten_args):
+            for pn_, gn_ in zip(pn_flatten_args, gn_flatten_args):
+                if isinstance(gn_, Node) and isinstance(pn_, Node):
+                    matched = self._match_nodes(pn_, gn_, match)
+                else:
+                    matched = self._match_args(pn_, gn_, match)
+
+                if not matched:
+                    match_found = False
+                    break
+        else:
+            match_found = False
 
         if not match_found:
             match.nodes_map.pop(pn)
@@ -192,6 +227,7 @@ class SubgraphMatcher:
         in practice, it's unlikely to blow up.
 
         """
+        from torch.fx.passes.utils.fuser_utils import validate_partition
 
         # find candidate nodes to match with pattern anchors
         match_candidates: Dict[Node, List[Node]] = defaultdict(list)
@@ -227,7 +263,15 @@ class SubgraphMatcher:
         # filter out the matches where the subgraph is not fully_contained
         matches = [match for match in matches if self._is_contained(match.nodes_map)]
 
+        # filter out the matches that that forms a cycle if the subgraph is fused
+        valid_matches = []
+        for match in matches:
+            matched_compute_nodes = \
+                [gn for pn, gn in match.nodes_map.items() if pn.op not in {"placeholder", "output"}]
+            if validate_partition(matched_compute_nodes):
+                valid_matches.append(match)
+
         if self.remove_overlapping_matches:
-            matches = self._remove_overlapping_matches(matches)
+            matches = self._remove_overlapping_matches(valid_matches)
 
         return matches
