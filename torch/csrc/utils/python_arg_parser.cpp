@@ -741,13 +741,14 @@ auto FunctionParameter::check(
         return true;
       }
       if (allow_numbers_as_tensors) {
-        return THPUtils_checkScalar(obj) ||
-            torch::is_symint_node(py::handle(obj)) ||
-            torch::is_symfloat_node(py::handle(obj));
+        return THPUtils_checkScalar(obj);
       }
       return false;
     }
     case ParameterType::SCALAR:
+      if (THPUtils_checkScalar(obj)) {
+        return true;
+      }
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
