@@ -17,6 +17,7 @@ Original file is located at
 import torch
 import scipy.optimize as sp
 from functools import reduce
+import math
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -233,43 +234,31 @@ class LSR1(torch.optim.Optimizer):
 
     def __init__(self,
                  params,
-                 lr=0.1,
+                 lr=1,
                  max_iter=20,
-                 max_eval=None,
                  tolerance_grad=1e-15,
-                 tolerance_change=1e-9,
-                 tr_rho = 0.7,
+                 tolerance_change=1e-15,
+                 tr_radius = 0.7,
                  history_size=7,
-                 gamma=1,
-                 c_1 = 2,
-                 c_2 = 0,
-                 c_3 = 0.5,
-                 trust_CG_tol=0.001,
                  mu_momentum = 0.5,
                  nu_momentum = 0.5,
-                 alpha_S = 0.5,
-                 trust_CG_iter=None,
+                 alpha_S = 0.25,
+                 newton_maxit = None,
+                 cg_iter = None,
                  line_search_fn="strong_wolfe",
-                 trust_method=None):
-        if max_eval is None:
-            max_eval = max_iter * 5 // 4
+                 trust_method="Cauchy_Point_Calculation"):
         defaults = dict(
             lr=lr,
             max_iter=max_iter,
-            max_eval=max_eval,
             tolerance_grad=tolerance_grad,
             tolerance_change=tolerance_change,
-            tr_rho = tr_rho,
+            tr_radius = tr_radius,
             history_size=history_size,
-            gamma=gamma,
-            c_1 = c_1,
-            c_2 = c_2,
-            c_3 = c_3,
-            trust_CG_tol=trust_CG_tol,
             mu_momentum = mu_momentum,
             nu_momentum = nu_momentum,
             alpha_S = alpha_S,
-            trust_CG_iter=trust_CG_iter,
+            newton_maxit = newton_maxit,
+            cg_iter = cg_iter,
             line_search_fn=line_search_fn,
             trust_method=trust_method)
         super(LSR1, self).__init__(params, defaults)
@@ -285,6 +274,8 @@ class LSR1(torch.optim.Optimizer):
         self._params = self.param_groups[0]['params']
         self._numel_cache = None
         self.history_size = self.param_groups[0]['history_size']
+        self.newton_maxit = self.param_groups[0]['newton_maxit']
+        self.cg_iter = self.param_groups[0]['cg_iter']
 
     #From torch.optim.LBFGS
     # im not sure what happens
@@ -336,87 +327,143 @@ class LSR1(torch.optim.Optimizer):
         self._set_param(x)
         return loss, flat_grad
 
-    def solve_trust_sub(self,flat_grad, hess_1, hess_2, tr_rho, trust_method, trust_CG_tol, trust_CG_iter):
+    def trust_solver_None(self, M_inverse, P, lamb_gamma, tr_rho, gamma, flat_grad, psi):
       """
-      .. The function solve a trust region subproblem. There are two options: 
-          "CG" which solve the problem with the cg-Steighaug method or "cauchy"
-          which solve the problem with a cauchy point calculation.
+      .. The function solve a trust region subproblem. This was copied from https://github.com/MATHinDL/sL_QN_TR.
+        Look in Subroutines in TRsubproblem_solver_OBS.m. Dont work very well.
 
       Args: 
-          flat_grad (torch.Tensor): gradient vector
-          hess (torch.Tensor): hesse matrix
-          tr_tho (float): trust_radius
-          trust_method (string): None, cauchy or CG. If None then cauchy
-          trust_CG_tol: toleranz for reiduum for CG Steighaug
-          trust:CG_iter: number of max iterations for CG Steighaug
-      """
-      # cauchy_condition : g^T * Hessematrix * g
-      if trust_method ==None or trust_method=="cauchy":
-        gH = torch.matmul(flat_grad, hess_1)
-        Hg = torch.matmul(hess_2, flat_grad)
-        cauchy_cond = torch.matmul(gH, Hg)
-        if cauchy_cond <=0:
-            tau = 1
-        else:
-            tau = min(torch.linalg.norm(flat_grad)**3/(cauchy_cond*tr_rho),1)
-        return -tau*tr_rho/torch.linalg.norm(flat_grad)*flat_grad
-      #performs CG Steighaug method for trust problem
-      if trust_method == "CG":
-        func = lambda a: torch.matmul(flat_grad, a)+torch.matmul(torch.matmul(a, hess_1),torch.matmul(hess_2, a))
-        z = torch.zeros(flat_grad.shape[0]).to(device)
-        rr = flat_grad
-        dd = -rr
-        tol = trust_CG_tol
-        if torch.linalg.norm(rr) < tol :
-          return z
-        for _ in range(trust_CG_iter):
-          dH = torch.matmul(dd, hess_1)
-          Hd = torch.matmul(hess_2, dd)
-          dHd = torch.matmul(dH, Hd)
-          dz = torch.matmul(dd,z)
-          ddd = torch.matmul(dd,dd)
-          zz = torch.matmul(z,z)
-          root = abs(-(zz-tr_rho**2)/ddd + (dz/ddd)**2)
-          no_root = dz/ddd
-          tau_1 = -no_root + torch.sqrt(root)
-          tau_2 = -no_root - torch.sqrt(root)
-          tau = 1
-          if dHd <= 0:
-            if func(z+tau_1*dd)> func(z+tau_2*dd) :
-              tau = tau_2
-            else:
-              tau = tau_1
-            return z+tau*dd
-          rrr = torch.matmul(rr,rr)
-          alpha2 = rrr/dHd
-          z_ersatz = z
-          z = z+alpha2*dd
-          if torch.linalg.norm(z) >= tr_rho:
-            if tau_1 >= 0:
-              tau = tau_1
-            else: 
-              tau = tau_2
-            return z_ersatz+tau*dd
-          rr = rr+ alpha2*torch.matmul(hess_1, torch.matmul(hess_2, dd))
-          if torch.linalg.norm(rr) < tol:
-            return z
-          beta = torch.matmul(rr,rr)/rrr
-          dd = -rr+beta*dd
+          M_inverse (torch.tensor): a small matrix from the calculation of the hesse matrix
+          P (torch.tensor) : The P from the hesse matrix
+          tr_tho (float) : trust_radius
+          gamma (float) : the gamma for the initial hess matrix
+          flat_grad (torch.Tensor) : gradient vector
+          psi (torch.tensor) : Y-B_0*S
+          newton_maxit (int) : the max iterations for the newton method
 
-    # calculate hess with limited memory method
-    def calculate_hess(self, S, Y, gamma):
       """
-      .. Calculate the hess matrix with the limited memory method.
+      def phi_phi_T(sigma, delta, a, lam):
+        obs_tol = 1e-10
+        t = lam + sigma
+        if torch.sum(torch.abs(a) < obs_tol)> 0 or torch.sum(torch.abs(t) < obs_tol) > 0:
+          llpll2 = 0
+          llpll_T = 0
+          for i in range(a):
+            if torch.abs(a[i]) > obs_tol and torch.abs(t[i]) < obs_tol:
+              return -1/delta, 1/obs_tol
+            if torch.abs(a[i])> obs_tol and torch.abs(t[i]) > obs_tol:
+              llpll2 = llpll2 + (a[i]/t[i])**2
+              llpll_T = llpll_T + ( a[i]^2 /t[i]^3 )
+          return 1/torch.sqrt(llpll2)- 1/delta
+        llpll = torch.linalg.norm(a/t)
+        return 1/llpll - 1/delta, llpll_T/(llpll^3)
+
+      def equation_p1(psi, M_inverse, tau_star, flat_grad):
+        psi_T = torch.tanspose(psi, 0, 1)
+        Z = tau_star*M_inverse + torch.matmul(psi_T, psi)
+        f = torch.matmul(psi_T, flat_grad)
+        Zf = torch.linalg.solve(Z, f)
+        return -(flat_grad - torch.matmul(psi, Zf))/tau_star
+
+      def equation_p2(sigma, gamma, g, a, lam, P_l, g_l):
+        t = lam+sigma
+        c = len(t)
+        v = torch.zeros(c).to(device)
+        if torch.abs(gamma+ sigma < 1e-10):
+          p = -torch.matmul(P, v[:-1])
+        else:
+          p = -torch.matmul(P, v[:-1]) - (g-torch.matmul(P, g_l))/(gamma+sigma)
+        return p
+
+      def equation_p3(lam_min, delta, p_hat,lam, P):
+        alpha = torch.sqrt(delta**2 - torch.matmul(p_hat, p_hat))
+        if torch.abs(lam_min - lam[0]) < 1e-10:
+          u_min = P[:, 1]/torch.linalg.norm(P[:,1])
+          z_star = alpha*u_min
+        else:
+          n, k = P.shape[0], P.shape[1]
+          e = torch.zeros(n)
+          found = 0
+          for i in range(k):
+            e[i] = 1
+            u_min = e - torch.matmul(P, torch.transpose(P,0,1)[:,i])
+            if torch.linalg.norm(u_min) > 1e-10:
+              found = 1
+              break
+            e[i] = 0
+          if found ==0:
+            e[i+1] = 1
+            u_min = e - torch.matmul(P, torch.transpose(P,0,1)[:,i+1])
+          u_min = u_min/torch.linalg.norm(u_min)
+          z_star = alpha * u_min
+        return p_hat + z_star
+
+      def newton_method(flat_grad, sigma_star, tr_rho, a, lam_all):
+        newton_tol = 1e-10
+        if self.newton_maxit == None:
+          self.newton_maxit = flat_grad.shape[0]*self.history_size**2
+        k = 0
+        sigma_star = 0
+        phi, phi_T = phi_phi_T(sigma_star, tr_rho, a, lam_all)
+        while torch.abs(phi) > newton_tol and k < self.newton_maxit:
+          sigma_star = sigma_star - phi/phi_T
+          phi, phi_T = phi_phi_T(sigma_star, tr_rho, a, lam_all)
+          k += 1
+        return sigma_star + gamma
+      
+      lam_all = torch.cat((lamb_gamma, gamma), 0)
+      lam_all = lam_all*( torch.abs(lam_all) > 1e-10 )
+      lam_min = min(lam_all[0], gamma)
+      g_ll = torch.matmul(torch.transpose(P, 0,1), flat_grad)
+      gg = torch.matmul(flat_grad, flat_grad)
+      gl_gl = torch.matmul(g_ll, g_ll)
+      llg_perbll = torch.sqrt(torch.abs(gg-gl_gl))
+      if llg_perbll^2 < 1e-10:
+        llg_perbll = 0
+      a = torch.cat((g_ll, llg_perbll), 0)
+      if phi_phi_T(0, tr_rho, a, lam_all)[0] >= 0 and lam_min >0:
+        sigma_star     = 0
+        tau_star       = gamma + sigma_star
+        psi_T = torch.tanspose(psi,0,1)
+        Z = tau_star*M_inverse + torch.matmul(psi_T, psi)
+        f = torch.matmul(psi_T, flat_grad)
+        Zf = torch.linalg.solve(Z, f)
+        p_star = -(flat_grad - torch.matmul(psi, Zf))/tau_star
+      if lam_min <=0 and phi_phi_T(-lam_min, tr_rho, a, lam_all)>=0:
+        sigma_star = -lam_min
+        p_star = equation_p2(sigma_star, gamma, flat_grad, a, lam_all, P)
+        if lam_min < 0:
+          p_hat = p_star
+          p_star = equation_p3(lam_min, tr_rho, p_hat, lam_all, P)
+      else:
+        if lam_min > 0:
+          sigma_star = newton_method(flat_grad, 0, tr_rho, a, lam_all)
+        else:
+          sigma_hat = max(torch.abs(a)/tr_rho -lam_all)
+          if sigma_hat > -lam_min:
+            sigma_star = newton_method(flat_grad, sigma_hat, tr_rho, a, lam_all)
+          else:
+            sigma_star = newton_method(flat_grad, -lam_min, tr_rho, a, lam_all)
+        tau_star = sigma_star + gamma
+        p_star = equation_p1(psi, M_inverse, tau_star, flat_grad) 
+      return p_star
+
+
+    def calculate_M(self, S,Y,gamma):
+      """
+      .. Calculate the marix M = L + L^T + S^T*B_0*S + diag(S^T*Y) and return this.
+        L is a lower left triangular matrix of S^TY.
+        In Addition psi = Y-B_0*S return.
 
       Args:
-          S (torch.Tensor): saved s as a matrix, S.shape = (n, history_size)
-          Y (torch.Tensor): saved y as a matrix, Y.shape = (n, history_size)
-          gamma (float): skalar of initial hesse matrix
+          S (torch.tensor) : matrix which contains the old s as columns
+          Y (torch.tensor) : matrix which contains the old y as columns
+          gamma (float) : the scalar for the initial hess matrix 
       """
       dim_hess = S.shape[0]
 
       # B_{k} = B_0 + phi * M^{-1} * phi
-      phi = Y - gamma*S
+      psi = Y - gamma*S
 
       #calculate M = D+L+L^T-S*B_0*S
       SY = torch.mm(torch.transpose(S, 0, 1), Y)
@@ -425,53 +472,48 @@ class LSR1(torch.optim.Optimizer):
       M = L + torch.transpose(L, 0,1) + SS
       mask_M = range(M.shape[0])
       M[mask_M, mask_M] = M[mask_M, mask_M] + torch.diag(SY)
+      return M, psi
 
-      #delete unnecessary matrices
-      del Y
-      del S       
-      del SY
-      del L
-      del SS
+    # calculate hess with limited memory method
+    def calculate_hess(self, psi, M_inverse, gamma):
+      """
+      .. Return P and lambdas+gamma. This are the components of the hess matrix.
+        hess = P *diag(gamma+lambdas) * P^T. For this do a thin qr factorisation
+        of psi. Use the M and R and to get RMR. Then do a spectral decomposition and 
+        calculate Q*U = P. The eigenvalues of the composition are the lambdas.
 
-      #check M singular, if yes then go to the next step
-      if torch.det(M)==0:
-          return False, 1, 1
-
-      #calculate the inverse of M
-      M_inverse = torch.linalg.solve(M, torch.eye(M.shape[0]).to(device)) 
-      del M
-
+      Args:
+          S (torch.Tensor): saved s as a matrix, S.shape = (n, history_size)
+          Y (torch.Tensor): saved y as a matrix, Y.shape = (n, history_size)
+          gamma (float): skalar of initial hesse matrix
+      """
       #thin q-r factorisation of phi
-      Q, R = torch.linalg.qr(phi, mode="reduced")
-      del phi
+      Q, R = torch.linalg.qr(psi, mode="reduced")
 
       # eigenvalues and eigenvectors of RM^{-1}R^T
+      
       RMR = torch.mm(torch.mm(R, M_inverse), torch.transpose(R,0,1))
+      RMR = (RMR + torch.transpose(RMR,0,1))/2
       lamb, U = torch.linalg.eig(RMR)
                 
-      del R
-      del M_inverse
 
       # create last orthogonal matrix QU
       P = torch.mm(Q, U.float())
-      del Q
-      del U
 
       #create hess matrix, but dont calculate hess
       # save only the matrices hess_1 and hess_2 which hess = P_lamb @ P
       P_lamb = gamma+lamb.float()*P
-      return True, P_lamb, torch.transpose(P, 0,1)
+      return P, gamma+lamb.float()
 
     def update_SY(self, s, y, old_s, old_y, cond_rest):
       """
       .. Update S and Y. Pop the first if history_size is reached.
 
       Args:
-          s (torch.Tensor): actual gradient vector
-          y (torch.Tensor): previous gradient vector
+          s (torch.Tensor): actual s
+          y (torch.Tensor): actual y
           old_s (list): list with tensors last s
           old_y (list): list with tensors last y
-          hess (torch.Tensor): hess matrix
           cond_rest (float): one part of the condition to update S or Y
 
       """
@@ -487,18 +529,101 @@ class LSR1(torch.optim.Optimizer):
           old_s.append(s)
           old_y.append(y)
 
-    #bearbeiten!!!!!!!
-    def update_radius(self, r, c_1, c_2, c_3, tr_rho):
+    def update_radius(self, r, tr_rho, s, T, rho):
       """
+      .. Update Radius like Algorithmus 5 in
+        "A minibatch stochastic Quasi-Newton method adapted for nonconvex deep learning problems"
+        from Joshua D. Griffin, Majid Jahani, Martin Takáč, Seyedalireza Yektamaram, Wenwen Zhou
+        with a little change. The 0.1 in the first if is here 0.5.
+
       Args:
           r (float): ratio of actual and predicted reduction
-          c_1,c_2,c_2 (flaot): hyperparameters of the changing radius
+          s (torch.tensor) : A vector w_k -w_{k-1}
           tr_rho (float): trust radius 
+          T (float) : A iteration parameter, it is used to do the radius stochastic
+          rho (float) : A iteration parameter, it is used to do the radius stochastic
       """
-      if r <= c_2:
-          tr_rho = c_3*tr_rho
-      else : 
-          tr_rho = c_1*tr_rho
+      rho = 0.5*T*rho + r
+      T = 0.5*T + 1
+      rho = rho/T
+      norm_s = torch.linalg.norm(s)
+      if rho < 0.5:
+          tr_rho = min(tr_rho, norm_s)
+      if rho >=  0.5 and norm_s >=tr_rho: 
+          tr_rho = 2*tr_rho
+      return tr_rho, rho, T
+
+    def trust_solver_cauchy(self, flat_grad, hess_1, hess_2, tr_rho):
+      """
+      .. Solves a trust subproblem with the Cauchy Point Calculation. I copied this from
+        https://optimization.mccormick.northwestern.edu/index.php/Trust-region_methods.
+
+      Args: 
+          flat_grad (torch.tensor) : gradient vector
+          hess_1 (torch.tensor) : P*diag(gamma+lambda)*P^T = hess, hess_1 = P*diag(gamma+lambda)
+          hess_2 (torch.tensor) : P*diag(gamma+lambda)*P^T = hess, hess_2 = P^T
+          tr_rho (float) : the trust radius
+      """
+      gH = torch.matmul(flat_grad, hess_1)
+      Hg = torch.matmul(hess_2, flat_grad)
+      cauchy_cond = torch.matmul(gH, Hg)
+      if cauchy_cond <=0:
+          tau = 1
+      else:
+          tau = min(torch.linalg.norm(flat_grad)**3/(cauchy_cond*tr_rho),1)
+      return -tau*tr_rho/torch.linalg.norm(flat_grad)*flat_grad
+
+    def trust_solver_steihaug(self, flat_grad, hess_1, hess_2, tr_rho):
+      """
+      .. Solves a trust subproblem with the Steihaug CG Method. I copied this from
+        https://optimization.mccormick.northwestern.edu/index.php/Trust-region_methods.
+        The solution for tau can be calculated with the quadratic formula.
+        The hyperparameters are from https://d-nb.info/1219852988/34. This download a pdf.
+        I will search for better sources.
+
+      Args: 
+          flat_grad (torch.tensor) : gradient vector
+          hess_1 (torch.tensor) : P*diag(gamma+lambda)*P^T = hess, hess_1 = P*diag(gamma+lambda)
+          hess_2 (torch.tensor) : P*diag(gamma+lambda)*P^T = hess, hess_2 = P^T
+          tr_rho (float) : the trust radius
+      """
+      n = flat_grad.shape[0]
+      if self.cg_iter == None:
+        self.cg_iter = n*(self.history_size**2)
+      z = torch.zeros(n).to(device)
+      r = flat_grad
+      d = -r
+      g_norm = torch.linalg.norm(flat_grad)
+      delta = min(0.5, torch.sqrt(g_norm))*g_norm
+      fH = torch.matmul(flat_grad, hess_1)
+      Hf = torch.matmul(hess_2, flat_grad)
+      if torch.matmul(fH, Hf) <= 0 :
+        return -tr_rho/torch.linalg.norm(flat_grad)*flat_grad
+      for _ in range(self.cg_iter):
+          dH = torch.matmul(d, hess_1)
+          Hd = torch.matmul(hess_2, d)
+          dHd = torch.matmul(dH, Hd)
+          dz = torch.matmul(d,z)
+          dd = torch.matmul(d,d)
+          zz = torch.matmul(z,z)
+          if dHd <= 0:
+            tau = (-2 * dz + torch.sqrt((-2*dz)**2 - 4* dd *(zz-tr_rho**2)))/(2*dd)
+            return z + tau*d
+          rr = torch.matmul(r,r)
+          alpha = rr/dHd
+          z_ersatz = z
+          z = z+alpha*d
+          if torch.linalg.norm(z) >= tr_rho:
+            tau = (-2 * dz + torch.sqrt((-2*dz)**2 - 4* dd *(zz-tr_rho**2)))/(2*dd)
+            return z_ersatz + tau*d
+          r = r+ alpha*torch.matmul(hess_1, torch.matmul(hess_2, d))
+          if torch.linalg.norm(r) < delta:
+            return z
+          beta = torch.matmul(r,r)/rr
+          d = -r+beta*dd
+      return z
+
+
 
     @torch.no_grad()
     def step(self, closure):
@@ -518,38 +643,27 @@ class LSR1(torch.optim.Optimizer):
         group = self.param_groups[0]
         lr = group['lr']
         max_iter = group['max_iter']
-        max_eval = group['max_eval']
-        gamma = group['gamma']
+        newton_maxit = group['newton_maxit']
         tolerance_grad = group['tolerance_grad']
         tolerance_change = group['tolerance_change']
         line_search_fn = group['line_search_fn']
         trust_method = group['trust_method']
-        tr_rho = group['tr_rho']
+        tr_radius = group['tr_radius']
         mu_momentum = group['mu_momentum']
         nu_momentum = group['nu_momentum']
         alpha_S = group['alpha_S']
-        c_1 = group['c_1']
-        c_2 = group['c_2']
-        c_3 = group['c_3']
-        trust_CG_tol = group['trust_CG_tol']
-        trust_CG_iter = group['trust_CG_iter']
-        
+
         #From torch.optim.LBFGS
         # NOTE: LSR1 has only global state, but we register it as state for
         # the first param, because this helps with casting in load_state_dict
         state = self.state[self._params[0]]
-        state.setdefault('func_evals', 0)
         state.setdefault('n_iter', 0)
 
-        #From torch.optim.LBFGS
+        # get loss
         # evaluate initial f(x) and df/dx
+        #From torch.optim.LBFGS
         orig_loss = closure()
         loss = float(orig_loss)
-        current_evals = 1
-        state['func_evals'] += 1
-
-        #From torch.optim.LBFGS
-        #df/dx
         flat_grad = self._gather_flat_grad()
         opt_cond = flat_grad.abs().max() <= tolerance_grad
 
@@ -566,25 +680,17 @@ class LSR1(torch.optim.Optimizer):
         old_y = state.get('old_y')
         prev_flat_grad = state.get('prev_flat_grad')
         prev_loss = state.get('prev_loss')
-        tr_radius = state.get('tr_rho')
+        tr_rho = state.get('tr_rho')
         s = state.get('s')
+        y = state.get('y')
+        T = state.get('T')
+        rho = state.get('rho')
 
+        #dimension of the data
         dim_hess = flat_grad.shape[0]
 
-        #check s is defined
-        if s == None:
-          s = torch.zeros(dim_hess).to(device)
-
-        #check initial radius
-        if tr_radius != None:
-          tr_rho = tr_radius
-
-        #check iterations of CG
-        
-        if trust_CG_iter == None:
-          trust_CG_iter = dim_hess
-
         n_iter = 0
+        is_forever = 0
         # optimize for a max of max_iter iterations
         while n_iter < max_iter:
             # keep track of iterations
@@ -600,40 +706,88 @@ class LSR1(torch.optim.Optimizer):
                 d = flat_grad.neg()
                 old_s = []
                 old_y = []
-                hess_1 = gamma*torch.ones(1).to(device)
                 hess_2 = torch.ones(1).to(device)
-                tr_rho = tr_rho
+                hess_1 = torch.ones(1).to(device)
+                gamma = 1
+                tr_rho = tr_radius
                 v = torch.zeros(dim_hess).to(device)
+                s = torch.zeros(dim_hess).to(device)
+                y = torch.zeros(dim_hess).to(device)
+                T = 0
+                rho=0
             else:
                 if torch.linalg.norm(flat_grad) < tolerance_grad:
-                    return orig_loss
+                    state['n_iter'] = 0
+                    break
+                
                 # stack the list to a tensor 
                 S = torch.transpose(torch.stack(old_s), 0, 1)
                 Y = torch.transpose(torch.stack(old_y), 0, 1)
 
-                # the approximate hess matrix
-                cond_M, hess_1, hess_2 = self.calculate_hess(S,Y, gamma)
-                #check if matrix "M" is singular
-                if cond_M == False:
-                  continue
+                #calculate gamma like in Stabilizied Barzilai-Borwein Method 
+                #from Oleg Burdakov, Yu-Hong Dai, Na Huang
+                gamma = torch.matmul(old_s[-1], old_s[-1])/(torch.matmul(old_s[-1], old_y[-1]))
 
-                #solve trust region subproblem
-                d = self.solve_trust_sub(flat_grad, hess_1, hess_2, tr_rho, trust_method, trust_CG_tol, trust_CG_iter)
-                # do some other options: momentum etc.
+                # calculate M and psi
+                M, psi = self.calculate_M(S,Y, gamma)
+
+                #check singular
+                if torch.det(M)==0:
+                  state['n_iter'] = 0
+                  break
+                
+                #calculate the inverse of M
+                M_inverse = torch.linalg.solve(M, torch.eye(M.shape[0]).to(device))
+
+                #calculate the components of the hessian matrix
+                P, lamb_gamma = self.calculate_hess(psi, M_inverse, gamma)
+                hess_1 = lamb_gamma*P
+                hess_2 = torch.transpose(P, 0, 1)
+
+                #get the new search direction with Trust Region
+                if trust_method == "Cauchy_Point_Calculation":
+                  d = self.trust_solver_cauchy(flat_grad, hess_1, hess_2, tr_rho)
+                if trust_method == "Steihaug_cg":
+                  d = self.trust_solver_steihaug(flat_grad, hess_1, hess_2, tr_rho)
+                if trust_method=="None":
+                  d = self.trust_solver_None(M_inverse, P, lamb_gamma, tr_rho, flat_grad, psi, newton_maxit)
+
+            # do some other options: momentum etc.
             v = mu_momentum*v - nu_momentum*alpha_S*flat_grad+(1-nu_momentum)*s
             v = min(1, tr_rho/torch.linalg.norm(v))*v
             d = (1-nu_momentum)*d + mu_momentum*v
             d = min(1, tr_rho/torch.linalg.norm(d))*d
             d = d.to(device)
-            gd = abs(torch.matmul(flat_grad, d))
+            dg = abs(torch.matmul(d, flat_grad))
+
+            # check if the serch direction is too orthogonal to gradient
+            d_norm = abs(torch.linalg.norm(d))
+            g_norm = abs(torch.linalg.norm(flat_grad))
+            if  min(dg, dg/d_norm) < g_norm*5e-10:
+
+              # the for_ever is useful to avoid enless loops 
+              if is_forever == 1:
+                old_s = []
+                old_y = []
+                s = None
+                y = None
+                v = None
+                tr_rho = tr_radius
+                state['n_iter'] = 0
+                break
+              n_iter=0
+              state['n_iter'] = 0
+              is_forever += 1
+              continue
+
+            #We need this for the actual prediction
             norm_g = torch.linalg.norm(flat_grad)
-            if state['n_iter']==1:
-              dH = hess_1*d
-              Hd = hess_2*d
-            else:
+            if len(hess_1.shape) !=1:
               dH = torch.matmul(d, hess_1)
               Hd = torch.matmul(hess_2, d)
-            dHd = torch.matmul(dH, Hd)
+              dHd = torch.matmul(dH, Hd)
+            else:
+              dHd = gamma*torch.matmul(d, d)
 
             #############################################################
             #######     set lr, s, previous loss and flat_grad  #########
@@ -641,23 +795,18 @@ class LSR1(torch.optim.Optimizer):
             #From torch.optim.LBFGS
             # directional derivative
             gtd = flat_grad.dot(d)  # g * d
-
-            # directional derivative is below tolerance
+            # check descent direction
             if gtd > 0:
                d = -d
 
             #set s/alpha and a part of update condition/alpha
-            # then we can delete hess
-            s = d
-            if state['n_iter']==1:
-              sH = hess_1*s
-              Hs = hess_2*s
-            else:
+            s = torch.clone(d).to(device)
+            if len(hess_1.shape) !=1:
               sH = torch.matmul(s, hess_1)
               Hs = torch.matmul(hess_2, s)
-            cond_rest = torch.matmul(sH, Hs)
-            del hess_1
-            del hess_2
+              cond_rest = torch.matmul(sH, Hs)
+            else:
+              cond_rest = gamma*torch.matmul(s, s)
 
             #From torch.optim.LBFGS
             # reset initial guess for step size
@@ -667,8 +816,10 @@ class LSR1(torch.optim.Optimizer):
                 alpha = lr
 
             # update prev_loss
-            prev_loss = loss
+            prev_loss_t = loss
+
             #update prev_flat_grad
+            #From torch.optim.LBFGS
             if prev_flat_grad is None:
                 prev_flat_grad = flat_grad.clone(memory_format=torch.contiguous_format)
             else:
@@ -679,7 +830,6 @@ class LSR1(torch.optim.Optimizer):
             #############################################################
             #From torch.optim.LBFGS
             # optional line search: user function
-            ls_func_evals = 0
             if line_search_fn is not None:
                 # perform line search, using user function
                 if line_search_fn != "strong_wolfe":
@@ -689,11 +839,26 @@ class LSR1(torch.optim.Optimizer):
 
                     def obj_func(x, t, d):
                         return self._directional_evaluate(closure, x, t, d)
-
-                    loss, flat_grad, alpha, ls_func_evals = _strong_wolfe(
+                    loss_t, flat_grad_t, alpha_t, _ = _strong_wolfe(
                         obj_func, x_init, alpha, d, loss, flat_grad, gtd)
-                self._add_grad(alpha, d)
-                opt_cond = flat_grad.abs().max() <= tolerance_grad
+                # sometimes the search direction is so bad, that alpha can be zero
+                # or very big. This produces nan in the loss
+                # Avoid this and break
+                if alpha_t != 0 and alpha_t < 5:
+                    alpha = alpha_t
+                    loss = loss_t
+                    flat_grad = flat_grad_t
+                    self._add_grad(alpha, d)
+                    opt_cond = flat_grad.abs().max() <= tolerance_grad
+                else:
+                    old_s = []
+                    old_y = []
+                    s = None
+                    y = None
+                    v = None
+                    tr_rho = tr_radius
+                    state['n_iter'] = 0
+                    break
             else:
                 # no line search, simply move with fixed-step
                 self._add_grad(alpha, d)
@@ -703,16 +868,28 @@ class LSR1(torch.optim.Optimizer):
                     flat_grad = self._gather_flat_grad()
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1
+            #calculate y
             y = flat_grad.sub(prev_flat_grad)
+
             #now we know alpha so we can use it
             s = alpha*s
             cond_rest = alpha*cond_rest
+
+            #update prev_loss
+            prev_loss = prev_loss_t
 
             #############################################################
             #######               update S,Y                    #########
             #############################################################
             self.update_SY(s, y, old_s, old_y, cond_rest)
-
+            if len(old_s)==0:
+                s = None
+                y = None
+                v = None
+                tr_rho = tr_radius
+                state['n_iter'] = 0
+                break
+            
             #############################################################
             #######               calculate ratio               #########
             #############################################################  
@@ -723,13 +900,7 @@ class LSR1(torch.optim.Optimizer):
             #############################################################
             #######               update radius                 #########
             #############################################################
-            if state['n_iter']!= 1:
-                self.update_radius(r, c_1, c_2, c_3, tr_rho)
-
-            #From torch.optim.LBFGS
-            # update func eval
-            current_evals += ls_func_evals
-            state['func_evals'] += ls_func_evals
+            tr_rho, rho, T = self.update_radius(r, tr_rho, s, T, rho)
 
             ############################################################
             #####               check conditions                  ######
@@ -738,20 +909,38 @@ class LSR1(torch.optim.Optimizer):
             if n_iter == max_iter:
                 break
 
-            #From torch.optim.LBFGS
-            if current_evals >= max_eval:
-                break
-
             # optimal condition, gradient is not zero
             if opt_cond:
+                old_s = []
+                old_y = []
+                s = None
+                y = None
+                v = None
+                tr_rho = tr_radius
+                state['n_iter'] = 0
                 break
 
             #From torch.optim.LBFGS
             # lack of progress
             if d.mul(alpha).abs().max() <= tolerance_change:
+                old_s = []
+                old_y = []
+                s = None
+                y = None
+                v = None
+                tr_rho = tr_radius
+                state['n_iter'] = 0
                 break
+
             #From torch.optim.LBFGS
             if abs(loss - prev_loss) < tolerance_change:
+                old_s = []
+                old_y = []
+                s = None
+                y = None
+                v = None
+                tr_rho = tr_radius
+                state['n_iter'] = 0
                 break
 
         state['d'] = d
@@ -763,7 +952,9 @@ class LSR1(torch.optim.Optimizer):
         state['tr_rho'] = tr_rho
         state['v'] = v
         state['s'] = s
-
+        state['y'] = y
+        state['T'] = T
+        state['rho'] = rho
 
         return orig_loss
 
@@ -772,7 +963,10 @@ class LSR1(torch.optim.Optimizer):
 import numpy as np
 from tqdm import tqdm
 def rosenbrock(xy):
-    """Evaluate Rosenbrock function.
+    """
+    ..Evaluate Rosenbrock function. Copied from
+      https://github.com/jankrepl/mildlyoverfitted/blob/master/mini_tutorials/custom_optimizer_in_pytorch/src.py.
+      It has some changes for my usecase.
     Parameters
     ----------
     xy : tuple
@@ -786,7 +980,7 @@ def rosenbrock(xy):
 
     return (1 - x) ** 2 + 100 * (y - x ** 2) ** 2
 
-def run_optimization(xy_init, n_iter, **optimizer_kwargs):
+def run_optimization(xy_init, n_iter, optimizer):
     """Run optimization finding the minimum of the Rosenbrock function.
     Parameters
     ----------
@@ -796,19 +990,14 @@ def run_optimization(xy_init, n_iter, **optimizer_kwargs):
         Optimizer class.
     n_iter : int
         Number of iterations to run the optimization for.
-    optimizer_kwargs : dict
-        Additional parameters to be passed into the optimizer.
+    optimizer : An torch optimizer.
     Returns
     -------
     path : np.ndarray
         2D array of shape `(n_iter + 1, 2)`. Where the rows represent the
         iteration and the columns represent the x resp. y coordinates.
     """
-    xy_t = torch.tensor(xy_init, requires_grad=True).to(device)
-
-    #Hier kann man Parameter einstellen
-    optimizer = LSR1([xy_t], history_size=2, trust_method="CG", trust_CG_iter=100)
-
+    
     path = np.empty((n_iter + 1, 2))
     path[0, :] = xy_init.cpu().detach().numpy()
 
@@ -830,9 +1019,15 @@ def run_optimization(xy_init, n_iter, **optimizer_kwargs):
 
     return path
 
+#settings and startpoint
 n_iter = 100
 xy_init = torch.zeros(2).to(device)
-path = run_optimization(xy_init, n_iter)
+xy_t = torch.tensor(xy_init, requires_grad=True).to(device)
+trust_method="Steihaug_cg"
+
+#set up optimizer and run, the last point ist path[-1]
+optimizer = LSR1([xy_t], history_size=2, trust_method=trust_method, line_search_fn="strong_wolfe", max_iter=100)
+path = run_optimization(xy_init, n_iter, optimizer)
 path[-1]
 
 """**Now evaluate on a neuronalnetwork:** \\
@@ -852,6 +1047,7 @@ testdt = dts.MNIST(
     train = False, 
     transform = ToTensor()
 )
+
 import torch.nn as nn
 class CNN(nn.Module):
     def __init__(self):
@@ -859,7 +1055,7 @@ class CNN(nn.Module):
         self.conv1 = nn.Sequential(         
             nn.Conv2d(
                 in_channels=1,              
-                out_channels=6,            
+                out_channels=3,            
                 kernel_size=5,              
                 stride=1,                   
                 padding=2,                  
@@ -868,11 +1064,12 @@ class CNN(nn.Module):
             nn.MaxPool2d(kernel_size=2),    
         )
         self.conv2 = nn.Sequential(         
-            nn.Conv2d(6, 4, 5, 1, 2),     
+            nn.Conv2d(3, 3, 5, 1, 2),     
             nn.ReLU(),                      
-            nn.MaxPool2d(2),                
+            nn.MaxPool2d(2),
+            #nn.BatchNorm2d(3)                
         )        # fully connected layer, output 10 classes
-        self.out = nn.Linear(4 * 7 * 7, 10)    
+        self.out = nn.Linear(3 * 7 * 7, 10)    
         
     def forward(self, x):
         x = self.conv1(x)
@@ -886,7 +1083,6 @@ class CNN(nn.Module):
 from torch.autograd import Variable
 
 loss_func = nn.CrossEntropyLoss()  
-#optimizer = LSR1(CNN_1.parameters(), lr = 0.01, line_search_fn="strong_wolfe") 
  
 train_losses, test_losses = [], []
 steps = 0
@@ -895,19 +1091,19 @@ print_every = 10
 
 loaders = {
     'train' : torch.utils.data.DataLoader(traindt, 
-                                          batch_size=128, 
+                                          batch_size=1024, 
                                           shuffle=True, 
                                           num_workers=1),
     
     'test'  : torch.utils.data.DataLoader(testdt, 
-                                          batch_size=128, 
+                                          batch_size=1024, 
                                           shuffle=True, 
                                           num_workers=1),
 }
 
 n = len(loaders['train'])
 m = len(loaders['test'])
-
+print(n)
 def train(num_epochs, cnn, loaders, optimizer):
     running_loss = 0
     cnn.train()
@@ -917,13 +1113,12 @@ def train(num_epochs, cnn, loaders, optimizer):
         
     for epoch in range(num_epochs):
         for i, (images, labels) in enumerate(loaders['train']):
-            
             images, labels = images.to(device), labels.to(device)
 
             # gives batch data, normalize x when iterate train_loader
             b_x = Variable(images)   # batch x
             b_y = Variable(labels)   # batch y
-            output = cnn(b_x)[0]    
+            output = cnn(b_x)[0] 
             
            
             loss = loss_func(output, b_y)
@@ -942,11 +1137,13 @@ def train(num_epochs, cnn, loaders, optimizer):
                   loss.backward()
                 return loss
                       
-            optimizer.step(closure = closure)  
+            aa = optimizer.step(closure = closure)  
+            if torch.isnan(aa)==True:
+              print(i)
             running_loss += loss.item()
             optimizer.zero_grad()              
             
-            if (i+1) % 100 == 0:
+            if (i+1) % 10 == 0:
                 test_loss = 0
                 accuracy = 0
                 cnn.eval()
@@ -968,7 +1165,7 @@ def train(num_epochs, cnn, loaders, optimizer):
                         accuracy +=   torch.mean(equals.type(torch.FloatTensor)).item()
                 train_losses.append(running_loss/n)
                 test_losses.append(test_loss/m)                    
-                print(f"Epoch {epoch+1}/{num_epochs}.. "
+                print(f"Epoch, Steps {epoch+1}/{num_epochs}, {i}.. "
                       f"Train loss: {running_loss/print_every:.3f}.. "
                       f"Test loss: {test_loss/m:.3f}.. "
                       f"Test accuracy: {accuracy/m:.3f}")
@@ -982,8 +1179,9 @@ num_epochs = 10
 CNN_1 = CNN().to(device)
 print("LSR1:")
 #hs = 5, mu = 0.5, tr_rho=0.5
-optimizer_LSR1 = LSR1(CNN_1.parameters(),lr=1, line_search_fn="strong_wolfe", history_size=5, mu_momentum=0.5, tr_rho=0.5) 
+optimizer_LSR1 = LSR1(CNN_1.parameters(),lr=1, line_search_fn="strong_wolfe", alpha_S=0.5, history_size=16, tr_radius=0.9, mu_momentum=0.95, nu_momentum=0.75, max_iter=150, trust_method="Steihaug_cg") 
 train(num_epochs, CNN_1, loaders, optimizer_LSR1)
+
 CNN_2 = CNN().to(device)
 print("LBFGS:")
 optimizer_LBFGS = torch.optim.LBFGS(CNN_2.parameters(), line_search_fn="strong_wolfe") 
@@ -992,9 +1190,49 @@ train(num_epochs, CNN_2, loaders, optimizer_LBFGS)
 CNN_3 = CNN().to(device)
 print("SGD:")
 optimizer_SGD = torch.optim.SGD(CNN_3.parameters(), lr = 0.01) 
-train(num_epochs, CNN_3, loaders, optimizer_SGD)
+#train(num_epochs, CNN_3, loaders, optimizer_SGD)
 CNN_4 = CNN().to(device)
 print("ADAM:")
-optimizer_ADAM = torch.optim.Adam(CNN_4.parameters(), lr = 0.01) 
-train(num_epochs, CNN_4, loaders, optimizer_ADAM)
+optimizer_ADAM = torch.optim.Adam(CNN_4.parameters(), lr = 0.001) 
+train(80, CNN_4, loaders, optimizer_ADAM)
 
+"""**Try with Cifar10**"""
+
+import torch
+import torch.nn as nn
+import torchvision
+import torchvision.transforms as transforms
+
+
+# Device configuration
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Hyper-parameters
+num_epochs = 3
+learning_rate = 0.001
+
+# Image preprocessing modules
+transform = transforms.Compose([
+    transforms.Pad(4),
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32),
+    transforms.ToTensor()])
+
+# CIFAR-10 dataset
+train_dataset = torchvision.datasets.CIFAR10(root='../../data/',
+                                             train=True, 
+                                             transform=transform,
+                                             download=True)
+
+test_dataset = torchvision.datasets.CIFAR10(root='../../data/',
+                                            train=False, 
+                                            transform=transforms.ToTensor())
+
+# Data loader
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
+                                           batch_size=512, 
+                                           shuffle=True)
+
+test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
+                                          batch_size=512, 
+                                          shuffle=False)
