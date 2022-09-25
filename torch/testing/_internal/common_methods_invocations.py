@@ -7437,7 +7437,7 @@ def sample_inputs_pixel_shuffle(op_info, device, dtype, requires_grad, **kwargs)
             kwargs=dict(upscale_factor=1),
         )
         for shape in [
-            (1, 1, 0, 1, 1)
+            (1, 1, 0, 1, 1),
             (1, 1, 1, 0, 1),
             (1, 1, 1, 1, 0),
         ]
