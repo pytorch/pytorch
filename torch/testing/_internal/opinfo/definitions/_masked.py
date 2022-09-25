@@ -452,6 +452,11 @@ op_db: List[OpInfo] = [
                 "TestReductions",
                 "test_ref_small_input",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.bfloat16: tol(atol=0.1, rtol=0.1)}),
+                "TestMasked",
+                "test_mask_layout",
+            ),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
@@ -907,6 +912,16 @@ op_db: List[OpInfo] = [
                 "TestCudaFuserOpInfo",
                 "test_nvfuser_correctness",
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-02, rtol=1e-02),
+                        torch.bfloat16: tol(atol=1e-03, rtol=1e-03),
+                    }
+                ),
+                "TestMasked",
+                "test_reference_masked",
+            ),
         ],
         sample_inputs_func=sample_inputs_masked_std_var,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
@@ -975,7 +990,8 @@ op_db: List[OpInfo] = [
                 "test_ref_small_input",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
+                                   torch.bfloat16: tol(atol=5e-03, rtol=5e-04)}),
                 "TestMasked",
                 "test_reference_masked",
             ),
