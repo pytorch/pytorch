@@ -591,8 +591,8 @@ class TestPartitioning(AOTTestCase):
 
         fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, 10, requires_grad=True), mod.weight, mod.bias],
                                              partitioner=default_partition)
-        self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
-        self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
+        self.assertEqual(get_num_ins_outs(fw_graph), (3, 4))
+        self.assertEqual(get_num_ins_outs(bw_graph), (4, 3))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner(self):
@@ -617,7 +617,7 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
 
         ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
+        self.assertEqual(outs[1].target, torch.ops.aten.tanh.default)
 
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
