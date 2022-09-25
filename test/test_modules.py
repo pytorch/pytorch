@@ -665,7 +665,7 @@ class TestModule(TestCase):
 
                         # === Compare outputs to (contiguous, contiguous) output. ===
                         if input_mem_format != torch.contiguous_format or module_mem_formats != torch.contiguous_format:
-                            self.assertEqual(outputs, desired_outputs)
+                            self.assertEqual(outputs, desired_outputs, rtol=7e-3, atol=3e-3)
 
                         # === Check mem format of output. ===
                         _check_out_mem_format(outputs, input_mem_format, module_mem_format)
