@@ -130,6 +130,23 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+    def test_init_pg_and_rpc_with_same_file(self):
+        # Init RPC using file
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options.init_method = f"file://{self.file.name}"
+        rpc.init_rpc("worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options)
+
+        # Init PG using file
+        dist.init_process_group("gloo", rank=0, world_size=1, init_method=f"file://{self.file.name}")
+        dist.destroy_process_group()
+        assert os.path.isfile(self.file.name)
+
+        rpc.shutdown()
+
+    @property
+    def num_keys_total(self):
+        return 6
+
 
 @skip_if_win32()
 class HashStoreTest(TestCase, StoreTestBase):

@@ -270,6 +270,7 @@ off_t refresh(
 
 } // namespace
 
+
 FileStore::FileStore(const std::string& path, int numWorkers)
     : Store(),
       path_(path),
@@ -277,7 +278,9 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
       regularPrefix_("/"),
-      deletePrefix_("-") {}
+      deletePrefix_("-") {
+  addHelper(cleanupKey_, 1);
+}
 
 FileStore::~FileStore() {
   // If the file does not exist - exit.
@@ -294,13 +297,12 @@ FileStore::~FileStore() {
   if (res == -1) {
     return;
   }
+
   // cleanup key will be different from all rest keys since all rest keys will
   // have a regular prefix.
-  auto numFinishedWorker = addHelper(cleanupKey_, 1);
-  // The last worker cleans up the file. If numWorkers was not initialized to
-  // a specific postive value (i.e. meaning that there was not a fixed number
-  // of workers), we don't attempt to clean.
-  if (numWorkers_ >= 0 && numFinishedWorker == numWorkers_) {
+  int64_t refCount = addHelper(cleanupKey_, -1);
+  // Clean up the file if number of references is 0.
+  if (refCount == 0) {
     // Best effort removal without checking the return
     std::remove(path_.c_str());
   }
