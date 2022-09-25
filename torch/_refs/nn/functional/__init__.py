@@ -166,6 +166,10 @@ def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
 
 
 # Pure Python implementation - don't register decomp
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target", "var"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def gaussian_nll_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -213,9 +217,8 @@ def gaussian_nll_loss(
     diff = input - target
     loss = 0.5 * (torch.log(var) + diff * diff / var)
     if full:
-        # TODO: TypeError: log(): argument 'input' (position 1) must be Tensor,
-        # not float
-        # Also, avoids inplace add.
+        # torch.log doesn't support scalars, so multiply by a tensor.
+        # Also, avoid inplace add.
         loss = loss + (0.5 * torch.log(2 * torch.pi * torch.ones_like(loss)))
 
     return _apply_loss_reduction(loss, reduction)
