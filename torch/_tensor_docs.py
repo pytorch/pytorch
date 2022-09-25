@@ -90,7 +90,7 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     fill_value (scalar): the number to fill the output tensor with.
-    
+
 Keyword args:
     {dtype}
     {device}
