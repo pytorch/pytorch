@@ -3317,19 +3317,12 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
                     kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
     # error inputs for bias shape equal to the output channels
-    yield ErrorInput(
-        SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 3)), make_arg((2,))),
-                    kwargs={'padding': 'same'}), error_regex="expected bias to be 1-dimensional with 1 elements")
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 3)), make_arg((2,)))),
+                     error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for same dimensions of input and weight
-    yield ErrorInput(
-        SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2)), make_arg((1,))),
-                    kwargs={'padding': 'same'}), error_regex="weight should have at least three dimensions")
-
-    # error inputs for same dimensions of input and weight
-    yield ErrorInput(
-        SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2)), make_arg((1,))),
-                    kwargs={'padding': 'same', 'groups': 2}), error_regex="weight should have at least three dimensions")
+    # error inputs for weight.ndim < 3
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2)), make_arg((1,)))),
+                     error_regex="weight should have at least three dimensions")
 
     # error inputs for groups should be divisible by weight size
     yield ErrorInput(
@@ -3366,19 +3359,13 @@ def error_inputs_conv2d(opinfo, device, **kwargs):
                     kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
     # error inputs for bias shape equal to the output channels
-    yield ErrorInput(
-        SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 1, 3, 2)), make_arg((2,))),
-                    kwargs={'padding': 'same'}), error_regex="expected bias to be 1-dimensional with 1 elements")
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 1, 3, 2)), make_arg((2,)))),
+                     error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for same dimensions of input and weight
+    # error inputs for weight.ndim < 4
     yield ErrorInput(
         SampleInput(make_arg((1, 1, 4, 3)), args=(make_arg((1, 2, 2)), make_arg((1,))),
                     kwargs={'padding': 'same'}), error_regex="Expected 3-dimensional input for 3-dimensional weight")
-
-    # error inputs for same dimensions of input and weight
-    yield ErrorInput(
-        SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 2, 2)), make_arg((1,))),
-                    kwargs={'padding': 'same', 'groups': 2}), error_regex="Expected 3-dimensional input for 3-dimensional weight")
 
     # error inputs for groups should be divisible by weight size
     yield ErrorInput(
@@ -3489,11 +3476,10 @@ def error_inputs_conv3d(opinfo, device, **kwargs):
                     kwargs={'dilation': (-1,), 'padding': (1,)}), error_regex="dilation should be greater than zero")
 
     # error inputs for bias shape equal to the output channels
-    yield ErrorInput(
-        SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 3, 3, 3)), make_arg((2,))),
-                    kwargs={'padding': 'same'}), error_regex="expected bias to be 1-dimensional with 1 elements")
+    yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 3, 3, 3)), make_arg((2,)))),
+                     error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for same dimensions of input and weight
+    # error inputs for weight.ndim < 5
     yield ErrorInput(
         SampleInput(make_arg((1, 1, 3, 4, 5)), args=(make_arg((1, 1, 4, 3)), make_arg((1,))),
                     kwargs={'padding': 'same'}), error_regex="Expected 4-dimensional input for 4-dimensional weight")
