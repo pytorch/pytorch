@@ -156,6 +156,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
     tol_table = {
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
+        (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
@@ -474,9 +476,6 @@ class TestDecomp(TestCase):
         func = op.get_op()
         for sample_input in samples:
             if requires_grad:
-                if None in sample_input.args:
-                    continue
-
                 fn, primals = normalize_op_input_output(func, sample_input)
                 primals = tree_map(
                     lambda x: x if isinstance(x, torch.Tensor) else x, primals
@@ -514,64 +513,6 @@ class TestDecomp(TestCase):
                 self.skipTest(
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
-
-    def test_slice(self):
-        class SampleInput:
-            def __init__(self, input, args, kwargs={}):
-                self.input = input
-                self.args = args
-                self.kwargs = kwargs
-
-        class SliceOpInfo:
-            name = "fake slice"
-            supports_autograd = False
-            decomp_aten_name = "aten.slice.Tensor"
-            def op(self, *args, **kwargs):
-                return torch.ops.aten.slice(*args, **kwargs)
-
-            def get_op(self):
-                return torch.ops.aten.slice
-
-            def sample_inputs(self, device, dtype, requires_grad):
-                for i in [
-                    SampleInput(
-                        input=torch.ones(3, device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(0,),
-                    ),
-                    SampleInput(
-                        input=torch.randn((20,30,40), device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(),
-                        kwargs={
-                            'dim': 1,
-                            'start': 1,
-                            'end': -2,
-                        }
-                    ),
-                    SampleInput(
-                        input=torch.randn((20,30,40), device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(),
-                        kwargs={
-                            'dim': 1,
-                            'start': 1,
-                            'end': -2,
-                            'step': 3,
-                        }
-                    ),
-                    SampleInput(
-                        input=torch.randn((20,30,40), device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(),
-                        kwargs={
-                            'dim': 0,
-                            'start': -10,
-                            'end': -2,
-                            'step': 2,
-                        }
-                    ),
-                ]:
-                    yield i
-        slice = SliceOpInfo()
-        # evice, dtype, op, *, run_all):
-        self.do_cross_ref('cpu', torch.float, slice, run_all=True)
 
 instantiate_device_type_tests(TestDecomp, globals())
 

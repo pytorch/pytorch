@@ -3160,7 +3160,8 @@ Tensor slice_backward_wrapper(
   auto start_val = start.has_value() ? start.value() : 0;
   auto end_val = end.has_value() ? end.value() : INT64_MAX;
 
-  return slice_backward_symint(grad, input_sizes, dim, start_val, end_val, step);
+  return slice_backward_symint(
+      grad, input_sizes, dim, start_val, end_val, step);
 }
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
