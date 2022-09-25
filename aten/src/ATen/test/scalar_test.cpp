@@ -180,7 +180,7 @@ TEST(TestScalar, TestFormatting) {
   ASSERT_EQ("false", format(Scalar(false)));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<double>(2.0, 3.1))));
   ASSERT_EQ("(2,3.1)", format(Scalar(c10::complex<float>(2.0, 3.1))));
-  ASSERT_EQ("SymInt(4)", format(Scalar(Scalar(4).toSymInt())));
+  ASSERT_EQ("4", format(Scalar(Scalar(4).toSymInt())));
 }
 
 TEST(TestSymInt, Basic) {
@@ -198,11 +198,14 @@ TEST(TestSymInt, Basic) {
   // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   ASSERT_TRUE(bar.isIntegral(false));
   foo2 = SymInt(4);
-  ASSERT_TRUE(foo2.isSymInt());
+  ASSERT_FALSE(foo2.isSymInt());
   ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wself-assign-overloade"
   // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   foo2 = foo2;
-  ASSERT_TRUE(foo2.isSymInt());
+#pragma GCC diagnostic pop
+  ASSERT_FALSE(foo2.isSymInt());
   ASSERT_EQ(foo2.toSymInt().expect_int(), 4);
 
   ASSERT_EQ(a_impl.use_count(), 3);

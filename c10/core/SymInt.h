@@ -87,13 +87,6 @@ class C10_API SymInt {
     return *this;
   }
 
-  SymIntNodeImpl* release() && {
-    TORCH_INTERNAL_ASSERT(is_symbolic());
-    auto* r = toSymIntNodeImplUnowned();
-    data_ = 0;  // transfer ownership
-    return r;
-  }
-
 #ifndef C10_MOBILE
   SymIntNodeImpl* toSymIntNodeImplUnowned() const {
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
@@ -109,8 +102,19 @@ class C10_API SymInt {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
   }
+
+  SymIntNodeImpl* release() && {
+    TORCH_INTERNAL_ASSERT(is_symbolic());
+    auto* r = toSymIntNodeImplUnowned();
+    data_ = 0; // transfer ownership
+    return r;
+  }
 #else
   void release_() {}
+
+  SymIntNodeImpl* release() && {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 #endif
 
   SymIntNode toSymIntNodeImpl() const;

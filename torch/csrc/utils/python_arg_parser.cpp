@@ -1496,10 +1496,11 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     scalar = at::Scalar(THPUtils_unpackLong(obj));
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  } else if (torch::is_symint_node(obj)) {
-    scalar = at::Scalar(py::cast<c10::SymInt>(obj));
   } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
+  // NB: we DO NOT put symbolic ints/floats into the Scalar itself,
+  // because although Scalar supports SymInt/SymFloat, the subsequent
+  // conversion to Tensor does not.  Instead, do it out of band.
   } else if (torch::is_symint_node(py::handle(obj))) {
     save_symint = true;
     // This scalar value doesn't matter, it shouldn't ever actually

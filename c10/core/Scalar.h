@@ -9,8 +9,8 @@
 
 #include <c10/core/OptionalRef.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
+#include <c10/core/SymInt.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
@@ -66,23 +66,23 @@ class C10_API Scalar {
     v.i = convert<int64_t, bool>(vv);
   }
 
-#define DEFINE_ACCESSOR(type, name)                                     \
-  type to##name() const {                                               \
-    if (Tag::HAS_d == tag) {                                            \
+#define DEFINE_ACCESSOR(type, name)                                   \
+  type to##name() const {                                             \
+    if (Tag::HAS_d == tag) {                                          \
       return checked_convert<type, double>(v.d, #type);               \
-    } else if (Tag::HAS_z == tag) {                                     \
+    } else if (Tag::HAS_z == tag) {                                   \
       return checked_convert<type, c10::complex<double>>(v.z, #type); \
-    }                                                                   \
-    if (Tag::HAS_b == tag) {                                            \
+    }                                                                 \
+    if (Tag::HAS_b == tag) {                                          \
       return checked_convert<type, bool>(v.i, #type);                 \
-    } else if (Tag::HAS_i == tag) {                                     \
+    } else if (Tag::HAS_i == tag) {                                   \
       return checked_convert<type, int64_t>(v.i, #type);              \
-    } else if (Tag::HAS_si == tag) {                                    \
-      TORCH_CHECK(false, "tried to get " #name " out of SymInt")        \
-    } else if (Tag::HAS_sd == tag) {                                    \
-      TORCH_CHECK(false, "tried to get " #name " out of SymFloat")      \
-    }                                                                   \
-    TORCH_CHECK(false)                                                  \
+    } else if (Tag::HAS_si == tag) {                                  \
+      TORCH_CHECK(false, "tried to get " #name " out of SymInt")      \
+    } else if (Tag::HAS_sd == tag) {                                  \
+      TORCH_CHECK(false, "tried to get " #name " out of SymFloat")    \
+    }                                                                 \
+    TORCH_CHECK(false)                                                \
   }
 
   // TODO: Support ComplexHalf accessor
@@ -92,7 +92,8 @@ class C10_API Scalar {
 
   SymInt toSymInt() const {
     if (Tag::HAS_si == tag) {
-      return c10::SymInt::toSymInt(intrusive_ptr<SymIntNodeImpl>::reclaim_copy(static_cast<SymIntNodeImpl*>(v.p)));
+      return c10::SymInt::toSymInt(intrusive_ptr<SymIntNodeImpl>::reclaim_copy(
+          static_cast<SymIntNodeImpl*>(v.p)));
     } else {
       return toLong();
     }
@@ -100,7 +101,9 @@ class C10_API Scalar {
 
   SymFloat toSymFloat() const {
     if (Tag::HAS_sd == tag) {
-      return c10::SymFloat::toSymFloat(intrusive_ptr<SymFloatNodeImpl>::reclaim_copy(static_cast<SymFloatNodeImpl*>(v.p)));
+      return c10::SymFloat::toSymFloat(
+          intrusive_ptr<SymFloatNodeImpl>::reclaim_copy(
+              static_cast<SymFloatNodeImpl*>(v.p)));
     } else {
       return toLong();
     }
