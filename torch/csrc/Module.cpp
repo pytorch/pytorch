@@ -15,12 +15,14 @@
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <torch/csrc/THConcat.h>
+#include <torch/csrc/utils/pybind.h>
 #include <cstdlib>
 #include <unordered_map>
 
@@ -40,11 +42,13 @@
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
+#include <torch/csrc/autograd/python_nested_functions.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_return_types.h>
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -52,6 +56,7 @@
 #include <torch/csrc/monitor/python_init.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
+#include <torch/csrc/profiler/python/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/init.h>
@@ -385,18 +390,23 @@ static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
 }
 
 void DLPack_Capsule_Destructor(PyObject* data) {
+  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
+    // early out, see DLPack spec: if a consuming library sets the capsule
+    // name to something else, they own it and we don't need to do anything
+    return;
+  }
   HANDLE_TH_ERRORS
+  // Causes overheads for validity checks again, but this case is rare
+  // since consuming libraries should rename the capsule according to spec.
+  // Note that this cannot set a python error (we checked validity above),
+  // so we don't need to handle python error state here.
   DLManagedTensor* dlMTensor =
       (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
-  if (dlMTensor) {
-    // the dlMTensor has not been consumed, call deleter ourselves
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
-  } else {
-    // the dlMTensor has been consumed
-    // PyCapsule_GetPointer has set an error indicator
-    PyErr_Clear();
-  }
+  // the dlMTensor has not been consumed, call deleter ourselves.
+  // DLPack spec mentions that deleter may be NULL, but deleter from
+  // `at::toDLPack` is never NULL, so no need for an additional check here.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
   END_HANDLE_TH_ERRORS_RET()
 }
 
@@ -910,6 +920,18 @@ void initModule(PyObject* module);
 } // namespace torch
 #endif
 
+#ifdef USE_ITT
+namespace torch {
+namespace profiler {
+void initIttBindings(PyObject* module);
+} // namespace profiler
+} // namespace torch
+#endif
+
+namespace torch {
+void initVerboseBindings(PyObject* module);
+} // namespace torch
+
 static std::vector<PyMethodDef> methods;
 
 // In Python we can't use the trick of C10_LOG_API_USAGE_ONCE
@@ -998,19 +1020,26 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
+  torch::functorch::impl::initFuncTorchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initReturnTypes(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
+  torch::autograd::initNestedFunctions(module);
   torch::autograd::initSparseFunctions(module);
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
+  torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
+#ifdef USE_ITT
+  torch::profiler::initIttBindings(module);
+#endif
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+  torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
 
 #ifdef USE_CUDA
@@ -1241,6 +1270,34 @@ Call this whenever a new thread is created in order to propagate values from
       "_set_neg", [](const at::Tensor& x, bool neg) { x._set_neg(neg); });
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
+  });
+
+  py_module.def("_add_meta_to_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    local_keyset.included_ = local_keyset.included_ | key_set;
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  });
+  py_module.def("_remove_meta_from_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    auto k = key_set.highestBackendKey();
+    local_keyset.included_ = local_keyset.included_.remove_backend(k);
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  });
+
+  py_module.def("_dump_local_tls_set", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+  });
+
+  py_module.def("_is_deploy_enabled", []() {
+#if defined(USE_DEPLOY)
+    return true;
+#else
+    return false;
+#endif
   });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();

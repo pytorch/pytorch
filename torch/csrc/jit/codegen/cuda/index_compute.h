@@ -61,6 +61,7 @@ namespace fuser {
 namespace cuda {
 
 class ContigIDs;
+class LoopIndexing;
 
 class IndexCompute : public BackwardVisitor {
  protected:
@@ -69,6 +70,7 @@ class IndexCompute : public BackwardVisitor {
   void handle(Split*) override;
   void handle(Merge*) override;
   void handle(Expr*) override;
+  void handle(Swizzle2D*) override;
 
   // return extent_map_[id] if exists, else return id->extent()
   Val* getExtent(IterDomain* id) const;
@@ -77,6 +79,24 @@ class IndexCompute : public BackwardVisitor {
   bool isZero(IterDomain* id) const;
   //! True if any dependent of a domain is not used to index
   bool hasZeroMerged(IterDomain* id) const;
+
+  //! Returns the concrete ID from the compute at EXACT mode map if
+  //! concrete_id_pass == true, otherwise returns id passed in.
+  //! Helps unify the expr handling logic in reference domain and concrete id
+  //! based traversal.
+  IterDomain* maybeGetExactMapConcreteID(IterDomain* id);
+
+  //! (Concrete indexing pass only)
+  //!  Collect permissive index binding from the given expression.
+  //! See also permissive_map_ and LoopIndexing::getBackwardOutOfLineExprList.
+  void collectIndexIntoPermissiveMap(const LoopIndexing& loop_indexing);
+
+  //! (Concrete indexing pass only)
+  //!  Iterate through id_expr's input and pull index vals from permissive
+  //! map, when both of the following are true:
+  //!    1. the output id is missing in index_map_.
+  //!    2. the output id is found in permissive map.
+  void updateIndexMapFromPermissiveMap(const Expr* id_expr);
 
   // Tensor domain we're mapping back to root
   const TensorDomain* td_; // NOLINT
@@ -117,6 +137,27 @@ class IndexCompute : public BackwardVisitor {
   // Map from IterDomains to halo-extended extents in corresponding
   // reference tensor
   std::unordered_map<IterDomain*, Val*> reference_halo_extent_map_;
+
+  // Temporary flag which tells IndexCompute to use concrete id's from the exact
+  // map rather than the actual IDs used in the ID expressions.
+  bool concrete_id_pass_ = false;
+
+  // Mode of swizzle that are activated in this index compute
+  //  instance. Will treat swizzles of different mode as no-op.
+  // Currently data mode swizzles are handled same as before in IndexSwizzle
+  //  pass, while loop mode swizzles are handled early on in concrete indexing
+  //  pass. See also [Note on swizzle mode]
+  SwizzleMode swizzle_mode_ = SwizzleMode::NoSwizzle;
+
+  // (Concrete id pass only)
+  // Contains the indexing math that could be resolved with only the
+  //  iterdomains on the right of the consumer_tv's ca axis, i.e. the
+  //  ones that corresponding to the loops that consumer_tv would not
+  //  share with any of its consumers.
+  // These indexing vals should be kept separate from index_map_ and
+  //  should only be used when the indexing traversal follows the
+  //  order defined in LoopIndexingAnalysis::traverseFromDomainVals.
+  std::unordered_map<IterDomain*, Val*> permissive_index_map_;
 
  public:
   const std::unordered_map<IterDomain*, Val*>& indexMap() const {
@@ -159,6 +200,14 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_set<IterDomain*> preferred_paths = {},
       std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
 
+  // Entry point used for using concrete id based traversal. This traversal is
+  // assumed to start at leaf IDs provided by initial_index_map.
+  IndexCompute(
+      std::unordered_map<IterDomain*, Val*> initial_index_map,
+      std::unordered_set<IterDomain*> zero_domains,
+      std::unordered_set<IterDomain*> preferred_paths,
+      std::unordered_map<IterDomain*, Val*> concrete_halo_extent_map);
+
   // Updates index_map, extent_map, and zero_merged_in based on id_map and
   // returns a new IndexCompute ready to be used.
   IndexCompute updateIndexCompute(
@@ -167,6 +216,10 @@ class IndexCompute : public BackwardVisitor {
       const ContigIDs& contig_finder,
       const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map =
           {}) const;
+
+  // Interface to run index traversal through loop indexing analysis result to
+  // be used with the entry point for concrete id based traversal.
+  void run(const LoopIndexing& loop_indexing);
 
   virtual void run();
 };
@@ -181,12 +234,22 @@ class IndexSwizzle : public IndexCompute {
       std::unordered_set<IterDomain*> zero_domains,
       std::unordered_set<IterDomain*> zero_merged_in);
 
+  IndexSwizzle(
+      const TensorView* tv,
+      const TensorDomain* domain,
+      std::unordered_map<IterDomain*, Val*> initial_index_map,
+      std::unordered_map<IterDomain*, Val*> extent_map,
+      std::unordered_set<IterDomain*> zero_domains,
+      std::unordered_set<IterDomain*> zero_merged_in);
+
   void run() override;
 
  protected:
   using IndexCompute::handle;
 
   void handle(Expr* e) override;
+
+  void handle(Swizzle2D* swizzle_2d) override;
 
  private:
   const TensorView* tv_ = nullptr;
@@ -300,6 +363,13 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
+  //! Returns a vector of strided indices mapped onto the (rfactor)
+  //! root domain of a consumer tensor. The returned index is intended
+  //! to be used to index into arange or Philox pseudo random sequences
+  static std::vector<Val*> getLinearIndex(
+      TensorView* consumer_tv,
+      const std::vector<kir::ForLoop*>& loops);
+
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
   //! predicates, and a list of concrete roots they're associated with. It is
@@ -322,25 +392,39 @@ class Index {
   //! this is not a bool value as if we have an unswitch loop with a vectorized
   //! loop inside, we only want to base the "unswitch" like predicate on the
   //! vectorized loop.
-  static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
-  getReferenceRootPredicates(
+  static std::vector<RootPredicateInfo> getReferenceRootPredicates(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,
       bool padding_predicate);
-
-  // Determine if we may run into over reuse of predicates or registers in the
-  // compiler. If the loop can be unrolled and the index and domain are not
-  // "simple" we likely want the loop protected.
-  //
-  // Magic zero protection should only be done for global memory and predicates.
-  // We should avoid use on registers. Shared memory does not require it, but
-  // likely wouldn't hurt.
-  static bool protectWithMagicZero(
-      kir::ForLoop* loop,
-      IterDomain* reference_domain = nullptr,
-      Val* ind = nullptr);
 };
+
+// Used for local and shared index mapping. Returns a map from loops
+// to loop indices as well as a set of loops that do not contribute to
+// indexing.
+// TODO: could be cleaned up further.
+std::pair<
+    std::unordered_map<kir::ForLoop*, Val*>,
+    std::unordered_set<kir::ForLoop*>>
+indexMapFromTV(
+    const TensorView* tv,
+    const std::vector<kir::ForLoop*>& loops,
+    kir::ForLoop* alloc_loop,
+    bool as_consumer,
+    kir::ForLoop* double_buffer_loop = nullptr);
+
+//! Set "pragma unroll" required for loops that indexing of Local
+//! tensors depends on.
+//!
+//! \param tv Indexed tensor
+//! \param alloc_loop Allocation loop of tv
+//! \param loops The current loop structure
+//! \param id_map Producer-to-consumer map in case of indexing as producer
+void ensureStaticIndexing(
+    const TensorView* tv,
+    kir::ForLoop* alloc_loop,
+    const std::vector<kir::ForLoop*>& loops,
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map = {});
 
 } // namespace cuda
 } // namespace fuser

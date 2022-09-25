@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <ATen/core/Tensor.h>
@@ -35,6 +36,7 @@
 #include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 
 #include <limits>
 
@@ -545,11 +547,13 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
 }
 
 void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  if (!result.is_same(self)) result.copy_(self);
+  if (!result.is_same(self)) {
+    result.copy_(self);
+  }
 
   // Scalars are treated as 1-d tensor
-  Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
-  Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+  const Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
+  const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
 
   TORCH_CHECK(result.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
   TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
@@ -571,19 +575,19 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   // total size of the tensor ignoring dimension `dim`;
   // -the number of index we are choosing, which is the total size
   // of the tensor `index`.
-  ptrdiff_t sliceSize = getSliceSize(self_, dim, index, source_);
-  ptrdiff_t sourceTotalSize = source.numel();
-  int64_t selfAddDimSize = self_.size(dim);
-  ptrdiff_t numIndex = index.numel();
-  int64_t selfNumel = self_.numel();
+  const ptrdiff_t sliceSize = getSliceSize(self_, dim, index, source_);
+  const ptrdiff_t sourceTotalSize = source.numel();
+  const int64_t selfAddDimSize = self_.size(dim);
+  const ptrdiff_t numIndex = index.numel();
+  const int64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
   }
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  bool indContig = index.is_contiguous();
+  const bool indContig = index.is_contiguous();
 
-  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
@@ -604,11 +608,11 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
+  const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  const dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
+  const dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  const dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -616,13 +620,13 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::ComplexHalf, result.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
-      int selfAddDim = selfInfo.collapseDims(dim);
+      const int selfAddDim = selfInfo.collapseDims(dim);
       selfInfo.reduceDim(selfAddDim);
-      auto alpha_value = alpha.to<scalar_t>();
+      const auto alpha_value = alpha.to<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cuda_", [&] () {
         auto sourceInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
-        int sourceAddDim = sourceInfo.collapseDims(dim);
+        const int sourceAddDim = sourceInfo.collapseDims(dim);
         sourceInfo.reduceDim(sourceAddDim);
 
         auto indexInfo =
@@ -642,7 +646,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
             SMALL_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1);
           }
         } else {
-          bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
+          const bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
 
           if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
             LARGE_INDEX(scalar_t, index_t, unsigned int, 1, 1, -2, true);
@@ -668,13 +672,13 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
         cuda::detail::getTensorInfo<scalar_t, uint64_t>(self_);
-      int selfAddDim = selfInfo.collapseDims(dim);
+      const int selfAddDim = selfInfo.collapseDims(dim);
       selfInfo.reduceDim(selfAddDim);
-      auto alpha_value = alpha.to<scalar_t>();
+      const auto alpha_value = alpha.to<scalar_t>();
 
       cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
         cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
-      int sourceAddDim = sourceInfo.collapseDims(dim);
+      const int sourceAddDim = sourceInfo.collapseDims(dim);
       sourceInfo.reduceDim(sourceAddDim);
 
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cuda_", [&] () {
@@ -1213,6 +1217,35 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
       });
 }
 
+template <typename scalar_t, typename mask_t>
+void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_val) {
+    gpu_kernel(
+        iter, [quantized_val] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
+          if (mask) {
+            return quantized_val;
+          }
+          return self;
+    });
+}
+
+void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
+  AT_DISPATCH_QINT_TYPES(
+      iter.common_dtype(), "masked_fill_", [&]() {
+        float float_val = value.to<float>();
+        const auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
+        auto mask_dtype = iter.input_dtype(0);
+
+        if (mask_dtype == at::ScalarType::Bool) {
+            cuda_masked_fill_kernel_quantized<scalar_t, bool>(iter, quantized_val);
+        }
+        else {
+            cuda_masked_fill_kernel_quantized<scalar_t, uint8_t>(iter, quantized_val);
+        }
+    });
+}
+
+REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_quantized);
+
 } // anonymous namespace
 
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
@@ -1254,6 +1287,11 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
+  // We hit this function if either of the input tensor lives on CUDA.
+  // It is ok, if `value` is `CPU` tensor but we should not allow `self` or
+  // `mask` to be CPU tensor. Check for `self` and `mask` being on same device
+  // exists in `masked_fill__cuda` (Scalar version).
+  TORCH_CHECK(!self.device().is_cpu(), "masked_fill_: Expected inputs to be on same device")
   return masked_fill__cuda(self, mask, value.item());
 }
 

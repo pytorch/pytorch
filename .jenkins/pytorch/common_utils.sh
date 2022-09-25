@@ -98,7 +98,7 @@ function get_pinned_commit() {
 function install_torchvision() {
   local commit
   commit=$(get_pinned_commit vision)
-  pip_install --user "git+https://github.com/pytorch/vision.git@${commit}"
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/vision.git@${commit}"
 }
 
 function checkout_install_torchvision() {
@@ -117,6 +117,8 @@ function clone_pytorch_xla() {
     pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
     git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
+    git submodule sync
+    git submodule update --init --recursive
     popd
   fi
 }
@@ -137,6 +139,10 @@ function checkout_install_torchdynamo() {
   time python setup.py develop
   popd
   popd
+}
+
+function test_functorch() {
+  python test/run_test.py --functorch --verbose
 }
 
 function print_sccache_stats() {

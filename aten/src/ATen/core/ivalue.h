@@ -7,6 +7,7 @@
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
+#include <c10/core/SymFloat.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
@@ -145,6 +146,7 @@ struct Capsule {
   _(ComplexDouble)           \
   _(Int)                     \
   _(SymInt)                  \
+  _(SymFloat)                \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -555,19 +557,37 @@ public:
     payload.u.as_int = i;
   }
 
-  IValue(c10::SymInt i) : tag(Tag::SymInt) {
-    payload.u.as_int = i.data();
+  IValue(c10::SymInt i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = i.toSymIntNodeImpl().release();
+    } else {
+      tag = Tag::Int;
+      payload.u.as_int = i.as_int_unchecked();
+    }
   }
-
-  IValue(c10::SymIntArrayRef v);
 
   bool isSymInt() const {
     return Tag::SymInt == tag;
   }
 
-  c10::SymInt toSymInt() const {
-    return c10::SymInt(payload.u.as_int);
+  c10::SymInt toSymInt() const;
+
+  IValue(c10::SymFloat i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = i.toSymFloatNodeImpl().release();
+    } else {
+      tag = Tag::Double;
+      payload.u.as_double = i.as_float_unchecked();
+    }
   }
+
+  bool isSymFloat() const {
+    return Tag::SymFloat == tag;
+  }
+
+  c10::SymFloat toSymFloat() const;
 
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
@@ -1072,7 +1092,9 @@ public:
       case Tag::Int:
         return false;
       case Tag::SymInt:
-        return false;
+        return true;
+      case Tag::SymFloat:
+        return true;
       case Tag::Bool:
         return false;
       case Tag::Tuple:
@@ -1335,6 +1357,10 @@ struct WeakOrStrongCompilationUnit {
     return strong_ptr_ != c10::nullopt;
   }
 
+  bool holdingEmptyStrongRef() const {
+    return holdingStrongRef() && *strong_ptr_ == nullptr;
+  }
+
   c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
   c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
 };
@@ -1358,8 +1384,13 @@ struct TORCH_API WeakOrStrongTypePtr {
 
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
+
   bool holds_strong_ref() const {
     return cu_.holdingStrongRef();
+  }
+
+  bool holds_empty_strong_ref() const {
+    return cu_.holdingEmptyStrongRef();
   }
 };
 

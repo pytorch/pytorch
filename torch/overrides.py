@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -91,6 +91,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.import_ir_module,
         torch.import_ir_module_from_buffer,
         torch.is_anomaly_enabled,
+        torch.is_anomaly_check_nan_enabled,
         torch.is_grad_enabled,
         torch.merge_type_from_type_comment,
         torch.parse_ir,
@@ -206,6 +207,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.init.kaiming_normal,
         torch.nn.init.orthogonal,
         torch.nn.init.sparse,
+        torch.nested.to_padded_tensor,
         has_torch_function,
         handle_torch_function,
         torch.set_autocast_enabled,
@@ -251,7 +253,10 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__new__,
         Tensor.__class__,
         Tensor.__subclasshook__,
+        Tensor.__hash__,
         Tensor.as_subclass,
+        Tensor.eig,
+        Tensor.lstsq,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
@@ -279,7 +284,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_zerotensor,
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
-        Tensor.to_padded_tensor
+        Tensor.to_padded_tensor,
     }
 
 
@@ -409,6 +414,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
         torch.concat: lambda tensors, dim=0, out=None: -1,  # alias for torch.cat
+        torch.concatenate: lambda tensors, dim=0, out=None: -1,  # alias for torch.concatenate
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
@@ -485,7 +491,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
         torch.dstack: lambda tensors, out=None: -1,
-        torch.eig: lambda input, eigenvectors=False, out=None: -1,
         torch.linalg.eig: lambda input, out=None: -1,
         torch.linalg.eigvals: lambda input, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
@@ -650,7 +655,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.logsumexp: lambda input, names, keepdim=False, out=None: -1,
         torch.lstm: lambda data, batch_sizes, hx, params, has_biases, num_layers, dropout, train, bidirectional: -1,
         torch.lstm_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
-        torch.lstsq: lambda input, A, out=None: -1,
         torch.lt: lambda input, other, out=None: -1,
         torch.less: lambda input, other, out=None: -1,
         torch.lu: lambda A, pivot=True, get_infos=False, out=None: -1,
@@ -667,7 +671,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
-        torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,
         torch.linalg.matrix_rank: lambda input, tol=None, hermitian=False: -1,
         torch.linalg.multi_dot: lambda tensors, out=None: -1,
         torch.matrix_exp: lambda input: -1,
@@ -691,6 +694,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.miopen_batch_norm: (lambda input, weight, bias, running_mean, running_var, training,
                                   exponential_average_factor, epsilon: -1),
         torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,
+        torch.miopen_convolution_add_relu: lambda input, weight, z, alpha, bias, stride, padding, dilation, groups: -1,
+        torch.miopen_convolution_relu: lambda input, weight, bias, stride, padding, dilation, groups: -1,
         torch.miopen_convolution_transpose: (lambda input, weight, bias, padding, output_padding, stride, dilation,
                                              groups, benchmark, deterministic: -1),
         torch.miopen_depthwise_convolution: (lambda input, weight, bias, padding, stride, dilation, groups, benchmark,
@@ -1073,6 +1078,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.true_divide: lambda input, other: -1,
         torch.trunc: lambda input, out=None: -1,
         torch.unbind: lambda input, dim=0: -1,
+        torch.unflatten: lambda input, dim, sizes, names: -1,
         torch.unique: lambda input, sorted=True, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unique_consecutive: lambda input, return_inverse=False, return_counts=False, dim=None: -1,
         torch.unsafe_chunk: lambda input, chunks, dim=0: -1,
@@ -1152,7 +1158,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__deepcopy__: lambda self, memo: -1,
         Tensor.__int__: lambda self: -1,
         Tensor.__long__: lambda self: -1,
-        Tensor.__hash__: lambda self: -1,
         Tensor.__index__: lambda self: -1,
         Tensor.__len__: lambda self: -1,
         Tensor.__format__: lambda self, format_spec: -1,
@@ -1802,8 +1807,6 @@ class TorchFunctionModeMeta(type):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
@@ -1830,7 +1833,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
           ``NotImplemented``.
 
     Independent subclasses of :class:`TorchFunctionMode` are compositional:
-    modes can be pushed onto a stack with :func:`push_torch_function_mode`.
+    modes can be pushed onto a stack using ``with MyMode():``.
     When you call functions in the PyTorch API inside your
     ``__torch_function__`` implementation, by default, they will forward on to
     the next mode on the mode stack.  If you want recursively call back into
@@ -1859,6 +1862,7 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
             else:
                 self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_function_mode(self)
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_function_mode(self.inner)
@@ -1869,8 +1873,9 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
 
     @classmethod
     def push(cls, *args, **kwargs):
-        return push_torch_function_mode(functools.partial(cls, *args, **kwargs))
-
+        warnings.warn("`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`")
+        instance = cls(*args, **kwargs)
+        return instance
 
 class BaseTorchFunctionMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
@@ -1894,8 +1899,7 @@ def _no_torch_function_mode() -> Iterator[None]:
 
 class _TorchFunctionModeInfo(_ModeInfo):
     def __init__(self):
-        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode,
-                         base_mode_class=BaseTorchFunctionMode)
+        super().__init__(mode_name="torch_function", mode_class=TorchFunctionMode)
 
     def get_mode(self):
         return _get_torch_function_mode()
@@ -1910,8 +1914,8 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
     Context manager that sets the current :class:`TorchFunctionMode`; see the
     class for more information on what modes are.  This function is
     non-compositional; if there is already an existing mode, it will raise an
-    error; prefer using :func:`push_torch_function_mode` if your
-    ``__torch_function__`` implementation can defer to an inner mode.
+    error; prefer using ``with MyMode():`` if your ``__torch_function__``
+    implementation can defer to an inner mode.
 
     This function is safe to use inside a ``__torch_function__`` mode handler,
     as the mode is guaranteed to be disabled in this context.  You can use
@@ -1935,25 +1939,6 @@ def enable_torch_function_mode(mode, *, replace=None, ignore_preexisting=False) 
             and overwrite it with the passed mode.
     """
     return _enable_mode(mode, _TorchFunctionModeInfo(), replace=replace, ignore_preexisting=ignore_preexisting)
-
-@contextlib.contextmanager
-def push_torch_function_mode(ctor) -> Iterator[TorchFunctionMode]:
-    """
-    Context manager that pushes a :class:`TorchFunctionMode` onto the current
-    mode stack; see the class for more information on what modes are.  Stacked
-    modes can delegate to each other by invoking the ``__torch_function__``
-    method for the ``inner`` mode.
-
-    Args:
-        ctor: a function that when invoked as ``ctor(inner=...)`` produces
-            a :class:`TorchFunctionMode`.  If your :class:`TorchFunctionMode`
-            has no ``__init__`` implementation, you can simply pass the class
-            itself (e.g., ``push_torch_function_mode(MyMode)``); otherwise,
-            use ``functools.partial`` to partially apply the constructor with all
-            non-inner arguments (e.g.,
-            ``push_torch_function_mode(partial(MyMode, arg))``)
-    """
-    return _push_mode(ctor, _TorchFunctionModeInfo())
 
 class enable_reentrant_dispatch():
     def __enter__(self):

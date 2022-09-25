@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Awaitable, DefaultDict, Dict, List, Match, Optional, Set, cast
+from typing import Awaitable, cast, DefaultDict, Dict, List, Match, Optional, Set
 
 from typing_extensions import TypedDict
 

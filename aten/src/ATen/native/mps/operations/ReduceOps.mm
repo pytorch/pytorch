@@ -84,13 +84,15 @@ void set_apparent_shapes(NSMutableArray<NSNumber*> * &apparent_out_shape,
 // Helper function to set the axes of reduction
 void set_axes(NSMutableArray<NSNumber *> * &axes,
               int64_t num_reduce_dims,
-              IntArrayRef& dim,
+              OptionalIntArrayRef opt_dim,
               int64_t num_input_dims) {
     if(num_reduce_dims == 0) {
       axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
       axes[0] = @0;
     }
     else {
+      TORCH_INTERNAL_ASSERT(opt_dim.has_value());
+      IntArrayRef dim = opt_dim.value();
       axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_reduce_dims];
       for(int i = 0; i < num_reduce_dims; i++) {
         axes[i] = [NSNumber numberWithInt:maybe_wrap_dim(dim[i], num_input_dims)];
@@ -100,7 +102,7 @@ void set_axes(NSMutableArray<NSNumber *> * &axes,
 
 // Helper function to prepare axes and tensor shapes
 void set_axes_and_shapes(const Tensor& input_t,
-                         IntArrayRef dims,
+                         OptionalIntArrayRef opt_dims,
                          NSMutableArray<NSNumber*> * &axes,
                          NSMutableArray<NSNumber*> * &apparent_input_shape,
                          NSMutableArray<NSNumber*> * &apparent_output_shape,
@@ -109,13 +111,13 @@ void set_axes_and_shapes(const Tensor& input_t,
   IntArrayRef input_shape = input_t.sizes();
 
   int64_t num_input_dims = input_shape.size();
-  int64_t num_reduce_dims = dims.size();
+  int64_t num_reduce_dims = opt_dims.has_value() ? opt_dims.value().size() : 0;
   int64_t num_output_dims;
 
   num_output_dims = num_reduce_dims == 0 ? 1 : num_input_dims;
 
   // Reduction axes
-  set_axes(axes, num_reduce_dims, dims, input_shape.size());
+  set_axes(axes, num_reduce_dims, opt_dims, input_shape.size());
 
   // Shapes
   set_apparent_shapes(apparent_output_shape,
@@ -136,20 +138,25 @@ void set_axes_and_shapes(const Tensor& input_t,
 }
 
 void reduction_out_mps
-   (const Tensor& input_t,
-    IntArrayRef dim,
+   (const Tensor& input_tensor,
+    OptionalIntArrayRef opt_dim,
     bool keepdim,
     c10::optional<ScalarType> dtype,
     const Tensor& output_t,
     MPSReductionType reduction_type,
     const std::string& func_name) {
 
+  auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
+
   IntArrayRef input_shape = input_t.sizes();
 
-  for(int i = 0; i < dim.size(); i++) {
-    auto wrap_dim = maybe_wrap_dim(dim[i], input_shape.size());
-    TORCH_CHECK(wrap_dim < input_shape.size(),
-    func_name+": reduction dim must be in the range of input shape")
+  if (opt_dim.has_value()) {
+    IntArrayRef dim = opt_dim.value();
+    for(int i = 0; i < dim.size(); i++) {
+      auto wrap_dim = maybe_wrap_dim(dim[i], input_shape.size());
+      TORCH_CHECK(wrap_dim < input_shape.size(),
+      func_name+": reduction dim must be in the range of input shape")
+    }
   }
 
   namespace native_mps = at::native::mps;
@@ -159,7 +166,7 @@ void reduction_out_mps
   NSMutableArray<NSNumber*> *apparent_output_shape = nil;
   NSMutableArray<NSNumber*> *output_shape = nil;
 
-  set_axes_and_shapes(input_t, dim, axes, apparent_input_shape, apparent_output_shape, output_shape);
+  set_axes_and_shapes(input_t, opt_dim, axes, apparent_input_shape, apparent_output_shape, output_shape);
 
    auto cache_ = native_mps::MPSGraphCache::getInstance();
 
@@ -271,12 +278,12 @@ void reduction_out_mps
 
 TORCH_IMPL_FUNC(sum_out_mps)
    (const Tensor& input_t,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     bool keepdim,
     c10::optional<ScalarType> dtype,
     const Tensor& output_t) {
 
-    reduction_out_mps(input_t, dim, keepdim, dtype, output_t, MPSReductionType::SUM, "sum_out_mps");
+    reduction_out_mps(input_t, opt_dim, keepdim, dtype, output_t, MPSReductionType::SUM, "sum_out_mps");
 }
 
 TORCH_IMPL_FUNC(prod_out_mps)
@@ -377,23 +384,26 @@ Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
 
 TORCH_IMPL_FUNC(mean_out_mps)
    (const Tensor& input_t,
-    IntArrayRef dim,
+    OptionalIntArrayRef opt_dim,
     bool keepdim,
     c10::optional<ScalarType> dtype,
     const Tensor& output_t) {
 
-    reduction_out_mps(input_t, dim, keepdim, dtype, output_t, MPSReductionType::MEAN, "mean_out_mps");
+    reduction_out_mps(input_t, opt_dim, keepdim, dtype, output_t, MPSReductionType::MEAN, "mean_out_mps");
 }
 
 TORCH_IMPL_FUNC(norm_out_mps)
-(const Tensor& input_t,
+(const Tensor& input_tensor,
  const OptionalScalarRef opt_p,
  IntArrayRef dim,
  bool keepdim,
  const Tensor& output_t)
 {
-  if (input_t.numel() == 0)
+  if (input_tensor.numel() == 0)
     return;
+
+  auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
+
   IntArrayRef input_shape = input_t.sizes();
 
   for(int i = 0; i < dim.size(); i++) {
@@ -402,7 +412,6 @@ TORCH_IMPL_FUNC(norm_out_mps)
     "norm_out_mps: reduction dim must be in the range of input shape")
   }
   namespace native_mps = at::native::mps;
-  CheckedFrom c = "norm_out_mps";
 
   using CachedGraph = native_mps::MPSUnaryCachedGraph;
 

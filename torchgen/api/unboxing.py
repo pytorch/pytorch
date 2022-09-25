@@ -1,15 +1,15 @@
 from typing import List, Tuple
 
 from torchgen.api import cpp
-from torchgen.api.types import Binding, CType, CppSignatureGroup
+from torchgen.api.types import Binding, CppSignatureGroup, CType
 from torchgen.model import (
     Argument,
-    NativeFunction,
-    Type,
-    BaseType,
-    OptionalType,
-    ListType,
     BaseTy,
+    BaseType,
+    ListType,
+    NativeFunction,
+    OptionalType,
+    Type,
 )
 
 # This file generates the code for unboxing wrappers, i.e., the glue logic to unbox a boxed operator and convert the
@@ -136,7 +136,10 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
 def argumenttype_ivalue_convert(
     t: Type, arg_name: str, *, mutable: bool = False
 ) -> Tuple[str, CType, List[str], List[str]]:
-    ctype = cpp.argumenttype_type(t=t, mutable=mutable, binds=arg_name).type
+    # Unboxing is for mobile, which doesn't care about SymInts
+    ctype = cpp.argumenttype_type(
+        t=t, mutable=mutable, binds=arg_name, symint=False
+    ).type
 
     if isinstance(t, BaseType):
         out_name = f"{arg_name}_base"

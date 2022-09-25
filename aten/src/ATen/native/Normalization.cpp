@@ -14,6 +14,7 @@
 #include <c10/util/irange.h>
 
 #include <vector>
+#include <c10/core/SymIntArrayRef.h>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -41,7 +42,7 @@ DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
-  void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
+  void check_dims_match_num_input_features(const char* arg_name, SymInt expected, SymInt actual){
     TORCH_CHECK(actual == expected,
              arg_name, " should contain ", expected, " elements not ", actual);
   }
@@ -186,6 +187,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     auto _var_sum = at::empty({n_input}, input.options().dtype(dtype));
     auto _mean_a = _mean.accessor<param_t, 1>();
     auto _var_sum_a = _var_sum.accessor<param_t, 1>();
+    auto momentum_ = static_cast<param_t>(momentum);
 
     batch_norm_cpu_collect_stats_stub(kCPU, _mean, _var_sum, input);
 
@@ -195,11 +197,11 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
         save_var_transform_a[f] = VarTransform<accscalar_t>{}(_var_sum_a[f] / n, eps);
 
         if (running_mean.defined()) {
-          running_mean_a[f] = momentum * _mean_a[f] + (1 - momentum) * running_mean_a[f];
+          running_mean_a[f] = momentum_ * _mean_a[f] + (1 - momentum_) * running_mean_a[f];
         }
         if (running_var.defined()) {
-           accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
-           running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+          accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
+          running_var_a[f] = momentum_ * unbiased_var + (1 - momentum_) * running_var_a[f];
         }
       }
     });
@@ -442,14 +444,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  auto num_features = input.sizes()[1];
+  auto num_features = input.sym_sizes()[1];
 
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
-    auto save_mean = at::empty({num_features}, options);
-    auto save_invstd = at::empty({num_features}, options);
+    auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
+    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
@@ -460,20 +462,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   }
 
   if (running_mean.defined()) {
-    check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
+    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
   } else if (!training) {
     AT_ERROR("running_mean must be defined in evaluation mode");
   }
   if (running_var.defined()) {
-    check_dims_match_num_input_features("running_var", num_features, running_var.numel());
+    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
   } else if (!training) {
     AT_ERROR("running_var must be defined in evaluation mode");
   }
   if (weight.defined()) {
-    check_dims_match_num_input_features("weight", num_features, weight.numel());
+    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", num_features, bias.numel());
+    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
   }
 
   const bool use_cudnn = (
@@ -489,7 +491,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
           ||(input.size(0) <= 65535 && !training)) //spatial, eval
       && detail::getCUDAHooks().compiledWithCuDNN()
       && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
-      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L);
+      && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
+      && input.numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+      );
 
   if (use_cudnn) {
     auto input_c = input.contiguous(input.suggest_memory_format());
@@ -521,7 +525,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
                && cudnn_enabled
                );
 
-  if (use_miopen) {
+  if (use_miopen && input.suggest_memory_format() != MemoryFormat::ChannelsLast && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d) {
     return std::tuple_cat(
              at::miopen_batch_norm(
                input.contiguous(), weight.contiguous(), bias.contiguous(),

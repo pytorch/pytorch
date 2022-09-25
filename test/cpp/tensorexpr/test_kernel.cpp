@@ -154,7 +154,7 @@ TEST_F(Kernel, _1) {
   k.run(stack);
   o = stack[0].toTensor();
   for (size_t i = 0; i < 5 * 3; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 }
 
@@ -192,7 +192,7 @@ TEST_F(Kernel, _2) {
   k.run(stack);
   o = stack[0].toTensor();
   for (size_t i = 0; i < 5 * 3; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 }
 
@@ -230,7 +230,7 @@ TEST_F(Kernel, _3) {
   k.run(stack);
   o = stack[0].toTensor();
   for (size_t i = 0; i < 5 * 3; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 }
 
@@ -278,7 +278,7 @@ TEST_F(Kernel, ParallelStrided) {
   k.run(stack);
   o = stack[0].toTensor();
   for (size_t i = 0; i < 5 * 3; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 }
 
@@ -321,7 +321,7 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     k.run(stack);
     o = stack[0].toTensor();
     for (size_t i = 0; i < 5 * 3; i++) {
-      CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+      TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
   {
@@ -356,10 +356,10 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     std::vector<IValue> stack = fmap<IValue>(inputs);
     k.run(stack);
     o = stack[0].toTensor();
-    CHECK_EQ(o.sizes()[0], 8);
-    CHECK_EQ(o.sizes()[1], 4);
+    TORCH_CHECK_EQ(o.sizes()[0], 8);
+    TORCH_CHECK_EQ(o.sizes()[1], 4);
     for (size_t i = 0; i < 8 * 4; i++) {
-      CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+      TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
   {
@@ -412,16 +412,16 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     o = stack[0].toTensor();
 
     // Check sizes
-    CHECK_EQ(o.sizes().size(), ref.sizes().size());
+    TORCH_CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
     for (const auto idx : c10::irange(ref.sizes().size())) {
-      CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+      TORCH_CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
     for (const auto i : c10::irange(num_el)) {
-      CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+      TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
   {
@@ -465,16 +465,16 @@ TEST_F(Kernel, DISABLED_Shape_Inference) {
     o = stack[0].toTensor();
 
     // Check sizes
-    CHECK_EQ(o.sizes().size(), ref.sizes().size());
+    TORCH_CHECK_EQ(o.sizes().size(), ref.sizes().size());
     size_t num_el = 1;
     for (const auto idx : c10::irange(ref.sizes().size())) {
-      CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+      TORCH_CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
     for (const auto i : c10::irange(num_el)) {
-      CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+      TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
     }
   }
   {
@@ -564,17 +564,17 @@ TEST_F(Kernel, CatInputTypesPromotion) {
     auto o = stack[0].toTensor();
 
     // Check sizes
-    CHECK_EQ(o.sizes().size(), ref.sizes().size());
-    CHECK_EQ(o.dtype(), ref.dtype());
+    TORCH_CHECK_EQ(o.sizes().size(), ref.sizes().size());
+    TORCH_CHECK_EQ(o.dtype(), ref.dtype());
     size_t num_el = 1;
     for (const auto idx : c10::irange(ref.sizes().size())) {
-      CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+      TORCH_CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
       num_el *= ref.sizes()[idx];
     }
 
     // Check the contents
     for (const auto i : c10::irange(num_el)) {
-      CHECK_EQ(((double*)o.data_ptr())[i], ((double*)ref.data_ptr())[i]);
+      TORCH_CHECK_EQ(((double*)o.data_ptr())[i], ((double*)ref.data_ptr())[i]);
     }
   }
 }
@@ -687,17 +687,17 @@ TEST_F(Kernel, CatWoConditionals) {
   auto o = stack[0].toTensor();
 
   // Check sizes
-  CHECK_EQ(o.sizes().size(), ref.sizes().size());
-  CHECK_EQ(o.dtype(), ref.dtype());
+  TORCH_CHECK_EQ(o.sizes().size(), ref.sizes().size());
+  TORCH_CHECK_EQ(o.dtype(), ref.dtype());
   size_t num_el = 1;
   for (const auto idx : c10::irange(ref.sizes().size())) {
-    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+    TORCH_CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
     num_el *= ref.sizes()[idx];
   }
 
   // Check the contents
   for (const auto i : c10::irange(num_el)) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
   getCatWoConditionals() = old_cat_wo_conditionals;
 }
@@ -752,17 +752,17 @@ TEST_F(Kernel, OptimizeConditionals) {
   auto o = stack[0].toTensor();
 
   // Check sizes
-  CHECK_EQ(o.sizes().size(), ref.sizes().size());
-  CHECK_EQ(o.dtype(), ref.dtype());
+  TORCH_CHECK_EQ(o.sizes().size(), ref.sizes().size());
+  TORCH_CHECK_EQ(o.dtype(), ref.dtype());
   size_t num_el = 1;
   for (const auto idx : c10::irange(ref.sizes().size())) {
-    CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
+    TORCH_CHECK_EQ(o.sizes()[idx], ref.sizes()[idx]);
     num_el *= ref.sizes()[idx];
   }
 
   // Check the contents
   for (const auto i : c10::irange(num_el)) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
   getOptConditionals() = old_opt_conditionals;
   getCatWoConditionals() = old_cat_wo_conditionals;
@@ -1517,7 +1517,7 @@ TEST_F(Kernel, RunFast) {
 
   k.runFast({a.data_ptr(), b.data_ptr()}, {o.data_ptr()});
   for (size_t i = 0; i < 5 * 3; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 #endif
 }
@@ -1544,7 +1544,7 @@ TEST_F(Kernel, RunWithAllocatedOutputs) {
   std::vector<IValue> stack = fmap<IValue>(args);
   k.runWithAllocatedOutputs(stack);
   for (size_t i = 0; i < 5 * 3; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 #endif
 }
@@ -1663,7 +1663,7 @@ TEST_F(Kernel, Vectorize) {
   k.run(stack);
   o = stack[0].toTensor();
   for (size_t i = 0; i < 100 * 16; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 #endif
 }
@@ -1699,7 +1699,7 @@ TEST_F(Kernel, DISABLED_FlattenVectorize) {
   k.run(stack);
   o = stack[0].toTensor();
   for (size_t i = 0; i < 100 * 3; i++) {
-    CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    TORCH_CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
   }
 #endif
 }
@@ -1729,7 +1729,8 @@ TEST_F(Kernel, Strided1dWithinBounds) {
   auto output = stack[0].toTensor();
 
   for (size_t i = 0; i < 3; ++i) {
-    CHECK_EQ(((float*)output.data_ptr())[i], ((float*)expect.data_ptr())[i]);
+    TORCH_CHECK_EQ(
+        ((float*)output.data_ptr())[i], ((float*)expect.data_ptr())[i]);
   }
 }
 
@@ -1784,14 +1785,14 @@ graph(%x : int, %y : int):
   std::vector<void*> inputs = {&x, &y};
   std::vector<void*> outputs = {&r, &z};
   k.runFast(inputs, outputs);
-  CHECK_EQ(z, x * y);
-  CHECK_EQ(r, z * x);
+  TORCH_CHECK_EQ(z, x * y);
+  TORCH_CHECK_EQ(r, z * x);
 
   // Verify that TEK::run works correctly with scalar outputs
   std::vector<IValue> stack = {x, y};
   k.run(stack);
-  CHECK_EQ(stack[0], x * y * x);
-  CHECK_EQ(stack[1], x * y);
+  TORCH_CHECK_EQ(stack[0], x * y * x);
+  TORCH_CHECK_EQ(stack[1], x * y);
 }
 
 TEST_F(Kernel, ScalarTensorOut) {
@@ -1820,8 +1821,8 @@ graph(%x : int,
   std::vector<void*> inputs = {&x, xt.data_ptr(), &y, yt.data_ptr()};
   std::vector<void*> outputs = {&r, rt.data_ptr(), &z, zt.data_ptr()};
   k.runFast(inputs, outputs);
-  CHECK_EQ(z, x * y);
-  CHECK_EQ(r, z * x);
+  TORCH_CHECK_EQ(z, x * y);
+  TORCH_CHECK_EQ(r, z * x);
   ASSERT_TRUE(at::equal(zt, xt * yt));
   ASSERT_TRUE(at::equal(rt, zt * xt));
 
@@ -1829,9 +1830,9 @@ graph(%x : int,
   // inputs/utputs
   std::vector<IValue> stack = {x, xt, y, yt};
   k.run(stack);
-  CHECK_EQ(stack[0], x * y * x);
+  TORCH_CHECK_EQ(stack[0], x * y * x);
   ASSERT_TRUE(at::equal(stack[1].toTensor(), xt * yt * xt));
-  CHECK_EQ(stack[2], x * y);
+  TORCH_CHECK_EQ(stack[2], x * y);
   ASSERT_TRUE(at::equal(stack[3].toTensor(), xt * yt));
 }
 

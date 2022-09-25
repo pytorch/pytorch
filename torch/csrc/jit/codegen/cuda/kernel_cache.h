@@ -25,8 +25,7 @@ class SchedulerRuntimeInfo;
 
 // Utilities for benchmarking and profiling
 struct ExecutorLog {
-  c10::optional<ReductionParams> reduction_params = c10::nullopt;
-  c10::optional<PointwiseParams> pointwise_params = c10::nullopt;
+  std::shared_ptr<HeuristicParams> params = nullptr;
   FusionExecutor* fusion_executor = nullptr;
 };
 
@@ -43,7 +42,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
  public:
   explicit FusionKernelRuntime(
       Fusion* fusion,
-      const at::ArrayRef<IValue>& inputs);
+      const KernelArgumentHolder& inputs);
 
   //! Type notations within FusionKernelRuntime Context
   using HashType = size_t;
@@ -57,10 +56,34 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
     }
   }
 
+  //! query if we already have a compiled kernel for execution
+  bool isCompiled() {
+    std::unique_lock<std::mutex> lock0(mutex_, std::try_to_lock);
+    std::unique_lock<std::mutex> lock1(compiling_, std::try_to_lock);
+    if (!lock0.owns_lock() || !lock1.owns_lock()) {
+      // compilation in progress
+      return false;
+    }
+
+    return std::all_of(
+        executors_.begin(), executors_.end(), [](const auto& executor) {
+          return executor.compiled();
+        });
+  }
+
+  //! starts compilation async
+  void startAsyncCompile(KernelArgumentHolder& inputs);
+
+  //! maps entries in `args` to fusion inputs.
+  //! Note that this function also pushes extra bits like dimension extent into
+  //! `args` for expression evaluator binding. So consider your `args` polluted
+  //! after this function and use it with caution.
+  void mapFusionInputsToArgs(
+      std::unordered_map<Val*, const ArgAbstract*>& tensor_map,
+      KernelArgumentHolder& args);
+
   //! Unified interface to run the managed kernels with given input
-  std::vector<at::Tensor> runWithInput(
-      const at::ArrayRef<IValue>& inputs,
-      size_t input_id);
+  std::vector<at::Tensor> runWithInput(KernelArgumentHolder& args);
 
   //! Turn On/Off profiling
   void profile(bool to_profile = true) {
@@ -111,7 +134,7 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //  any segment cannot be scheduled or the parameters don't match
   using HeuristicsPtr = std::unique_ptr<FusionHeuristics>;
   c10::optional<HeuristicsPtr> getMaybeHeuristicsFor(
-      const at::ArrayRef<IValue>& inputs);
+      const KernelArgumentHolder& args);
 
   //! Copy the launch params given in the parameter heuristics to prepare
   //!  for kernel launch for a new input dimension but same heuristics
@@ -122,8 +145,14 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! fusions, or a kernel for a segmentedGrouup in a segmented fusion. Returns
   //! the kernel outputs.
   std::vector<at::Tensor> runKernelWithInput(
-      const at::ArrayRef<IValue>& inputs,
-      size_t input_id,
+      KernelArgumentHolder& args,
+      SegmentedGroup* sg);
+
+  //! Interface to compile a single kernel, either one kernel for single-kernel
+  //! fusions, or a kernel for a segmentedGrouup in a segmented fusion. Returns
+  //! the kernel outputs with tensor that doesn't own memory.
+  KernelArgumentHolder compileKernel(
+      const KernelArgumentHolder& args,
       SegmentedGroup* sg);
 
   //! Interface to run a the whole graph in a segmented fusion and return the
@@ -155,25 +184,24 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
 
   //! Pre-allocated runtime workspace to speed up kernel launch preparation.
   struct RuntimeWorkSpace {
-    //! Temporary space to save intermediate tensors for segmented fusion
-    std::unordered_map<Val*, IValue> tensor_map;
-
     //! Pre-determined order to run the segmented groups
     std::vector<SegmentedGroup*> group_run_order;
 
     //! Pre-determined order to bind tensor input meta data
     std::vector<Val*> group_extent_binding_order;
-
-    //! Pre-allocated workspace to hold group inputs and outputs
-    std::vector<IValue> group_runtime_inputs;
-    std::vector<at::Tensor> group_runtime_outputs;
   } runtime_workspace_;
 
-  //! Utility to speed up integer evaluation at runtime
-  std::unique_ptr<FusionPrecomputedIntegers> precomputed_integers_;
+  //! Utility to speed up value evaluation at runtime
+  std::unique_ptr<FusionPrecomputedValues> precomputed_values_;
 
   // States for profiling support
   bool profiling_ = false;
+
+  std::mutex mutex_;
+  // TODO: remove `compiling_` mutex and rely on `mutex_` only.
+  // we don't need the second mutex, if only I could figure out how to pass
+  // unique_lock into lambda
+  std::mutex compiling_;
 
   // The heuristics and executor for most recent kernel launch
   ExecutorLog most_recent_executor_log_;
@@ -209,9 +237,7 @@ class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
   //! within the lookup cache. This is needed because lookup shortcut is also
   //! cached in nested `GraphCache`, `FusionExecutorCache` and `FusionExecutor`.
   //! see [ Note -- 2 level cache implementation ]
-  IdLookupReturn lookupId(
-      const at::ArrayRef<IValue>& inputs,
-      const SchedulerRuntimeInfo* additional_info = nullptr);
+  IdLookupReturn lookupId(const at::ArrayRef<IValue>& inputs);
 
   //! debugging API that returns the size of lookup table
   size_t size() const {
@@ -305,11 +331,13 @@ class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
 class TORCH_CUDA_CU_API FusionExecutorCache {
  public:
   //! create new fusion executor cache at a given device to handle kernel
-  //! generation of dynamic sizes;
-  //! fusion executor is taking the ownership of `fusion`;
+  //! generation of dynamic sizes
+  //! fusion executor is taking the ownership of `fusion`
   explicit FusionExecutorCache(std::unique_ptr<Fusion> fusion);
 
-  //! Execute fusion graph with given inputs, create `FusionExecutor` as needed;
+  //! Execute fusion graph with given inputs, create `FusionExecutor` as needed
+  //! Note this function also handles permutation & input update outside of
+  //! codegen.
   std::vector<at::Tensor> runFusionWithInputs(
       const at::ArrayRef<IValue>& inputs);
 
@@ -360,14 +388,25 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
     }
   }
 
+  //! converts inputs from IValue to KernelArgumentHolder, also handles cache
+  //! lookup
+  KernelArgumentHolder prepareInputs(const at::ArrayRef<IValue>& inputs);
+
+  //! query if there's a kernel ready to go for given inputs
+  bool isCompiled(const at::ArrayRef<IValue>& inputs);
+
+  //! compile a kernel executor for given inputs. Note: the compilation is
+  //! async, there's some restriction on the user side. e.g. don't overlap
+  //! compilation and execution for the same FusionExecutor entry. This is
+  //! experimental at this moment, please use with extra caution.
+  void compileFusionAsync(const at::ArrayRef<IValue>& inputs);
+
  private:
   //! evict cached short cut entry in `code_to_fe_lookup_` as well as cached
   //! entry in `FusionExecutor`
   void evictCache(size_t cache_id);
 
-  FusionKernelRuntime* getKernelRuntimeFor(
-      const at::ArrayRef<IValue>& inputs,
-      size_t id);
+  FusionKernelRuntime* getKernelRuntimeFor(const KernelArgumentHolder& inputs);
 
  private:
   //! original un-scheduled `Fusion`;
