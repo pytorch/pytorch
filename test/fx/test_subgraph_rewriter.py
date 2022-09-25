@@ -18,6 +18,12 @@ if __name__ == '__main__':
                        "\tpython test/test_fx.py TESTNAME\n\n"
                        "instead.")
 
+@torch.fx.wrap
+def wrapped_gemm_bias_mul(a, b, bias):
+    lin_res = torch.nn.functional.linear(a, b, bias=bias)
+    mul_res = lin_res * a
+    return lin_res, mul_res
+
 class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_preserves_logic(self):
@@ -656,3 +662,39 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x1)
         test_outs = traced.forward(x1)
         self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_kwargs(self):
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w0 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b0 = torch.nn.Parameter(torch.empty([128]))
+
+            def forward(self, in0):
+                lin_res = torch.nn.functional.linear(in0, self.w0, bias=self.b0)
+                mul_res = in0 * lin_res
+                sum_res = mul_res + in0
+                return sum_res
+
+        def pattern(a, b, bias):
+            lin_res = torch.nn.functional.linear(a, b, bias=bias)
+            mul_res = a * lin_res
+            return lin_res, mul_res
+
+        def replacement(a, b, bias):
+            lin_res, mul_res = wrapped_gemm_bias_mul(a, b, bias)
+            return lin_res, mul_res
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        self.assertEqual(len(matches), 1)
+
+        found_repalcement_node = False
+        for node in traced.graph.nodes:
+            if node.target == wrapped_gemm_bias_mul:
+                found_repalcement_node = True
+                break
+
+        self.assertTrue(found_repalcement_node)

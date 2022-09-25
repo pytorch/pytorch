@@ -75,8 +75,6 @@ class SubgraphMatcher:
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
     def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
-        # TODO: match args and kwargs
-
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
             return True
@@ -172,7 +170,14 @@ class SubgraphMatcher:
         pn_flatten_args, _ = pytree.tree_flatten(pn.args)
         gn_flatten_args, _ = pytree.tree_flatten(gn.args)
 
-        if len(pn_flatten_args) == len(gn_flatten_args):
+        if pn.kwargs.keys() == gn.kwargs.keys():
+            for key in pn.kwargs.keys():
+                pn_flatten_args.append(pn.kwargs[key])
+                gn_flatten_args.append(gn.kwargs[key])
+        else:
+            match_found = False
+
+        if match_found and len(pn_flatten_args) == len(gn_flatten_args):
             for pn_, gn_ in zip(pn_flatten_args, gn_flatten_args):
                 if isinstance(gn_, Node) and isinstance(pn_, Node):
                     matched = self._match_nodes(pn_, gn_, match)
