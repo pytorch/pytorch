@@ -749,6 +749,7 @@ auto FunctionParameter::check(
       if (THPUtils_checkScalar(obj)) {
         return true;
       }
+      // fallthrough
     case ParameterType::COMPLEX:
       if (PyComplex_Check(obj)) {
         return true;
