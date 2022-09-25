@@ -121,7 +121,7 @@ Example::
 add_docstr_all(
     "new_empty",
     """
-new_empty(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, /
+new_empty(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
 pin_memory=False) -> Tensor
 """
     + r"""
