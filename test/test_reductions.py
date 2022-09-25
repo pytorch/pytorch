@@ -3374,6 +3374,7 @@ as the input tensor excluding its innermost dimension'):
             self.assertEqual(actual, expected, msg, exact_dtype=exact_dtype)
 
     @onlyCUDA
+    @largeTensorTest("8GB")
     @dtypes(torch.half, torch.chalf)
     def test_reductions_large_half_tensors(self, device, dtype):
         t = torch.ones(2**31, device=device, dtype=dtype)
