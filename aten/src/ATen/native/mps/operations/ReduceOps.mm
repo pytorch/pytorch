@@ -646,7 +646,7 @@ Tensor std_var_common_impl_mps(
           output_shape.push_back(input_shape[i]);
           curr_i += 1;
           // End loop when output shape is filled
-          if(curr_i == num_output_dims)
+          if (curr_i == num_output_dims)
             break;
       }
 
@@ -705,11 +705,9 @@ Tensor std_var_common_impl_mps(
       }
   }
 
-  int64_t output_shape_array[output_shape.size()];
-  std::copy(output_shape.begin(), output_shape.end(), output_shape_array);
 
   Tensor output_t = at::native::empty_mps(
-                      IntArrayRef(output_shape_array, num_output_dims),
+                      IntArrayRef(output_shape.data(), num_output_dims),
                       input_t.scalar_type(),
                       c10::nullopt,
                       kMPS,

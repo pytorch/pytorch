@@ -2964,7 +2964,7 @@ class TestNLLLoss(TestCase):
     def test_var_simple(self):
         def helper():
 
-            shape = [2,3,4,5]
+            shape = [2, 3 ,4, 5]
 
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
