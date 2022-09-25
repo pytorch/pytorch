@@ -1141,8 +1141,8 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   static constexpr bool is_inp_out_type_half_or_chalf =
       (std::is_same<at::Half, scalar_t>::value &&
        std::is_same<at::Half, out_scalar_t>::value) ||
-      (std::is_same<at::ComplexHalf, scalar_t>::value &&
-       std::is_same<at::ComplexHalf, out_scalar_t>::value);
+      (std::is_same<at::complex<Half>, scalar_t>::value &&
+       std::is_same<at::complex<Half>, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
       std::is_convertible<arg_t, out_scalar_t>::value && !is_inp_out_type_half_or_chalf;
 
@@ -1241,8 +1241,8 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
   static constexpr bool is_inp_out_type_half_or_chalf =
       (std::is_same<at::Half, scalar_t>::value &&
        std::is_same<at::Half, out_scalar_t>::value) ||
-      (std::is_same<at::ComplexHalf, scalar_t>::value &&
-       std::is_same<at::ComplexHalf, out_scalar_t>::value);
+      (std::is_same<at::complex<Half>, scalar_t>::value &&
+       std::is_same<at::complex<Half>, out_scalar_t>::value);
   static constexpr bool can_accumulate_in_output =
       std::is_convertible<arg_t, out_scalar_t>::value && !is_inp_out_type_half_or_chalf;
 
