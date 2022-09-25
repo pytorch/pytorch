@@ -1241,7 +1241,6 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
       std::is_same<at::Half, out_scalar_t>::value;
   static constexpr bool can_accumulate_in_output =
       std::is_convertible<arg_t, out_scalar_t>::value && !is_inp_out_type_half;
-  static_assert(can_accumulate_in_output == true, "unsupported arg_t for jitted reduction");
 
   bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
   std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
