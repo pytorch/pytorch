@@ -2823,7 +2823,7 @@ def gaussian_nll_loss(
 
     # Check validity of reduction mode
     if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
-        raise ValueError(reduction + " is not valid")
+        raise ValueError(reduction + " is not a valid value for reduction")
 
     # Entries of var must be non-negative
     if torch.any(var < 0):

@@ -28,6 +28,8 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
+    "gaussian_nll_loss",
+    "glu",
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
@@ -44,7 +46,6 @@ __all__ = [
     "softshrink",
     "tanhshrink",
     "threshold",
-    "glu",
     "pairwise_distance",
     "pdist",
 ]
@@ -145,6 +146,79 @@ def elu(
         rhs = torch.expm1(a)
 
     return torch.where(a > 0, a, rhs)
+
+
+@register_decomposition(torch.ops.aten.glu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    check(
+        a.shape[dim] % 2 == 0,
+        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
+    )
+    b, c = torch.tensor_split(a, 2, dim)
+
+    return b * torch.sigmoid(c)
+
+
+# Pure Python implementation - don't register decomp
+def gaussian_nll_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    var: TensorLikeType,
+    full: bool = False,
+    eps: float = 1e-6,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    # Check var size
+    # If var.size == input.size, the case is heteroscedastic and no further
+    # checks are needed.
+    # Otherwise:
+    if var.size() != input.size():
+        # If var is one dimension short of input, but the sizes match otherwise,
+        # then this is a homoscedastic case.
+        # e.g. input.size = (10, 2, 3), var.size = (10, 2)
+        # -> unsqueeze var so that var.shape = (10, 2, 1)
+        # this is done so that broadcasting can happen in the loss calculation
+        if input.size()[:-1] == var.size():
+            var = torch.unsqueeze(var, -1)
+        # This checks if the sizes match up to the final dimension, and the
+        # final dimension of var is of size 1.
+        # This is also a homoscedastic case.
+        # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
+        elif input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1:
+            pass
+        # If none of the above pass, then the size of var is incorrect.
+        else:
+            raise ValueError("var is of incorrect size")
+
+    # Check validity of reduction mode
+    _check_reduction_value(reduction)
+
+    # Entries of var must be non-negative
+    if torch.any(var < 0).item():
+        raise ValueError("var has negative entry/entries")
+
+    # Clamp for stability
+    # Done in the no_grad context so that clamping is not affecting the
+    # gradients.
+    with torch.no_grad():
+        var = var.clamp(min=eps)
+
+    # Calculate the loss
+    diff = input - target
+    loss = 0.5 * (torch.log(var) + diff * diff / var)
+    if full:
+        # TODO: TypeError: log(): argument 'input' (position 1) must be Tensor,
+        # not float
+        # Also, avoids inplace add.
+        loss = loss + (0.5 * torch.log(2 * torch.pi * torch.ones_like(loss)))
+
+    return _apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(torch.ops.aten.relu)
@@ -607,23 +681,6 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     # It may be better to use clamp here, but we use hardtanh to replicate
     # the behavior of the existing implementation
     return refs.nn.functional.hardtanh(a, 0, 6)
-
-
-@register_decomposition(torch.ops.aten.glu)
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("a",),
-    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
-@out_wrapper()
-def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
-    dim = utils.canonicalize_dims(a.ndim, dim)
-    check(
-        a.shape[dim] % 2 == 0,
-        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
-    )
-    b, c = torch.tensor_split(a, 2, dim)
-
-    return b * torch.sigmoid(c)
 
 
 @register_decomposition(torch.ops.aten.pairwise_distance)
