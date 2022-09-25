@@ -1618,6 +1618,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
+        '_refs.nn.functional.triplet_margin_loss',
+        '_refs.nn.functional.triplet_margin_with_distance_loss',
         '_refs.rfloordiv',
         '_refs.rtruediv',
         '_refs.rpow',

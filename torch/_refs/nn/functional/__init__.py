@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 import torch
 
@@ -44,6 +44,8 @@ __all__ = [
     "softshrink",
     "tanhshrink",
     "threshold",
+    "triplet_margin_loss",
+    "triplet_margin_with_distance_loss",
     "glu",
     "pairwise_distance",
     "pdist",
@@ -455,6 +457,83 @@ def threshold(
         raise NotImplementedError
 
     return torch.where(a <= threshold, value, a)
+
+
+# CompositeImplicitAutograd - don't register decomp
+# No elementwise type promotion here because it breaks a bunch of dtype tests.
+def triplet_margin_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    margin: float = 1.0,
+    p: float = 2,
+    eps: float = 1e-6,
+    swap: bool = False,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+
+    return torch.nn.functional.triplet_margin_with_distance_loss(
+        anchor=anchor,
+        positive=positive,
+        negative=negative,
+        distance_function=lambda x, y: torch.pairwise_distance(x, y, p, eps),
+        margin=margin,
+        swap=swap,
+        reduction=reduction,
+    )
+
+
+# Pure Python implementation - don't register decomp
+# No elementwise type promotion here because it breaks a bunch of dtype tests.
+def triplet_margin_with_distance_loss(
+    anchor: TensorLikeType,
+    positive: TensorLikeType,
+    negative: TensorLikeType,
+    *,
+    distance_function: Optional[
+        Callable[[TensorLikeType, TensorLikeType], TensorLikeType]
+    ] = None,
+    margin: float = 1.0,
+    swap: bool = False,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    _check_reduction_value(reduction)
+
+    # TODO: Regular PyTorch has this check for triplet_margin_loss but not for
+    # triplet_margin_with_distance_loss.  However, the docs for both suggest
+    # these must have the same shape.
+    a_dim = anchor.dim()
+    p_dim = positive.dim()
+    n_dim = negative.dim()
+    check(
+        a_dim == p_dim and p_dim == n_dim,
+        lambda: f"All inputs should have same dimension but got {a_dim}D, {p_dim}D and {n_dim}D inputs.",
+    )
+
+    # TODO: Additional check not implemented in regular PyTorch (as per the
+    # docs).
+    check(margin > 0, lambda: "margin value must be greater than 0")
+    # TODO: Perhaps add additional size checks for input tensors, but the docs
+    # are not very clear on that, so not doing it to avoid breakage.  If this
+    # code is reused, make sure the behavior is compatible with
+    # triplet_margin_loss and triplet_margin_with_distance_loss.
+
+    if distance_function is None:
+        distance_function = torch.pairwise_distance
+
+    dist_pos = distance_function(anchor, positive)
+    dist_neg = distance_function(anchor, negative)
+    if swap:
+        dist_swap = distance_function(positive, negative)
+        dist_neg = torch.minimum(dist_neg, dist_swap)
+    loss = torch.clamp_min(margin + dist_pos - dist_neg, 0)
+    return _apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(torch.ops.aten.hardtanh)

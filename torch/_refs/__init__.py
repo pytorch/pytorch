@@ -115,6 +115,7 @@ __all__ = [
     "bitwise_or",
     "bitwise_right_shift",
     "bitwise_xor",
+    "clamp_min",
     # "complex",
     "copysign",
     "div",

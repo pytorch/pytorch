@@ -7312,6 +7312,54 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
             kwargs["distance_function"] = torch.nn.PairwiseDistance()
         yield SampleInput(input, args=args, kwargs=kwargs)
 
+def error_inputs_triplet_margin_loss(op_info, device, with_distance=False, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+
+    # TODO: triplet_margin_loss and triplet_margin_with_distance_loss have no
+    # margin > 0 checks in regular PyTorch
+
+    samples = [
+        # input, args, kwargs, error_type, error_regex
+        # invalid reduction
+        (make_input(3, 4), (make_input(3, 4), make_input(3, 4)),
+         dict(reduction="abc"),
+         ValueError, "abc is not a valid value for reduction"),
+
+        # shape mismatch
+        (make_input(3, 5), (make_input(3, 4), make_input(3, 4)),
+         dict(),
+         RuntimeError,
+         r"The size of tensor a \(5\) must match the size of tensor b \(4\) at non-singleton dimension 1"),
+        (make_input(3, 4), (make_input(3, 5), make_input(3, 4)),
+         dict(),
+         RuntimeError,
+         r"The size of tensor a \(4\) must match the size of tensor b \(5\) at non-singleton dimension 1"),
+        (make_input(3, 4), (make_input(3, 4), make_input(3, 5)),
+         dict(),
+         RuntimeError,
+         r"The size of tensor a \(4\) must match the size of tensor b \(5\) at non-singleton dimension 1"),
+    ]
+
+    # TODO: triplet_margin_with_distance_loss has no shape check in regular PyTorch
+    if not with_distance:
+        # same dimensions
+        samples.append(
+            (make_input(3,), (make_input(3, 4), make_input(3, 4)),
+             dict(),
+             RuntimeError, r"All inputs should have same dimension but got 1D, 2D and 2D inputs."))
+        samples.append(
+            (make_input(3, 4), (make_input(3,), make_input(3, 4)),
+             dict(),
+             RuntimeError, r"All inputs should have same dimension but got 2D, 1D and 2D inputs."))
+        samples.append(
+            (make_input(3, 4), (make_input(3, 4), make_input(3,)),
+             dict(),
+             RuntimeError, r"All inputs should have same dimension but got 2D, 2D and 1D inputs."))
+
+    for input, args, kwargs, error_type, error_regex in samples:
+        yield ErrorInput(SampleInput(input, args=args, kwargs=kwargs),
+                         error_type=error_type, error_regex=error_regex)
+
 
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -11955,6 +12003,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.triplet_margin_loss",
         sample_inputs_func=sample_inputs_triplet_margin_loss,
+        error_inputs_func=error_inputs_triplet_margin_loss,
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -11964,6 +12013,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.triplet_margin_with_distance_loss",
         sample_inputs_func=partial(sample_inputs_triplet_margin_loss, with_distance=True),
+        error_inputs_func=partial(error_inputs_triplet_margin_loss, with_distance=True),
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
@@ -17374,6 +17424,34 @@ python_ref_db = [
         "_refs.clamp",
         torch_opinfo_name="clamp",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.triplet_margin_loss",
+        torch_opinfo_name="nn.functional.triplet_margin_loss",
+        supports_out=False,
+        # TODO: Uses minimum and clamp, which don't support nvfuser.
+        supports_nvfuser=False,
+        skips=(
+            # AssertionError: Tensor-likes are not close!
+            # Greatest absolute difference: 6.103515625e-05 at index (4,) (up to 1e-05 allowed)
+            # Greatest relative difference: 8.519846983548175e-06 at index (4,) (up to 1.3e-06 allowed)
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.uint8,), device_type="cpu"),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.triplet_margin_with_distance_loss",
+        torch_opinfo_name="nn.functional.triplet_margin_with_distance_loss",
+        supports_out=False,
+        # TODO: Uses minimum and clamp, which don't support nvfuser.
+        supports_nvfuser=False,
+        skips=(
+            # AssertionError: Tensor-likes are not close!
+            # Greatest absolute difference: 6.103515625e-05 at index (4,) (up to 1e-05 allowed)
+            # Greatest relative difference: 8.519846983548175e-06 at index (4,) (up to 1.3e-06 allowed)
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.uint8,), device_type="cpu"),
+        )
     ),
     #
     # Data Conversion & Data Movement Opinfos
