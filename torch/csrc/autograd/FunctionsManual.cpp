@@ -357,12 +357,12 @@ Tensor _nested_from_padded_backward(
   if (do_transform_0213) {
     auto new_sizes = {
         input.size(0), input.size(2), (input.size(1) * input.size(3))};
-    auto out = nested_to_padded_tensor(grad, 0, new_sizes);
+    auto out = grad.to_padded_tensor(0, new_sizes);
     auto expand_last_dim_size = {
         input.size(0), input.size(2), input.size(1), input.size(3)};
     return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
   }
-  return nested_to_padded_tensor(grad, 0, input.sizes());
+  return grad.to_padded_tensor(0, input.sizes());
 }
 
 Tensor linalg_vector_norm_jvp(
@@ -3151,15 +3151,16 @@ Tensor elu_double_backward(
 
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
-    const c10::IntArrayRef& input_sizes,
+    const c10::SymIntArrayRef& input_sizes,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step) {
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
+    c10::SymInt step) {
   auto start_val = start.has_value() ? start.value() : 0;
   auto end_val = end.has_value() ? end.value() : INT64_MAX;
 
-  return slice_backward(grad, input_sizes, dim, start_val, end_val, step);
+  return slice_backward_symint(
+      grad, input_sizes, dim, start_val, end_val, step);
 }
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
