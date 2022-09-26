@@ -1222,10 +1222,6 @@ class TestOperators(TestCase):
         skip('native_layer_norm'),
 
         # Potential bugs/errors
-<<<<<<< HEAD
-=======
-        xfail('masked.cumprod'),  # calls item()
->>>>>>> [maskedtensor] port torch/_masked into torch/masked
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
         xfail('bernoulli'),  # calls random op
