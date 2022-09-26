@@ -489,7 +489,7 @@ def _get_test_report_path():
     return os.path.join('test-reports', test_source)
 
 is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
-parser = argparse.ArgumentParser(add_help=not is_running_via_run_test)
+parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
