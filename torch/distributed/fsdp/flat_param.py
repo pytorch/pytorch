@@ -5,7 +5,6 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
-    Callable,
     cast,
     Dict,
     Generator,
@@ -712,7 +711,7 @@ class FlatParamHandle:
         # Invariant: `_mp_shard` is always on the compute device.
         flat_param.data = flat_param._mp_shard  # type: ignore[attr-defined]
 
-    def unshard(self, gradient_hook: Optional[Callable]):
+    def unshard(self):
         """
         Runs the unshard logic. This includes all-gathering the flattened
         parameter and switching to using the unsharded flattened parameter. If

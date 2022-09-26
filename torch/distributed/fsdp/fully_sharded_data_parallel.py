@@ -1552,11 +1552,7 @@ class FullyShardedDataParallel(nn.Module):
             self._streams["all_gather"].wait_stream(self._streams["pre_all_gather"])
         with torch.cuda.stream(self._streams["all_gather"]):
             for handle in handles:
-                gradient_hook = (
-                    functools.partial(self._post_backward_hook, handle)
-                    if self._use_orig_params else None
-                )
-                handle.unshard(gradient_hook)
+                handle.unshard()
                 handle.post_unshard()
 
     def _reshard(
