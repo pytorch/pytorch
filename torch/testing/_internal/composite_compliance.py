@@ -1,6 +1,5 @@
 import torch
 from torch import Tensor
-import contextlib
 import itertools
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
@@ -100,20 +99,9 @@ def is_inplace(func):
     return name[-1] == '_'
 
 
-def generate_cct(enable_recursive_torch_dispatch=False,
-                 autograd_view_consistency=True):
+def generate_cct(autograd_view_consistency=True):
     # This function returns a new class CompositeCompliantTensor
     # The two arguments control the behaviour described below.
-
-    # enable_recursive_torch_dispatch:
-    #   If True, enable __torch_dispatch__ before calling the func in
-    #   CCT's __torch_dispatch__ implementation else call
-    #   the func under `no_dispatch`.
-    #   NOTE: We need to disable dispatch under Torch Dispatch Mode,
-    #   to avoid infinite recursion.
-    #   Also, we need to enable dispatch for checking
-    #   forward_AD composite compliance
-    #   Refer: https://github.com/pytorch/pytorch/issues/75652
 
     # autograd_view_consistency:
     #   If True, alias result using `set_` if func returns a view
@@ -196,11 +184,10 @@ def generate_cct(enable_recursive_torch_dispatch=False,
                         'regular Tensor but the other tensors are Tensor Subclasses. '
                         'Please try to avoid this in-place operation.')
 
-            with contextlib.nullcontext() if enable_recursive_torch_dispatch else no_dispatch():
-                unwrapped_args = tree_map(unwrap, args)
-                unwrapped_kwargs = tree_map(unwrap, kwargs)
-                unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
-                rs = tree_map(wrap, unwrapped_rs)
+            unwrapped_args = tree_map(unwrap, args)
+            unwrapped_kwargs = tree_map(unwrap, kwargs)
+            unwrapped_rs = func(*unwrapped_args, **unwrapped_kwargs)
+            rs = tree_map(wrap, unwrapped_rs)
 
             if is_view_fn(func) and autograd_view_consistency:
                 # Note [Alias Result]
@@ -412,6 +399,26 @@ def gather_leaf_tensors(args, kwargs):
     return leaf_tensors
 
 
+def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradcheck_wrapper=None):
+    if gradcheck_wrapper is None:
+        results = op(*args, **kwargs)
+    else:
+        results = gradcheck_wrapper(op, *args, **kwargs)
+
+    if output_process_fn_grad is not None:
+        results = output_process_fn_grad(results)
+
+    flat_results, _ = tree_flatten(results)
+    flat_diff_results = [r for r in flat_results if r.requires_grad]
+    assert len(flat_diff_results) > 0
+
+    grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results]
+    leaf_tensors = gather_leaf_tensors(args, kwargs)
+    assert len(leaf_tensors) > 0
+    return torch.autograd.grad(flat_diff_results, leaf_tensors,
+                               grads, allow_unused=True, retain_graph=True)
+
+
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
@@ -424,27 +431,7 @@ def check_backward_formula(op: Callable, args, kwargs,
                            gradcheck_wrapper=None, assert_equal_fn=None):
     CCT = generate_cct()
 
-    def compute_expected_grads(args, kwargs):
-        if gradcheck_wrapper is None:
-            results = op(*args, **kwargs)
-        else:
-            results = gradcheck_wrapper(op, *args, **kwargs)
-
-        if output_process_fn_grad is not None:
-            results = output_process_fn_grad(results)
-
-        flat_results, _ = tree_flatten(results)
-        flat_diff_results = [r for r in flat_results if r.requires_grad]
-        assert len(flat_diff_results) > 0
-
-        grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
-                 for r in flat_diff_results]
-        leaf_tensors = gather_leaf_tensors(args, kwargs)
-        assert len(leaf_tensors) > 0
-        return torch.autograd.grad(flat_diff_results, leaf_tensors,
-                                   grads, allow_unused=True, retain_graph=True)
-
-    expected = compute_expected_grads(args, kwargs)
+    expected = compute_expected_grads(op, args, kwargs, output_process_fn_grad, gradcheck_wrapper)
 
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
@@ -499,7 +486,7 @@ def check_backward_formula(op: Callable, args, kwargs,
 # this means we can apply check_forward_ad_formula to things that aren't OpInfos
 # while debugging.
 def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None, assert_equal_fn=None):
-    CCT = generate_cct(enable_recursive_torch_dispatch=True, autograd_view_consistency=False)
+    CCT = generate_cct(autograd_view_consistency=False)
 
     def maybe_tangent(t):
         assert type(t) is not CCT

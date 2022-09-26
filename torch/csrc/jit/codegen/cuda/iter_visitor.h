@@ -109,7 +109,7 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   void traverseAllPaths(Fusion* fusion);
 
   //! Get inputs to vals. Possible input vals can be optionally
-  //! given. If not, vals with no defining expression are returned.
+  //! given. If not, vals with no producers are returned.
   static std::vector<Val*> getInputsTo(
       const std::vector<Val*>& vals,
       const std::vector<Val*>& inputs = {});
