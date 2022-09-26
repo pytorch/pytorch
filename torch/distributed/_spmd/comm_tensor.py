@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
 
 
 import torch
@@ -8,6 +8,7 @@ from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import (
     _ProxyTensor,
     fetch_tensor_proxy,
+    get_proxy,
     get_proxy_slots,
     set_proxy_slot,
     track_tensor_tree,
@@ -50,6 +51,15 @@ def _wrap_comm_result(result: Tuple[Any, Any]) -> Tuple[Any, Any]:
     return (tree_map(partial(wrap, work), result[0]), work)
 
 
+def _get_tracer(obj: Any) -> Optional[torch.fx.Tracer]:
+    slots = get_proxy_slots(obj)
+    if slots is None:
+        return None
+    keys = tuple(slots.keys())
+    assert len(keys) == 1
+    return keys[0]
+
+
 class CommTensor(torch.Tensor):
     r"""
     A Tensor subclass to wrap input tensors for collective communications. This
@@ -85,25 +95,29 @@ class CommTensor(torch.Tensor):
         "reduce_scatter_",
         "scatter_",
     ]
-    _after_comm: bool
+
     _tensor: torch.Tensor
-    _work: torch.distributed._Work
+    _work: Optional[torch.distributed._Work]
 
     @staticmethod
     def __new__(cls, tensor: torch.Tensor):
-        r = torch.Tensor._make_subclass(
-            cls,
-            tensor,
-            require_grad=tensor.requires_grad,
-        )
+        t = tensor._tensor if isinstance(tensor, CommTensor) else tensor
+        if _get_tracer(t) is None:
+            # noop for eager mode
+            return tensor
+
+        # Use non-CommTensor to avoid nested CommTensor Wrapping
+        r = torch.Tensor._make_subclass(cls, t, require_grad=t.requires_grad)
         # The tensor object wrapped by this CommTensor
         r._tensor = tensor  # type: ignore[attr-defined]
-        # Record whether communication has launched on this tensor.
-        r._after_comm = False  # type: ignore[attr-defined]
+        # Record the LAST `work` object returned by collective communication
+        # operations. If this is None, it means no collectives have called
+        # since last time a tensor is wrapped by CommTensor
+        r._work = None  # type: ignore[attr-defined]
         return r
 
     def __repr__(self):
-        return f"CommTensor({self._tensor}, after_comm={self._after_comm})"
+        return f"CommTensor({self._tensor}, work={self._work})"
 
     # disable __torch_function__ so that CommTensor can recursively dispatch
     # with ProxyTorchDispatchMode in make_fx
@@ -116,38 +130,22 @@ class CommTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # shared states when unwrapping args
-        tracer = None
-        after_comm = False
-
-        def get_tracer(obj):
-            slots = get_proxy_slots(obj)
-            if slots is None:
-                return None
-            keys = tuple(slots.keys())
-            assert len(keys) == 1
-            return keys[0]
-
-        def get_proxy(obj):
-            slots = get_proxy_slots(obj)
-            if slots is None:
-                return None
-            vals = tuple(slots.values())
-            assert len(vals) == 1
-            return vals[0]
+        tracer: Optional[torch.fx.Tracer] = None
+        work: Optional[torch.distributed._Work] = None
 
         # wrapped ._tensor if this is a CommTensor, and insert/call wait()
         # if communication has been launched on this tensor.
         def unwrap(e: Any):
             if isinstance(e, CommTensor):
-                nonlocal tracer, after_comm
+                nonlocal tracer, work
 
-                after_comm = e._after_comm
-                tracer = get_tracer(e._tensor)
+                work = e._work
+                tracer = _get_tracer(e._tensor)
 
-                if after_comm:
+                if work is not None:
                     if tracer is not None:
                         # insert a node to the traced graph.
-                        proxy_res = tracer.create_proxy(
+                        proxy_res = tracer.create_proxy(  # type: ignore[union-attr]
                             'call_function',
                             _wait_comm,
                             (get_proxy(e._tensor).proxy,),
@@ -159,8 +157,9 @@ class CommTensor(torch.Tensor):
                     # For eager mode, simply wait.
                     # During tracing, still need to wait here, to make sure the
                     # execution during tracing is correct.
-                    e._work.wait()
+                    work.wait()
 
+                # communication has been waited, stop propagating CommTensor
                 return e._tensor
             else:
                 return e
@@ -168,11 +167,14 @@ class CommTensor(torch.Tensor):
         def wrap(e: Any):
             return CommTensor(e) if isinstance(e, torch.Tensor) else e
 
-        def mark_after_comm(work: torch.distributed._Work, e: Any):
-            if isinstance(e, torch.Tensor) or isinstance(e, CommTensor):
+        def set_work(work: torch.distributed._Work, e: Any):
+            if isinstance(e, CommTensor):
                 e._work = work  # type: ignore[attr-defined]
-                e._after_comm = True  # type: ignore[attr-defined]
-
+            elif isinstance(e, torch.Tensor):
+                raise RuntimeError(
+                    "Type of output tensors from collective communication during "
+                    "tracing should always be CommTensor instead of torch.Tensor"
+                )
             return e
 
         unwrapped_args = tree_map(unwrap, args)
@@ -195,7 +197,7 @@ class CommTensor(torch.Tensor):
                 proxy_res = func(*proxy_args, **proxy_kwargs)
                 # insert a node that wraps the output tuple into
                 # _CommResult(tensor, work)
-                comm_result_proxy = tracer.create_proxy(
+                comm_result_proxy = tracer.create_proxy(  # type: ignore[union-attr]
                     'call_function',
                     _wrap_comm_result,
                     (proxy_res, ),
@@ -215,7 +217,7 @@ class CommTensor(torch.Tensor):
                 # for it later to make sure the execution during tracing is
                 # correct. Also, remember comm is already launched
                 # args[0] is always the collection of output tensors
-                tree_map(partial(mark_after_comm, out[1]), args[0])
+                tree_map(partial(set_work, out[1]), args[0])
 
                 # HACK: update the proxy on the input argument as this is an
                 # inplace collective communication.
@@ -227,11 +229,11 @@ class CommTensor(torch.Tensor):
                 return out
             else:
                 # in eager mode, simply remember work handle as an attribute
-                out = func(*unwrapped_args, **kwargs)
-                tree_map(partial(mark_after_comm, out[1]), args[0])
+                out = func(*unwrapped_args, **unwrapped_kwargs)
+                tree_map(partial(set_work, out[1]), args[0])
                 return out
         else:
-            if after_comm:
+            if work is not None:
                 return func(*unwrapped_args, **unwrapped_kwargs)
             else:
                 # we need to propagate CommTensor wrapping until the first

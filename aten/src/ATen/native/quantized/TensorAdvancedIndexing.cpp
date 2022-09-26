@@ -11,7 +11,7 @@ namespace at {
 namespace native {
 DEFINE_DISPATCH(masked_fill_kernel_quantized_stub);
 DEFINE_DISPATCH(index_put_kernel_quantized_stub);
-DEFINE_DISPATCH(index_put_with_sort_kernel_quantized_stub);
+DEFINE_DISPATCH(index_put_with_sort_quantized_stub);
 
 namespace {
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
@@ -193,7 +193,7 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::op
 
   // See Note [Enabling Deterministic Operations]
   if (self.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()) {
-      index_put_with_sort_kernel_quantized_stub(self.device().type(), self, indices, value_, self.q_scale(), self.q_zero_point(), unsafe);
+      index_put_with_sort_quantized_stub(self.device().type(), self, indices, value_, self.q_scale(), self.q_zero_point(), unsafe);
       return self;
   }
 
