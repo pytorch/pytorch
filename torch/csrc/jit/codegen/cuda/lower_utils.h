@@ -79,11 +79,8 @@ TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 // Returns the first output of Expr that is a TensorView
 TORCH_CUDA_CU_API TensorView* getTvOutput(const Expr*);
 
-// Returns if Expr is a reduction op
-TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
-
-// Returns if Expr is a reduction op with TensorView or TensorIndex
-TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
+// Returns the first input of Expr that is a TensorView
+TORCH_CUDA_CU_API TensorView* getTvInput(const Expr*);
 
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 

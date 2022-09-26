@@ -32,6 +32,7 @@ def register_functional_optim(key, optim):
     need not be of :class:`torch.optim.Optimizer` (e.g. for custom optimizers)
     Example::
         >>> # import the new functional optimizer
+        >>> # xdoctest: +SKIP
         >>> from xyz import fn_optimizer
         >>> from torch.distributed.optim.utils import register_functional_optim
         >>> fn_optim_key = "XYZ_optim"
