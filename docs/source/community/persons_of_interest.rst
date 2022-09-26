@@ -186,6 +186,13 @@ PowerPC
 
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
 
+torch.hub
+~~~~~~~~~
+
+-  Nicolas Hug (`nicolashug <https://github.com/nicolashug>`__)
+-  Vincent Moens (`vmoens <https://github.com/vmoens>`__)
+-  (emeritus) Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
+
 Library-level maintainers
 -------------------------
 
@@ -214,6 +221,7 @@ TorchVision
 
 -  Francisco Massa (`fmassa <https://github.com/fmassa>`__)
 -  Vasilis Vryniotis (`datumbox <https://github.com/datumbox>`__)
+-  Nicolas Hug (`nicolashug <https://github.com/nicolashug>`__)
 
 TorchText
 ~~~~~~~~~
@@ -228,3 +236,8 @@ TorchAudio
 
 -  Moto Hira (`mthrok <https://github.com/mthrok>`__)
 -  (emeritus) Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
+
+TorchRL
+~~~~~~~
+
+-  Vincent Moens (`vmoens <https://github.com/vmoens>`__)
