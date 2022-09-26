@@ -562,6 +562,23 @@ def meta_mm(a, b):
     return a.new_empty(N, P)
 
 
+@register_meta([aten.convolution_backward.default])
+def meta_convolution_backward(grad_output_, input_, weight_, bias_sizes_opt, stride, padding, dilation, transposed, output_padding, groups, output_mask):
+    # TODO: THIS IS SUPER WRONG AND WOULD WORK FOR SOME MODELS!!!!
+    backend_grad_input = None
+    backend_grad_weight = None
+    backend_grad_bias = None
+
+    if output_mask[0]:
+        backend_grad_input = aten.empty_like.default(input_)
+    if output_mask[1]:
+        backend_grad_weight = aten.empty_like.default(weight_)
+    if output_mask[2]:
+        backend_grad_bias = aten.empty_like.default(bias_sizes_opt, **weight_.options())
+
+    return (backend_grad_input, backend_grad_weight, backend_grad_bias)
+
+
 @register_meta([aten.addbmm.default, aten.addbmm.out])
 @out_wrapper()
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
