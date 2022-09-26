@@ -2,6 +2,7 @@
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/core/impl/GPUTrace.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
@@ -100,6 +101,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     }
 
     C10_CUDA_CHECK(cudaEventCreateWithFlags(cuda_event, cuda_flag));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_creation(
+          reinterpret_cast<uintptr_t>(cuda_event));
+    }
   }
 
   void destroyEvent(void* event, const DeviceIndex device_index)
@@ -110,6 +116,11 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     int orig_device;
     C10_CUDA_CHECK_WARN(cudaGetDevice(&orig_device));
     C10_CUDA_CHECK_WARN(cudaSetDevice(device_index));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_deletion(
+          reinterpret_cast<uintptr_t>(cuda_event));
+    }
     C10_CUDA_CHECK_WARN(cudaEventDestroy(cuda_event));
     C10_CUDA_CHECK_WARN(cudaSetDevice(orig_device));
   }
@@ -140,6 +151,12 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaEventRecord(cuda_event, cuda_stream));
     // Makes the void* point to the (possibly just allocated) CUDA event
     *event = cuda_event;
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_record(
+          reinterpret_cast<uintptr_t>(cuda_event),
+          reinterpret_cast<uintptr_t>(cuda_stream.stream()));
+    }
 
     // Resets device
     setDevice(orig_device);
@@ -156,6 +173,12 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
         cuda_stream,
         cuda_event,
         /*flags (must be zero)=*/0));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_event_wait(
+          reinterpret_cast<uintptr_t>(cuda_event),
+          reinterpret_cast<uintptr_t>(cuda_stream.stream()));
+    }
     setDevice(orig_device);
   }
 
