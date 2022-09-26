@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 from collections import OrderedDict
-import os
 import contextlib
 import torch
 import torch.nn.functional as F
@@ -125,7 +124,10 @@ from torch.ao.quantization.fx.qconfig_mapping_utils import (
     maybe_adjust_qconfig_for_module_name_object_type_order,
 )
 
-from torch.ao.quantization.fx.utils import NodeInfo
+from torch.ao.quantization.fx.utils import (
+    _reroute_tuple_getitem_pattern,
+    NodeInfo,
+)
 
 from torch.ao.quantization.fake_quantize import (
     default_fixed_qparams_range_0to1_fake_quant,
@@ -152,6 +154,7 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
     test_only_train_fn,
     ModelForConvTransposeBNFusion,
+    get_supported_device_types,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -179,13 +182,6 @@ import operator
 import unittest
 import io
 from typing import Callable, Optional, List
-
-
-
-TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
-def get_supported_device_types():
-    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -2584,6 +2580,7 @@ class TestQuantizeFx(QuantizationTestCase):
             @classmethod
             def from_observed(cls, observed_module):
                 assert hasattr(observed_module, 'qconfig')
+                observed_module.linear.qconfig = observed_module.qconfig
                 quantized = cls(nnqd.Linear.from_float(observed_module.linear))
                 return quantized
 
@@ -2658,7 +2655,7 @@ class TestQuantizeFx(QuantizationTestCase):
             example_inputs = (torch.randn(3, 3),)
             # check prepared model
             m = prepare_fx(
-                original_m,
+                copy.deepcopy(original_m),
                 qconfig_dict,
                 example_inputs=example_inputs,
                 prepare_custom_config=prepare_custom_config_dict)
@@ -2685,7 +2682,8 @@ class TestQuantizeFx(QuantizationTestCase):
             res = m(*example_inputs)
 
             # quantize the reference model
-            ref_m = prepare_fx(original_ref_m, qconfig_dict, example_inputs=example_inputs)
+            ref_m = prepare_fx(
+                copy.deepcopy(original_ref_m), qconfig_dict, example_inputs=example_inputs)
             ref_m(*example_inputs)
             ref_m = convert_fx(ref_m)
             ref_res = ref_m(*example_inputs)
@@ -4081,6 +4079,191 @@ class TestQuantizeFx(QuantizationTestCase):
         for n in m.graph.nodes:
             if n.target == "lstm":
                 self.assertEqual(type(n.args[1]), tuple)
+
+    def _test_static_lstm_helper(self, model, prepare_node_occurrence, convert_node_occurrence):
+        """
+        Helper method to validate the graph of a model with static LSTM.
+        """
+        qconfig_mapping = get_default_qconfig_mapping()
+        prepare_custom_config = PrepareCustomConfig() \
+            .set_float_to_observed_mapping(torch.nn.LSTM, torch.ao.nn.quantizable.LSTM)
+        convert_custom_config = ConvertCustomConfig() \
+            .set_observed_to_quantized_mapping(torch.ao.nn.quantizable.LSTM, torch.ao.nn.quantized.LSTM)
+        example_inputs = (torch.rand(5, 3, 50), torch.rand(1, 3, 50), torch.randn(1, 3, 50))
+
+        model = prepare_fx(model, qconfig_mapping, example_inputs, prepare_custom_config=prepare_custom_config)
+        self.checkGraphModuleNodes(model, expected_node_occurrence=prepare_node_occurrence)
+        model(*example_inputs)
+
+        model = convert_fx(model, convert_custom_config=convert_custom_config)
+        self.checkGraphModuleNodes(model, expected_node_occurrence=convert_node_occurrence)
+        model(*example_inputs)
+
+    def test_static_lstm(self):
+        """
+        Test statically quantized custom module LSTM followed by ops that consume individual
+        tensors of the output tuple.
+        """
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+                self.linear1 = nn.Linear(50, 10)
+                self.linear2 = nn.Linear(50, 10)
+                self.linear3 = nn.Linear(50, 10)
+
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                (out, (h0_out, c0_out)) = self.lstm(inputs, (h0, c0))
+                out = self.linear1(out)
+                h0_out = self.linear2(h0_out)
+                c0_out = self.linear3(c0_out)
+                return (out, (h0_out, c0_out))
+
+        m = MyModel()
+        prepare_node_occurrence = {
+            ns.call_module(torch.ao.nn.quantizable.LSTM): 1,
+        }
+        convert_node_occurrence = {
+            ns.call_module(torch.ao.nn.quantized.LSTM): 1,
+            ns.call_function(torch.quantize_per_tensor): 3,
+            # lstm[0].dequantize()
+            # lstm[1][0].dequantize()
+            # lstm[1][1].dequantize()
+            ns.call_method("dequantize"): 3,
+            # lstm[0], lstm[1], lstm[1][0], lstm[1][1]
+            ns.call_function(operator.getitem): 4,
+            # No tuples are consumed
+            ns.call_function(tuple): 0,
+        }
+        self._test_static_lstm_helper(m, prepare_node_occurrence, convert_node_occurrence)
+
+    def test_static_lstm_consume_tuple(self):
+        """
+        Test statically quantized custom module LSTM followed by a module that consumes the
+        output tuple, either as a whole or part of it.
+        """
+        class ModuleAfterLSTM(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.identity = torch.nn.Identity()
+
+            def forward(self, x):
+                return self.identity(x)
+
+        class ConsumeWholeTuple(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = nn.LSTM(50, 50, 1)
+                self.module_after_lstm = ModuleAfterLSTM()
+
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                x = self.lstm(inputs, (h0, c0))
+                x = self.module_after_lstm(x)  # consume tuple (output, (hidden0, hidden1))
+                return x
+
+        class ConsumeHiddenTuple(ConsumeWholeTuple):
+            def forward(self, inputs: torch.Tensor, h0: torch.Tensor, c0: torch.Tensor):
+                x = self.lstm(inputs, (h0, c0))
+                x = self.module_after_lstm(x[1])  # consume tuple (hidden0, hidden1)
+                return x
+
+        # Test consuming the whole tuple (output, (hidden0, hidden1))
+        m1 = ConsumeWholeTuple()
+        prepare_node_occurrence = {
+            ns.call_module(torch.ao.nn.quantizable.LSTM): 1,
+        }
+        convert_node_occurrence1 = {
+            ns.call_module(torch.ao.nn.quantized.LSTM): 1,
+            ns.call_function(torch.quantize_per_tensor): 3,
+            # lstm[0].dequantize()
+            # lstm[1][0].dequantize()
+            # lstm[1][1].dequantize()
+            ns.call_method("dequantize"): 3,
+            # lstm[0], lstm[1], lstm[1][0], lstm[1][1]
+            ns.call_function(operator.getitem): 4,
+            # tuple(output_dq, tuple(hidden0_dq, hidden1_dq))
+            ns.call_function(tuple): 2,
+        }
+        self._test_static_lstm_helper(m1, prepare_node_occurrence, convert_node_occurrence1)
+
+        # Test consuming just the hidden tuple (hidden0, hidden1)
+        m2 = ConsumeHiddenTuple()
+        convert_node_occurrence2 = {
+            ns.call_module(torch.ao.nn.quantized.LSTM): 1,
+            ns.call_function(torch.quantize_per_tensor): 3,
+            # lstm[1][0].dequantize()
+            # lstm[1][1].dequantize()
+            ns.call_method("dequantize"): 2,
+            # lstm[1], lstm[1][0], lstm[1][1]
+            ns.call_function(operator.getitem): 3,
+            # tuple(hidden0_dq, hidden1_dq)
+            ns.call_function(tuple): 1,
+        }
+        self._test_static_lstm_helper(m2, prepare_node_occurrence, convert_node_occurrence2)
+
+    def test_reroute_tuple_getitem_patterns(self):
+        """
+        The following graph should redirect the output to `b`. After the transformation,
+        all other nodes, including the inputs `a` and `c`, are no longer needed.
+
+             a   b     c
+             |   \\   /
+             \\   tuple
+              \\   /
+               tuple
+               /  \\
+              /    \\
+             |      \\
+             |       \\
+             |        \\
+        getitem0    getitem1
+             |      /     \\
+             | getitem0  getitem1
+             |     \\     /
+             \\      tuple
+              \\      /
+               \\    /
+                tuple
+                  |
+               getitem1
+                  |
+               getitem0
+                  |
+                output
+        """
+        # Construct graph manually because symbolic_trace does not insert tuple and getitem nodes
+        graph = torch.fx.Graph()
+        a = graph.create_node("placeholder", "a")
+        b = graph.create_node("placeholder", "b")
+        c = graph.create_node("placeholder", "c")
+        bc = graph.call_function(tuple, args=([b, c],))
+        abc = graph.call_function(tuple, args=([a, bc],))
+
+        # Break down tuple and reconstruct it again
+        a2 = graph.call_function(operator.getitem, args=(abc, 0))
+        bc2 = graph.call_function(operator.getitem, args=(abc, 1))
+        b2 = graph.call_function(operator.getitem, args=(bc2, 0))
+        c2 = graph.call_function(operator.getitem, args=(bc2, 1))
+        bc3 = graph.call_function(tuple, args=([b2, c2],))
+        abc2 = graph.call_function(tuple, args=([a2, bc3],))
+
+        # Output tuple[1][0]
+        bc4 = graph.call_function(operator.getitem, args=(abc2, 1))
+        b3 = graph.call_function(operator.getitem, args=(bc4, 0))
+        output = graph.output(b3)
+
+        # Do reroute
+        _reroute_tuple_getitem_pattern(graph)
+
+        # Assert that output reroutes to `b` directly, and all other nodes can be removed
+        output_ancestors = []
+        def gather_ancestors(current_node):  # noqa: E306
+            for arg in current_node.args:
+                output_ancestors.append(arg)
+                gather_ancestors(arg)
+        gather_ancestors(output)
+        self.assertEqual(output_ancestors, [b])
+        self.assertEqual(output.args[0], b)
 
     def test_relu_lowering(self):
         class M(torch.nn.Module):

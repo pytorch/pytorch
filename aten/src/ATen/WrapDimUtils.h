@@ -97,8 +97,10 @@ static inline int64_t legacy_cat_wrap_dim(
   return dim;
 }
 
-static inline int64_t legacy_cat_wrap_dim(int64_t dim, ITensorListRef tensors) {
-  for (auto& tensor : tensors) {
+static inline int64_t legacy_cat_wrap_dim(
+    int64_t dim,
+    const MaterializedITensorListRef& tensors) {
+  for (const Tensor& tensor : tensors) {
     if (tensor.dim() == 1 && tensor.sizes()[0] == 0) {
       continue;
     }
