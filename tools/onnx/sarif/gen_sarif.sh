@@ -11,6 +11,8 @@ tmp_dir=$(mktemp -d)
 sarif_schema_file_path=$tmp_dir/sarif-schema-$SARIF_VERSION.json
 wget -O $sarif_schema_file_path $SARIF_SCHEMA_LINK
 
+# TODO: A private branch of jschema_to_python was used to enable
+#       the generation to dataclasses and support annotation.
 python -m jschema_to_python \
     --schema-path $sarif_schema_file_path \
     --module-name torch.onnx._internal.diagnostics.infra.sarif_om \
@@ -18,6 +20,7 @@ python -m jschema_to_python \
     --root-class-name SarifLog \
     --hints-file-path code-gen-hints.json \
     --force \
+    --library dataclasses \
     -vv
 
 # generate SARIF version file
@@ -29,4 +32,5 @@ cd $ROOT
 for f in $(find $SARIF_DIR -name '*.py'); do
     echo "# flake8: noqa" >> $f
 done
+
 lintrunner $SARIF_DIR/** -a
