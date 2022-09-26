@@ -1014,6 +1014,19 @@ class {test_classname}(torch.nn.Module):
         else:
             self.fail("Didn't find call_function torch.add")
 
+    def test_normalize_args_perserve_type(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a: List[torch.Tensor]):
+                return torch.add(a[0], a[1])
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+        traced = NormalizeArgs(traced).transform()
+
+        for node in traced.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(node.type, List[torch.Tensor])
+
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
         m = resnet18()
