@@ -333,8 +333,8 @@ class GaussianNLLLoss(_Loss):
         - Target: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input
           but with one dimension equal to 1 (to allow for broadcasting)
         - Var: :math:`(N, *)` or :math:`(*)`, same shape as the input, or same shape as the input but
-          with one dimension equal to 1, or same shape as the input but with one fewer
-          dimension (to allow for broadcasting)
+          with the last dimension equal to 1, or same shape as the input but with one fewer
+          dimension (to allow for broadcasting).  If ``var < 0``, the behavior is undefined
         - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
           ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`, same
           shape as the input

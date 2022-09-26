@@ -7180,9 +7180,6 @@ def error_inputs_gaussian_nll_loss(op_info, device, **kwargs):
         (make_input(10, 2, 3), (make_input(10, 2, 2), make_input((10, 2, 3), low=0)), dict(),
          RuntimeError,
          r"The size of tensor a \(3\) must match the size of tensor b \(2\) at non-singleton dimension 2"),
-
-        # TODO: negative var
-        # FakeTensor always returns False for torch.any(var < 0).item()
     )
 
     for input, args, kwargs, error_type, error_regex in samples:
@@ -16107,11 +16104,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_gaussian_nll_loss,
         error_inputs_func=error_inputs_gaussian_nll_loss,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
@@ -17406,7 +17399,7 @@ python_ref_db = [
         "_refs.nn.functional.gaussian_nll_loss",
         torch_opinfo_name="nn.functional.gaussian_nll_loss",
         supports_out=False,
-        # TODO: Uses item and clamp, which don't support nvfuser.
+        # TODO: Uses clamp, which doesn't support nvfuser.
         supports_nvfuser=False,
     ),
     #

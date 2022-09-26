@@ -2777,8 +2777,10 @@ def gaussian_nll_loss(
     Args:
         input: expectation of the Gaussian distribution.
         target: sample from the Gaussian distribution.
-        var: tensor of positive variance(s), one for each of the expectations
-            in the input (heteroscedastic), or a single one (homoscedastic).
+        var: same shape as the input, or same shape as the input but with the
+            last dimension equal to 1, or same shape as the input but with one
+            fewer dimension (to allow for broadcasting).  If ``var < 0``, the
+            behavior is undefined.
         full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
         eps (float, optional): value added to var, for stability. Default: 1e-6.
         reduction (str, optional): specifies the reduction to apply to the output:
@@ -2824,10 +2826,6 @@ def gaussian_nll_loss(
     # Check validity of reduction mode
     if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
         raise ValueError(reduction + " is not a valid value for reduction")
-
-    # Entries of var must be non-negative
-    if torch.any(var < 0):
-        raise ValueError("var has negative entry/entries")
 
     # Clamp for stability
     var = var.clone()
