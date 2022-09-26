@@ -1,8 +1,7 @@
+import dataclasses
 import json
 import re
 from typing import Any, Callable, Dict, List, Union
-
-import attr
 
 from torch.onnx._internal.diagnostics.infra import sarif_om
 
@@ -43,6 +42,6 @@ def _convert_key(
 
 
 def sarif_to_json(attr_cls_obj: _SarifClass) -> str:
-    dict = attr.asdict(attr_cls_obj)
+    dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, _camel_case_to_snake_case)
     return json.dumps(dict, indent=4)
