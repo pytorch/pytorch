@@ -430,7 +430,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   UPSAMPLE_BATCH(upsample_nearest3d);
   UPSAMPLE_BATCH(upsample_trilinear3d);
 
-  UPSAMPLE_BACKWARD(upsample_bicubic2d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_bilinear2d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_linear1d_backward, vec);
   UPSAMPLE_BACKWARD(upsample_nearest1d_backward, vec);

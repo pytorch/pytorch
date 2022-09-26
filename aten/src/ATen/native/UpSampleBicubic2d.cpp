@@ -45,6 +45,7 @@ TORCH_META_FUNC(upsample_bicubic2d_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
+
 TORCH_META_FUNC(_upsample_bicubic2d_aa) (
   const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
@@ -269,18 +270,6 @@ Tensor upsample_bicubic2d(
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
   return at::upsample_bicubic2d(input, osize, align_corners, scale_h, scale_w);
-}
-
-Tensor upsample_bicubic2d_backward(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    bool align_corners,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return at::upsample_bicubic2d_backward(grad_output, osize, input_size, align_corners, scale_h, scale_w);
 }
 
 Tensor _upsample_bicubic2d_aa(

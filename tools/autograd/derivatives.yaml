@@ -2113,10 +2113,6 @@
   input: upsample_trilinear3d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
   result: auto_linear
 
-- name: upsample_bicubic2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_bicubic2d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
-  result: auto_linear
-
 - name: _upsample_bicubic2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   input: _upsample_bicubic2d_aa_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
 
@@ -2545,10 +2541,6 @@
 
 - name: upsample_trilinear3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   grad_output: upsample_trilinear3d(grad, output_size, align_corners, scale_factors)
-  result: auto_linear
-
-- name: upsample_bicubic2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_bicubic2d(grad, output_size, align_corners, scale_factors)
   result: auto_linear
 
 - name: _upsample_bicubic2d_aa_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor

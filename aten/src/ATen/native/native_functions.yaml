@@ -10892,15 +10892,7 @@
 
 - func: upsample_bicubic2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: upsample_bicubic2d
   autogen: upsample_bicubic2d.vec_out
-
-- func: upsample_bicubic2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: upsample_bicubic2d_backward
-  autogen: upsample_bicubic2d_backward.vec_out
 
 - func: _upsample_bicubic2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
