@@ -466,7 +466,9 @@ class TestFSDPStateDict(FSDPTest):
         with FSDP.state_dict_type(model, enum_val):
             return model.load_state_dict(state_dict, strict=True)
 
-    def _dist_train(self, wrap_fsdp: bool, state_dict_type: str = ""):
+    def _dist_train(
+        self, wrap_fsdp: bool, state_dict_type: str = "", move_to_cpu: bool = False
+    ):
         # TODO: Move this test to common_fsdp.
         model = self._initialize_model(wrap_fsdp)
         optim = SGD(model.parameters(), lr=0.1)
@@ -482,6 +484,16 @@ class TestFSDPStateDict(FSDPTest):
             blank_model = FSDP(Model(True).cuda())
             _zero_model(blank_model)
             state_dict = self._state_dict(model, state_dict_type)
+            if move_to_cpu:
+                for key in list(state_dict.keys()):
+                    tensor = state_dict[key]
+                    if isinstance(tensor, torch.Tensor):
+                        state_dict[key] = tensor.cpu()
+                    else:
+                        shards = tensor.local_shards()
+                        if shards:
+                            shards[0].tensor = shards[0].tensor.cpu()
+
             self._load_state_dict(blank_model, state_dict_type, state_dict)
             return get_full_params(blank_model)
         else:
@@ -489,8 +501,11 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
-    def test_state_dict_save_load_flow(self, state_dict_type):
-        fsdp_params = self._dist_train(wrap_fsdp=True, state_dict_type=state_dict_type)
+    @parametrize("move_to_cpu", [True, False])
+    def test_state_dict_save_load_flow(self, state_dict_type, move_to_cpu):
+        fsdp_params = self._dist_train(
+            wrap_fsdp=True, state_dict_type=state_dict_type, move_to_cpu=move_to_cpu,
+        )
         ddp_params = self._dist_train(wrap_fsdp=False)
         self.assertEqual(ddp_params, fsdp_params)
 
