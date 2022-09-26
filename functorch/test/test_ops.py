@@ -360,6 +360,8 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
+        tol1('nn.functional.batch_norm',
+             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
@@ -1147,6 +1149,8 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
         tol1('_masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
+        tol1('nn.functional.group_norm',
+             {torch.float32: tol(atol=1e-03, rtol=1e-03)}),
     ))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1297,6 +1301,8 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol1('linalg.pinv',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),

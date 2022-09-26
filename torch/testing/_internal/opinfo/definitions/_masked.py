@@ -453,7 +453,12 @@ op_db: List[OpInfo] = [
                 "test_ref_small_input",
             ),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=0.1, rtol=0.1)}),
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=0.1, rtol=0.1),
+                        torch.float16: tol(atol=5e-3, rtol=5e-3),
+                    }
+                ),
                 "TestMasked",
                 "test_mask_layout",
             ),
@@ -990,8 +995,12 @@ op_db: List[OpInfo] = [
                 "test_ref_small_input",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02),
-                                   torch.bfloat16: tol(atol=5e-03, rtol=5e-04)}),
+                toleranceOverride(
+                    {
+                        torch.float16: tol(atol=1e-02, rtol=1e-02),
+                        torch.bfloat16: tol(atol=5e-03, rtol=5e-04),
+                    }
+                ),
                 "TestMasked",
                 "test_reference_masked",
             ),
