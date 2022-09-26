@@ -648,13 +648,9 @@ const SparseCsrTensor& resize_as_sparse_compressed_(
       src_layout, "resize_as_sparse_compressed_: src ", []() {});
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
       self_layout, "resize_as_sparse_compressed_: self ", []() {});
-  // resize_as_sparse_compressed_tensor will resize AND set the layout, if the
-  // sizes are correct and the layout is wrong at least some of the member
-  // tensors need to be resized
-  if (!_is_same_size_as_sparse_compressed(self, src) ||
-      (self_layout != src_layout)) {
-    get_sparse_csr_impl(self)->resize_as_sparse_compressed_tensor_(src);
-  }
+  // Note: The impl method does all required checking to see if resize/data copy
+  // on member tensors is required.
+  get_sparse_csr_impl(self)->resize_as_sparse_compressed_tensor_(src);
   return self;
 }
 
