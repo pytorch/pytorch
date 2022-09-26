@@ -9,8 +9,7 @@ namespace torch {
     void initEnumTag(PyObject* module) {
         auto m = py::handle(module).cast<py::module>();
         py::enum_<at::Tag>(m, "Tag")
-        ${enum_of_valid_tags}
-        .export_values();
+        ${enum_of_valid_tags};
         m.doc() = "An Enum that contains tags that can be assigned to an operator registered in C++.";
     }
 }}

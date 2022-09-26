@@ -39,6 +39,7 @@ class TensorView;
 class UnaryOp;
 class BinaryOp;
 class TernaryOp;
+class RNGOp;
 class ReductionOp;
 class WelfordOp;
 class BroadcastOp;
@@ -55,6 +56,7 @@ class Allocate;
 class BlockSync;
 class GridSync;
 class CpAsyncWait;
+class CpAsyncCommit;
 class InitMagicZero;
 class UpdateMagicZero;
 class ForLoop;
@@ -63,6 +65,7 @@ class GridReduction;
 class GroupedGridReduction;
 class GridBroadcast;
 class GridWelford;
+class GroupedGridWelford;
 class AllocateFusedReduction;
 
 // Expr container
@@ -258,11 +261,27 @@ class TORCH_CUDA_CU_API BlockSync final : public Expr {
 };
 
 // CpAsyncWait represents wait intrinsics for cp.async
-// TODO: expand to support different wait modes of the intrinsic
-//  as the analysis passes build out.
 class TORCH_CUDA_CU_API CpAsyncWait final : public Expr {
  public:
-  explicit CpAsyncWait(IrBuilderPasskey passkey);
+  explicit CpAsyncWait(IrBuilderPasskey passkey, unsigned int keep_stages = 0);
+
+  //! Returns the remaining number of stages that are not synchronized
+  //!  after this op.
+  unsigned int keepStages() const {
+    return keep_stages_;
+  }
+
+ private:
+  //! Number of stage to leave un-sync'ed by this op.
+  unsigned int keep_stages_ = 0;
+};
+
+// CpAsyncCommit represents commit intrinsics for cp.async
+//  A commit intrinsic communicates delimiter of transaction groups
+// to the async load hardware. Example usage see [Cicular buffer].
+class TORCH_CUDA_CU_API CpAsyncCommit final : public Expr {
+ public:
+  explicit CpAsyncCommit(IrBuilderPasskey passkey);
 };
 
 // Synchronize all blocks in device, implies cooperative group launch is
@@ -677,6 +696,8 @@ class TORCH_CUDA_CU_API GridBroadcast final : public Expr {
 //!
 //! This node provides FusionExecutor the information it needs to allocate the
 //! reduction and sync buffers.
+//!
+//! TODO: Make this a subclass of WelfordOp
 class TORCH_CUDA_CU_API GridWelford final : public Expr {
  public:
   GridWelford(
@@ -741,6 +762,64 @@ class TORCH_CUDA_CU_API GridWelford final : public Expr {
   ParallelTypeBitmap thread_predicate_;
 };
 
+class TORCH_CUDA_CU_API GroupedGridWelford final : public GroupedWelfordOp {
+ public:
+  // input, output and init vals are vectors of triplets
+  GroupedGridWelford(
+      IrBuilderPasskey passkey,
+      std::vector<WelfordTriplet> output_vals,
+      std::vector<WelfordTriplet> input_vals,
+      std::vector<WelfordTriplet> init_vals,
+      std::array<std::vector<Allocate*>, 3> reduction_buffers,
+      Allocate* sync_buffer,
+      Val* entrance_index,
+      Val* entrances,
+      Val* buffer_stride,
+      bool is_allreduce = false);
+
+  const std::array<std::vector<Allocate*>, 3>& reduction_buffers() const {
+    return reduction_buffers_;
+  }
+
+  Allocate* sync_buffer() const {
+    return sync_buffer_;
+  }
+
+  // Which instance of entering this grid reduction is this iteration?
+  Val* entrance_index() const {
+    return entrance_index_;
+  }
+
+  // How many times will this grid reduction be entered
+  Val* entrances() const {
+    return entrances_;
+  }
+
+  Val* buffer_stride() const {
+    return buffer_stride_;
+  }
+
+  const ParallelTypeBitmap& threadPredicate() const {
+    return thread_predicate_;
+  }
+
+  void setThreadPredicate(const ParallelTypeBitmap& thread_predicate) {
+    thread_predicate_ = thread_predicate;
+  }
+
+ private:
+  std::array<std::vector<Allocate*>, 3> reduction_buffers_;
+  Allocate* sync_buffer_ = nullptr;
+  // gridReduce has template flags for thread predicates. In order to
+  // use them, the thread predicate is held here separately from
+  // Expr::predicate_.
+  ParallelTypeBitmap thread_predicate_;
+  Val* entrance_index_ = nullptr;
+  Val* entrances_ = nullptr;
+  // Stride of reduction buffers
+  Val* buffer_stride_ = nullptr;
+};
+
 // Allocate an instance of the fused reduction class.
 class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
  public:
@@ -756,6 +835,10 @@ class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
       IrBuilderPasskey passkey,
       GroupedGridReduction* grouped_grid_reduction);
 
+  explicit AllocateFusedReduction(
+      IrBuilderPasskey passkey,
+      GroupedGridWelford* grouped_grid_welford);
+
   Expr* gridExpr() const {
     return grid_expr_;
   }
@@ -765,7 +848,7 @@ class TORCH_CUDA_CU_API AllocateFusedReduction final : public Expr {
   const ParallelTypeBitmap& threadPredicate() const;
 
  private:
-  //! GridReduction, GridWelford or GroupedGridReduction
+  //! GridReduction, GridWelford, GroupedGridReduction or GroupedGridWelford
   Expr* grid_expr_ = nullptr;
 };
 

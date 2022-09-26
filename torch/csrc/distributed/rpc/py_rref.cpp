@@ -56,7 +56,7 @@ RRefForkData fromPyTuple(const py::tuple& pyTuple) {
 TypePtr tryInferTypeWithTypeHint(
     const py::object& value,
     const py::object& type_hint) {
-  // If the py::object to be contained by the RRef is a ScripModule, we enforce
+  // If the py::object to be contained by the RRef is a ScriptModule, we enforce
   // users to specify its ModuleInterface type.
   if (auto module = jit::as_module(value)) {
     TORCH_CHECK(
@@ -101,7 +101,7 @@ TypePtr tryInferTypeWithTypeHint(
   }
 
   // NB: `jit::tryToInferType(..)` infers types including ScriptClass, but
-  // excluding ScripModule.
+  // excluding ScriptModule.
   jit::InferredType type_inferred = jit::tryToInferType(value);
   if (type_inferred.success()) {
     // If we could infer the type from the pyobject, we create

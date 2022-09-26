@@ -20,6 +20,7 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         drop_last: Option to drop the last batch if it's not full
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper
         >>> dp = SequenceWrapper(range(10))
         >>> batch_dp = dp.batch(batch_size=2)

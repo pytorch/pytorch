@@ -2,6 +2,12 @@
 
 set -ex
 
+if [[ -d "/usr/local/cuda/" ]];  then
+  with_cuda=/usr/local/cuda/
+else
+  with_cuda=no
+fi
+
 function install_ucx() {
   set -ex
   git clone --recursive https://github.com/openucx/ucx.git
@@ -12,6 +18,7 @@ function install_ucx() {
   ./autogen.sh
   ./configure --prefix=$UCX_HOME      \
       --enable-mt                     \
+      --with-cuda=$with_cuda          \
       --enable-profiling              \
       --enable-stats
   time make -j
@@ -29,7 +36,7 @@ function install_ucc() {
   git submodule update --init --recursive
 
   ./autogen.sh
-  ./configure --prefix=$UCC_HOME --with-ucx=$UCX_HOME --with-nccl=no
+  ./configure --prefix=$UCC_HOME --with-ucx=$UCX_HOME --with-cuda=$with_cuda
   time make -j
   sudo make install
 

@@ -227,7 +227,7 @@ Tensor quantile_compute(
   // synchronizing an accelerator with the CPU
   if (self.device().is_cpu()) {
     auto all_q_in_range = q.ge(0).logical_and_(q.le(1)).all();
-    TORCH_CHECK(at::equal(all_q_in_range, all_q_in_range.new_ones({})),
+    TORCH_CHECK(at::is_scalar_tensor_true(all_q_in_range),
                 "quantile() q values must be in the range [0, 1]");
   }
 
