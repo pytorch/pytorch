@@ -449,15 +449,16 @@ class KLDivLoss(_Loss):
 
     Examples::
 
+        >>> import torch.nn.functional as F
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean")
         >>> # input should be a distribution in the log space
-        >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True))
+        >>> input = F.log_softmax(torch.randn(3, 5, requires_grad=True), dim=1)
         >>> # Sample a batch of distributions. Usually this would come from the dataset
-        >>> target = F.softmax(torch.rand(3, 5))
+        >>> target = F.softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, target)
 
         >>> kl_loss = nn.KLDivLoss(reduction="batchmean", log_target=True)
-        >>> log_target = F.log_softmax(torch.rand(3, 5))
+        >>> log_target = F.log_softmax(torch.rand(3, 5), dim=1)
         >>> output = kl_loss(input, log_target)
     """
     __constants__ = ['reduction']
@@ -670,7 +671,7 @@ class BCEWithLogitsLoss(_Loss):
         >>> pos_weight = torch.ones([64])  # All weights are equal to 1
         >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         >>> criterion(output, target)  # -log(sigmoid(1.5))
-        tensor(0.2014)
+        tensor(0.20...)
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
@@ -832,9 +833,9 @@ class MultiLabelMarginLoss(_Loss):
         >>> x = torch.FloatTensor([[0.1, 0.2, 0.4, 0.8]])
         >>> # for target y, only consider labels 3 and 0, not after label -1
         >>> y = torch.LongTensor([[3, 0, -1, 1]])
-        >>> loss(x, y)
         >>> # 0.25 * ((1-(0.1-0.2)) + (1-(0.1-0.4)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
-        tensor(0.8500)
+        >>> loss(x, y)
+        tensor(0.85...)
 
     """
     __constants__ = ['reduction']
@@ -1344,7 +1345,7 @@ class MultiMarginLoss(_WeightedLoss):
     .. math::
         \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i])^p}{\text{x.size}(0)}
 
-    where :math:`x \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
+    where :math:`i \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
     and :math:`i \neq y`.
 
     Optionally, you can give non-equal weighting on the classes by passing
@@ -1388,9 +1389,9 @@ class MultiMarginLoss(_WeightedLoss):
         >>> loss = nn.MultiMarginLoss()
         >>> x = torch.tensor([[0.1, 0.2, 0.4, 0.8]])
         >>> y = torch.tensor([3])
-        >>> loss(x, y)
         >>> # 0.25 * ((1-(0.8-0.1)) + (1-(0.8-0.2)) + (1-(0.8-0.4)))
-        tensor(0.3250)
+        >>> loss(x, y)
+        tensor(0.32...)
     """
     __constants__ = ['p', 'margin', 'reduction']
     margin: float
@@ -1575,15 +1576,16 @@ class TripletMarginWithDistanceLoss(_Loss):
     >>> def l_infinity(x1, x2):
     >>>     return torch.max(torch.abs(x1 - x2), dim=1).values
     >>>
-    >>> triplet_loss = \
-    >>>     nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5)
+    >>> # xdoctest: +SKIP("FIXME: Would call backwards a second time")
+    >>> triplet_loss = (
+    >>>     nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5))
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
     >>>
     >>> # Custom Distance Function (Lambda)
-    >>> triplet_loss = \
+    >>> triplet_loss = (
     >>>     nn.TripletMarginWithDistanceLoss(
-    >>>         distance_function=lambda x, y: 1.0 - F.cosine_similarity(x, y))
+    >>>         distance_function=lambda x, y: 1.0 - F.cosine_similarity(x, y)))
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
 
@@ -1708,6 +1710,7 @@ class CTCLoss(_Loss):
         >>> C = 20      # Number of classes (including blank)
         >>>
         >>> # Initialize random batch of input vectors, for *size = (T,C)
+        >>> # xdoctest: +SKIP("FIXME: error in doctest")
         >>> input = torch.randn(T, C).log_softmax(2).detach().requires_grad_()
         >>> input_lengths = torch.tensor(T, dtype=torch.long)
         >>>

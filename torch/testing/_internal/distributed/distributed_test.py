@@ -143,6 +143,7 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.NCCL,
     dist.Backend.GLOO,
     dist.Backend.MPI,
+    # TODO(ucc): dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported with use_cuda=True
@@ -150,6 +151,7 @@ CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
     dist.Backend.NCCL,
+    # TODO(ucc): dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported for p2p ops
@@ -157,6 +159,7 @@ SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.MPI,
     dist.Backend.GLOO,
     dist.Backend.NCCL,
+    # TODO(ucc): dist.Backend.UCC,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -395,6 +398,8 @@ def require_backends_available(backends):
             return dist.is_nccl_available()
         if backend == dist.Backend.MPI:
             return dist.is_mpi_available()
+        if backend == dist.Backend.UCC:
+            return dist.is_ucc_available()
         if backend in DistTestCases.backend_feature["plugin"]:
             return True
         return False
@@ -503,7 +508,7 @@ class TestDistBackend(MultiProcessTestCase):
     @classmethod
     def setUpClass(cls):
         os.environ["MASTER_ADDR"] = str(MASTER_ADDR)
-        os.environ["MASTER_PORT"] = str(MASTER_PORT)
+        # Not setting MASTER_PORT and get a random free port
         super().setUpClass()
 
     def setUp(self):
@@ -2202,6 +2207,46 @@ class DistributedTest:
                 rank_to_GPU,
             )
 
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports reduce_scatter_v")
+        @sandcastle_skip_if(BACKEND in DistTestCases.skip_collective["reduce"], f"{BACKEND} does not support reduce")
+        @skip_if_no_gpu
+        def test_reduce_scatter_v_cuda(self):
+            self._barrier()
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            input_split_sizes = []
+            for src in group:
+                input_split_sizes.append(src + 1)
+            start_len = sum(input_split_sizes[:rank])
+            end_len = start_len + input_split_sizes[rank]
+            sum_len = sum(input_split_sizes)
+            master_value = 2
+            worker_value = 10
+
+            for async_val in [True, False]:
+                tensor = _build_tensor(sum_len, worker_value, device_id=device_id)
+                tensor[start_len:end_len].fill_(master_value)
+                out_tensor = torch.empty(input_split_sizes[rank], sum_len, sum_len, dtype=torch.float).fill_(-1).cuda(device_id)
+
+                req = dist.reduce_scatter(
+                    out_tensor,
+                    list(torch.split(tensor, input_split_sizes)),
+                    dist.ReduceOp.SUM,
+                    group_id,
+                    async_val,
+                )
+                if async_val:
+                    req.wait()
+
+                expected_value = 2 + (10 * (len(group) - 1))
+                expected_tensor = torch.empty(input_split_sizes[rank], sum_len, sum_len, dtype=torch.float)
+                expected_tensor = expected_tensor.fill_(expected_value).cuda(device_id)
+
+                self.assertEqual(out_tensor, expected_tensor)
+            self._barrier()
+
         @skip_if_no_gpu
         @require_backend(DistTestCases.backend_feature["gpu"])
         def test_all_reduce_result_cuda(self):
@@ -2873,6 +2918,7 @@ class DistributedTest:
             self._barrier()
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         def test_scatter_checks(self):
             group, group_id, rank = self._init_global_test()
             one = torch.ones([1])
@@ -2896,6 +2942,7 @@ class DistributedTest:
             self.assertEqual(output, one * rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         def test_scatter(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank)
@@ -2908,6 +2955,7 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         def test_scatter_complex(self):
             group, group_id, rank = self._init_global_test()
             self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
@@ -2920,12 +2968,14 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, True, rank_to_GPU, dtype=torch.cfloat)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         @skip_if_small_worldsize
         def test_scatter_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_scatter_helper(group, group_id, rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         def test_scatter_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_scatter_helper(group, group_id, rank)
@@ -2959,6 +3009,7 @@ class DistributedTest:
             self._barrier()
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         def test_gather_checks(self):
             group, group_id, rank = self._init_global_test()
             one = torch.ones([1])
@@ -2982,6 +3033,7 @@ class DistributedTest:
                 dist.gather(one * rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         def test_gather(self):
             group, group_id, rank = self._init_global_test()
             self._test_gather_helper(group, group_id, rank)
@@ -2994,12 +3046,14 @@ class DistributedTest:
             self._test_gather_helper(group, group_id, rank, True, rank_to_GPU)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         @skip_if_small_worldsize
         def test_gather_group(self):
             group, group_id, rank = self._init_group_test()
             self._test_gather_helper(group, group_id, rank)
 
         @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support CPU tensors")
+        @sandcastle_skip_if(BACKEND == "ucc", "CPU tensor ops not supported by UCP TL")
         def test_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_gather_helper(group, group_id, rank)
@@ -3074,6 +3128,40 @@ class DistributedTest:
         def test_all_gather_full_group(self):
             group, group_id, rank = self._init_full_group_test()
             self._test_all_gather_helper(group, group_id, rank)
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports all_gather_v")
+        @skip_if_no_gpu
+        def test_all_gather_v_cuda(self):
+            self._barrier()
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            device_id = rank_to_GPU[rank][0]
+
+            output_split_sizes = []
+            for dst in group:
+                output_split_sizes.append(dst + 1)
+            sum_len = sum(output_split_sizes)
+            value = 2
+
+            for async_val in [True, False]:
+                tensor = torch.empty(output_split_sizes[rank], sum_len, sum_len, dtype=torch.float).fill_(value).cuda(device_id)
+                out_tensor = _build_tensor(sum_len, -1, device_id=device_id)
+
+                req = dist.all_gather(
+                    list(torch.split(out_tensor, output_split_sizes)),
+                    tensor,
+                    group_id,
+                    async_val,
+                )
+                if async_val:
+                    req.wait()
+
+                expected_value = value
+                expected_tensor = _build_tensor(sum_len, expected_value, device_id=device_id)
+
+                self.assertEqual(out_tensor, expected_tensor)
+            self._barrier()
+
 
         def _run_all_gather_coalesced_and_verify(
             self, output_tensor_lists, input_tensors, expected_tensors, group_id
@@ -3537,6 +3625,7 @@ class DistributedTest:
 
         @skip_if_no_gpu
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't supports GPU barrier")
+        @sandcastle_skip_if(BACKEND == "ucc", "flaky on PyTorch CI with timeout")
         def test_barrier_cuda(self):
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
@@ -4262,7 +4351,7 @@ class DistributedTest:
                     dist.barrier()
 
         @sandcastle_skip_if(
-            BACKEND == "nccl",
+            BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
         @skip_if_lt_x_gpu(2)
@@ -4289,7 +4378,7 @@ class DistributedTest:
             )
 
         @sandcastle_skip_if(
-            BACKEND == "nccl",
+            BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
         @skip_if_lt_x_gpu(2)
@@ -4309,7 +4398,7 @@ class DistributedTest:
             )
 
         @sandcastle_skip_if(
-            BACKEND == "nccl",
+            BACKEND == "nccl" or BACKEND == "ucc",
             "Issues with async error handling, see https://github.com/pytorch/pytorch/issues/73259"
         )
         @skip_if_lt_x_gpu(2)
@@ -5019,6 +5108,7 @@ class DistributedTest:
 
             self.assertEqual(averager2.step, 0)
 
+            dist.barrier()
             if self.rank == 0:
                 os.remove(chkpt_file)
 
@@ -6152,7 +6242,6 @@ class DistributedTest:
             IS_MACOS or IS_WINDOWS,
             "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124",
         )
-        @skip_if_rocm
         def test_ddp_profiling_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
@@ -8938,12 +9027,17 @@ class DistributedTest:
             for orig_param, dummy_param in zip(ddp_model.parameters(), dummy_ddp_model.parameters()):
                 self.assertEqual(orig_param.grad, dummy_param.grad)
 
+            dist.barrier()
             if rank == 0:
                 os.remove(chkpt_file)
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
+        )
+        @sandcastle_skip_if(
+            BACKEND == "ucc",
+            "flaky on PyTorch CI: No such file or directory: '/tmp/checkpoint.pt'"
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         def test_ddp_hook_pickling_powerSGD(self):

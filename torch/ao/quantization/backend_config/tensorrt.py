@@ -1,6 +1,10 @@
 import torch
-from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig
-from .observation_type import ObservationType
+from .backend_config import (
+    BackendConfig,
+    BackendPatternConfig,
+    DTypeConfig,
+    ObservationType
+)
 from ._common_operator_config_utils import (
     _get_binary_op_configs,
     _get_linear_configs,

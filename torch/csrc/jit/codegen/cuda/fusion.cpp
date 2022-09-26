@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
+#include <torch/csrc/jit/codegen/cuda/disjoint_set.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
@@ -50,9 +51,9 @@ void swap(Fusion& a, Fusion& b) noexcept {
 }
 
 std::unique_ptr<SegmentedFusion> Fusion::segment(
-    const at::ArrayRef<IValue>& inputs) {
+    const KernelArgumentHolder& args) {
   FUSER_PERF_SCOPE("Segment Fusion");
-  return SegmentCandidateFinder::segment(this, inputs);
+  return SegmentCandidateFinder::segment(this, args);
 }
 
 IrCloner Fusion::copy(const Fusion* from, Fusion* to) {
@@ -229,15 +230,6 @@ void Fusion::addOutput(Val* output) {
   all_tv_uses_valid_ = false;
 }
 
-void Fusion::addOutput(WelfordResult& wr) {
-  // Want to always make sure the avg gets added last
-  //  since avg will be the out() value of welfordOp,
-  //  and want to make it the top of the computeAt chain
-  addOutput(wr.var_sum);
-  addOutput(wr.n);
-  addOutput(wr.avg);
-}
-
 void Fusion::removeInput(Val* input) {
   auto find_input = std::find(inputs_.begin(), inputs_.end(), input);
   if (find_input != inputs_.end()) {
@@ -381,6 +373,19 @@ void Fusion::printMath(bool from_outputs_only) {
   std::cout << "}\n\n";
 }
 
+std::vector<Val*> Fusion::inputsAndCreated() {
+  auto result = inputs_;
+  for (auto expr : exprs()) {
+    auto tv_inputs = ir_utils::filterByType<TensorView>(expr->inputs());
+    if (tv_inputs.empty()) {
+      for (auto v : expr->outputs()) {
+        result.emplace_back(v);
+      }
+    }
+  }
+  return result;
+}
+
 void Fusion::printTransforms() {
   FUSER_PERF_SCOPE("Fusion::printTransforms");
 
@@ -516,7 +521,19 @@ std::vector<Val*> Fusion::usedMathVals() {
   return used_math_vals;
 }
 
-std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
+std::vector<Val*> Fusion::terminatingMathVals() {
+  VectorOfUniqueEntries<Val*> result;
+  auto used_vals = usedMathVals();
+  for (auto v : used_vals) {
+    // Locate the vals that are not expr outputs but have valid definitions.
+    if (unordered_uses(v).empty() && v->definition() != nullptr) {
+      result.pushBack(v);
+    }
+  }
+  return result.vector();
+}
+
+std::unordered_set<Expr*> Fusion::unordered_uses(const Val* val) const {
   return std::unordered_set<Expr*>(val->uses().begin(), val->uses().end());
 }
 
@@ -527,14 +544,15 @@ Expr* Fusion::definition(const Val* val) const {
 
 // Indicate to kernel to set itself up to generate random numbers
 bool Fusion::isStochastic() {
-  for (auto expr : exprs())
-    if (expr->getExprType() == ExprType::UnaryOp)
-      if (expr->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::RandLike)
-        return true;
+  for (auto expr : exprs()) {
+    if (expr->getExprType() == ExprType::RNGOp) {
+      return true;
+    }
+  }
   return false;
 }
 
-std::vector<Val*> Fusion::getTerminatingOutputs() {
+std::vector<Val*> Fusion::getTerminatingOutputs() const {
   FUSER_PERF_SCOPE("getTerminatingOutputs");
 
   auto is_reachable_to_output = [](Val* val) {
