@@ -8,6 +8,7 @@
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
+#include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
 
@@ -479,6 +480,22 @@ void block_sparse_mm(
   TORCH_INTERNAL_ASSERT(
       mat1.values().is_contiguous() ||
       mat1.values().transpose(-2, -1).is_contiguous());
+
+  // NOTE: the code below allows arbitrary block sizes
+  // and might be potentially faster than cuSPARSE implementation
+  // especially for not very sparse inputs.
+  if (mat1.scalar_type() == ScalarType::Half || mat1.scalar_type() == ScalarType::BFloat16) {
+    at::native::sparse::impl::_compressed_row_strided_addmm_out(
+        mat1, // ignored when beta == 0
+        mat1,
+        mat2,
+        /*beta=*/0.,
+        /*alpha=*/alpha,
+        // @nikitaved: not sure whether `const Tensor& result` makes sense,
+        // but let's keep the interface intact, hence the const cast.
+        const_cast<Tensor&>(result));
+    return;
+  }
 
   const cusparseDirection_t block_layout = mat1.values().is_contiguous()
       ? CUSPARSE_DIRECTION_ROW

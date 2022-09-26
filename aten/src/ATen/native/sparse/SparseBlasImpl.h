@@ -8,12 +8,12 @@ namespace native {
 namespace sparse {
 namespace impl {
 
-Tensor& _compressed_row_strided_mm_out(
+TORCH_API Tensor& _compressed_row_strided_mm_out(
     const Tensor& compressed_row_sparse,
     const Tensor& strided,
     Tensor& result);
 
-Tensor& _compressed_row_strided_addmm_out(
+TORCH_API Tensor& _compressed_row_strided_addmm_out(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,
