@@ -118,9 +118,13 @@ namespace detail {
 
 namespace impl {
 
-template<class T, class Iterator>
-ListElementReference<T, Iterator>::operator T() const {
-  return c10::detail::list_element_to<T>(*iterator_);
+template <class T, class Iterator>
+ListElementReference<T, Iterator>::operator std::conditional_t<
+    std::is_reference<typename c10::detail::ivalue_to_const_ref_overload_return<
+        T>::type>::value,
+    const T&,
+    T>() const {
+  return iterator_->template to<T>();
 }
 
 template<class T, class Iterator>

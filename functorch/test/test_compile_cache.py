@@ -1,12 +1,14 @@
 # Owner(s): ["module: functorch"]
 
 import torch
+import torch.utils._pytree as pytree
 
 import functorch
-from functorch._src.partitioners import move_input_mutations_into_submodule
+from functorch._src.partitioners import move_input_mutations_into_epilogue
 from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 import unittest
 
+from functorch import make_fx
 from functorch.compile import aot_function, nop
 
 
@@ -59,28 +61,28 @@ class TestCompileCache(TestCase):
             c_view.add_(1)
 
             return [b, b], d
-        out = functorch.make_fx(functorch.experimental.functionalize(fn))(
-            torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2))
+        args = [torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2)]
+        out = functorch.make_fx(functorch.experimental.functionalize(fn))(*args)
         self.assertExpectedInline((out.code), """\
 
 
 
 def forward(self, tensor1, lst, tensor2):
     tensor1_1, lst_1, lst_2, tensor2_1, = fx_pytree.tree_flatten_spec([tensor1, lst, tensor2], self._in_spec)
-    view_default = torch.ops.aten.view.default(tensor1_1, [-1])
-    add_tensor = torch.ops.aten.add.Tensor(view_default, 1);  view_default = None
-    view_default_1 = torch.ops.aten.view.default(lst_2, [-1])
-    add_tensor_1 = torch.ops.aten.add.Tensor(view_default_1, 1);  view_default_1 = None
-    view_default_2 = torch.ops.aten.view.default(add_tensor, [2]);  add_tensor = None
-    view_default_3 = torch.ops.aten.view.default(add_tensor_1, [2]);  add_tensor_1 = None
-    copy__default = torch.ops.aten.copy_.default(tensor1_1, view_default_2);  tensor1_1 = view_default_2 = None
-    copy__default_1 = torch.ops.aten.copy_.default(lst_2, view_default_3);  lst_2 = view_default_3 = None
+    view = torch.ops.aten.view.default(tensor1_1, [-1])
+    add = torch.ops.aten.add.Tensor(view, 1);  view = None
+    view_1 = torch.ops.aten.view.default(lst_2, [-1])
+    add_1 = torch.ops.aten.add.Tensor(view_1, 1);  view_1 = None
+    view_2 = torch.ops.aten.view.default(add, [2]);  add = None
+    view_3 = torch.ops.aten.view.default(add_1, [2]);  add_1 = None
+    copy_ = torch.ops.aten.copy_.default(tensor1_1, view_2);  tensor1_1 = view_2 = None
+    copy__1 = torch.ops.aten.copy_.default(lst_2, view_3);  lst_2 = view_3 = None
     return pytree.tree_unflatten([lst_1, lst_1, tensor2_1], self._out_spec)
     """)
 
-        move_input_mutations_into_submodule(out)
+        _ = move_input_mutations_into_epilogue(out)
 
-        # After calling move_input_mutations_into_submodule,
+        # After calling move_input_mutations_into_epilogue,
         # The graph also returns mutated inputs as outputs (two new outputs in this example)
         self.assertExpectedInline((out.code), """\
 
@@ -88,23 +90,15 @@ def forward(self, tensor1, lst, tensor2):
 
 def forward(self, tensor1, lst, tensor2):
     tensor1_1, lst_1, lst_2, tensor2_1, = fx_pytree.tree_flatten_spec([tensor1, lst, tensor2], self._in_spec)
-    view_default = torch.ops.aten.view.default(tensor1_1, [-1]);  tensor1_1 = None
-    add_tensor = torch.ops.aten.add.Tensor(view_default, 1);  view_default = None
-    view_default_1 = torch.ops.aten.view.default(lst_2, [-1]);  lst_2 = None
-    add_tensor_1 = torch.ops.aten.add.Tensor(view_default_1, 1);  view_default_1 = None
-    view_default_2 = torch.ops.aten.view.default(add_tensor, [2]);  add_tensor = None
-    view_default_3 = torch.ops.aten.view.default(add_tensor_1, [2]);  add_tensor_1 = None
-    return pytree.tree_unflatten([view_default_2, view_default_3, lst_1, lst_1, tensor2_1], self._out_spec)
+    view = torch.ops.aten.view.default(tensor1_1, [-1]);  tensor1_1 = None
+    add = torch.ops.aten.add.Tensor(view, 1);  view = None
+    view_1 = torch.ops.aten.view.default(lst_2, [-1]);  lst_2 = None
+    add_1 = torch.ops.aten.add.Tensor(view_1, 1);  view_1 = None
+    view_2 = torch.ops.aten.view.default(add, [2]);  add = None
+    view_3 = torch.ops.aten.view.default(add_1, [2]);  add_1 = None
+    return pytree.tree_unflatten([view_2, view_3, lst_1, lst_1, tensor2_1], self._out_spec)
     """)
 
-        self.assertExpectedInline((out.input_mutation_submodule.code), """\
-
-
-
-def forward(self, tensor1_1, view_default_2, lst_2, view_default_3):
-    copy__default = torch.ops.aten.copy_.default(tensor1_1, view_default_2);  tensor1_1 = view_default_2 = None
-    copy__default_1 = torch.ops.aten.copy_.default(lst_2, view_default_3);  lst_2 = view_default_3 = None
-    """)
 
         from unittest.mock import patch
         with patch.object(functorch.compile.config, "use_functionalize", True):

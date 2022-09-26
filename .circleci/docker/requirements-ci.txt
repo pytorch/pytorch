@@ -129,7 +129,7 @@ numba==0.55.2 ; python_version == "3.10"
 #Pinned versions:
 #test that import:
 
-protobuf==3.20.1
+protobuf==3.20.2
 #Description:  Google’s data interchange format
 #Pinned versions: 3.20.1
 #test that import: test_tensorboard.py
@@ -149,6 +149,11 @@ pytest-xdist
 #Pinned versions:
 #test that import:
 
+pytest-shard
+#Description: plugin spliting up tests in pytest
+#Pinned versions:
+#test that import:
+
 pytest-rerunfailures
 #Description: plugin for rerunning tests in pytest
 #Pinned versions:
@@ -163,6 +168,16 @@ pytest-rerunfailures
 #Description: shows failures and errors instantly
 #Pinned versions:
 #test that import:
+
+xdoctest==1.0.2
+#Description: runs doctests in pytest
+#Pinned versions: 1.0.2
+#test that import:
+
+pygments==2.12.0
+#Description: support doctest highlighting
+#Pinned versions: 2.12.0
+#test that import: the doctests
 
 #PyYAML
 #Description: data serialization format

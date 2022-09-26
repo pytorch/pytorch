@@ -4,11 +4,19 @@ import importlib
 from typing import List, Optional
 
 class AOMigrationTestCase(TestCase):
-    def _test_package_import(self, package_name: str, base: Optional[str] = None):
+    def _test_package_import(self, package_name: str,
+                             base: Optional[str] = None,
+                             skip: List[str] = None):
         r"""Tests the module import by making sure that all the internals match
-        (except the dunder methods)."""
-        if base is None:
-            base = 'quantization'
+        (except the dunder methods).
+
+        Args:
+            package_name: The name of the package to be tested
+            base: The base namespace where the `package_name` resides
+            skip: The list of the subpackages/modules/functions to skip
+        """
+        skip = skip or []
+        base = base or 'quantization'
         old_base = 'torch.' + base
         new_base = 'torch.ao.' + base
         old_module = importlib.import_module(f'{old_base}.{package_name}')
@@ -17,7 +25,11 @@ class AOMigrationTestCase(TestCase):
         new_module_dir = set(dir(new_module))
         # Remove magic modules from checking in subsets
         for el in list(old_module_dir):
-            if el[:2] == '__' and el[-2:] == '__':
+            if el.startswith('__') and el.endswith('__'):
+                # Remove dunder
+                old_module_dir.remove(el)
+            if el in skip:
+                # Remove skips
                 old_module_dir.remove(el)
         assert (old_module_dir <= new_module_dir), \
             f"Importing {old_module} vs. {new_module} does not match: " \

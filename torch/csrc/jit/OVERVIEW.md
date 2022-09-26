@@ -1200,6 +1200,8 @@ or switching the fuser could also provide a temporary fix in case of bugs.
 | NNC context manager | `with torch.jit.fuser("fuser1"):` |
 | NVFuser enable/disable | `torch._C._jit_set_nvfuser_enabled()` |
 | NVFuser context manager | `with torch.jit.fuser("fuser2")` |
+| oneDNN Graph on CPU | `torch._C._jit_set_llga_enabled(True)` |
+| oneDNN Graph context manager | `with torch.jit.fuser("fuser3"):` |
 
 **C++ APIs:**
 

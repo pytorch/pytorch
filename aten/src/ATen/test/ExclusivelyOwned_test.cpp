@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Tensor.h>
 #include <caffe2/core/tensor.h>
@@ -28,7 +29,7 @@ T getSampleValue();
 
 template <>
 at::Tensor getSampleValue() {
-  return at::native::zeros({2, 2}).to(at::kCPU);
+  return at::zeros({2, 2}).to(at::kCPU);
 }
 
 template <>
