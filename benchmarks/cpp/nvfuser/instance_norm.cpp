@@ -165,7 +165,7 @@ static void Baseline_InstanceNorm(
   auto ato_running_var = c10::optional<at::Tensor>(at_var);
 
   clearL2Cache();
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
 
@@ -182,9 +182,9 @@ static void Baseline_InstanceNorm(
     auto output = at::relu(norm);
 
     benchmark_state.SetIterationTime(timer.elapsed() / 1000.0);
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
     clearL2Cache();
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
   }
 
   const size_t kChannels = benchmark_state.range(2);

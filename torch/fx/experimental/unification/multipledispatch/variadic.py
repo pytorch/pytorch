@@ -2,6 +2,7 @@ import six
 
 from .utils import typename
 
+__all__ = ["VariadicSignatureType", "isvariadic", "VariadicSignatureMeta", "Variadic"]
 
 class VariadicSignatureType(type):
     # checking if subclass is a subclass of self
@@ -76,6 +77,7 @@ class Variadic(six.with_metaclass(VariadicSignatureMeta)):
     Examples
     --------
     >>> Variadic[int]  # any number of int arguments
+    >>> # xdoctest: +SKIP
     <class 'multipledispatch.variadic.Variadic[int]'>
     >>> Variadic[(int, str)]  # any number of one of int or str arguments
     <class 'multipledispatch.variadic.Variadic[(int, str)]'>
