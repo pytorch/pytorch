@@ -62,4 +62,3 @@ def with_fake_comms(func=None, rank=0, world_size=2):
         with with_dist(rank, world_size):
             func(self, *args, **kwargs)
     return wrapper
-
