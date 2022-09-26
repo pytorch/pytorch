@@ -29,6 +29,7 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     TEST_WITH_ASAN,
     TEST_WITH_UBSAN,
+    skipIfRocm,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
@@ -1835,6 +1836,9 @@ fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfai
 fake_autocast_backward_xfails = {
     skip("nn.functional.binary_cross_entropy"),
     skip("sparse.sampled_addmm"),
+    skip("linalg.pinv"),
+    skip("linalg.pinv", "hermitian"),
+    skip("linalg.pinv", "singular"),
 }
 
 @skipIfSlowGradcheckEnv
@@ -1937,13 +1941,14 @@ class TestFakeTensor(TestCase):
                         sample.output_process_fn_grad,
                         op.gradcheck_wrapper)
 
+    @skipIfRocm
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_no_amp', fake_backward_xfails)
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
 
-
+    @skipIfRocm
     @onlyCUDA
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
