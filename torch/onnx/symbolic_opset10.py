@@ -20,7 +20,7 @@ from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+# see Note [Edit Symbolic Files] in README.md
 
 # This file exports ONNX ops for opset 10
 # Opset 10 is supported by ONNX release 1.5.0
