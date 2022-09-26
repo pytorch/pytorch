@@ -1932,13 +1932,9 @@ def register_custom_op_symbolic(
 
     _verify_custom_op_name(symbolic_name)
 
-    versions = range(
-        max(_constants.ONNX_MIN_OPSET, opset_version), _constants.ONNX_MAX_OPSET + 1
-    )
-
     registration.custom_onnx_symbolic(
         symbolic_name,
-        versions,
+        opset_version,
         decorate=[
             _symbolic_context_handler,
         ],
@@ -1961,9 +1957,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
 
     _verify_custom_op_name(symbolic_name)
 
-    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
-        if version >= opset_version:
-            registration.registry.unregister(symbolic_name, version)
+    registration.registry.unregister(symbolic_name, opset_version)
 
 
 @_beartype.beartype
