@@ -3,7 +3,7 @@ import operator
 import sys
 from enum import Enum
 from itertools import product
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, cast, Iterable, List, Optional, Tuple
 
 import torch
 import torch._prims_common as utils
@@ -1873,6 +1873,36 @@ def nll_loss_forward(
     return result, total_weight
 
 
+# These are adapted from aten/src/ATen/native/UpSample.h, wich is based on
+# https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+def _upsample_cubic_convolution1(x: Tensor, A: float) -> Tensor:
+    return ((A + 2) * x - (A + 3)) * x * x + 1
+
+
+def _upsample_cubic_convolution2(x: Tensor, A: float) -> Tensor:
+    return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A
+
+
+def _upsample_get_cubic_coefficients(t: Tensor) -> TensorSequenceType:
+    A = -0.75
+    return (
+        _upsample_cubic_convolution2(t + 1.0, A),
+        _upsample_cubic_convolution1(t, A),
+        _upsample_cubic_convolution1(1.0 - t, A),
+        _upsample_cubic_convolution2(2.0 - t, A),
+    )
+
+
+def _upsample_cubic_interp1d(coeffs: TensorSequenceType, ts: Tensor) -> Tensor:
+    coeffs2 = _upsample_get_cubic_coefficients(ts)
+    return _sum_tensors(c1 * c2 for (c1, c2) in zip(coeffs, coeffs2))
+
+
+# Need this instead of just sum() to keep mypy happy
+def _sum_tensors(ts: Iterable[Tensor]) -> Tensor:
+    return functools.reduce(torch.add, ts)
+
+
 @register_decomposition(aten.grid_sampler_2d)
 @pw_cast_for_opmath
 def grid_sampler_2d(
@@ -1889,10 +1919,6 @@ def grid_sampler_2d(
     utils.check(
         padding_mode in (0, 1, 2), lambda: f"Invalid padding mode {padding_mode}"
     )
-
-    # Need this instead of just sum() to keep mypy happy
-    def sum_tensors(ts: Iterable[Tensor]) -> Tensor:
-        return functools.reduce(torch.add, ts)
 
     def unnormalize(coords: Tensor, size: int) -> Tensor:
         # Rescale coordinates from [-1, 1] to:
@@ -1977,7 +2003,7 @@ def grid_sampler_2d(
         w_sw = (ix_ne - ix) * (iy - iy_ne)
         w_se = (ix - ix_nw) * (iy - iy_nw)
 
-        return sum_tensors(
+        return _sum_tensors(
             get_summand(ix, iy, w)
             for (ix, iy, w) in (
                 (ix_nw, iy_nw, w_nw),
@@ -2009,29 +2035,6 @@ def grid_sampler_2d(
             y = compute_coordinates(iy, iH)
             return get_summand(x, y, 1)
 
-        # These are adapted from aten/src/ATen/native/UpSample.h, wich is based on
-        # https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
-        def cubic_convolution1(x: Tensor, A: float) -> Tensor:
-            return ((A + 2) * x - (A + 3)) * x * x + 1
-
-        def cubic_convolution2(x: Tensor, A: float) -> Tensor:
-            return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A
-
-        def get_cubic_upsample_coefficients(t: Tensor) -> TensorSequenceType:
-            A = -0.75
-            return (
-                cubic_convolution2(t + 1.0, A),
-                cubic_convolution1(t, A),
-                cubic_convolution1(1.0 - t, A),
-                cubic_convolution2(2.0 - t, A),
-            )
-
-        def cubic_interp1d(coeffs: TensorSequenceType, ts: Tensor) -> Tensor:
-            coeffs2 = get_cubic_upsample_coefficients(ts)
-            return sum_tensors(
-                c1 * c2.unsqueeze(1) for (c1, c2) in zip(coeffs, coeffs2)
-            )
-
         def get_coeff(ofs: int) -> Tensor:
             iy_ofs = iy_nw + (ofs - 1)
             cs = (
@@ -2040,10 +2043,10 @@ def grid_sampler_2d(
                 get_value_bounded(ix_nw + 1, iy_ofs),
                 get_value_bounded(ix_nw + 2, iy_ofs),
             )
-            return cubic_interp1d(cs, tx)
+            return _upsample_cubic_interp1d(cs, tx.unsqueeze(1))
 
         coeffs = tuple((get_coeff(ofs) for ofs in range(4)))
-        return cubic_interp1d(coeffs, ty)
+        return _upsample_cubic_interp1d(coeffs, ty.unsqueeze(1))
 
 
 @register_decomposition(aten.mv)
@@ -2241,3 +2244,85 @@ def matmul(tensor1, tensor2):
         return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
     else:
         utils.check(False, lambda: "both arguments to matmul need to be at least 1D")
+
+
+@register_decomposition(aten.upsample_bicubic2d.default)
+@out_wrapper()
+@pw_cast_for_opmath
+def upsample_bicubic2d_default(
+    a: Tensor,
+    output_size: Tuple[int, int],
+    align_corners: bool,
+    scale_h: Optional[float] = None,
+    scale_w: Optional[float] = None,
+) -> Tensor:
+    N, C, iH, iW = a.shape
+    oH, oW = output_size
+
+    def compute_scale(in_size, out_size, align_corners, scale=None):
+        if align_corners:
+            return (in_size - 1) / (out_size - 1) if out_size > 1 else 0
+        else:
+            return 1 / scale if scale is not None and scale > 0 else in_size / out_size
+
+    def compute_source_index(scale, dst_index, align_corners):
+        if align_corners:
+            return scale * dst_index
+        else:
+            return scale * (dst_index + 0.5) - 0.5
+
+    height_scale = compute_scale(iH, oH, align_corners, scale_h)
+    width_scale = compute_scale(iW, oW, align_corners, scale_w)
+
+    N_idx = torch.arange(N, device=a.device).view(N, 1, 1, 1)
+    C_idx = torch.arange(C, device=a.device).view(1, C, 1, 1)
+    out_y = torch.arange(oH, device=a.device).view((1, 1, oH, 1))
+    out_x = torch.arange(oW, device=a.device).view((1, 1, 1, oW))
+
+    real_x = compute_source_index(width_scale, out_x, align_corners)
+    in_x = real_x.floor()
+    t_x = real_x - in_x
+    ix = in_x.to(dtype=torch.int64)
+
+    real_y = compute_source_index(height_scale, out_y, align_corners)
+    in_y = real_y.floor()
+    t_y = real_y - in_y
+    iy = in_y.to(dtype=torch.int64)
+
+    iys_ofs = (iy - 1, iy, iy + 1, iy + 2)
+    ixs_ofs = (ix - 1, ix, ix + 1, ix + 2)
+
+    def load_bounded(ys, xs):
+        y_idx = torch.clamp(ys, 0, iH - 1)
+        x_idx = torch.clamp(xs, 0, iW - 1)
+        return a[N_idx, C_idx, y_idx, x_idx]
+
+    def get_x_interp(y):
+        coeffs_x = tuple((load_bounded(y, x_ofs) for x_ofs in ixs_ofs))
+        return _upsample_cubic_interp1d(coeffs_x, t_x)
+
+    coeffs_y = tuple((get_x_interp(y_ofs) for y_ofs in iys_ofs))
+    return _upsample_cubic_interp1d(coeffs_y, t_y)
+
+
+@register_decomposition(aten.upsample_bicubic2d.vec)
+@out_wrapper()
+@pw_cast_for_opmath
+def upsample_bicubic2d_vec(
+    a: Tensor,
+    output_size: Optional[Tuple[int, int]],
+    align_corners: bool,
+    scale_factors: Optional[Tuple[float, float]] = None,
+) -> Tensor:
+    utils.check(
+        bool(output_size) + bool(scale_factors) == 1,
+        lambda: "Must specify exactly one of output_size and scale_factors.",
+    )
+    if output_size is None:
+        assert scale_factors is not None
+        output_size = cast(
+            Tuple[int, int],
+            tuple(int(w * scale) for w, scale in zip(a.shape[2:], scale_factors)),
+        )
+    scale_h, scale_w = scale_factors if scale_factors else (None, None)
+    return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
