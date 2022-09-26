@@ -173,7 +173,8 @@ static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>&
     slice_test(dim2size.second, dim2size.first, -30, -10, 1);       // i.e., 4D tensor's equivalent indexing = [:,:,:,-30:-10:1] with negative start/end
     slice_test(dim2size.second, dim2size.first, 0, INT64_MAX, 1);   // i.e., 4D 's equivalent indexing = [:,:,:,0:9223372036854775807:1] with end=INT64_MAX
     slice_test(dim2size.second, dim2size.first, -10, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-10:9223372036854775807:1] with negative start and end=INT64_MAX
-    slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
+    // This triggers a SymInt assert since [-2^63, -2^62-1] range is reserved for packed symints
+    //slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
     slice_test(dim2size.second, dim2size.first, {}, {}, 1);         // i.e., 4D 's equivalent indexing = [:,:,:,::1] with empty start/end
   }
 }
@@ -781,7 +782,7 @@ TEST_F(VulkanAPITest, batch_norm_large) {
   c10::InferenceMode mode;
 
 
-  const auto input_cpu = at::rand({79, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::rand({11, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
   const auto weight_cpu = at::rand({52}, at::device(at::kCPU).dtype(at::kFloat));
@@ -1897,7 +1898,7 @@ TEST_F(VulkanAPITest, hardswish_) {
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
-  at::native::hardswish_(cpu);
+  at::hardswish_(cpu);
   at::hardswish_(vulkan);
 
   const auto check = almostEqual(cpu, vulkan.cpu());
@@ -3833,13 +3834,15 @@ TEST_F(VulkanAPITest, gru_success) {
   const int H_in = 5;  // input_size
   const int H_out = 7; // hidden_size
   const int num_layers = 3;
+  const int L = 1;
+  const int N = 1;
   const double gru_dropout = .0;
   const bool has_biases = true;
   const bool train = false;
   const bool bidirectional = false;
   const bool batch_first = true;
-  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({N, L, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, H_out}, at::device(at::kCPU).dtype(at::kFloat));
 
   c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
@@ -3900,13 +3903,15 @@ TEST_F(VulkanAPITest, gru_mclareninputs_success) {
   const int H_in = 384;  // input_size
   const int H_out = 384; // hidden_size
   const int num_layers = 2;
+  const int L = 1;
+  const int N = 1;
   const double gru_dropout = .0;
   const bool has_biases = true;
   const bool train = false;
   const bool bidirectional = false;
   const bool batch_first = true;
-  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({N, L, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, H_out}, at::device(at::kCPU).dtype(at::kFloat));
 
   c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
@@ -3963,13 +3968,15 @@ TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
   const int H_in = 17;  // input_size
   const int H_out = 50; // hidden_size
   const int num_layers = 2;
+  const int L = 5;
+  const int N = 4;
   const double gru_dropout = .0;
   const bool has_biases = true;
   const bool train = false;
   const bool bidirectional = false;
   const bool batch_first = true;
-  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({N, L, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, H_out}, at::device(at::kCPU).dtype(at::kFloat));
 
   c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
@@ -4056,13 +4063,15 @@ TEST_F(VulkanAPITest, gru_prepack_success) {
   const int H_in = 81;  // input_size
   const int H_out = 10; // hidden_size
   const int num_layers = 2;
+  const int L = 1;
+  const int N = 1;
   const double gru_dropout = .0;
   const bool has_biases = true;
   const bool train = false;
   const bool bidirectional = false;
   const bool batch_first = true;
-  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({N, L, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, H_out}, at::device(at::kCPU).dtype(at::kFloat));
 
   c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
@@ -4125,13 +4134,15 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
   const int H_in = 70;  // input_size
   const int H_out = 2; // hidden_size
   const int num_layers = 2;
+  const int L = 3;
+  const int N = 5;
   const double gru_dropout = .0;
   const bool has_biases = true;
   const bool train = false;
   const bool bidirectional = false;
   const bool batch_first = true;
-  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({N, L, H_in}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, H_out}, at::device(at::kCPU).dtype(at::kFloat));
 
   c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
   c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
@@ -4232,6 +4243,10 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, false);
+    auto out_vulkan = callOpByName(
+        "vulkan_prepack::run_gru_context",
+        "",
+        in_cpu.vulkan(), h0_cpu.vulkan(), prepack[0]);
   }, ::c10::Error);
 
   // Act: dropout should be 0.0
