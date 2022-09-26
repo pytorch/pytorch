@@ -1952,7 +1952,7 @@
 
 - name: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   self: leaky_relu_backward(grad, result, negative_slope, true)
-  result: auto_element_wise
+  result: self_t.copy_(leaky_relu_backward(original_self_t.conj(), result, negative_slope, true).conj())
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
@@ -2023,8 +2023,8 @@
   result: auto_element_wise
 
 - name: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
-  self: threshold_backward(grad, result, threshold)
-  result: auto_element_wise
+  self: threshold_backward(grad, self, threshold)
+  result: self_t.copy_(threshold_backward(self_t.conj(), original_self_p, threshold).conj())
 
 - name: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
   self: reflection_pad1d_backward(grad, self, padding)
