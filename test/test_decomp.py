@@ -24,6 +24,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch._dispatch.python import enable_python_dispatcher
 
 import itertools
 import functools
@@ -155,6 +156,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
     tol_table = {
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
+        (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
@@ -277,6 +280,8 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
     (None, None, "new_empty"),
+    (None, None, "empty_like"),
+    (None, None, "empty"),
     # decomp has problem even with opmath
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
@@ -398,6 +403,8 @@ class TestDecomp(TestCase):
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default,
                     # non-deterministic ops
+                    torch.ops.aten.empty.memory_format,
+                    torch.ops.aten.empty_like.default,
                     torch.ops.aten.new_empty.default
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
@@ -469,9 +476,6 @@ class TestDecomp(TestCase):
         func = op.get_op()
         for sample_input in samples:
             if requires_grad:
-                if None in sample_input.args:
-                    continue
-
                 fn, primals = normalize_op_input_output(func, sample_input)
                 primals = tree_map(
                     lambda x: x if isinstance(x, torch.Tensor) else x, primals
@@ -482,7 +486,7 @@ class TestDecomp(TestCase):
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
@@ -491,7 +495,7 @@ class TestDecomp(TestCase):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
-                    with enable_torch_dispatch_mode(DecompCrossRefMode):
+                    with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
@@ -500,7 +504,7 @@ class TestDecomp(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name)
@@ -509,7 +513,6 @@ class TestDecomp(TestCase):
                 self.skipTest(
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
-
 
 instantiate_device_type_tests(TestDecomp, globals())
 
