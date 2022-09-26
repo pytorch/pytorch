@@ -53,11 +53,16 @@ namespace cuda {
 // if this is the case, we only consider the two largest groups, and the tensors
 // in the remaining groups will just be accessed unvectorized and uncoalesced.
 // We call the largest group as `group1` and the second largest group as
-// `group2`. When we have the split, we will make a 2D tiling [I1, I2] ->
+// `group2`. When we have the groups, we will make a 2D tiling [I1, I2] ->
 // [I1/tile1, tile1, I2/tile2, tile2] on the inner most dimensions of group1 and
-// group2. Each tile [tile1, tile2] will be handled by a block, and the tensors
-// that have mismatched threadIdx.x bindings will use shared memory. The outer
-// IDs of the tiling split will be merged with non-tiled IDs and then binded to
+// group2. If I1 and I2 are too small to make a 32x32 tile, such as in the
+// fusion of tanspose(T1[1024, 2, 1024, 2], {1, 3}), we merge in other
+// dimensions to make a virtual I1 and I2. The details of how we create virtual
+// I1 and I2 are described in note [Supporting small transpose dimensions].
+//
+// Each tile [tile1, tile2] will be handled by a block, and the tensors that
+// have mismatched threadIdx.x bindings will use shared memory. The outer IDs of
+// the tiling split will be merged with non-tiled IDs and then binded to
 // blockIdx.x for the entire DAG, regardless of which group a tensor belongs to.
 // For the inner tile IDs [tile1, tile2], we need to transform and parallelize
 // group 1 and group 2 differently. The intermediate tensors can be transformed
@@ -85,7 +90,7 @@ TORCH_CUDA_CU_API std::shared_ptr<TransposeParams> getTransposeHeuristics(
 
 TORCH_CUDA_CU_API void scheduleTranspose(
     Fusion* fusion,
-    const TransposeParams& params);
+    TransposeParams params);
 
 TORCH_CUDA_CU_API LaunchParams scheduleTranspose(
     Fusion* fusion,
@@ -93,7 +98,7 @@ TORCH_CUDA_CU_API LaunchParams scheduleTranspose(
 
 //! Utility for canSchedule interface to check if this fusion has at least two
 //! groups, each with a fully broadcasted reference tensor.
-bool hasAtLeastTwoValidGroups(Fusion* fusion);
+TORCH_CUDA_CU_API bool hasAtLeastTwoValidGroups(Fusion* fusion);
 
 } // namespace cuda
 } // namespace fuser

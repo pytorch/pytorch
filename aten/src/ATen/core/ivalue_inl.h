@@ -225,6 +225,15 @@ inline c10::SymInt IValue::toSymInt() const {
   }
 }
 
+inline c10::SymFloat IValue::toSymFloat() const {
+  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  if (isSymFloat()) {
+    return c10::SymFloat::toSymFloat(toIntrusivePtr<c10::SymFloatNodeImpl>());
+  } else {
+    return c10::SymFloat(payload.u.as_double);
+  }
+}
+
 namespace ivalue {
 
 void TORCH_API
@@ -1456,6 +1465,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return !type_.holds_strong_ref();
   }
 
+  bool is_empty_strong_compilation_ref() const {
+    return type_.holds_empty_strong_ref();
+  }
+
  private:
   void resizeObject(size_t slot);
   WeakOrStrongTypePtr type_;
@@ -1595,6 +1608,7 @@ DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
+DEFINE_TO(c10::SymFloat, toSymFloat)
 
 template <class T>
 struct _fake_type {};
