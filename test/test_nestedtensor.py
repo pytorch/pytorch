@@ -552,7 +552,7 @@ class TestNestedTensorDeviceType(TestCase):
         expected_grad = torch.nested_tensor([grad_x0, torch.zeros((3, 4), device=device, dtype=dtype)])
         self.assertEqual(nt.grad, expected_grad)
 
-    @dtypes(torch.float, torch.float16, torch.double)
+    @dtypes(*floating_types_and_half())
     def test_nested_tensor_slicing(self, device, dtype):
         # Create NT with one regular dimension, one jagged dimension
         x = torch.nested_tensor([
@@ -607,6 +607,37 @@ class TestNestedTensorDeviceType(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, 'dimension 1 is irregular'):
             x.chunk(2, dim=1)
+
+    @dtypes(*floating_types_and_half())
+    def test_nested_tensor_chunk(self, device, dtype):
+        # transformer case
+        a = torch.randn(3, 3 * 4, device=device, dtype=dtype)
+        b = torch.randn(2, 3 * 4, device=device, dtype=dtype)
+        c = torch.randn(1, 3 * 4, device=device, dtype=dtype)
+        a_chunks = a.chunk(3, dim=-1)
+        b_chunks = b.chunk(3, dim=-1)
+        c_chunks = c.chunk(3, dim=-1)
+
+        a_nt = [a_chunks[0], b_chunks[0], c_chunks[0]]
+        b_nt = [a_chunks[1], b_chunks[1], c_chunks[1]]
+        c_nt = [a_chunks[2], b_chunks[2], c_chunks[2]]
+
+        nt = torch.nested_tensor([a, b, c])
+        chunked = nt.chunk(3, dim=-1)
+        self.assertEqual(chunked[0], torch.nested_tensor(a_nt))
+        self.assertEqual(chunked[1], torch.nested_tensor(b_nt))
+        self.assertEqual(chunked[2], torch.nested_tensor(c_nt))
+
+        # Chunking across first dimension when n_chunks is greater than n_tensors
+        # floors to n_tensors
+        nt_chunks = torch.chunk(nt, 100, dim=0)
+        self.assertEqual(torch.nested_tensor([a]), nt_chunks[0])
+        self.assertEqual(torch.nested_tensor([b]), nt_chunks[1])
+        self.assertEqual(torch.nested_tensor([c]), nt_chunks[2])
+
+        # Failure chunking on ragged dimensions
+        self.assertRaisesRegex(
+            RuntimeError, "Given dimension 1 is irregular and does not have a size.", lambda: torch.chunk(nt, 5, 1))
 
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
