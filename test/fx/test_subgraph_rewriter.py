@@ -707,6 +707,11 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_local_revert(self):
 
+        # Following model will have 3 anchors as the matching candidate with the given pattern
+        # Anchor 1 and 3 is a real match, but anchor 2 is not.
+        # The subgraph rewriter should be able to revert the changes made while matching anchor 2.
+        # Final match with anchor 3 should be successful.
+
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -724,15 +729,18 @@ class TestSubgraphRewriter(JitTestCase):
             def forward(self, in0, in1):
                 lin_res_1 = torch.nn.functional.linear(in1, self.w0, bias=self.b0)
                 lin_res_2 = torch.nn.functional.linear(lin_res_1, self.w1, bias=self.b1)
+                # potential match at anchor 1
                 mul_res_1 = in1 * lin_res_2
                 sum_res_1 = mul_res_1 + in1
                 lin_res_3 = torch.nn.functional.linear(
                     sum_res_1, self.w2, bias=self.b2
                 )
                 sigmoid_res_1 = torch.sigmoid(lin_res_3)
+                # potential match at anchor 2
                 mul_res_2 = lin_res_3 * sigmoid_res_1
                 lin_res_4 = torch.nn.functional.linear(in0, self.w3, bias=self.b3)
                 lin_res_5 = torch.nn.functional.linear(lin_res_4, self.w4, bias=self.b4)
+                # potential match at anchor 3
                 mul_res_3 = in0 * lin_res_5
                 sum_res_2 = mul_res_3 + in0
                 cat_res = torch.cat(
