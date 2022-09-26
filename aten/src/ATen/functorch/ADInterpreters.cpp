@@ -14,7 +14,7 @@ static void checkForInvalidMutationOnCaptures(
   auto args = torch::jit::last(stack, op.schema().arguments().size());
   auto mutated_arg = unwrapIfDead(args[0].toTensor());
   auto* wrapper = maybeGetTensorWrapper(mutated_arg);
-  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !(wrapper->generated())) {
+  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !(wrapper->alias_of_unwrapped())) {
     return;
   }
   TORCH_CHECK(false,
@@ -26,20 +26,22 @@ static void checkForInvalidMutationOnCaptures(
 }
 
 static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
-  const bool generated = getDuringFunctorchTransform();
+  // we will only mark something as an alias of an unwrapped tensor if it's during user code in a transform.
+  // This state is saved by the during functorch transform context manager
+  const bool mark_as_alias_of_unwrapped = getDuringFunctorchTransform();
   if (!tensor.defined()) {
     return tensor;
   }
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
-    return makeTensorWrapper(tensor, current_level, generated);
+    return makeTensorWrapper(tensor, current_level, mark_as_alias_of_unwrapped);
   }
   TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
   if (wrapper->level().value() == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }
-  return makeTensorWrapper(tensor, current_level, generated);
+  return makeTensorWrapper(tensor, current_level, mark_as_alias_of_unwrapped);
 }
 
 static void autogradBasedTransformProcess(
@@ -92,14 +94,14 @@ static void autogradBasedTransformSendToNext(
     }
     return tensor;
   };
-  auto wrap = [&](const Tensor& tensor, bool generated) {
+  auto wrap = [&](const Tensor& tensor, bool alias_of_unwrapped) {
     if (!tensor.defined()) {
       return tensor;
     }
     // if (c10::show_dispatch_trace_enabled()) {
     //   std::cout << "wrap " << current_level << std::endl;
     // }
-    return makeTensorWrapper(tensor, current_level, generated);
+    return makeTensorWrapper(tensor, current_level, alias_of_unwrapped);
   };
 
   // TODO: we only need to do the following (marked with !) on in-place functions
@@ -128,7 +130,7 @@ static void autogradBasedTransformSendToNext(
     }
     const auto tensor = ivalue.toTensor();
     auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
-    if (!maybe_tensor_wrapper || maybe_tensor_wrapper->generated()) {
+    if (!maybe_tensor_wrapper || maybe_tensor_wrapper->alias_of_unwrapped()) {
       // if the input is unwrapped, we note its relative position in schema, noting that
       // args are in reverse order on stack, so the last arg is at the top of the stack
       const auto relative_pos = idx - (stack->size() - args_size);
