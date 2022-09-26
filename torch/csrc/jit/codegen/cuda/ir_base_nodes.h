@@ -48,6 +48,7 @@ class Expr;
 class Val;
 class UnaryOp;
 class BinaryOp;
+class RNGOp;
 class IterDomain;
 class IrCloner;
 class IrContainer;
@@ -243,11 +244,38 @@ class TORCH_CUDA_CU_API Val : public Statement {
   // Returns if all dependencies are constant scalars
   bool isConstScalar() const;
 
+  // Returns if all dependencies are constant integers
+  bool isConstInt() const;
+
   bool isAnInt() const {
     return isScalar() && dtype_ == DataType::Int;
   }
 
+  bool isADouble() const {
+    return isScalar() && dtype_ == DataType::Double;
+  }
+
+  // If this Val is an integer with a direct constant value associated with it,
+  // will return the value of that constant integer. If this integer has
+  // defining expressions it will return a c10::nullopt. Those values should be
+  // infered using evaluateInt.
   c10::optional<int64_t> getInt() const;
+
+  // If this Val is a double with a direct constant value associated with it,
+  // will return the value of that constant double. If this double has
+  // defining expressions it will return a c10::nullopt. Those values should be
+  // infered using evaluateDouble.
+  c10::optional<double> getDouble() const;
+
+  // If this Val is a constant integer, and its history is comprised only of
+  // constant values, will return the value of that constant integer. Cannot
+  // make constant as expression evaluator takes non-constant Vals.
+  int64_t evaluateInt();
+
+  // If this Val is a constant double, and its history is comprised only of
+  // constant values, will return the value of that constant double. Cannot
+  // make constant as expression evaluator takes non-constant Vals.
+  double evaluateDouble();
 
   // Returns if no dependencies and is a constant scalar.
   virtual bool isConst() const {

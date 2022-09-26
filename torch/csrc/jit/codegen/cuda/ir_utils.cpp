@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 
 #include <set>
 
@@ -11,6 +12,49 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 namespace ir_utils {
+
+std::vector<int64_t> normalizeNew2Old(
+    const std::vector<int64_t>& new2old_in,
+    size_t ndims) {
+  TORCH_CHECK(
+      new2old_in.size() == ndims,
+      "There must be a transpose mapping for each dimension in domain");
+
+  // Canonicalize dimensions by wrapping each dim for the given ndims
+  std::vector<int64_t> new2old;
+  std::transform(
+      new2old_in.begin(),
+      new2old_in.end(),
+      std::inserter(new2old, new2old.begin()),
+      [ndims](int64_t entry) { return entry < 0 ? entry + ndims : entry; });
+
+  // Check if any adjusted values are < 0, or >= nDims, which are invalid
+  TORCH_CHECK(
+      std::none_of(
+          new2old.begin(),
+          new2old.end(),
+          [ndims](int64_t entry) {
+            return entry < 0 || (unsigned int)entry >= ndims;
+          }),
+      "New2Old axes are not within the number of dimensions of the provided domain.\t",
+      new2old);
+
+  // Going to use sets, to see if any duplicate values are in the map.
+  std::set<int64_t> old_pos_set;
+  std::transform(
+      new2old.begin(),
+      new2old.end(),
+      std::inserter(old_pos_set, old_pos_set.begin()),
+      [](int64_t entry) { return entry; });
+
+  // Error out if duplicate values are found.
+  TORCH_CHECK(
+      new2old.size() == ndims && old_pos_set.size() == new2old.size(),
+      "Duplicate entries in transformation map.");
+
+  // END VALIDATION CHECKS
+  return new2old;
+}
 
 std::vector<int> normalizeOld2New(
     const std::unordered_map<int, int>& old2new_in,
@@ -136,6 +180,26 @@ struct SubstituteInExpr : public OptInDispatch {
     OptInDispatch::handle(expr);
   }
 
+  void handle(ARangeOp* arange_expr) final {
+    auto start = reference_->sameAs(arange_expr->start())
+        ? substitute_
+        : arange_expr->start();
+    auto end = reference_->sameAs(arange_expr->end()) ? substitute_
+                                                      : arange_expr->end();
+    auto step = reference_->sameAs(arange_expr->step()) ? substitute_
+                                                        : arange_expr->step();
+    auto out = reference_->sameAs(arange_expr->output(0))
+        ? substitute_
+        : arange_expr->output(0);
+    expr_ = IrBuilder::create<ARangeOp>(
+        arange_expr->container(),
+        out,
+        start,
+        end,
+        step,
+        arange_expr->getLinearIndex());
+  }
+
   void handle(UnaryOp* unary_expr) final {
     auto in =
         reference_->sameAs(unary_expr->in()) ? substitute_ : unary_expr->in();
@@ -177,6 +241,17 @@ struct SubstituteInExpr : public OptInDispatch {
         in1,
         in2,
         in3);
+  }
+
+  void handle(RNGOp* rng_expr) final {
+    auto out = reference_->sameAs(rng_expr->output(0)) ? substitute_
+                                                       : rng_expr->output(0);
+    expr_ = IrBuilder::create<RNGOp>(
+        rng_expr->container(),
+        rng_expr->getRNGOpType(),
+        out,
+        rng_expr->getRNGOffset(),
+        rng_expr->getPhiloxIndex());
   }
 
   void handle(ReductionOp* reduction_expr) final {
@@ -254,6 +329,26 @@ struct SubstituteInExpr : public OptInDispatch {
         : transpose_expr->in();
     expr_ = IrBuilder::create<TransposeOp>(
         transpose_expr->container(), out, in, transpose_expr->new2old());
+  }
+
+  void handle(ExpandOp* expand_expr) final {
+    auto out = reference_->sameAs(expand_expr->out())
+        ? substitute_->as<TensorView>()
+        : expand_expr->out();
+    auto in = reference_->sameAs(expand_expr->in())
+        ? substitute_->as<TensorView>()
+        : expand_expr->in();
+
+    auto expanded_extents = expand_expr->expanded_extents();
+    if (substitute_->isA<Int>()) {
+      for (auto i : c10::irange(expanded_extents.size())) {
+        if (!expanded_extents[i]->sameAs(substitute_)) {
+          expanded_extents[i] = substitute_;
+        }
+      }
+    }
+    expr_ = IrBuilder::create<ExpandOp>(
+        expand_expr->container(), out, in, expanded_extents);
   }
 
   void handle(ShiftOp* shift_expr) final {
@@ -347,13 +442,28 @@ struct SubstituteInExpr : public OptInDispatch {
         out_avg,
         out_var,
         out_N,
-        init_avg,
-        init_var,
-        init_N,
         in_avg,
         in_var,
         in_N,
+        init_avg,
+        init_var,
+        init_N,
         welford_expr->isAllreduce());
+  }
+
+  void handle(LoadStoreOp* ldst_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto in = reference_->sameAs(ldst_expr->in())
+        ? substitute_->as<TensorView>()
+        : ldst_expr->in();
+    auto out = reference_->sameAs(ldst_expr->out())
+        ? substitute_->as<TensorView>()
+        : ldst_expr->out();
+    expr_ = IrBuilder::create<LoadStoreOp>(
+        ldst_expr->container(), ldst_expr->opType(), out, in);
   }
 
   void handle(MmaOp* mma_expr) final {
@@ -395,25 +505,23 @@ TensorView* rfactorHelper(
     TensorView* reduction_tv,
     const std::vector<int>& axes) {
   TORCH_INTERNAL_ASSERT(reduction_tv->definition() != nullptr);
-  const bool is_welford = reduction_tv->definition()->isA<WelfordOp>();
-  if (!is_welford) {
+  const bool has_multiple_tvs = reduction_tv->definition()->inputs().size() > 1;
+  if (!has_multiple_tvs) {
     return reduction_tv->rFactor(axes);
   }
-  auto welford = reduction_tv->definition()->as<WelfordOp>();
-  auto w_avg = welford->outAvg()->as<TensorView>();
-  auto w_var = welford->outVar()->as<TensorView>();
-  auto w_n = welford->outN()->as<TensorView>();
 
-  auto rtvs =
-      reduction_tv->rFactor(axes, std::vector<TensorView*>{w_avg, w_var, w_n});
+  std::vector<TensorView*> out_tvs;
+  std::transform(
+      reduction_tv->definition()->outputs().begin(),
+      reduction_tv->definition()->outputs().end(),
+      std::back_inserter(out_tvs),
+      [](Val* val) { return val->as<TensorView>(); });
 
-  if (reduction_tv == w_n) {
-    return rtvs.at(2);
-  } else if (reduction_tv == w_var) {
-    return rtvs.at(1);
-  } else {
-    return rtvs.at(0);
-  }
+  auto rf_tvs = reduction_tv->rFactor(axes, out_tvs);
+
+  return rf_tvs.at(std::distance(
+      out_tvs.begin(),
+      std::find(out_tvs.begin(), out_tvs.end(), reduction_tv)));
 }
 
 namespace {
@@ -451,6 +559,22 @@ TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val) {
   return uniqueEntries<Val>(consumer_vals);
 }
 
+// Return immediate siblings of val
+TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val) {
+  std::vector<Val*> sibling_vals;
+  auto def = val->definition();
+  if (def != nullptr) {
+    auto outs = def->outputs();
+    for (auto sibling_val : outs) {
+      if (sibling_val == val) {
+        continue;
+      }
+      sibling_vals.emplace_back(sibling_val);
+    }
+  }
+  return sibling_vals;
+}
+
 // Return immediate producers of val
 TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(
     const std::vector<Val*>& vals) {
@@ -478,22 +602,21 @@ TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(
 }
 
 std::vector<TensorView*> producerTvsOf(TensorView* tv) {
-  if (tv->definition() == nullptr) {
-    return {};
-  }
-  auto producer_vals =
-      ir_utils::filterByType<TensorView>(tv->definition()->inputs());
-  return uniqueEntries<TensorView>(
-      {producer_vals.begin(), producer_vals.end()});
+  auto producer_vals = producerValsOf(tv);
+  auto producer_tvs = ir_utils::filterByType<TensorView>(producer_vals);
+  return {producer_tvs.begin(), producer_tvs.end()};
 }
 
 std::vector<TensorView*> consumerTvsOf(TensorView* tv) {
-  std::vector<TensorView*> consumer_tvs;
-  for (auto use_expr : tv->uses()) {
-    auto outputs = ir_utils::filterByType<TensorView>(use_expr->outputs());
-    consumer_tvs.insert(consumer_tvs.end(), outputs.begin(), outputs.end());
-  }
-  return uniqueEntries<TensorView>(consumer_tvs);
+  auto consumer_vals = consumerValsOf(tv);
+  auto consumer_tvs = ir_utils::filterByType<TensorView>(consumer_vals);
+  return {consumer_tvs.begin(), consumer_tvs.end()};
+}
+
+TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv) {
+  auto sibling_vals = siblingValsOf(tv);
+  auto sibling_tvs = ir_utils::filterByType<TensorView>(sibling_vals);
+  return {sibling_tvs.begin(), sibling_tvs.end()};
 }
 
 std::vector<TensorView*> producerTvsOf(const std::vector<TensorView*>& tvs) {
@@ -559,6 +682,19 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   return uniqueEntries<TensorView>(all_tvs);
 }
 
+std::vector<TensorView*> allTvsExcept(
+    Fusion* fusion,
+    const std::unordered_set<TensorView*>& except) {
+  auto all_tvs = allTvs(fusion);
+  std::vector<TensorView*> result;
+  for (auto tv : all_tvs) {
+    if (except.count(tv) == 0) {
+      result.emplace_back(tv);
+    }
+  }
+  return result;
+}
+
 std::vector<Expr*> getReductionOps(Fusion* fusion, bool ignore_trivial) {
   std::vector<Expr*> red_ops;
 
@@ -611,13 +747,29 @@ class ValReplacementMutator : private OptOutMutator {
     // would be a tensorview that doesn't get updated extents. Therefore, first
     // grab all leaves towards outputs and grab stmts from there.
     auto stmts = StmtSort::getStmts(fusion, allLeafOuts(fusion), true);
-    for (auto stmt : stmts) {
+
+    // Some fusions, such as standalone randlike, can have disconnected DAG, so
+    // we need some mechanism to make sure our replacement set is as complete as
+    // possible
+    // TODO: I think we need a more general mechanism to support disconnected
+    // DAG
+    std::vector<Val*> more;
+    for (auto v : fusion->inputs()) {
+      if (std::find(stmts.begin(), stmts.end(), v) == stmts.end()) {
+        more.emplace_back(v);
+      }
+    }
+    auto more_stmts = StmtSort::getStmts(fusion, more, true);
+    more_stmts.insert(more_stmts.end(), stmts.begin(), stmts.end());
+
+    for (auto stmt : more_stmts) {
       mutate(stmt);
     }
   }
 
  private:
   using OptOutMutator::mutate;
+
   void mutate(Val* val) final {
     if (replacement_map_.find(val) == replacement_map_.end()) {
       return OptOutMutator::mutate(val);
@@ -673,34 +825,157 @@ Val* getReductionInitValOf(TensorView* tv) {
   if (auto rop = dynamic_cast<ReductionOp*>(def)) {
     init = rop->init();
   } else if (auto grop = dynamic_cast<GroupedReductionOp*>(def)) {
-    int output_idx = -1;
-    for (const auto i : c10::irange(grop->numReductions())) {
-      if (tv == grop->output(i)) {
-        output_idx = static_cast<int>(i);
-        break;
-      }
-    }
-    TORCH_INTERNAL_ASSERT(
-        output_idx >= 0,
-        "Matching output not found for GroupedReductionOp: ",
-        tv->toString(),
-        ". Defined by: ",
-        def->toString());
+    int output_idx = grop->getExprIndexOfOutput(tv);
     init = grop->initVal(output_idx);
   } else if (auto wop = dynamic_cast<WelfordOp*>(def)) {
-    if (tv == wop->outAvg()) {
-      init = wop->initAvg();
-    } else if (tv == wop->outVar()) {
-      init = wop->initVar();
-    } else {
-      TORCH_INTERNAL_ASSERT(tv == wop->outN());
-      init = wop->initN();
-    }
+    return wop->getInitValOfOutput(tv);
+  } else if (auto gwop = dynamic_cast<GroupedWelfordOp*>(def)) {
+    init = gwop->getInitValOfOutput(tv);
   } else if (auto mma = dynamic_cast<MmaOp*>(def)) {
     init = mma->init();
   }
 
   return init;
+}
+
+// TODO: Should mma be in here? Should we return true if it's a trivial
+// reduction?
+bool isReductionOp(const Expr* expr) {
+  // Note that GridReduction inherits ReductionOp
+  return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
+      expr->isA<WelfordOp>() || expr->isA<GroupedWelfordOp>() ||
+      expr->isA<kir::GridWelford>() || expr->isA<kir::GroupedGridWelford>();
+}
+
+bool isReductionTvOp(const Expr* expr) {
+  return ir_utils::isTvOp(expr) && isReductionOp(expr);
+}
+
+namespace {
+
+struct ReplaceValInIndexVal : public OptInDispatch {
+ public:
+  //! Apply replacements to index as specified in
+  //! replacement_map. index is assumed to consist only from Int and
+  //! NamedScalar
+  static Val* replace(
+      Val* index,
+      const std::unordered_map<Val*, Val*>& replacement_map) {
+    ReplaceValInIndexVal replace_index_val(replacement_map);
+    replace_index_val.handle(index);
+    // Return the original index if not replaced
+    if (replace_index_val.is_replaced_) {
+      return replace_index_val.last_visited_val_;
+    } else {
+      return index;
+    }
+  }
+
+ private:
+  ReplaceValInIndexVal(const std::unordered_map<Val*, Val*>& replacement_map)
+      : replacement_map_(replacement_map) {}
+
+  using OptOutDispatch::handle;
+
+  void handle(Val* val) override {
+    TORCH_INTERNAL_ASSERT(
+        val->isA<Int>() || val->isA<NamedScalar>() || val->isA<kir::IntPair>(),
+        "Invalid Val type: ",
+        val->toString());
+
+    // if val appears in the replacement map, stop traversing and set
+    // the current val with the replacement
+    auto it = replacement_map_.find(val);
+    if (it != replacement_map_.end()) {
+      last_visited_val_ = it->second;
+      is_replaced_ = true;
+      return;
+    }
+
+    // Recursively traverse its defining expr
+    auto def = val->definition();
+    if (def != nullptr) {
+      switch (def->etype()) {
+        case ExprType::UnaryOp:
+        case ExprType::BinaryOp:
+        case ExprType::Swizzle2DInt:
+        case ExprType::PairSelect:
+          handle(val->definition());
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(
+              false, "Unexpected definition: ", def->toString())
+      }
+      // last_visited_val_ is set in the expr handlers
+    } else {
+      last_visited_val_ = val;
+    }
+  }
+
+  // Clone expression after recurisvely replacing inputs
+  void handle(UnaryOp* uop) override {
+    handle(uop->in());
+    auto inp = last_visited_val_;
+    TORCH_INTERNAL_ASSERT(uop->out()->isA<Int>());
+    auto out = IrBuilder::create<Int>(c10::nullopt);
+    IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, inp);
+    last_visited_val_ = out;
+  }
+
+  // Clone expression after recurisvely replacing inputs
+  void handle(BinaryOp* bop) override {
+    handle(bop->lhs());
+    auto lhs = last_visited_val_;
+    handle(bop->rhs());
+    auto rhs = last_visited_val_;
+    TORCH_INTERNAL_ASSERT(bop->out()->isA<Int>());
+    auto out = IrBuilder::create<Int>(c10::nullopt);
+    IrBuilder::create<BinaryOp>(bop->getBinaryOpType(), out, lhs, rhs);
+    last_visited_val_ = out;
+  }
+
+  // Clone expression after recurisvely replacing inputs
+  void handle(kir::Swizzle2DInt* swizzle_2d) override {
+    handle(swizzle_2d->inX());
+    auto in_x = last_visited_val_;
+    handle(swizzle_2d->inY());
+    auto in_y = last_visited_val_;
+    auto out = IrBuilder::create<kir::IntPair>();
+
+    // Extents are assumed constant in swizzle so no need to
+    //  duplicate their graphs.
+    IrBuilder::create<kir::Swizzle2DInt>(
+        out,
+        in_x,
+        in_y,
+        swizzle_2d->extentX(),
+        swizzle_2d->extentY(),
+        swizzle_2d->swizzleType());
+    last_visited_val_ = out;
+  }
+
+  void handle(kir::PairSelect* pair_select) override {
+    handle(pair_select->in()->asVal());
+    auto in = last_visited_val_;
+    TORCH_INTERNAL_ASSERT(pair_select->out()->isA<Int>());
+    auto out = IrBuilder::create<Int>(c10::nullopt);
+    IrBuilder::create<kir::PairSelect>(
+        out, in->as<kir::IntPair>(), pair_select->selection());
+    last_visited_val_ = out;
+  }
+
+ private:
+  const std::unordered_map<Val*, Val*>& replacement_map_;
+  Val* last_visited_val_ = nullptr;
+  bool is_replaced_ = false;
+};
+
+} // namespace
+
+Val* replaceValInIndexVal(
+    Val* index,
+    const std::unordered_map<Val*, Val*>& replacement_map) {
+  return ReplaceValInIndexVal::replace(index, replacement_map);
 }
 
 } // namespace ir_utils

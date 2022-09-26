@@ -17,11 +17,15 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   explicit LTCTensorImpl(const LazyTensor& tensor);
   explicit LTCTensorImpl(LazyTensor&& tensor);
 
-  LazyTensorPtr tensor() { return tensor_; }
+  LazyTensorPtr tensor() {
+    return tensor_;
+  }
 
   void set_tensor(const LazyTensorPtr& lazy_tensor);
 
-  void force_refresh_sizes() { generation_ = 0; }
+  void force_refresh_sizes() {
+    generation_ = 0;
+  }
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
       const c10::VariableVersion& version_counter,
@@ -40,19 +44,24 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
 
   virtual c10::SymIntArrayRef sym_sizes_custom() const override;
+  virtual c10::SymIntArrayRef sym_strides_custom() const override;
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  const at::Storage& storage() const override { return tensor_->Storage(); }
-  bool has_storage() const override { return tensor_->Storage(); }
-#endif  // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  const at::Storage& storage() const override {
+    return tensor_->Storage();
+  }
+  bool has_storage() const override {
+    return tensor_->Storage();
+  }
+#endif // C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 
  private:
   void setup_size_properties();
 
   LazyTensorPtr tensor_;
-  std::vector<c10::SymInt> sym_sizes_;
-  size_t generation_ {0};
+  mutable c10::optional<std::vector<c10::SymInt>> sym_sizes_;
+  size_t generation_{0};
 };
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

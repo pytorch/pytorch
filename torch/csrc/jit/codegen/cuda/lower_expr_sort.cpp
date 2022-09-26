@@ -252,8 +252,10 @@ class ExprSegmentationSorter {
   // Allocate an empty expr group and return it
   ExprGroup* makeEmptyGroup();
 
-  // Allocate an expr group with the provided expr and return it
-  ExprGroup* makeEmptyGroup(Expr*);
+  // Allocate an expr group with the provided expr and return it. Also requires
+  // information on if this expression is a terminating expression (none of its
+  // outputs are used in other expressions being sorted).
+  ExprGroup* makeEmptyGroup(Expr*, bool terminating_expr);
 
   // Returns if sg1 and sg2 should be merged together, is called if they can
   // based on the current status of the DAG.
@@ -538,14 +540,19 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup() {
   return groups_.back().get();
 }
 
-ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
+ExprGroup* ExprSegmentationSorter::makeEmptyGroup(
+    Expr* expr,
+    bool terminating_expr) {
   auto group = makeEmptyGroup();
   group->exprs().push_back(expr);
   if (ir_utils::isTvOp(expr)) {
     auto out_tv = expr->outputs()[0]->as<TensorView>();
     // Grab all id's that are shared with other tensors.
-    for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
-      group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
+    // If not connected to consumers, doesn't mater what compute at is set to
+    if (!terminating_expr) {
+      for (const auto tv_i : c10::irange(out_tv->getComputeAtPosition())) {
+        group->payload()->ca_domains_.push_back(out_tv->axis(tv_i));
+      }
     }
     for (const auto tv_i : c10::irange(out_tv->getMaxProducerPosition())) {
       group->payload()->pa_domains_.push_back(out_tv->axis(tv_i));
@@ -555,39 +562,41 @@ ExprGroup* ExprSegmentationSorter::makeEmptyGroup(Expr* expr) {
 }
 
 // Debug function that prints the current state of the sorter.
-std::string ExprSegmentationSorter::toString(int verbosity) const {
-  std::stringstream ss;
-  ss << "{\n";
-  for (auto& group : groups_) {
-    ss << "  " << group.get() << "\n";
+//
+// Uncomment if needed.
+// std::string ExprSegmentationSorter::toString(int verbosity) const {
+//   std::stringstream ss;
+//   ss << "{\n";
+//   for (auto& group : groups_) {
+//     ss << "  " << group.get() << "\n";
 
-    if (verbosity > 1) {
-      if (group->producerEdges().size() > 0) {
-        ss << "Produced by groups with edges: { \n";
-        for (auto producer_edge : group->producerEdges()) {
-          ss << producer_edge->producer_val_ << " -> "
-             << producer_edge->consumer_val_ << "\n";
-        }
-        ss << "    }"
-           << "\n";
-      }
-    }
+//     if (verbosity > 1) {
+//       if (group->producerEdges().size() > 0) {
+//         ss << "Produced by groups with edges: { \n";
+//         for (auto producer_edge : group->producerEdges()) {
+//           ss << producer_edge->producer_val_ << " -> "
+//              << producer_edge->consumer_val_ << "\n";
+//         }
+//         ss << "    }"
+//            << "\n";
+//       }
+//     }
 
-    if (verbosity > 1) {
-      if (group->consumerEdges().size() > 0) {
-        ss << "Consumed by groups with edges: { \n";
-        for (auto consumer_edge : group->consumerEdges()) {
-          ss << consumer_edge->producer_val_ << " -> "
-             << consumer_edge->consumer_val_ << "\n";
-        }
-        ss << "    }"
-           << "\n";
-      }
-    }
-  }
-  ss << "}\n";
-  return ss.str();
-}
+//     if (verbosity > 1) {
+//       if (group->consumerEdges().size() > 0) {
+//         ss << "Consumed by groups with edges: { \n";
+//         for (auto consumer_edge : group->consumerEdges()) {
+//           ss << consumer_edge->producer_val_ << " -> "
+//              << consumer_edge->consumer_val_ << "\n";
+//         }
+//         ss << "    }"
+//            << "\n";
+//       }
+//     }
+//   }
+//   ss << "}\n";
+//   return ss.str();
+// }
 
 namespace {
 
@@ -1217,9 +1226,24 @@ void ExprSegmentationSorter::sort() {
   // Need this for initialization of the DAG that is processed
   std::unordered_map<Expr*, ExprGroup*> expr2group;
 
+  auto all_exprs = fusion_->exprs();
+
+  // Figure out all the values used as inputs to the expressions we're sorting
+  // (to find terminating expressions). There could be branches of expressions
+  // not used to produce outputs, so can't simply check val->uses() to figure
+  // out if it's actually used in the expressions we're sorting.
+  std::unordered_set<Val*> used_vals;
+  for (auto expr : all_exprs) {
+    used_vals.insert(expr->inputs().begin(), expr->inputs().end());
+  }
+
   // Initialize DAG, convert each expr to a segment group
-  for (auto expr : fusion_->exprs()) {
-    auto group = makeEmptyGroup(expr);
+  for (auto expr : all_exprs) {
+    bool is_terminating_expr = std::none_of(
+        expr->outputs().begin(),
+        expr->outputs().end(),
+        [&used_vals](Val* output) { return used_vals.count(output) > 0; });
+    auto group = makeEmptyGroup(expr, is_terminating_expr);
     expr2group.insert(std::make_pair(expr, group));
   }
 

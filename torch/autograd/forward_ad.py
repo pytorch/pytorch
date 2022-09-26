@@ -56,6 +56,7 @@ def make_dual(tensor, tangent, *, level=None):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> with dual_level():
         ...   inp = make_dual(x, v)
         ...   out = f(inp)
@@ -71,6 +72,10 @@ def make_dual(tensor, tangent, *, level=None):
     if level < 0:
         raise RuntimeError("Trying to create a dual Tensor for forward AD but no level "
                            "exists, make sure to enter_dual_level() first.")
+    if not (tensor.is_floating_point() or tensor.is_complex()):
+        raise ValueError(f"Expected primal to be floating point or complex, but got: {tensor.dtype}")
+    if not (tangent.is_floating_point() or tangent.is_complex()):
+        raise ValueError(f"Expected tangent to be floating point or complex, but got: {tangent.dtype}")
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
@@ -91,6 +96,7 @@ def unpack_dual(tensor, *, level=None):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> with dual_level():
         ...   inp = make_dual(x, x_t)
         ...   out = f(inp)
@@ -126,6 +132,7 @@ class dual_level(_DecoratorContextManager):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> x = torch.tensor([1])
         >>> x_t = torch.tensor([1])
         >>> with dual_level():

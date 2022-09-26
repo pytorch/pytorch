@@ -13,12 +13,15 @@
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vml.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/CopyKernel.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
 
+#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
+#include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/irange.h>
 
 #if AT_MKL_ENABLED()
@@ -201,13 +204,18 @@ static void angle_kernel(TensorIteratorBase& iter) {
 
 // NB: Ignores the negative bit on tensors
 void conj_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kBool, kBFloat16, kHalf, kComplexHalf, iter.common_dtype(), "conj_cpu", [&]() {
-        cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return conj_impl(a); },
-            [=](Vectorized<scalar_t> a) { return a.conj(); });
-      });
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "conj_cpu",
+    AT_DISPATCH_CASE_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, [&] {
+      // conj is a no-op for non-complex types
+      direct_copy_kernel(iter);
+    })
+    AT_DISPATCH_CASE_COMPLEX_TYPES_AND(kComplexHalf, [&] {
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t a) -> scalar_t { return conj_impl(a); },
+          [=](Vectorized<scalar_t> a) { return a.conj(); });
+    })
+  );
 }
 
 static void bitwise_not_kernel(TensorIteratorBase& iter) {
@@ -283,7 +291,7 @@ void sign_kernel(TensorIteratorBase& iter){
 
         cpu_kernel_vec(
           iter,
-          [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+          [=](scalar_t a) -> scalar_t { return (0 < a) - c10::is_negative(a); },
           [=](Vectorized<scalar_t> self_vec){
 
               // Comparison operators returns bitmask.
@@ -297,9 +305,16 @@ void sign_kernel(TensorIteratorBase& iter){
 }
 
 static void signbit_kernel(TensorIteratorBase& iter){
-  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
-    cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
-  });
+  // NOTE: signbit does not always support integral arguments.
+  AT_DISPATCH_SWITCH(iter.input_dtype(), "signbit_cpu",
+      AT_DISPATCH_CASE_INTEGRAL_TYPES([&] {
+        cpu_kernel(iter, [](scalar_t a) -> bool { return c10::is_negative(a); });
+      })
+      AT_DISPATCH_CASE_FLOATING_TYPES_AND2(kBFloat16, ScalarType::Half, [&] {
+        using opmath_t = at::opmath_type<scalar_t>;
+        cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(opmath_t{a}); });
+      })
+    );
 }
 
 static void sgn_kernel(TensorIteratorBase& iter) {
@@ -559,6 +574,86 @@ void round_decimals_kernel(TensorIteratorBase& iter, int64_t decimals) {
       });
 }
 
+static void bessel_j0_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_j0_forward(x);
+        });
+    });
+} // bessel_j0_kernel(TensorIteratorBase& iterator)
+
+static void bessel_j1_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_j1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_j1_forward(x);
+        });
+    });
+} // bessel_j1_kernel(TensorIteratorBase& iterator)
+
+static void bessel_y0_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_y0_forward(x);
+        });
+    });
+} // bessel_y0_kernel(TensorIteratorBase& iterator)
+
+static void bessel_y1_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "bessel_y1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return bessel_y1_forward(x);
+        });
+    });
+} // bessel_y1_kernel(TensorIteratorBase& iterator)
+
+static void modified_bessel_i0_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_i0_forward(x);
+        });
+    });
+} // modified_bessel_i0_kernel(TensorIteratorBase& iterator)
+
+static void modified_bessel_i1_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_i1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_i1_forward(x);
+        });
+    });
+} // modified_bessel_i1_kernel(TensorIteratorBase& iterator)
+
+static void modified_bessel_k0_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k0_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_k0_forward(x);
+        });
+    });
+} // modified_bessel_k0_kernel(TensorIteratorBase& iterator)
+
+static void modified_bessel_k1_kernel(TensorIteratorBase& iterator) {
+    TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+
+    AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "modified_bessel_k1_cpu", [&]() {
+        cpu_kernel(iterator, [](scalar_t x) {
+            return modified_bessel_k1_forward(x);
+        });
+    });
+} // modified_bessel_k1_kernel(TensorIteratorBase& iterator)
+
 // TODO: Disable cont. branch to test more risky code
 
 #define IMPLEMENT_ITERATOR_LAMBDA(op)                                         \
@@ -649,7 +744,14 @@ REGISTER_DISPATCH(special_i1_stub, &CPU_CAPABILITY::i1_kernel);
 REGISTER_DISPATCH(special_i1e_stub, &CPU_CAPABILITY::i1e_kernel);
 REGISTER_DISPATCH(special_erfcx_stub, &CPU_CAPABILITY::erfcx_kernel);
 REGISTER_DISPATCH(round_decimals_stub, &CPU_CAPABILITY::round_decimals_kernel);
-
+REGISTER_DISPATCH(special_bessel_j0_stub, &CPU_CAPABILITY::bessel_j0_kernel);
+REGISTER_DISPATCH(special_bessel_j1_stub, &CPU_CAPABILITY::bessel_j1_kernel);
+REGISTER_DISPATCH(special_bessel_y0_stub, &CPU_CAPABILITY::bessel_y0_kernel);
+REGISTER_DISPATCH(special_bessel_y1_stub, &CPU_CAPABILITY::bessel_y1_kernel);
+REGISTER_DISPATCH(special_modified_bessel_i0_stub, &CPU_CAPABILITY::modified_bessel_i0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_i1_stub, &CPU_CAPABILITY::modified_bessel_i1_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k0_stub, &CPU_CAPABILITY::modified_bessel_k0_kernel);
+REGISTER_DISPATCH(special_modified_bessel_k1_stub, &CPU_CAPABILITY::modified_bessel_k1_kernel);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 IMPLEMENT_COMPLEX_KERNEL(acos)

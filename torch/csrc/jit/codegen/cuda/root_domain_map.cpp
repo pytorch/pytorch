@@ -1005,6 +1005,10 @@ void ComputeAtRootDomainMapBuilder::mapAllPendingMappings(
   }
 }
 
+void ComputeAtRootDomainMapBuilder::handle(RNGOp* rop) {
+  handle(rop->output(0)->as<TensorView>());
+}
+
 void ComputeAtRootDomainMapBuilder::handle(TensorView* tv) {
   const TensorDomain* td = tv->domain();
   const auto rfactor = TensorDomain::noReductions(td->getMaybeRFactorDomain());
@@ -1147,6 +1151,15 @@ ExactRootDomainMap::ExactRootDomainMap(Fusion* fusion) {
 bool ExactRootDomainMap::areMapped(
     const IterDomain* id_a,
     const IterDomain* id_b) const {
+  // With expand going into a view operation there can be an instance where an
+  // iteration root domain in the consumer resolves the broadcast from the
+  // producer, then immediately rfactors it. In this case the consumer root is
+  // not mapped exactly to any other domain, so it might no have an entry in
+  // eq_sets_. eq_sets_.strictAreMapped would throw in this case so just return
+  // false if a mapping doesn't exist.
+  if (!eq_sets_.mappingExists(id_a) || !eq_sets_.mappingExists(id_b)) {
+    return false;
+  }
   return eq_sets_.strictAreMapped(id_a, id_b);
 }
 

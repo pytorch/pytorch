@@ -15,7 +15,7 @@ struct C10_API Storage {
   // Allocates memory buffer using given allocator and creates a storage with it
   Storage(
       use_byte_size_t /*use_byte_size*/,
-      size_t size_bytes,
+      SymInt size_bytes,
       Allocator* allocator = nullptr,
       bool resizable = false)
       : storage_impl_(c10::make_intrusive<StorageImpl>(
@@ -53,6 +53,13 @@ struct C10_API Storage {
         true));
   }
 
+  // Mimic create_legacy, but without requiring a newly-created StorageImpl.
+  void reset_legacy() {
+    TORCH_CHECK(resizable() && allocator());
+    set_nbytes(0);
+    set_data_ptr_noswap(allocator()->allocate(0));
+  }
+
   template <typename T>
   T* data() const {
     return storage_impl_->data<T>();
@@ -68,12 +75,20 @@ struct C10_API Storage {
     storage_impl_.get()->set_nbytes(size_bytes);
   }
 
+  void set_nbytes(c10::SymInt size_bytes) const {
+    storage_impl_.get()->set_nbytes(size_bytes);
+  }
+
   bool resizable() const {
     return storage_impl_->resizable();
   }
 
   size_t nbytes() const {
     return storage_impl_->nbytes();
+  }
+
+  SymInt sym_nbytes() const {
+    return storage_impl_->sym_nbytes();
   }
   // get() use here is to get const-correctness
 

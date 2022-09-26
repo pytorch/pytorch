@@ -41,6 +41,105 @@ to lower precision with minimal accuracy loss.
 Quantization API Summary
 -----------------------------
 
+PyTorch provides two different modes of quantization: Eager Mode Quantization and FX Graph Mode Quantization.
+
+Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
+
+FX Graph Mode Quantization is a new automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``). Note that FX Graph Mode Quantization is not expected to work on arbitrary models since the model might not be symbolically traceable, we will integrate it into domain libraries like torchvision and users will be able to quantize models similar to the ones in supported domain libraries with FX Graph Mode Quantization. For arbitrary models we'll provide general guidelines, but to actually make it work, users might need to be familiar with ``torch.fx``, especially on how to make a model symbolically traceable.
+
+New users of quantization are encouraged to try out FX Graph Mode Quantization first, if it does not work, user may try to follow the guideline of `using FX Graph Mode Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_quant_guide.html>`_ or fall back to eager mode quantization.
+
+The following table compares the differences between Eager Mode Quantization and FX Graph Mode Quantization:
+
++-----------------+-------------------+-------------------+
+|                 |Eager Mode         |FX Graph           |
+|                 |Quantization       |Mode               |
+|                 |                   |Quantization       |
++-----------------+-------------------+-------------------+
+|Release          |beta               |prototype          |
+|Status           |                   |                   |
++-----------------+-------------------+-------------------+
+|Operator         |Manual             |Automatic          |
+|Fusion           |                   |                   |
++-----------------+-------------------+-------------------+
+|Quant/DeQuant    |Manual             |Automatic          |
+|Placement        |                   |                   |
++-----------------+-------------------+-------------------+
+|Quantizing       |Supported          |Supported          |
+|Modules          |                   |                   |
++-----------------+-------------------+-------------------+
+|Quantizing       |Manual             |Automatic          |
+|Functionals/Torch|                   |                   |
+|Ops              |                   |                   |
++-----------------+-------------------+-------------------+
+|Support for      |Limited Support    |Fully              |
+|Customization    |                   |Supported          |
++-----------------+-------------------+-------------------+
+|Quantization Mode|Post Training      |Post Training      |
+|Support          |Quantization:      |Quantization:      |
+|                 |Static, Dynamic,   |Static, Dynamic,   |
+|                 |Weight Only        |Weight Only        |
+|                 |                   |                   |
+|                 |Quantiztion Aware  |Quantiztion Aware  |
+|                 |Training:          |Training:          |
+|                 |Static             |Static             |
++-----------------+-------------------+-------------------+
+|Input/Output     |``torch.nn.Module``|``torch.nn.Module``|
+|Model Type       |                   |(May need some     |
+|                 |                   |refactors to make  |
+|                 |                   |the model          |
+|                 |                   |compatible with FX |
+|                 |                   |Graph Mode         |
+|                 |                   |Quantization)      |
++-----------------+-------------------+-------------------+
+
+
+There are three types of quantization supported:
+
+1. dynamic quantization (weights quantized with activations read/stored in
+   floating point and quantized for compute)
+2. static quantization (weights quantized, activations quantized, calibration
+   required post training)
+3. static quantization aware training (weights quantized, activations quantized,
+   quantization numerics modeled during training)
+
+Please see our `Introduction to Quantization on Pytorch
+<https://pytorch.org/blog/introduction-to-quantization-on-pytorch/>`_ blog post
+for a more comprehensive overview of the tradeoffs between these quantization
+types.
+
+Operator coverage varies between dynamic and static quantization and is captured in the table below.
+Note that for FX quantization, the corresponding functionals are also supported.
+
++---------------------------+-------------------+--------------------+
+|                           |Static             | Dynamic            |
+|                           |Quantization       | Quantization       |
++---------------------------+-------------------+--------------------+
+| | nn.Linear               | | Y               | | Y                |
+| | nn.Conv1d/2d/3d         | | Y               | | N                |
++---------------------------+-------------------+--------------------+
+| | nn.LSTM                 | | Y (through      | | Y                |
+| |                         | | custom modules) | |                  |
+| | nn.GRU                  | | N               | | Y                |
++---------------------------+-------------------+--------------------+
+| | nn.RNNCell              | | N               | | Y                |
+| | nn.GRUCell              | | N               | | Y                |
+| | nn.LSTMCell             | | N               | | Y                |
++---------------------------+-------------------+--------------------+
+|nn.EmbeddingBag            | Y (activations    |                    |
+|                           | are in fp32)      | Y                  |
++---------------------------+-------------------+--------------------+
+|nn.Embedding               | Y                 | N                  |
++---------------------------+-------------------+--------------------+
+| nn.MultiheadAttention     | Y (through        | Not supported      |
+|                           | custom modules)   |                    |
++---------------------------+-------------------+--------------------+
+| Activations               | Broadly supported | Un-changed,        |
+|                           |                   | computations       |
+|                           |                   | stay in fp32       |
++---------------------------+-------------------+--------------------+
+
+
 Eager Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^
 For a general introduction to the quantization flow, including different types of quantization, please take a look at `General Quantization Flow`_.
@@ -69,31 +168,31 @@ Diagram::
                        /
      linear_weight_int8
 
-API example::
+PTDQ API Example::
 
-    import torch
+  import torch
 
-    # define a floating point model
-    class M(torch.nn.Module):
-        def __init__(self):
-            super(M, self).__init__()
-            self.fc = torch.nn.Linear(4, 4)
+  # define a floating point model
+  class M(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.fc = torch.nn.Linear(4, 4)
 
-        def forward(self, x):
-            x = self.fc(x)
-            return x
+      def forward(self, x):
+          x = self.fc(x)
+          return x
 
-    # create a model instance
-    model_fp32 = M()
-    # create a quantized model instance
-    model_int8 = torch.quantization.quantize_dynamic(
-        model_fp32,  # the original model
-        {torch.nn.Linear},  # a set of layers to dynamically quantize
-        dtype=torch.qint8)  # the target dtype for quantized weights
+  # create a model instance
+  model_fp32 = M()
+  # create a quantized model instance
+  model_int8 = torch.quantization.quantize_dynamic(
+      model_fp32,  # the original model
+      {torch.nn.Linear},  # a set of layers to dynamically quantize
+      dtype=torch.qint8)  # the target dtype for quantized weights
 
-    # run the model
-    input_fp32 = torch.randn(4, 4, 4, 4)
-    res = model_int8(input_fp32)
+  # run the model
+  input_fp32 = torch.randn(4, 4, 4, 4)
+  res = model_int8(input_fp32)
 
 To learn more about dynamic quantization please see our `dynamic quantization tutorial
 <https://pytorch.org/tutorials/recipes/recipes/dynamic_quantization.html>`_.
@@ -124,14 +223,14 @@ Diagram::
                         /
       linear_weight_int8
 
-API Example::
+PTSQ API Example::
 
   import torch
 
   # define a floating point model where some layers could be statically quantized
   class M(torch.nn.Module):
       def __init__(self):
-          super(M, self).__init__()
+          super().__init__()
           # QuantStub converts tensors from floating point to quantized
           self.quant = torch.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
@@ -222,14 +321,14 @@ Diagram::
                        /
      linear_weight_int8
 
-API Example::
+QAT API Example::
 
   import torch
 
   # define a floating point model where some layers could benefit from QAT
   class M(torch.nn.Module):
       def __init__(self):
-          super(M, self).__init__()
+          super().__init__()
           # QuantStub converts tensors from floating point to quantized
           self.quant = torch.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
@@ -249,8 +348,8 @@ API Example::
   # create a model instance
   model_fp32 = M()
 
-  # model must be set to train mode for QAT logic to work
-  model_fp32.train()
+  # model must be set to eval for fusion to work
+  model_fp32.eval()
 
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'fbgemm' for server inference and
@@ -265,8 +364,9 @@ API Example::
       [['conv', 'bn', 'relu']])
 
   # Prepare the model for QAT. This inserts observers and fake_quants in
+  # the model needs to be set to train for QAT logic to work
   # the model that will observe weight and activation tensors during calibration.
-  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused)
+  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused.train())
 
   # run the training loop (not shown)
   training_loop(model_fp32_prepared)
@@ -296,7 +396,7 @@ by module basis. Specifically, for all quantization techniques, the user needs t
    additional parameters) from functionals to module form (for example,
    using ``torch.nn.ReLU`` instead of ``torch.nn.functional.relu``).
 2. Specify which parts of the model need to be quantized either by assigning
-   ``.qconfig`` attributes on submodules or by specifying ``qconfig_dict``.
+   ``.qconfig`` attributes on submodules or by specifying ``qconfig_mapping``.
    For example, setting ``model.conv1.qconfig = None`` means that the
    ``model.conv`` layer will not be quantized, and setting
    ``model.linear1.qconfig = custom_qconfig`` means that the quantization
@@ -307,29 +407,31 @@ For static quantization techniques which quantize activations, the user needs
 to do the following in addition:
 
 1. Specify where activations are quantized and de-quantized. This is done using
-   :class:`~torch.quantization.QuantStub` and
-   :class:`~torch.quantization.DeQuantStub` modules.
-2. Use :class:`torch.nn.quantized.FloatFunctional` to wrap tensor operations
+   :class:`~torch.ao.quantization.QuantStub` and
+   :class:`~torch.ao.quantization.DeQuantStub` modules.
+2. Use :class:`~torch.ao.nn.quantized.FloatFunctional` to wrap tensor operations
    that require special handling for quantization into modules. Examples
    are operations like ``add`` and ``cat`` which require special handling to
    determine output quantization parameters.
 3. Fuse modules: combine operations/modules into a single module to obtain
    higher accuracy and performance. This is done using the
-   :func:`torch.quantization.fuse_modules` API, which takes in lists of modules
+   :func:`~torch.ao.quantization.fuse_modules` API, which takes in lists of modules
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
 
 (Prototype) FX Graph Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_dict` (an argument of the `prepare_fx` function).
+There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_mapping` (an argument of the `prepare_fx` function).
 
-API Example::
+FXPTQ API Example::
 
+  import torch
+  from torch.ao.quantization import QConfigMapping
   import torch.quantization.quantize_fx as quantize_fx
   import copy
 
-  model_fp = UserModel(...)
+  model_fp = UserModel()
 
   #
   # post training dynamic/weight_only quantization
@@ -338,10 +440,12 @@ API Example::
   # we need to deepcopy if we still want to keep model_fp unchanged after quantization since quantization apis change the input model
   model_to_quantize = copy.deepcopy(model_fp)
   model_to_quantize.eval()
-  qconfig_dict = {"": torch.quantization.default_dynamic_qconfig}
+  qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig)
+  # a tuple of one or more example inputs are needed to trace the model
+  example_inputs = (input_fp32)
   # prepare
-  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_dict)
-  # no calibration needed when we only have dynamici/weight_only quantization
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
+  # no calibration needed when we only have dynamic/weight_only quantization
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
 
@@ -350,10 +454,10 @@ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_dict = {"": torch.quantization.get_default_qconfig('qnnpack')}
+  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('qnnpack'))
   model_to_quantize.eval()
   # prepare
-  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_dict)
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
   # calibrate (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
@@ -363,10 +467,10 @@ API Example::
   #
 
   model_to_quantize = copy.deepcopy(model_fp)
-  qconfig_dict = {"": torch.quantization.get_default_qat_qconfig('qnnpack')}
+  qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qat_qconfig('qnnpack'))
   model_to_quantize.train()
   # prepare
-  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_dict)
+  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping, example_inputs)
   # training loop (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
@@ -431,7 +535,7 @@ Here are a few key attributes for quantized Tensor:
 
     * scale (float)
     * zero_point (int)
-  * torch.per_tensor_affine would have quantization parameters of
+  * torch.per_channel_affine would have quantization parameters of
 
     * per_channel_scales (list of float)
     * per_channel_zero_points (list of int)
@@ -748,8 +852,8 @@ based on observed tensor data are provided, developers can provide their own
 quantization functions. Quantization can be applied selectively to different
 parts of the model or configured differently for different parts of the model.
 
-We also provide support for per channel quantization for **conv2d()**,
-**conv3d()** and **linear()**
+We also provide support for per channel quantization for **conv1d()**, **conv2d()**,
+**conv3d()** and **linear()**.
 
 Quantization workflows work by adding (e.g. adding observers as
 ``.observer`` submodule) or replacing (e.g. converting ``nn.Conv2d`` to
@@ -789,105 +893,101 @@ on that output. The observer will be stored under the `activation_post_process` 
 as an attribute of the custom module instance. Relaxing these restrictions may
 be done at a future time.
 
-Example::
+Custom API Example::
 
-    import torch
-    import torch.nn.quantized as nnq
-    import torch.quantization.quantize_fx
+  import torch
+  import torch.nn.quantized as nnq
+  from torch.ao.quantization import QConfigMapping
+  import torch.ao.quantization.quantize_fx
 
-    # original fp32 module to replace
-    class CustomModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.linear = torch.nn.Linear(3, 3)
+  # original fp32 module to replace
+  class CustomModule(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.linear = torch.nn.Linear(3, 3)
 
-        def forward(self, x):
-            return self.linear(x)
+      def forward(self, x):
+          return self.linear(x)
 
-    # custom observed module, provided by user
-    class ObservedCustomModule(torch.nn.Module):
-        def __init__(self, linear):
-            super().__init__()
-            self.linear = linear
+  # custom observed module, provided by user
+  class ObservedCustomModule(torch.nn.Module):
+      def __init__(self, linear):
+          super().__init__()
+          self.linear = linear
 
-        def forward(self, x):
-            return self.linear(x)
+      def forward(self, x):
+          return self.linear(x)
 
-        @classmethod
-        def from_float(cls, float_module):
-            assert hasattr(float_module, 'qconfig')
-            observed = cls(float_module.linear)
-            observed.qconfig = float_module.qconfig
-            return observed
+      @classmethod
+      def from_float(cls, float_module):
+          assert hasattr(float_module, 'qconfig')
+          observed = cls(float_module.linear)
+          observed.qconfig = float_module.qconfig
+          return observed
 
-    # custom quantized module, provided by user
-    class StaticQuantCustomModule(torch.nn.Module):
-        def __init__(self, linear):
-            super().__init__()
-            self.linear = linear
+  # custom quantized module, provided by user
+  class StaticQuantCustomModule(torch.nn.Module):
+      def __init__(self, linear):
+          super().__init__()
+          self.linear = linear
 
-        def forward(self, x):
-            return self.linear(x)
+      def forward(self, x):
+          return self.linear(x)
 
-        @classmethod
-        def from_observed(cls, observed_module):
-            assert hasattr(observed_module, 'qconfig')
-            assert hasattr(observed_module, 'activation_post_process')
-            observed_module.linear.activation_post_process = \
-                observed_module.activation_post_process
-            quantized = cls(nnq.Linear.from_float(observed_module.linear))
-            return quantized
+      @classmethod
+      def from_observed(cls, observed_module):
+          assert hasattr(observed_module, 'qconfig')
+          assert hasattr(observed_module, 'activation_post_process')
+          observed_module.linear.activation_post_process = \
+              observed_module.activation_post_process
+          quantized = cls(nnq.Linear.from_float(observed_module.linear))
+          return quantized
 
-    #
-    # example API call (Eager mode quantization)
-    #
+  #
+  # example API call (Eager mode quantization)
+  #
 
-    m = torch.nn.Sequential(CustomModule()).eval()
-
-    prepare_custom_config_dict = {
-        "float_to_observed_custom_module_class": {
-            CustomModule: ObservedCustomModule
-        }
-    }
-    convert_custom_config_dict = {
-        "observed_to_quantized_custom_module_class": {
-            ObservedCustomModule: StaticQuantCustomModule
-        }
-    }
-
-    m.qconfig = torch.quantization.default_qconfig
-    mp = torch.quantization.prepare(
-        m, prepare_custom_config_dict=prepare_custom_config_dict)
-    # calibration (not shown)
-    mq = torch.quantization.convert(
-        mp, convert_custom_config_dict=convert_custom_config_dict)
-
-    #
-    # example API call (FX graph mode quantization)
-    #
-
-    m = torch.nn.Sequential(CustomModule()).eval()
-
-    qconfig_dict = {'': torch.quantization.default_qconfig}
-    prepare_custom_config_dict = {
-        "float_to_observed_custom_module_class": {
-            "static": {
-                CustomModule: ObservedCustomModule,
-            }
-        }
-    }
-    convert_custom_config_dict = {
-        "observed_to_quantized_custom_module_class": {
-            "static": {
-                ObservedCustomModule: StaticQuantCustomModule,
-            }
-        }
-    }
-    mp = torch.quantization.quantize_fx.prepare_fx(
-        m, qconfig_dict, prepare_custom_config_dict=prepare_custom_config_dict)
-    # calibration (not shown)
-    mq = torch.quantization.quantize_fx.convert_fx(
-        mp, convert_custom_config_dict=convert_custom_config_dict)
+  m = torch.nn.Sequential(CustomModule()).eval()
+  prepare_custom_config_dict = {
+      "float_to_observed_custom_module_class": {
+          CustomModule: ObservedCustomModule
+      }
+  }
+  convert_custom_config_dict = {
+      "observed_to_quantized_custom_module_class": {
+          ObservedCustomModule: StaticQuantCustomModule
+      }
+  }
+  m.qconfig = torch.ao.quantization.default_qconfig
+  mp = torch.ao.quantization.prepare(
+      m, prepare_custom_config_dict=prepare_custom_config_dict)
+  # calibration (not shown)
+  mq = torch.ao.quantization.convert(
+      mp, convert_custom_config_dict=convert_custom_config_dict)
+  #
+  # example API call (FX graph mode quantization)
+  #
+  m = torch.nn.Sequential(CustomModule()).eval()
+  qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.default_qconfig)
+  prepare_custom_config_dict = {
+      "float_to_observed_custom_module_class": {
+          "static": {
+              CustomModule: ObservedCustomModule,
+          }
+      }
+  }
+  convert_custom_config_dict = {
+      "observed_to_quantized_custom_module_class": {
+          "static": {
+              ObservedCustomModule: StaticQuantCustomModule,
+          }
+      }
+  }
+  mp = torch.ao.quantization.quantize_fx.prepare_fx(
+      m, qconfig_mapping, torch.randn(3,3), prepare_custom_config=prepare_custom_config_dict)
+  # calibration (not shown)
+  mq = torch.ao.quantization.quantize_fx.convert_fx(
+      mp, convert_custom_config=convert_custom_config_dict)
 
 Best Practices
 --------------
@@ -1033,6 +1133,9 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
 .. py:module:: torch.ao.nn
+.. py:module:: torch.ao.nn.quantizable
+.. py:module:: torch.ao.nn.quantizable.modules
+.. py:module:: torch.ao.nn.quantized
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
@@ -1042,7 +1145,17 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.quantization.fx
 .. py:module:: torch.ao.quantization.backend_config
 .. py:module:: torch.ao.sparsity
-.. py:module:: torch.ao.sparsity.experimental
-.. py:module:: torch.ao.sparsity.experimental.pruner
 .. py:module:: torch.ao.sparsity.scheduler
 .. py:module:: torch.ao.sparsity.sparsifier
+
+.. py:module:: torch.nn.qat
+.. py:module:: torch.nn.qat.modules
+.. py:module:: torch.nn.qat.dynamic
+.. py:module:: torch.nn.qat.dynamic.modules
+.. py:module:: torch.nn.quantized
+.. py:module:: torch.nn.quantized.modules
+.. py:module:: torch.nn.quantized.dynamic
+.. py:module:: torch.nn.quantized.dynamic.modules
+
+.. py:module:: torch.ao.nn.quantized.reference
+.. py:module:: torch.ao.nn.quantized.reference.modules

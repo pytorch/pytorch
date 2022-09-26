@@ -249,13 +249,15 @@ Tensor embedding_backward_cuda_kernel(
   });
 #endif
 
+  int64_t max_segments = std::min<int64_t>(numel, num_weights);
+
   AT_DISPATCH_INDEX_TYPES(orig_indices.scalar_type(), "embedding_backward_cuda_kernel", [&] () {
     // We split the segments up into sizes of `NROWS_PER_THREAD`
     // Compute the number partial-segments per segment (some partial-segments
     // may not be the full `NROWS_PER_THREAD` number of rows)
-    auto partials_per_segment = at::empty({numel}, orig_indices.options());
+    auto partials_per_segment = at::empty({max_segments}, orig_indices.options());
     {
-      krn_partials_per_segment<<<ceil_div(numel, 32), 32, 0, stream>>> (
+      krn_partials_per_segment<<<ceil_div(max_segments, 32), 32, 0, stream>>> (
               partials_per_segment.data_ptr<index_t>(),
               segment_offsets.data_ptr<index_t>(),
               num_of_segments_ptr,
@@ -267,11 +269,11 @@ Tensor embedding_backward_cuda_kernel(
     // of each partial-segment in `sorted_indices`, we need to compute the
     // start position of each _segment_ in `partial_segment_offset`.
     // Unit: index in `partial_segment_offset`
-    auto partials_per_segment_offset = at::empty({numel}, orig_indices.options());
+    auto partials_per_segment_offset = at::empty({max_segments}, orig_indices.options());
     cuda::cub::exclusive_sum(
         partials_per_segment.data_ptr<index_t>(),
         partials_per_segment_offset.data_ptr<index_t>(),
-        numel);
+        max_segments);
 
     // The total number of partial-segments is the sum of `partials_per_segment_offset`
     auto num_of_partial_segments_tensor = at::empty({}, grad.options().dtype(kLong));
@@ -282,11 +284,13 @@ Tensor embedding_backward_cuda_kernel(
       num_of_segments_ptr, num_of_partial_segments_ptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
+    auto max_partial_segment = numel / NROWS_PER_THREAD + max_segments;
+
     // Now we can compute the start position of each partial-segment
     // Unit: index in `sorted_indices` and `orig_indices`
-    auto partial_segment_offset = at::empty({numel}, orig_indices.options());
+    auto partial_segment_offset = at::empty({max_partial_segment}, orig_indices.options());
     {
-      krn_partial_segment_offset<<<ceil_div(numel, 32), 32, 0, stream>>> (
+      krn_partial_segment_offset<<<ceil_div(max_segments, 32), 32, 0, stream>>> (
               partial_segment_offset.data_ptr<index_t>(),
               partials_per_segment.data_ptr<index_t>(),
               partials_per_segment_offset.data_ptr<index_t>(),
@@ -298,7 +302,7 @@ Tensor embedding_backward_cuda_kernel(
     const int warp_size = at::cuda::warp_size();
     const int stride_warped = ceil_div(stride, warp_size)*warp_size;
     const int block = std::min(stride_warped, MAX_BLOCK_SIZE);
-    const int grid = ceil_div(numel*stride_warped, block);
+    const int grid = ceil_div(max_partial_segment*stride_warped, block);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       grad.scalar_type(), "embedding_bag_backward_cuda_compute_grad_weight", [&] {
@@ -311,7 +315,7 @@ Tensor embedding_backward_cuda_kernel(
         } else {
             op = grad.options();
         }
-        auto grad_weight_per_segment = at::empty({numel, stride}, op);
+        auto grad_weight_per_segment = at::empty({max_partial_segment, stride}, op);
         // Compute the sum of each partial-segment and handle bags
         if (offset2bag.defined()) {
               compute_grad_weight_bags<scalar_t><<<grid, block, 0, stream>>>(
@@ -341,7 +345,7 @@ Tensor embedding_backward_cuda_kernel(
 
         // Finally, we sum all the partial-sums and scatter them
         // into `grad_weight`.
-        const int grid2 = ceil_div(numel*stride_warped, block);
+        const int grid2 = ceil_div(max_segments*stride_warped, block);
             sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
               sorted_indices.data_ptr<index_t>(),
               grad_weight.data_ptr<scalar_t>(),

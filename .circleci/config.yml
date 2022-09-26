@@ -174,46 +174,6 @@ commands:
               echo "This is not a pull request, skipping..."
             fi
 
-  upload_binary_size_for_android_build:
-    description: "Upload binary size data for Android build"
-    parameters:
-      build_type:
-        type: string
-        default: ""
-      artifacts:
-        type: string
-        default: ""
-    steps:
-      - run:
-          name: "Binary Size - Install Dependencies"
-          no_output_timeout: "5m"
-          command: |
-            retry () {
-              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
-            }
-            retry pip3 install requests
-      - run:
-          name: "Binary Size - Untar Artifacts"
-          no_output_timeout: "5m"
-          command: |
-            # The artifact file is created inside docker container, which contains the result binaries.
-            # Now unpackage it into the project folder. The subsequent script will scan project folder
-            # to locate result binaries and report their sizes.
-            # If artifact file is not provided it assumes that the project folder has been mounted in
-            # the docker during build and already contains the result binaries, so this step can be skipped.
-            export ARTIFACTS="<< parameters.artifacts >>"
-            if [ -n "${ARTIFACTS}" ]; then
-              tar xf "${ARTIFACTS}" -C ~/project
-            fi
-      - run:
-          name: "Binary Size - Upload << parameters.build_type >>"
-          no_output_timeout: "5m"
-          command: |
-            cd ~/project
-            export ANDROID_BUILD_TYPE="<< parameters.build_type >>"
-            export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            python3 -m tools.stats.upload_binary_size_to_scuba android
-
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
 # The binary builds use the docker executor b/c at time of writing the machine
@@ -441,245 +401,6 @@ binary_windows_params: &binary_windows_params
 # Job specs
 ##############################################################################
 jobs:
-  binary_linux_build:
-    <<: *binary_linux_build_params
-    steps:
-    - checkout
-    - calculate_docker_image_tag
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - run:
-        name: Build
-        no_output_timeout: "1h"
-        command: |
-            source "/pytorch/.circleci/scripts/binary_linux_build.sh"
-            # Preserve build log
-            if [ -f /pytorch/build/.ninja_log ]; then
-              cp /pytorch/build/.ninja_log /final_pkgs
-            fi
-    - run:
-        name: Output binary sizes
-        no_output_timeout: "1m"
-        command: |
-            ls -lah /final_pkgs
-    - run:
-        name: upload build & binary data
-        no_output_timeout: "5m"
-        command: |
-            source /env
-            cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            python3 -mpip install requests && \
-            SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-    - persist_to_workspace:
-        root: /
-        paths: final_pkgs
-
-    - store_artifacts:
-        path: /final_pkgs
-
-    # This should really just be another step of the binary_linux_build job above.
-    # This isn't possible right now b/c the build job uses the docker executor
-    # (otherwise they'd be really really slow) but this one uses the macine
-    # executor (b/c we have to run the docker with --runtime=nvidia and we can't do
-    # that on the docker executor)
-  binary_linux_test:
-    <<: *binary_linux_test_upload_params
-    machine:
-        image: ubuntu-2004:202104-01
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - attach_workspace:
-        at: /home/circleci/project
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - run:
-        name: Prepare test code
-        no_output_timeout: "1h"
-        command: .circleci/scripts/binary_linux_test.sh
-    - run:
-        <<: *binary_run_in_docker
-
-  binary_upload:
-    parameters:
-      package_type:
-        type: string
-        description: "What type of package we are uploading (eg. wheel, libtorch, conda)"
-        default: "wheel"
-      upload_subfolder:
-        type: string
-        description: "What subfolder to put our package into (eg. cpu, cudaX.Y, etc.)"
-        default: "cpu"
-    docker:
-      - image: continuumio/miniconda3
-    environment:
-      - DRY_RUN: disabled
-      - PACKAGE_TYPE: "<< parameters.package_type >>"
-      - UPLOAD_SUBFOLDER: "<< parameters.upload_subfolder >>"
-    steps:
-      - attach_workspace:
-          at: /tmp/workspace
-      - checkout
-      - designate_upload_channel
-      - run:
-          name: Install dependencies
-          no_output_timeout: "1h"
-          command: |
-            conda install -yq anaconda-client
-            pip install -q awscli
-      - run:
-          name: Do upload
-          no_output_timeout: "1h"
-          command: |
-            AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}" \
-              AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}" \
-              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
-              .circleci/scripts/binary_upload.sh
-
-  # Nighlty build smoke tests defaults
-  # These are the second-round smoke tests. These make sure that the binaries are
-  # correct from a user perspective, testing that they exist from the cloud are
-  # are runnable. Note that the pytorch repo is never cloned into these jobs
-  ##############################################################################
-  smoke_linux_test:
-    <<: *binary_linux_test_upload_params
-    machine:
-      image: ubuntu-2004:202104-01
-    steps:
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - run:
-        name: Test
-        no_output_timeout: "1h"
-        command: |
-          set -ex
-          cat >/home/circleci/project/ci_test_script.sh \<<EOL
-          # The following code will be executed inside Docker container
-          set -eux -o pipefail
-          /builder/smoke_test.sh
-          # The above code will be executed inside Docker container
-          EOL
-    - run:
-        <<: *binary_run_in_docker
-
-  smoke_mac_test:
-    <<: *binary_linux_test_upload_params
-    macos:
-      xcode: "12.0"
-    steps:
-      - checkout
-      - run:
-          <<: *binary_checkout
-      - run:
-          <<: *binary_populate_env
-      - brew_update
-      - run:
-          <<: *binary_install_miniconda
-      - run:
-          name: Build
-          no_output_timeout: "1h"
-          command: |
-            set -ex
-            source "/Users/distiller/project/env"
-            export "PATH=$workdir/miniconda/bin:$PATH"
-            # TODO unbuffer and ts this, but it breaks cause miniconda overwrites
-            # tclsh. But unbuffer and ts aren't that important so they're just
-            # disabled for now
-            ./builder/smoke_test.sh
-
-  binary_mac_build:
-    <<: *binary_mac_params
-    macos:
-      xcode: "12.0"
-      resource_class: "large"
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - brew_update
-    - run:
-        <<: *binary_install_miniconda
-
-    - run:
-        name: Build
-        no_output_timeout: "90m"
-        command: |
-          # Do not set -u here; there is some problem with CircleCI
-          # variable expansion with PROMPT_COMMAND
-          set -ex -o pipefail
-          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
-          cat "$script"
-          source "$script"
-
-    - run:
-        name: Test
-        no_output_timeout: "1h"
-        command: |
-          # Do not set -u here; there is some problem with CircleCI
-          # variable expansion with PROMPT_COMMAND
-          set -ex -o pipefail
-          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_test.sh"
-          cat "$script"
-          source "$script"
-
-    - persist_to_workspace:
-        root: /Users/distiller/project
-        paths: final_pkgs
-
-    - store_artifacts:
-        path: /Users/distiller/project/final_pkgs
-
-  binary_macos_arm64_build:
-    <<: *binary_mac_params
-    macos:
-      xcode: "12.3.0"
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - brew_update
-    - run:
-        <<: *binary_install_miniconda
-
-    - run:
-        name: Build
-        no_output_timeout: "90m"
-        command: |
-          # Do not set -u here; there is some problem with CircleCI
-          # variable expansion with PROMPT_COMMAND
-          set -ex -o pipefail
-          export CROSS_COMPILE_ARM64=1
-          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_build.sh"
-          cat "$script"
-          source "$script"
-
-    - persist_to_workspace:
-        root: /Users/distiller/project
-        paths: final_pkgs
-
-    - store_artifacts:
-        path: /Users/distiller/project/final_pkgs
-
-
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
@@ -721,90 +442,6 @@ jobs:
         no_output_timeout: "1h"
         command: |
           script="/Users/distiller/project/.circleci/scripts/binary_ios_upload.sh"
-          cat "$script"
-          source "$script"
-
-  binary_windows_build:
-    <<: *binary_windows_params
-    parameters:
-      build_environment:
-        type: string
-        default: ""
-      executor:
-        type: string
-        default: "windows-xlarge-cpu-with-nvidia-cuda"
-    executor: <<parameters.executor>>
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - run:
-        name: Build
-        no_output_timeout: "1h"
-        command: |
-          set -eux -o pipefail
-          script="/c/w/p/.circleci/scripts/binary_windows_build.sh"
-          cat "$script"
-          source "$script"
-    - persist_to_workspace:
-        root: "C:/w"
-        paths: final_pkgs
-    - store_artifacts:
-        path: C:/w/final_pkgs
-
-  binary_windows_test:
-    <<: *binary_windows_params
-    parameters:
-      build_environment:
-        type: string
-        default: ""
-      executor:
-        type: string
-        default: "windows-medium-cpu-with-nvidia-cuda"
-    executor: <<parameters.executor>>
-    steps:
-    - checkout
-    - attach_workspace:
-        at: c:/users/circleci/project
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - run:
-        name: Test
-        no_output_timeout: "1h"
-        command: |
-          set -eux -o pipefail
-          script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
-          cat "$script"
-          source "$script"
-
-  smoke_windows_test:
-    <<: *binary_windows_params
-    parameters:
-      build_environment:
-        type: string
-        default: ""
-      executor:
-        type: string
-        default: "windows-medium-cpu-with-nvidia-cuda"
-    executor: <<parameters.executor>>
-    steps:
-    - checkout
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - run:
-        name: Test
-        no_output_timeout: "1h"
-        command: |
-          set -eux -o pipefail
-          export TEST_NIGHTLY_PACKAGE=1
-          script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
           cat "$script"
           source "$script"
 
@@ -862,95 +499,6 @@ jobs:
           pushd /tmp/workspace
           git push -u origin "<< parameters.branch >>"
 
-  pytorch_python_doc_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-python-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4"
-    resource_class: large
-    machine:
-      image: ubuntu-2004:202104-01
-    steps:
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        name: Doc Build and Push
-        no_output_timeout: "1h"
-        command: |
-          set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
-          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          # turn v1.12.0rc3 into 1.12
-          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
-          target=${tag:-main}
-          echo "building for ${target}"
-          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/python_doc_push_script.sh docs/'$target' '$target' site") | docker exec -u jenkins -i "$id" bash) 2>&1'
-
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          mkdir -p ~/workspace/build_artifacts
-          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io/docs/main ~/workspace/build_artifacts
-          docker cp $id:/var/lib/jenkins/workspace/pytorch.github.io /tmp/workspace
-
-          # Save the docs build so we can debug any problems
-          export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
-          docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
-          time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
-    - persist_to_workspace:
-        root: /tmp/workspace
-        paths:
-          - .
-    - store_artifacts:
-        path: ~/workspace/build_artifacts/main
-        destination: docs
-
-  pytorch_cpp_doc_build:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-cpp-doc-push
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4"
-    resource_class: large
-    machine:
-      image: ubuntu-2004:202104-01
-    steps:
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        name: Doc Build and Push
-        no_output_timeout: "1h"
-        command: |
-          set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
-          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          # turn v1.12.0rc3 into 1.12
-          tag=$(echo $CIRCLE_TAG | sed -e 's/v*\([0-9]*\.[0-9]*\).*/\1/')
-          target=${tag:-main}
-          echo "building for ${target}"
-          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && '"export CIRCLE_SHA1='$CIRCLE_SHA1'"' && . ./.circleci/scripts/cpp_doc_push_script.sh docs/"$target" main") | docker exec -u jenkins -i "$id" bash) 2>&1'
-
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          mkdir -p ~/workspace/build_artifacts
-          docker cp $id:/var/lib/jenkins/workspace/cppdocs/ /tmp/workspace
-
-          # Save the docs build so we can debug any problems
-          export DEBUG_COMMIT_DOCKER_IMAGE=${COMMIT_DOCKER_IMAGE}-debug
-          docker commit "$id" ${DEBUG_COMMIT_DOCKER_IMAGE}
-          time docker push ${DEBUG_COMMIT_DOCKER_IMAGE}
-
-    - persist_to_workspace:
-        root: /tmp/workspace
-        paths:
-          - .
-
   pytorch_macos_10_15_py3_build:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.15-py3-arm64-build
@@ -964,7 +512,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export CROSS_COMPILE_ARM64=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
@@ -1002,7 +549,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
@@ -1024,6 +570,196 @@ jobs:
           paths:
             - miniconda3
 
+  mac_build:
+    parameters:
+      build-environment:
+        type: string
+        description: Top-level label for what's being built/tested.
+      xcode-version:
+        type: string
+        default: "13.3.1"
+        description: What xcode version to build with.
+      build-generates-artifacts:
+        type: boolean
+        default: true
+        description: if the build generates build artifacts
+      python-version:
+        type: string
+        default: "3.8"
+    macos:
+      xcode: << parameters.xcode-version >>
+    resource_class: medium
+    environment:
+      BUILD_ENVIRONMENT: << parameters.build-environment >>
+      AWS_REGION: us-east-1
+    steps:
+
+      - checkout
+      - run_brew_for_macos_build
+
+      - run:
+          name: Install sccache
+          command: |
+            sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "export SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${BASH_ENV}"
+            echo "export SCCACHE_S3_KEY_PREFIX=${GITHUB_WORKFLOW}" >> "${BASH_ENV}"
+
+            set +x
+            echo "export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> "${BASH_ENV}"
+            echo "export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4}" >> "${BASH_ENV}"
+            set -x
+
+      - run:
+          name: Get workflow job id
+          command: |
+            echo "export OUR_GITHUB_JOB_ID=${CIRCLE_WORKFLOW_JOB_ID}" >> "${BASH_ENV}"
+
+      - run:
+          name: Build
+          command: |
+            set -x
+
+            git submodule sync
+            git submodule update --init --recursive --depth 1 --jobs 0
+
+            export PATH="/usr/local/bin:$PATH"
+            export WORKSPACE_DIR="${HOME}/workspace"
+            mkdir -p "${WORKSPACE_DIR}"
+            MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py38_4.12.0-MacOSX-x86_64.sh"
+            if [  << parameters.python-version >> == 3.9.12 ]; then
+              MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-MacOSX-x86_64.sh"
+            fi
+
+            # If a local installation of conda doesn't exist, we download and install conda
+            if [ ! -d "${WORKSPACE_DIR}/miniconda3" ]; then
+              mkdir -p "${WORKSPACE_DIR}"
+              curl --retry 3 ${MINICONDA_URL} -o "${WORKSPACE_DIR}"/miniconda3.sh
+              bash "${WORKSPACE_DIR}"/miniconda3.sh -b -p "${WORKSPACE_DIR}"/miniconda3
+            fi
+            export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
+            # shellcheck disable=SC1091
+            source "${WORKSPACE_DIR}"/miniconda3/bin/activate
+
+            echo "export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${BASH_ENV}"
+            .jenkins/pytorch/macos-build.sh
+
+      - when:
+          condition: << parameters.build-generates-artifacts >>
+          steps:
+            - run:
+                name: Archive artifacts into zip
+                command: |
+                  zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json .pytorch-test-times.json
+                  cp artifacts.zip /Users/distiller/workspace
+
+      - persist_to_workspace:
+          root: /Users/distiller/workspace/
+          paths:
+            - miniconda3
+            - artifacts.zip
+
+      - store_artifacts:
+          path: /Users/distiller/project/artifacts.zip
+
+  mac_test:
+    parameters:
+      build-environment:
+        type: string
+      shard-number:
+        type: string
+      num-test-shards:
+        type: string
+      xcode-version:
+        type: string
+      test-config:
+        type: string
+        default: 'default'
+
+    macos:
+      xcode: << parameters.xcode-version >>
+    environment:
+      GIT_DEFAULT_BRANCH: 'master'
+      BUILD_ENVIRONMENT: << parameters.build-environment >>
+      TEST_CONFIG: << parameters.test-config >>
+      SHARD_NUMBER: << parameters.shard-number >>
+      NUM_TEST_SHARDS: << parameters.num-test-shards >>
+      PYTORCH_RETRY_TEST_CASES: 1
+      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
+      - run_brew_for_macos_build
+      - run:
+          name: Test
+          no_output_timeout: "2h"
+          command: |
+            set -x
+
+            git submodule sync --recursive
+            git submodule update --init --recursive
+
+            mv ~/workspace/artifacts.zip .
+            unzip artifacts.zip
+
+            export IN_CI=1
+
+            COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
+
+            export PATH="/usr/local/bin:$PATH"
+            export WORKSPACE_DIR="${HOME}/workspace"
+            mkdir -p "${WORKSPACE_DIR}"
+
+            export PATH="${WORKSPACE_DIR}/miniconda3/bin:$PATH"
+            source "${WORKSPACE_DIR}"/miniconda3/bin/activate
+
+            # sanitize the input commit message and PR body here:
+
+            # trim all new lines from commit messages to avoid issues with batch environment
+            # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+            COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+
+            # then trim all special characters like single and double quotes to avoid unescaped inputs to
+            # wreak havoc internally
+            export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+
+            python3 -mpip install dist/*.whl
+            .jenkins/pytorch/macos-test.sh
+      - run:
+          name: Copy files for uploading test stats
+          command: |
+            # copy into a parent folder test-reports because we can't use CIRCLEI_BUILD_NUM in path when persisting to workspace
+            mkdir -p test-reports/test-reports_${CIRCLE_BUILD_NUM}/test/test-reports
+            cp -r test/test-reports test-reports/test-reports_${CIRCLE_BUILD_NUM}/test/test-reports
+      - store_test_results:
+          path: test/test-reports
+      - persist_to_workspace:
+          root: /Users/distiller/project/
+          paths:
+            - test-reports
+
+  upload_test_stats:
+    machine: # executor type
+      image: ubuntu-2004:202010-01 # # recommended linux image - includes Ubuntu 20.04, docker 19.03.13, docker-compose 1.27.4
+    steps:
+      - checkout
+      - attach_workspace:
+          at: ~/workspace
+      - run:
+          name: upload
+          command: |
+            set -ex
+            if [ -z ${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD} ]; then
+              echo "No credentials found, cannot upload test stats (are you on a fork?)"
+              exit 0
+            fi
+            cp -r ~/workspace/test-reports/* ~/project
+            pip3 install requests==2.26 rockset==0.8.3 boto3==1.19.12 six==1.16.0
+            export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
+            export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_KEY_FOR_OSSCI_ARTIFACT_UPLOAD}
+            # i dont know how to get the run attempt number for reruns so default to 1
+            python3 -m tools.stats.upload_test_stats --workflow-run-id "${CIRCLE_WORKFLOW_JOB_ID}" --workflow-run-attempt 1 --head-branch << pipeline.git.branch >> --circleci
   pytorch_macos_10_13_py3_test:
     environment:
       BUILD_ENVIRONMENT: pytorch-macos-10.13-py3-test
@@ -1039,7 +775,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
@@ -1052,7 +787,6 @@ jobs:
             source /Users/distiller/workspace/miniconda3/bin/activate
             python3 -m pip install boto3==1.19.12
 
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Using the same IAM user to write stats to our OSS bucket
@@ -1078,7 +812,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
             export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
@@ -1168,9 +901,6 @@ jobs:
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           time docker push ${output_image}
-    - upload_binary_size_for_android_build:
-        build_type: prebuilt
-        artifacts: /home/circleci/workspace/build_android_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1246,9 +976,6 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           time docker push ${output_image}
-    - upload_binary_size_for_android_build:
-        build_type: prebuilt-single
-        artifacts: /home/circleci/workspace/build_android_x86_32_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -1258,7 +985,40 @@ jobs:
     macos:
       xcode: "12.5.1"
     steps:
-      - checkout
+      - run:
+          name: checkout with retry
+          command: |
+            checkout() {
+              set -ex
+              # Workaround old docker images with incorrect $HOME
+              # check https://github.com/docker/docker/issues/2968 for details
+              if [ "${HOME}" = "/" ]
+                then
+                export HOME=$(getent passwd $(id -un) | cut -d: -f6)
+              fi
+
+              mkdir -p ~/.ssh
+
+              echo 'github.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAq2A7hRGmdnm9tUDbO9IDSwBK6TbQa+PXYPCPy6rbTrTtw7PHkccKrpp0yVhp5HdEIcKr6pLlVDBfOLX9QUsyCOV0wzfjIJNlGEYsdlLJizHhbn2mUjvSAHQqZETYP81eFzLQNnPHt4EVVUh7VfDESU84KezmD5QlWpXLmvU31/yMf+Se8xhHTvKSCZIFImWwoG6mbUoWf9nzpIoaSjB+weqqUUmpaaasXVal72J+UX2B+2RPW3RcT0eOzQgqlJL3RKrTJvdsjE3JEAvGq3lGHSZXy28G3skua2SmVi/w4yCE6gbODqnTWlg7+wC604ydGXA8VJiS5ap43JXiUFFAaQ==
+              ' >> ~/.ssh/known_hosts
+
+              # use git+ssh instead of https
+              git config --global url."ssh://git@github.com".insteadOf "https://github.com" || true
+              git config --global gc.auto 0 || true
+
+              echo 'Cloning git repository'
+              mkdir -p '/Users/distiller/project'
+              cd '/Users/distiller/project'
+              git clone "$CIRCLE_REPOSITORY_URL" .
+              echo 'Checking out branch'
+              git checkout --force -B "$CIRCLE_BRANCH" "$CIRCLE_SHA1"
+              git --no-pager log --no-color -n 1 --format='HEAD is now at %h %s'
+            }
+
+            retry () {
+              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+            retry checkout
       - run_brew_for_ios_build
       - run:
           name: Run Fastlane
@@ -1288,7 +1048,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"
@@ -1375,12 +1134,13 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
             if [ ${USE_COREML_DELEGATE} == 1 ]; then
-              pip install coremltools==5.0b5
-              pip install six
+              pip install coremltools==5.0b5 protobuf==3.20.1 six==1.16.0
               python coreml_backend.py
             else
-              python trace_model.py
+              cd "${PROJ_ROOT}"
+              python test/mobile/model_test/gen_test_model.py ios-test
             fi
+            cd "${PROJ_ROOT}/ios/TestApp/benchmark"
             if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
               echo "Setting up the TestApp for LiteInterpreter"
               ruby setup.rb --lite 1
@@ -1388,10 +1148,10 @@ jobs:
               echo "Setting up the TestApp for Full JIT"
               ruby setup.rb
             fi
-            cd ${PROJ_ROOT}/ios/TestApp
-            instruments -s -devices
-            if [ ${BUILD_LITE_INTERPRETER} == 1 ]; then
-              if [ ${USE_COREML_DELEGATE} == 1 ]; then
+            cd "${PROJ_ROOT}/ios/TestApp"
+            # instruments -s -devices
+            if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
+              if [ "${USE_COREML_DELEGATE}" == 1 ]; then
                 fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
               else
                 fastlane scan --only_testing TestAppTests/TestAppTests/testLiteInterpreter
@@ -1493,30 +1253,6 @@ jobs:
             set -e
             python3 -m pip install requests
             python3 ./.circleci/scripts/trigger_azure_pipeline.py
-
-  pytorch_doc_test:
-    environment:
-      BUILD_ENVIRONMENT: pytorch-doc-test
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.7-gcc5.4"
-    resource_class: medium
-    machine:
-      image: ubuntu-2004:202104-01
-    steps:
-    - checkout
-    - calculate_docker_image_tag
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - run:
-        name: Doc test
-        no_output_timeout: "30m"
-        command: |
-          set -ex
-          export COMMIT_DOCKER_IMAGE=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
-          echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
-          time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
-          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && . ./.jenkins/pytorch/docs-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   # update_s3_htmls job
   # These jobs create html files for every cpu/cu## folder in s3. The html

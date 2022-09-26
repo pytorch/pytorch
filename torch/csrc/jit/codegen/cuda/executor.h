@@ -33,17 +33,46 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
       int id,
       CompileOptions options = CompileOptions());
 
+  //! infers output sizes via returning non-allocated KernelArgumentHolder.
+  //! this function is useful for async compilation for segmented fusion
+  KernelArgumentHolder inferOutputSizes(
+      const KernelArgumentHolder& args,
+      const LaunchParams& launch_constraints);
+
+  void compileFusion(
+      Fusion* fusion,
+      const KernelArgumentHolder& args,
+      const LaunchParams& launch_constraints = LaunchParams());
+
+  // TODO: merge it with the overload above.
+  //! This API is merely here so we don't have to go back and update all cpp
+  //! tests.
   void compileFusion(
       Fusion* fusion,
       const at::ArrayRef<IValue>& inputs = {},
+      const LaunchParams& launch_constraints = LaunchParams()) {
+    KernelArgumentHolder args =
+        KernelArgumentHolder::createKernelArgumentHolder(inputs);
+    compileFusion(fusion, args, launch_constraints);
+  }
+
+  std::vector<at::Tensor> runFusion(
+      KernelArgumentHolder& args,
       const LaunchParams& launch_constraints = LaunchParams(),
-      CompileOptions options = CompileOptions());
+      const std::vector<at::Tensor>& outputs = {});
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
       const std::vector<at::Tensor>& outputs,
       const LaunchParams& launch_constraints = LaunchParams(),
-      const c10::optional<size_t>& opt_code = c10::nullopt);
+      const c10::optional<size_t>& opt_code = c10::nullopt) {
+    KernelArgumentHolder args =
+        KernelArgumentHolder::createKernelArgumentHolder(inputs);
+    if (opt_code.has_value()) {
+      args.setCacheId(*opt_code);
+    }
+    return runFusion(args, launch_constraints, outputs);
+  }
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
@@ -74,6 +103,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
     LaunchParams launch_params;
     std::vector<std::pair<int, int>> io_alias_indices;
     std::vector<std::vector<int64_t>> output_sizes;
+    std::vector<std::vector<int64_t>> output_strides;
     std::vector<at::ScalarType> output_types;
     std::vector<std::vector<int64_t>> buffer_sizes;
     std::vector<at::ScalarType> buffer_types;
@@ -140,7 +170,8 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   void compileRtc(
       const std::string& code,
       const std::string& name,
-      bool structured = false);
+      bool structured = false,
+      CompileOptions options = CompileOptions());
 
   //! Internal tests only. Runs the compiled CUDA kernel from compileRtc.
   void runRtc(
@@ -157,6 +188,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   struct GlobalBuffers {
     std::vector<at::Tensor> buffers;
     std::vector<bool> zero_init;
+    at::Tensor profile_buffer;
   };
 
   static std::string kernelNamespace() {
@@ -185,7 +217,6 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   // skip allocating real storage for those, but still maintain its spot to
   // maintain the indexing from output aliases to inputs
   std::vector<at::Tensor> allocOutputs(
-      const at::ArrayRef<IValue>& inputs,
       kir::ExpressionEvaluator& expr_eval,
       const std::unordered_set<int>& alias_indices = {});
 
@@ -198,6 +229,15 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   ExecutorCompileTimeInfoCache* compileTimeDataCache() {
     return &compile_time_info_cache_;
   }
+
+  //! returns KernelArgumentHolder representing the output sizes from kernel
+  //! execution. Note: 1. this API would ignoring aliased outputs and instead
+  //! pushing scalar int 0 as a place holder; 2. this API doesn't actually
+  //! allocate output in memory, but rather is used just to infer output sizes.
+  KernelArgumentHolder evaluateOutputSizes(
+      const KernelArgumentHolder& args,
+      kir::ExpressionEvaluator& expr_eval,
+      const std::unordered_set<int>& alias_indices = {});
 
  private:
   CompileOptions options_;
@@ -247,7 +287,7 @@ class TORCH_CUDA_CU_API FusionExecutor : public NonCopyable {
   ExecutorCompileTimeInfoCache compile_time_info_cache_;
 
   // Cached expr eval
-  std::unique_ptr<KernelPrecomputedIntegers> evaluator_precomputed_integers_ =
+  std::unique_ptr<KernelPrecomputedValues> evaluator_precomputed_values_ =
       nullptr;
 
   // Profiling support: knob to control wheter we actually execute the

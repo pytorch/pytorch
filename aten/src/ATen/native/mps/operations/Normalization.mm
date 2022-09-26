@@ -7,6 +7,7 @@
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Pool.h>
+#include <ATen/native/layer_norm.h>
 #include <torch/library.h>
 
 namespace at {
@@ -69,7 +70,6 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
                     Tensor& save_var) {
 
   namespace native_mps = at::native::mps;
-
   struct CachedGraph : public native_mps::MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
@@ -797,6 +797,427 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
   }
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
+
+}
+
+// Layer norm forward for MPS
+std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& bias_opt,
+    double eps) {
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto X = input.expect_contiguous();
+  auto gamma = weight.expect_contiguous();
+
+  auto input_shape = input.sizes();
+  const auto input_ndim = input.dim();
+  const int normalized_ndim = normalized_shape.size();
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
+  const int axis = input_ndim - normalized_ndim;
+  at::Tensor input_reshaped = input.reshape({1, M, -1});
+  // Unlike Batch Normalization, which applies scalar scale and bias for each
+  // entire channel/plane with the affine option, Layer Normalization applies
+  // per-element scale and bias. E.g. For input {N, C, H, W}, weight for
+  // batchnorm has shape {C} while weight for layernorm has shape {H, W} or {W}.
+  auto outputs = at::native_batch_norm(
+      input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
+      /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
+  at::Tensor out = std::get<0>(outputs);
+  out = out.view(input_shape);
+  if (weight.defined() && bias.defined()) {
+    out = bias.addcmul(out, weight, 1);
+  } else if (weight.defined()) {
+    out = out.mul(weight);
+  } else if (bias.defined()) {
+    out = out.add(bias);
+  }
+  at::Tensor mean = std::get<1>(outputs);
+  at::Tensor variance = std::get<2>(outputs);
+
+  at::Tensor rstd = at::rsqrt(at::add(variance, eps));
+
+  std::vector<int64_t> stat_shape;
+  for (const auto idx : c10::irange(axis)) {
+    stat_shape.push_back(input_shape[idx]);
+  }
+  for (const auto idx : c10::irange(axis, input.dim())) {
+    (void)idx; // Suppress unused variable
+    stat_shape.push_back(1);
+  }
+  mean = mean.view(stat_shape);
+  rstd = rstd.view(stat_shape);
+  return std::make_tuple(out, mean, rstd);
+}
+
+std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(
+    const Tensor& grad_out,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& mean,
+    const Tensor& rstd,
+    const c10::optional<Tensor>& weight_opt /* optional */,
+    const c10::optional<Tensor>& bias_opt /* optional */,
+    std::array<bool, 3> grad_input_mask) {
+
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
+  auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
+  auto X = input.expect_contiguous();
+  auto gamma = weight.expect_contiguous();
+  auto beta = bias.expect_contiguous();
+  auto dOut = grad_out.expect_contiguous();
+
+  Tensor grad_input;
+  Tensor grad_weight;
+  Tensor grad_bias;
+  if (grad_input_mask[0]) {
+    grad_input = at::native::empty_like(
+        *X,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        kMPS /* device */,
+        c10::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
+  }
+  if (grad_input_mask[1]) {
+    grad_weight = M > 0 ? at::native::empty_like(
+                         *gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         kMPS /* device */,
+                         c10::nullopt /* pin_memory */,
+                         at::MemoryFormat::Contiguous)
+                   : at::native::zeros_like(
+                         *gamma,
+                         c10::nullopt /* dtype */,
+                         c10::nullopt /* layout */,
+                         kMPS /* device */,
+                         c10::nullopt /* pin_memory */,
+                         at::MemoryFormat::Contiguous);
+  }
+  if (grad_input_mask[2]) {
+    grad_bias = M > 0 ? at::native::empty_like(
+                        *beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        kMPS /* device */,
+                        c10::nullopt /* pin_memory */,
+                        at::MemoryFormat::Contiguous)
+                  : at::native::zeros_like(
+                        *beta,
+                        c10::nullopt /* dtype */,
+                        c10::nullopt /* layout */,
+                        kMPS /* device */,
+                        c10::nullopt /* pin_memory */,
+                        at::MemoryFormat::Contiguous);
+  }
+  if (M > 0) {
+
+    namespace native_mps = at::native::mps;
+
+    // Derive from MPSCachedGraph
+    struct CachedGraph : public native_mps::MPSCachedGraph
+    {
+      CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+      MPSGraphTensor* gradOutputTensor_ = nil;
+      MPSGraphTensor* inputTensor_ = nil;
+      MPSGraphTensor* weightTensor_ = nil;
+      MPSGraphTensor* meanTensor_ = nil;
+      MPSGraphTensor* rstdTensor_ = nil;
+      MPSGraphTensor* gradInputTensor_ = nil;
+      MPSGraphTensor* gradWeightTensor_ = nil;
+      MPSGraphTensor* gradBiasTensor_ = nil;
+    };
+
+    native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
+
+    auto stream = at::mps::getCurrentMPSStream();
+
+    const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
+
+    if (grad_input.numel() == 0) {
+      return std::make_tuple(grad_input, grad_weight, grad_bias);
+    }
+
+    // const auto memory_format = input.suggest_memory_format();
+
+    @autoreleasepool {
+
+      MPSShape* input_shape = mps::getMPSShape(*X);
+      MPSShape* gamma_shape = mps::getMPSShape(normalized_shape);
+
+      auto num_normalized_dims = [gamma_shape count];
+      auto num_channel_dims = [input_shape count] - num_normalized_dims;
+
+      NSMutableArray<NSNumber*>* gamma_axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_channel_dims];
+
+      for(int i = 0; i < num_channel_dims; i++)
+        gamma_axes[i] = [NSNumber numberWithInt:i];
+
+      // Axes along which to reduce to get "batch norm" gradient
+      // This will be applied on shape [1, M, -1]
+      NSMutableArray<NSNumber*>* bn_axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_normalized_dims];
+      for(int i = 0; i < num_normalized_dims; i++)
+        bn_axes[i] = [NSNumber numberWithInt:(1+1+i)];
+
+      // Shape of input to do "batch norm" backward
+      // This is [1, M, -1]
+      NSMutableArray<NSNumber*>* bn_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims+2)];
+      bn_shape[0] = [NSNumber numberWithInt:1];
+      bn_shape[1] = [NSNumber numberWithInt:M];
+      for(int i = 0; i < num_normalized_dims; i++)
+        bn_shape[i+2] = input_shape[i+num_channel_dims];
+
+      // Shape of mean to do "batch norm" backward
+      // This is [1, M, [1,1,1..1]]
+      NSMutableArray<NSNumber*>* bn_mean_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims+2)];
+      bn_mean_shape[0] = [NSNumber numberWithInt:1];
+      bn_mean_shape[1] = [NSNumber numberWithInt:M];
+      for(int i = 0; i < num_normalized_dims; i++)
+        bn_mean_shape[i+2] = [NSNumber numberWithInt:1];
+
+      // Shape of gamma to multiply with "batch norm" backward
+      // This is [1, 1, -1]
+      NSMutableArray<NSNumber*>* bn_gamma_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims+2)];
+      bn_gamma_shape[0] = [NSNumber numberWithInt:1];
+      bn_gamma_shape[1] = [NSNumber numberWithInt:1];
+      for(int i = 0; i < num_normalized_dims; i++)
+        bn_gamma_shape[i+2] = input_shape[i+num_channel_dims];
+
+      string key = "layer_norm_backward_mps:"
+                        + std::to_string(has_weight) + ":"
+                        + native_mps::getArrayRefString(normalized_shape) + ":"
+                        + native_mps::getArrayRefString((*X).sizes()) + ":"
+                        + native_mps::getMPSTypeString((*X).scalar_type());
+
+      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+
+      if(!cachedGraph) {
+        native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+
+          CachedGraph *newCachedGraph = nil;
+
+          @autoreleasepool {
+            MPSGraph* mpsGraph = native_mps::make_mps_graph();
+            newCachedGraph = new CachedGraph(mpsGraph);
+
+            MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, *X);
+            MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, *dOut);
+            MPSGraphTensor* weightTensor = nil;
+            if(has_weight)
+              weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, *gamma);
+
+            // Mean and inv std tensors to be saved and returned
+            MPSGraphTensor* meanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, mean);
+            MPSGraphTensor* rstdTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, rstd);
+
+            MPSGraphTensor* gradInputTensor = nil;
+            MPSGraphTensor* gradWeightTensor = nil;
+            MPSGraphTensor* gradBiasTensor = nil;
+
+            if(grad_input_mask[1]) {
+              MPSGraphTensor* xMinusMean = [mpsGraph subtractionWithPrimaryTensor:inputTensor
+                                                                  secondaryTensor:meanTensor
+                                                                             name:nil];
+              MPSGraphTensor* bnForwardTensor = [mpsGraph multiplicationWithPrimaryTensor:xMinusMean
+                                                                          secondaryTensor:rstdTensor
+                                                                                     name:nil];
+              MPSGraphTensor* gradBnMulTensor = [mpsGraph multiplicationWithPrimaryTensor:bnForwardTensor
+                                                                          secondaryTensor:gradOutputTensor
+                                                                                     name:nil];
+              gradWeightTensor = [mpsGraph reductionSumWithTensor:gradBnMulTensor
+                                                             axes:gamma_axes
+                                                             name:nil];
+            }
+            if(grad_input_mask[2]) {
+              gradBiasTensor = [mpsGraph reductionSumWithTensor:gradOutputTensor
+                                                           axes:gamma_axes
+                                                           name:nil];
+            }
+            if(grad_input_mask[0]) {
+
+              // Reshape input to [1, M, -1]
+              // Reshape mean and rstd to [1, M, -1]
+              // Reshape gamma to [1, 1, -1] (-1 has N dims)
+
+              MPSGraphTensor* bnInputTensor = [mpsGraph reshapeTensor:inputTensor
+                                                            withShape:bn_shape
+                                                                 name:nil];
+              MPSGraphTensor* bnGradOutputTensor = [mpsGraph reshapeTensor:gradOutputTensor
+                                                                 withShape:bn_shape
+                                                                      name:nil];
+              // Do this at the end
+              if(has_weight) {
+                MPSGraphTensor* bnGammaTensor = [mpsGraph reshapeTensor:weightTensor
+                                                              withShape:bn_gamma_shape
+                                                                   name:nil];
+                bnGradOutputTensor = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
+                                                               secondaryTensor:bnGammaTensor
+                                                                          name:nil];
+              }
+              MPSGraphTensor* bnMeanTensor = [mpsGraph reshapeTensor:meanTensor
+                                                           withShape:bn_mean_shape
+                                                                name:nil];
+              MPSGraphTensor* bnRstdTensor = [mpsGraph reshapeTensor:rstdTensor
+                                                           withShape:bn_mean_shape
+                                                                name:nil];
+
+              MPSGraphTensor* mulTensor = [mpsGraph constantWithScalar:N
+                                                   shape:@[@1]
+                                                dataType:MPSDataTypeInt32];
+
+              MPSGraphTensor* numberToReduceTensor = mulTensor;
+
+              MPSGraphTensor* cast2Tensor = [mpsGraph castTensor:numberToReduceTensor
+                                                          toType:bnInputTensor.dataType
+                                                            name:@"cast2Tensor"];
+
+              MPSGraphTensor* sizeReciprocalTensor = [mpsGraph reciprocalWithTensor:cast2Tensor
+                                                                               name:nil];
+
+              // TODO: Reduce redundant computation
+              MPSGraphTensor* xMinusMean = [mpsGraph subtractionWithPrimaryTensor:bnInputTensor
+                                                                  secondaryTensor:bnMeanTensor
+                                                                             name:nil];
+
+              MPSGraphTensor* normalizedTensor = [mpsGraph multiplicationWithPrimaryTensor:xMinusMean
+                                                                           secondaryTensor:bnRstdTensor
+                                                                                      name:nil];
+
+              MPSGraphTensor* bnGradMulTensor = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
+                                                                          secondaryTensor:normalizedTensor
+                                                                                     name:nil];
+
+              MPSGraphTensor* gammaGradient = [mpsGraph reductionSumWithTensor:bnGradMulTensor
+                                                                          axes:bn_axes
+                                                                          name:nil];
+
+              MPSGraphTensor* betaGradient = [mpsGraph reductionSumWithTensor:bnGradOutputTensor
+                                                                         axes:bn_axes
+                                                                         name:nil];
+
+              MPSGraphTensor* gradient1 = [mpsGraph multiplicationWithPrimaryTensor:bnGradOutputTensor
+                                                                    secondaryTensor:bnRstdTensor
+                                                                               name:nil];
+
+              MPSGraphTensor* gradient2_1 = [mpsGraph multiplicationWithPrimaryTensor:sizeReciprocalTensor
+                                                                      secondaryTensor:xMinusMean
+                                                                                 name:nil];
+
+              // reverseVariance is square of rstd
+              MPSGraphTensor* reverseVariance = [mpsGraph squareWithTensor:bnRstdTensor
+                                                                      name:nil];
+              MPSGraphTensor* gradient2_2 = [mpsGraph multiplicationWithPrimaryTensor:gammaGradient
+                                                                      secondaryTensor:reverseVariance
+                                                                                 name:nil];
+
+              MPSGraphTensor* gradient2 = [mpsGraph multiplicationWithPrimaryTensor:gradient2_1
+                                                                secondaryTensor:gradient2_2
+                                                                           name:nil];
+
+              MPSGraphTensor* gradient3_1 = [mpsGraph multiplicationWithPrimaryTensor:sizeReciprocalTensor
+                                                                      secondaryTensor:betaGradient
+                                                                                 name:nil];
+
+              MPSGraphTensor* gradient3 = [mpsGraph multiplicationWithPrimaryTensor:gradient3_1
+                                                                    secondaryTensor:bnRstdTensor
+                                                                               name:nil];
+
+              MPSGraphTensor* gradient4 = [mpsGraph subtractionWithPrimaryTensor:gradient1
+                                                                 secondaryTensor:gradient2
+                                                                            name:nil];
+
+              MPSGraphTensor* gradient = [mpsGraph subtractionWithPrimaryTensor:gradient4
+                                                                secondaryTensor:gradient3
+                                                                           name:nil];
+
+              gradInputTensor = [mpsGraph reshapeTensor:gradient
+                                              withShape:input_shape
+                                                   name:nil];
+
+            }
+
+            if(grad_input_mask[1]) {
+              gradWeightTensor = [mpsGraph reshapeTensor:gradWeightTensor
+                                               withShape:gamma_shape
+                                                    name:nil];
+            }
+            if(grad_input_mask[2]) {
+              gradBiasTensor = [mpsGraph reshapeTensor:gradBiasTensor
+                                             withShape:gamma_shape
+                                                  name:nil];
+            }
+
+            newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+            newCachedGraph->inputTensor_ = inputTensor;
+            newCachedGraph->weightTensor_ = weightTensor;
+            newCachedGraph->meanTensor_ = meanTensor;
+            newCachedGraph->rstdTensor_ = rstdTensor;
+            newCachedGraph->gradInputTensor_ = gradInputTensor;
+            newCachedGraph->gradWeightTensor_ = gradWeightTensor;
+            newCachedGraph->gradBiasTensor_ = gradBiasTensor;
+          }
+          return newCachedGraph;
+        });
+        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+      }
+
+      auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, *X);
+      auto gradOutputPlaceholder = native_mps::Placeholder(cachedGraph->gradOutputTensor_, *dOut);
+      auto weightPlaceholder = native_mps::Placeholder();
+      if(has_weight)
+        weightPlaceholder = native_mps::Placeholder(cachedGraph->weightTensor_, *gamma);
+      auto saveMeanPlaceholder = native_mps::Placeholder(cachedGraph->meanTensor_, mean);
+      auto saveVarPlaceholder = native_mps::Placeholder(cachedGraph->rstdTensor_, rstd);
+
+      auto gradInputPlaceholder = native_mps::Placeholder();
+      if(grad_input_mask[0])
+        gradInputPlaceholder = native_mps::Placeholder(cachedGraph->gradInputTensor_, grad_input);
+      auto gradWeightPlaceholder = native_mps::Placeholder();
+      if(grad_input_mask[1])
+        gradWeightPlaceholder = native_mps::Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
+      auto gradBiasPlaceholder = native_mps::Placeholder();;
+      if(grad_input_mask[2])
+        gradBiasPlaceholder = native_mps::Placeholder(cachedGraph->gradBiasTensor_, grad_bias);
+
+      NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
+      feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
+      feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
+      if(has_weight)
+        feeds[weightPlaceholder.getMPSGraphTensor()] = weightPlaceholder.getMPSGraphTensorData();
+      feeds[saveMeanPlaceholder.getMPSGraphTensor()] = saveMeanPlaceholder.getMPSGraphTensorData();
+      feeds[saveVarPlaceholder.getMPSGraphTensor()] = saveVarPlaceholder.getMPSGraphTensorData();
+
+      NSMutableDictionary *results = [[NSMutableDictionary new] autorelease];
+      if(grad_input_mask[0])
+        results[gradInputPlaceholder.getMPSGraphTensor()] = gradInputPlaceholder.getMPSGraphTensorData();
+      if(grad_input_mask[1])
+        results[gradWeightPlaceholder.getMPSGraphTensor()] = gradWeightPlaceholder.getMPSGraphTensorData();
+      if(grad_input_mask[2])
+        results[gradBiasPlaceholder.getMPSGraphTensor()] = gradBiasPlaceholder.getMPSGraphTensorData();
+
+      native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+
+  }
+
+  }
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 
 }
 

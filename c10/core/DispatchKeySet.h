@@ -172,7 +172,9 @@ class DispatchKeySet final {
             (1ULL
              << (num_backends + static_cast<uint8_t>(toFunctionalityKey(t)) -
                  1)) -
-            1) {}
+            1) {
+    *this = add(DispatchKey::PythonDispatcher);
+  }
 
   // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!
@@ -316,7 +318,7 @@ class DispatchKeySet final {
   // Any backend bits set on self will remain unchanged.
   // See Note [Removing keys from DispatchKeySet Only Affects Functionality
   // Keys]
-  DispatchKeySet operator-(DispatchKeySet other) const {
+  constexpr DispatchKeySet operator-(DispatchKeySet other) const {
     return DispatchKeySet(repr_ & (full_backend_mask | ~other.repr_));
   }
 
@@ -332,10 +334,10 @@ class DispatchKeySet final {
   }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
   // returns the extended DispatchKeySet!
-  C10_NODISCARD DispatchKeySet add(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet add(DispatchKey t) const {
     return *this | DispatchKeySet(t);
   }
-  C10_NODISCARD DispatchKeySet add(DispatchKeySet ks) const {
+  C10_NODISCARD constexpr DispatchKeySet add(DispatchKeySet ks) const {
     return *this | ks;
   }
 
@@ -363,9 +365,15 @@ class DispatchKeySet final {
   //
   // Instead, remove(DispatchKey.AutogradCPU) will only remove the "Autograd"
   // bit from the bitset.
-  constexpr DispatchKeySet remove(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
+  }
+  // You're allowed to remove a backend bit from a DispatchKeySet,
+  // but you have to be explicit about it (remove_backend() instead of
+  // remove()).
+  constexpr DispatchKeySet remove_backend(BackendComponent b) const {
+    return DispatchKeySet(repr_ & ~(DispatchKeySet(b).repr_));
   }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
@@ -504,6 +512,8 @@ class DispatchKeySet final {
     using iterator_category = std::input_iterator_tag;
     using value_type = DispatchKey;
     using difference_type = ptrdiff_t;
+    using reference = value_type&;
+    using pointer = value_type*;
     // final mask value should mask out the entire keyset
     static const uint8_t end_iter_mask_val =
         num_backends + num_functionality_keys;
@@ -625,6 +635,7 @@ C10_API inline int getDispatchTableIndexForDispatchKey(DispatchKey k) {
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradFunctionality,
     DispatchKey::AutogradOther,
+    DispatchKey::AutogradNestedTensor,
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
@@ -676,7 +687,6 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
-         DispatchKey::Meta,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
          DispatchKey::Quantized})
@@ -724,6 +734,7 @@ constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
 constexpr auto autograd_lazy_ks = DispatchKeySet(DispatchKey::AutogradLazy);
+constexpr auto autograd_meta_ks = DispatchKeySet(DispatchKey::AutogradMeta);
 constexpr auto autograd_mps_ks = DispatchKeySet(DispatchKey::AutogradMPS);
 constexpr auto autograd_hpu_ks = DispatchKeySet(DispatchKey::AutogradHPU);
 constexpr auto autograd_privateuse1_ks =
@@ -733,7 +744,8 @@ constexpr auto autograd_privateuse2_ks =
 constexpr auto autograd_privateuse3_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse3);
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
-
+constexpr auto autograd_nested =
+    DispatchKeySet(DispatchKey::AutogradNestedTensor);
 // keyset correpsonding to functorch keys that have their own dedicated
 // TensorImpl subclass.
 constexpr auto functorch_transforms_ks = DispatchKeySet(
@@ -799,6 +811,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
       return inplace_or_view_ks | autograd_xla_ks;
     case BackendComponent::LazyBit:
       return inplace_or_view_ks | autograd_lazy_ks;
+    case BackendComponent::MetaBit:
+      return inplace_or_view_ks | autograd_meta_ks;
     case BackendComponent::MPSBit:
       return inplace_or_view_ks | autograd_mps_ks;
     case BackendComponent::HPUBit:

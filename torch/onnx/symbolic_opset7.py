@@ -10,12 +10,16 @@ Updated operators:
   Scan
 """
 
+import functools
 import warnings
 
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx._internal import registration
 
-block_listed_operators = [
+
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=7)
+
+block_listed_operators = (
     "scan",
     "expand",
     "expand_as",
@@ -26,12 +30,13 @@ block_listed_operators = [
     "max_pool1d_with_indices",
     "max_pool2d_with_indices",
     "max_pool3d_with_indices",
-]
+)
 
 
 # NOTE: max, min, sum, mean: broadcasting is not supported in opset 7.
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
+@_onnx_symbolic("aten::max")
 def max(g, self, dim_or_y=None, keepdim=None):
     # torch.max(input, other)
     if keepdim is None and dim_or_y is not None:
@@ -43,6 +48,7 @@ def max(g, self, dim_or_y=None, keepdim=None):
     return opset9.max(g, self, dim_or_y, keepdim)
 
 
+@_onnx_symbolic("aten::min")
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input, other)
     if keepdim is None and dim_or_y is not None:
@@ -55,4 +61,6 @@ def min(g, self, dim_or_y=None, keepdim=None):
 
 
 for block_listed_op in block_listed_operators:
-    vars()[block_listed_op] = symbolic_helper._block_list_in_opset(block_listed_op)
+    _onnx_symbolic(f"aten::{block_listed_op}")(
+        symbolic_helper._block_list_in_opset(block_listed_op)
+    )

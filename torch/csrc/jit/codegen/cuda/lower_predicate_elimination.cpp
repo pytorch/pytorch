@@ -24,6 +24,10 @@ namespace {
 //   the whole warp will get the same value.
 void assertOnWarpOps(const Expr* expr) {
   TORCH_INTERNAL_ASSERT(
+      !ir_utils::isLdMatrixOp(expr),
+      "Predicate elimination: cannot eliminate pred for ldmatrix, use exact parallel dims",
+      expr->toString());
+  TORCH_INTERNAL_ASSERT(
       !expr->isA<MmaOp>(),
       "Mma op: cannot eliminate predicate for mma op, tiling not valid. ",
       expr->toString());
@@ -32,6 +36,26 @@ void assertOnWarpOps(const Expr* expr) {
 } // namespace
 
 namespace {
+
+// Utility to check if the scheduled domain of the given
+//   TensorView represent an exact shared mem access, meaning
+//   that all the thread parallel dimensions on the leaf nodes
+//   are exact so that the shared mem read/write would not
+//   run out of bound because of thread over-subscription.
+bool isExactParallelSharedMemAccess(TensorView* tv) {
+  auto& parallel_dimension_map = GpuLower::current()->parallelDimensionMap();
+  for (auto id : tv->domain()->domain()) {
+    if (id->isThreadDim()) {
+      auto ptype = id->getParallelType();
+      // Need to predicate to avoid out of bound access
+      //  because of over-subscribed block size.
+      if (!parallel_dimension_map.isExact(ptype)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
 
 class PredicateAnalyzer : public OptOutDispatch {
  public:
@@ -42,17 +66,15 @@ class PredicateAnalyzer : public OptOutDispatch {
   //! local memory. However, accessing producer tensors still may
   //! result in out-of-bound as they are replayed as consumers.
   static bool needsPredicate(TensorView* producer, TensorView* consumer) {
-    // Both tensors must be on local memory. Global tensors must be
+    // Both tensors must be on local or shared memory. Global tensors must be
     // predicated as allocation is done based on root domains. Smem
-    // and local tensors are allocated based on leaf domains, however,
-    // smem tensors are parallelized, which is highly likely, the size
+    // and local tensors are allocated based on leaf domains.
+    // However, smem tensors are parallelized, which is highly likely, the size
     // of the parallelized axis is the actual size of the axis, not
-    // the number of threads. Since the number of threads can be
-    // larger than the axis size, it's not safe to skip predication
-
-    // Check that parallel dimension will not generate out of bound index
-    if (!(producer->getMemoryType() == MemoryType::Local &&
-          consumer->getMemoryType() == MemoryType::Local)) {
+    // the number of threads. This is currently actively checked to avoid
+    // out of bound shared mem access by out of bound threads.
+    if (producer->getMemoryType() == MemoryType::Global ||
+        consumer->getMemoryType() == MemoryType::Global) {
       return true;
     }
 
@@ -167,9 +189,23 @@ class PredicateChcker : public IterVisitor {
   void handle(Expr* expr) final {
     needs_predicate_ = predicateIntDiv(expr) ||
         predicateMisalignedVectorize(expr) || predicateShift(expr) ||
-        predicateProducerConsumerPair(expr) ||
+        predicateSharedMemAccess(expr) || predicateProducerConsumerPair(expr) ||
         predicateNonDivisibleRootDomains(expr) ||
-        predicateNonDivisibleSplit(expr);
+        predicateNonDivisibleSplit(expr) || predicateExpandReduce(expr);
+
+    // A cp.async op would need a predicate for either the global
+    //  input or its shared mem output, or both.
+    // Due to the WAR discussed in [Predicate Inversion for CpAsync],
+    //  we currently cannot support use cases where both the gmem read
+    //  and the smem write need to be predicated.
+    // Adding a check here would make the exclusion of such case as precise as
+    //  possible and avoid duplication of predicateSharedMemAccess
+    //  logic. But this part along with [Predicate Inversion for CpAsync]
+    //  should be cleaned up all together when we extend predicate/masking
+    //  logic to cover this usage.
+    TORCH_INTERNAL_ASSERT(
+        !(ir_utils::isCpAsyncOp(expr) && predicateSharedMemAccess(expr)),
+        "predicate removal: unsupported use case of cp.async");
 
     if (needs_predicate_) {
       return;
@@ -194,6 +230,54 @@ class PredicateChcker : public IterVisitor {
          expr->as<BinaryOp>()->getBinaryOpType() == BinaryOpType::Mod ||
          expr->as<BinaryOp>()->getBinaryOpType() == BinaryOpType::Remainder ||
          expr->as<BinaryOp>()->getBinaryOpType() == BinaryOpType::CeilDiv));
+  }
+
+  // If we're reducing an expanded domain, we need to be careful to predicate it
+  // or we could end up reducing a broadcasted value too many times.
+  bool predicateExpandReduce(Expr* expr) const {
+    if (!ir_utils::isReductionOp(expr)) {
+      return false;
+    }
+    auto tv_inputs = ir_utils::getTvs(expr->inputs());
+    TORCH_INTERNAL_ASSERT(
+        tv_inputs.size() > 0,
+        "Should never have a reduction op without a tensor view input.");
+    bool found_expand = false;
+    for (auto tv_input : tv_inputs) {
+      found_expand |= std::any_of(
+          tv_input->getMaybeRFactorDomain().begin(),
+          tv_input->getMaybeRFactorDomain().end(),
+          [](IterDomain* id) { return id->hasExpandedExtent(); });
+    }
+
+    if (!found_expand) {
+      return false;
+    }
+
+    auto tv_outputs = ir_utils::getTvs(expr->outputs());
+    if (expr->isA<WelfordOp>() && tv_inputs.size() != tv_outputs.size()) {
+      tv_outputs = std::vector<TensorView*>(tv_inputs.size(), tv_outputs[0]);
+    }
+
+    TORCH_INTERNAL_ASSERT(
+        tv_outputs.size() == tv_inputs.size(),
+        "Was expecting matching number of inputs and outputs for expression: ",
+        expr->toString());
+
+    for (auto i : c10::irange(tv_inputs.size())) {
+      const auto root_p2c =
+          PairwiseRootDomainMap(tv_inputs[i], tv_outputs[i])
+              .mapProducerToConsumer(
+                  tv_inputs[i]->domain(), tv_outputs[i]->domain());
+      for (auto entry : root_p2c) {
+        auto p_id = entry.first;
+        auto c_id = entry.second;
+        if (p_id->hasExpandedExtent() && c_id->isReduction()) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   // Skip if MisalignedVectorize is involved for now. This could be
@@ -239,6 +323,144 @@ class PredicateChcker : public IterVisitor {
       }
     }
     return false;
+  }
+
+  bool predicateSharedMemAccess(Expr* expr) const {
+    // This is initial step to gradually remove predicates around
+    //  sharedmem access in suitable situations.
+    // Using an additional variable to track the predicate-on reasons
+    //  when the predicate around shared mem cannot be removed.
+    for (auto consumer : ir_utils::filterByType<TensorView>(expr->outputs())) {
+      for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
+        if (producer->getMemoryType() == MemoryType::Shared ||
+            consumer->getMemoryType() == MemoryType::Shared) {
+          if (needSharedMemPredicate(producer, consumer)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // Check for conditions where the predicate cannot be removed
+  //  when either producer or consumer is in shared memory.
+  bool needSharedMemPredicate(TensorView* producer, TensorView* consumer)
+      const {
+    // Indexing is based on consumer leaf ids so check the consumer.
+
+    // If consumer schedule contains in-exact thread parallel
+    //  dimensions, need to predicate against out of bound
+    //  shared memory access by out of bound threads.
+    if (!isExactParallelSharedMemAccess(consumer)) {
+      return true;
+    }
+
+    // TODO: This is directed WAR on FusionPersistentNormLocalShared.
+    //  This use case along with other previous issues motivate a
+    //   joint optimization of predicate removal and buffer reuse.
+    // In this particular case:
+    //   __shared__ T0 [10], T1[10]
+    //   for i in ...
+    //      if(pred)
+    //        T1[i] = T0[i] + ...  // exp0
+    //      T2 = 0;              // init for exp1
+    //      if(pred)
+    //        T2 = T1 ...        // exp1
+    //  If we remove pred around expr1, as the way the pred removal
+    //    pass is set up, the init for expr will be pushed up to
+    //    initialize T1 instead.
+    //  However if we initialize T1, the code will look like:
+    //  for i in ...
+    //    T1[i] = 0;
+    //  for i in ...
+    //    if(pred)
+    //      T1[i] = T0[i] + ...
+    //  Note that we'd be able to reuse buffer of T0 for T1 but
+    //    if we initialze T1 we cannot do that and thus the
+    //    kernel would not fit in smaller devices.
+    if (producer->getMemoryType() == MemoryType::Shared) {
+      if (auto producer_def = producer->definition()) {
+        if (std::any_of(
+                producer_def->inputs().begin(),
+                producer_def->inputs().end(),
+                [](Val* val) {
+                  if (auto tv = ir_utils::getTv(val)) {
+                    return tv->getMemoryType() == MemoryType::Shared;
+                  }
+                  return false;
+                })) {
+          // Disable shared memory producers that is a consumer
+          //  of another shared memory tensor. The initialization would
+          //  break potential opportunity to re-use shared mem buffer.
+          return true;
+        }
+      }
+    }
+
+    for (auto id : consumer->domain()->domain()) {
+      // TODO: (Enable in a follow up)
+      //  smem predicate removal with init would break unroll and unswitch,
+      //  eg. as in issue 1133, so disabling this removal pattern for now.
+      if (id->getParallelType() == ParallelType::Unroll ||
+          id->getParallelType() == ParallelType::Unswitch) {
+        return true;
+      }
+
+      // TODO: （Enable in a follow up)
+      //  This cannot yet be removed since smem initialization needs to be
+      //  handled specially, e.g. as in smem_reduce test. Will be able to
+      //  lift this one once the generic pred removal pass with fusion
+      //  traversal is ready.
+      auto consumer_def = consumer->definition();
+      if (ir_utils::isReductionOp(consumer_def)) {
+        if (producer->getMemoryType() == MemoryType::Shared) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // Utility to find the leaf iterdomains of the given
+  //   tensor view that will be treated as "zero loops"
+  //   in the indexing pass.
+  // For details on zero loops, see indexMapFromTV in
+  //  lower index pass.
+  std::vector<Val*> getZeroLeafIds(const TensorView* tv) const {
+    TORCH_INTERNAL_ASSERT(
+        tv->getMemoryType() == MemoryType::Local ||
+            tv->getMemoryType() == MemoryType::Shared,
+        "Local or shared memory tensor is assumed: ",
+        tv->toString());
+    bool is_shared_mem = tv->getMemoryType() == MemoryType::Shared;
+    std::vector<Val*> zero_leaf_ids;
+    for (const auto i : c10::irange(tv->nDims())) {
+      auto leaf_id = tv->axis(i);
+      if (is_shared_mem && leaf_id->isThreadDim()) {
+        // Thread parallel axes on shared mem are never
+        //  zero loops as each thread owns its share
+        //  of the shared mem space.
+        continue;
+      }
+      if (
+          // Non-thread parallel dimension on the left
+          //  of CA axes are zero loops.
+          i < tv->getComputeAtPosition() ||
+          // Parallel axes on local mem is zero loop.
+          // Grid axes on shared mem is zero loop.
+          leaf_id->isThread() ||
+          // Mma axes, similar to vectorization, are
+          //  implicit in hardware intrinsics, and thus
+          //  will be treated as a zero loop.
+          leaf_id->isMma()) {
+        zero_leaf_ids.push_back(leaf_id);
+      }
+    }
+
+    return zero_leaf_ids;
   }
 
   // An index can exceed the logical extent of the indexed domain if
@@ -289,18 +511,7 @@ class PredicateChcker : public IterVisitor {
       if (split_root.empty()) {
         continue;
       }
-      TORCH_INTERNAL_ASSERT(
-          output->getMemoryType() == MemoryType::Local,
-          "Local memory tensor is assumed: ",
-          output->toString());
-      std::vector<Val*> zero_leaf_ids;
-      for (const auto i : c10::irange(output->nDims())) {
-        auto leaf_id = output->axis(i);
-        if (i < output->getComputeAtPosition() || leaf_id->isThread() ||
-            leaf_id->isMma()) {
-          zero_leaf_ids.push_back(leaf_id);
-        }
-      }
+      const auto zero_leaf_ids = getZeroLeafIds(output);
       if (zero_leaf_ids.empty()) {
         return true;
       }
@@ -352,7 +563,7 @@ class PredicateChcker : public IterVisitor {
     // predication for expressions involving global memory, this
     // should never occur.
     TORCH_INTERNAL_ASSERT(
-        input_def != nullptr, "Inconsistent input found: ", input);
+        input_def != nullptr, "Inconsistent input found: ", input->toString());
 
     // The input needs to be initialized to the init value to omit
     // the predicate, so if the input has its own init value, i.e.,
@@ -412,7 +623,9 @@ class PredicateChcker : public IterVisitor {
       // predication for expressions involving global memory, this
       // should never occur.
       TORCH_INTERNAL_ASSERT(
-          input_def != nullptr, "Inconsistent input found: ", input);
+          input_def != nullptr,
+          "Inconsistent input found: ",
+          input->toString());
 
       // The input needs to be initialized to the init value to omit
       // the predicate, so if the input has its own init value, i.e.,
@@ -427,16 +640,17 @@ class PredicateChcker : public IterVisitor {
       // If input is not predicated, out-of-bound value may be
       // overwritten by a garbage value. However, it doesn't matter if
       // the input is also produced by another welford.
-      if (!input_def->isA<WelfordOp>() &&
+      if (!input_def->isA<WelfordOp>() && !input_def->isA<GroupedWelfordOp>() &&
           non_predicated_exprs_.find(input_def) !=
               non_predicated_exprs_.end()) {
         needs_predicate_ = true;
+        return;
       }
     }
   }
 
   void handle(GroupedReductionOp* grouped_rop) final {
-    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    for (const auto i : c10::irange(grouped_rop->numExprs())) {
       auto input = grouped_rop->input(i)->as<TensorView>();
       auto input_def = input->definition();
       // When input_def is null, input must be an input to the fusion,
@@ -444,7 +658,9 @@ class PredicateChcker : public IterVisitor {
       // predication for expressions involving global memory, this
       // should never occur.
       TORCH_INTERNAL_ASSERT(
-          input_def != nullptr, "Inconsistent input found: ", input);
+          input_def != nullptr,
+          "Inconsistent input found: ",
+          input->toString());
 
       // The input needs to be initialized to the init value to omit
       // the predicate, so if the input has its own init value, i.e.,
@@ -476,12 +692,8 @@ class PredicateChcker : public IterVisitor {
       } else if (
           auto input_def_grouped_rop =
               dynamic_cast<GroupedReductionOp*>(input_def)) {
-        auto input_index_as_output = std::distance(
-            input_def_grouped_rop->outputs().begin(),
-            std::find(
-                input_def_grouped_rop->outputs().begin(),
-                input_def_grouped_rop->outputs().end(),
-                input));
+        auto input_index_as_output =
+            input_def_grouped_rop->getExprIndexOfOutput(input);
         if (grouped_rop->getReductionOpType(i) !=
                 input_def_grouped_rop->getReductionOpType(
                     input_index_as_output) &&
@@ -499,12 +711,70 @@ class PredicateChcker : public IterVisitor {
     }
   }
 
+  void handle(GroupedWelfordOp* grouped_wop) final {
+    for (const auto expr_idx : c10::irange(grouped_wop->numExprs())) {
+      for (const auto val_idx : c10::irange(3)) {
+        auto init = grouped_wop->initVals().at(expr_idx).get(val_idx);
+
+        // Welford input can be a scalar. Predicate is required unless
+        // the scalar value is equal to the init value.
+        auto input = grouped_wop->inputVals().at(expr_idx).get(val_idx);
+        if (input->isScalar()) {
+          if (!input->sameAs(init)) {
+            needs_predicate_ = true;
+            return;
+          }
+          continue;
+        }
+
+        auto input_tv = dynamic_cast<TensorView*>(input);
+        TORCH_INTERNAL_ASSERT(input_tv != nullptr);
+
+        auto input_def = input->definition();
+
+        // When input_def is null, input must be an input to the fusion,
+        // so that must be allocated on global memory. Since we don't omit
+        // predication for expressions involving global memory, this
+        // should never occur.
+        TORCH_INTERNAL_ASSERT(
+            input_def != nullptr,
+            "Inconsistent input found: ",
+            input->toString());
+
+        // The input needs to be initialized to the init value to omit
+        // the predicate, so if the input has its own init value, i.e.,
+        // produced by another reduction, they must use the same init
+        // value.
+        Val* input_init = ir_utils::getReductionInitValOf(input_tv);
+        if (input_init != nullptr && !init->sameAs(input_init)) {
+          needs_predicate_ = true;
+          return;
+        }
+
+        // If input is not predicated, out-of-bound value may be
+        // overwritten by a garbage value. However, it doesn't matter if
+        // the input is also produced by another reduction op as it
+        // must be initialized and its initialized value is already
+        // found to be equal to the initil value of this op.
+        if (!input_def->isA<WelfordOp>() &&
+            !input_def->isA<GroupedWelfordOp>() &&
+            non_predicated_exprs_.find(input_def) !=
+                non_predicated_exprs_.end()) {
+          needs_predicate_ = true;
+          return;
+        }
+      }
+    }
+  }
+
   // Similar to the above reduction constraint but for MMA
   void handle(MmaOp* mma) final {
     for (auto input : ir_utils::filterByType<TensorView>(mma->inputs())) {
       auto input_def = input->definition();
       TORCH_INTERNAL_ASSERT(
-          input_def != nullptr, "Inconsistent input found: ", input);
+          input_def != nullptr,
+          "Inconsistent input found: ",
+          input->toString());
 
       Val* input_init = ir_utils::getReductionInitValOf(input);
       if (input_init != nullptr && !mma->init()->sameAs(input_init)) {
@@ -514,8 +784,40 @@ class PredicateChcker : public IterVisitor {
 
       if (non_predicated_exprs_.find(input_def) !=
           non_predicated_exprs_.end()) {
-        needs_predicate_ = true;
-        return;
+        // If producer of mma is non_predicated and initialized
+        //  with the same value. The mma should not need a
+        //  predicate. In fact this is the only way we can
+        //  use mma at the moment since we could not predicate
+        //  mma ops without guaranteeing warp uniform results.
+        auto input_init =
+            GpuLower::current()->predicateElimination().getInitValue(input);
+
+        // TODO:
+        //   clean up this to support more generic prolog fusion.
+        //   Will need additional analysis passes on initialization
+        //    propagation and further predicate placement on top.
+        // More TODO:
+        //  Even when producer is initialized, it is still generally
+        //   not safe to remove predicate around reduction ops if the
+        //   producer is not predicated.
+        //  On the other side, we do have patterns like ldmatrix->mma where
+        //   both producer and consumer cannot be safely predicated without
+        //   guaranteeing warp uniform results.
+        //  This is currently a WAR and relies on validation pass to exclude
+        //   complex prolog patterns in mma based matmul kernels. Will
+        //   definitely need to revisit and build out predicate and
+        //   initialization analysis pass to better handle this case.
+        if (input_init != nullptr && !input_init->sameAs(mma->init())) {
+          // This is a WAR at the moment. We would need to propagate
+          //  initialization information from PredicateElimination
+          //  pass to most accurately detect if the input is
+          //  initialized correctly.
+          // This could also be fixed when we have the traversal
+          //  based predicate elimination and initialization pass
+          //  ready. Would be easy to clean up this part at that point.
+          needs_predicate_ = true;
+          return;
+        }
       }
     }
   }
@@ -626,9 +928,9 @@ bool PredicateElimination::setReductionInitValue(
         "Incosistent setting of initialization value for t",
         tv->name(),
         ". Prev: ",
-        existing_val,
+        existing_val->toString(),
         ", New: ",
-        reduction_init);
+        reduction_init->toString());
     return false;
   }
 }
@@ -636,7 +938,7 @@ bool PredicateElimination::setReductionInitValue(
 bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   // Predicate elimination can be disabled with
   // PYTORCH_NVFUSER_DISABLE=predicate_elimination
-  if (isDisabled(DisableOption::PredicateElimination)) {
+  if (isOptionDisabled(DisableOption::PredicateElimination)) {
     assertOnWarpOps(expr);
     return false;
   }
@@ -644,14 +946,20 @@ bool PredicateElimination::canOmitPredicate(const Expr* expr) const {
   TORCH_INTERNAL_ASSERT(expr != nullptr);
   const auto out_tv = ir_utils::getTvOutput(expr);
   TORCH_INTERNAL_ASSERT(out_tv != nullptr, "Not a tensor expression");
-  // No need to predicate local tensors to which a scalar is assigned
-  if (out_tv->getMemoryType() == MemoryType::Local) {
-    if (auto uop = dynamic_cast<const UnaryOp*>(expr)) {
-      if (uop->getUnaryOpType() == UnaryOpType::Set && uop->in()->isScalar()) {
-        return true;
-      }
+
+  if (ir_utils::isTensorScalarFillOp(expr)) {
+    if (out_tv->getMemoryType() == MemoryType::Local) {
+      // Filling a local tensor with scalar shouldn't
+      //   need any predicate currently.
+      return true;
+    } else if (out_tv->getMemoryType() == MemoryType::Shared) {
+      // A shared memory initialization should be same except
+      //  that we'd need a predicate to guard against out of
+      //  bound access by out of inexact threads.
+      return isExactParallelSharedMemAccess(out_tv);
     }
   }
+
   if (non_predicated_exprs_.find(expr) != non_predicated_exprs_.end()) {
     return true;
   }

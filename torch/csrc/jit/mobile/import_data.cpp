@@ -7,6 +7,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/observer.h>
@@ -15,10 +16,7 @@
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/custom_class.h>
 
-#if defined(ENABLE_FLATBUFFER)
-#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
-#endif // defined(ENABLE_FLATBUFFER)
-
+#include <caffe2/serialize/in_memory_adapter.h>
 #include <exception>
 #include <fstream>
 #include <string>
@@ -28,6 +26,7 @@ namespace torch {
 namespace jit {
 using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
+using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
@@ -175,7 +174,7 @@ std::map<std::string, at::Tensor> load_parameters_from_zip(
   auto result = unpickler.deserialize(device).toGenericDict();
   std::map<std::string, at::Tensor> map;
   for (const auto& e : result) {
-    auto key = e.key().toString()->string();
+    auto key = e.key().toStringRef();
     auto value = e.value().toTensor().tensor_data();
     map[key] = value;
   }
@@ -238,34 +237,30 @@ std::map<std::string, at::Tensor> mobile_module_to_parameter_map(
       "' in deserialized mobile::Module");
 }
 
-std::map<std::string, at::Tensor> _load_parameters(
-    std::istream& in,
+std::map<std::string, at::Tensor> _load_parameters_bytes(
+    std::shared_ptr<char> data,
+    size_t size,
     c10::optional<at::Device> device) {
-  // Detect the data format from the head of the input stream.
-  FileFormat format = getFileFormat(in);
-
+  TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");
+  FileFormat format = getFileFormat(data.get());
   // Call the appropriate parser.
   std::map<std::string, at::Tensor> map;
   switch (format) {
     case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
-      std::shared_ptr<char> data;
-      size_t size = 0;
-      std::tie(data, size) = get_stream_content(in);
-      mobile::Module module =
-          parse_and_initialize_mobile_module(std::move(data), size, device);
-      map = mobile_module_to_parameter_map(module);
-#else // !defined(ENABLE_FLATBUFFER)
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-#endif // !defined(ENABLE_FLATBUFFER)
+      if (load_flatbuffer_bytes_no_object != nullptr) {
+        auto m = load_flatbuffer_bytes_no_object(data, size, device);
+        map = mobile_module_to_parameter_map(m);
+      } else {
+        TORCH_CHECK(
+            false,
+            "Flatbuffer input file but the build hasn't enabled flatbuffer");
+      }
       break;
     }
 
     case FileFormat::ZipFileFormat: {
-      std::unique_ptr<IStreamAdapter> rai =
-          std::make_unique<IStreamAdapter>(&in);
+      auto rai = std::make_unique<caffe2::serialize::MemoryReadAdapter>(
+          data.get(), size);
       map = load_parameters_from_zip(std::move(rai), device);
       break;
     }
@@ -277,37 +272,21 @@ std::map<std::string, at::Tensor> _load_parameters(
 }
 
 std::map<std::string, at::Tensor> _load_parameters(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_stream_content(in);
+  return _load_parameters_bytes(std::move(data), size, device);
+}
+
+std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
     c10::optional<at::Device> device) {
-  // Detect the file format from its header.
-  FileFormat format = getFileFormat(filename);
-
-  // Call the appropriate parser.
-  std::map<std::string, at::Tensor> map;
-  switch (format) {
-    case FileFormat::FlatbufferFileFormat: {
-#if defined(ENABLE_FLATBUFFER)
-      mobile::Module module = load_mobile_module_from_file(filename, device);
-      map = mobile_module_to_parameter_map(module);
-#else // !defined(ENABLE_FLATBUFFER)
-      TORCH_CHECK(
-          false,
-          "Flatbuffer input file but the build hasn't enabled flatbuffer");
-#endif // !defined(ENABLE_FLATBUFFER)
-      break;
-    }
-
-    case FileFormat::ZipFileFormat: {
-      std::unique_ptr<FileAdapter> rai =
-          std::make_unique<FileAdapter>(filename);
-      map = load_parameters_from_zip(std::move(rai), device);
-      break;
-    }
-
-    default:
-      TORCH_CHECK(false, "Unrecognized data format");
-  }
-  return map;
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_file_content(filename.c_str());
+  return _load_parameters_bytes(std::move(data), size, device);
 }
 
 } // namespace jit

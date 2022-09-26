@@ -1,7 +1,9 @@
-from typing import Any, Callable
+from typing import Any, Callable, List
 
 import torch
 import torch.distributed as dist
+
+__all__: List[str] = []
 
 _FUNCTIONAL_OPTIM_STEP_METHOD_NAME = "step_param"
 
@@ -30,16 +32,12 @@ class _OptimizerHookState(object):
             )
 
 
-# TODO: Add an example to use such a wrapper.
 def _hook_then_optimizer(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
     optimizer_state: _OptimizerHookState,
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Runs optimizer in a functional fashion after DDP communication hook.
-
-    .. warning ::
-        This API is experimental adn subject to change.
     """
     has_set_params = (
         hasattr(optimizer_state, 'params_to_optimize')

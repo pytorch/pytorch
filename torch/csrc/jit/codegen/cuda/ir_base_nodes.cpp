@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -129,6 +130,11 @@ class ConstCheck : private OptOutConstDispatch {
  private:
   bool is_const_ = true;
 
+  // Returns true if all Val's in the hisotry of provided Val is an Int. Since
+  // our expression evaluator doesn't support any type besides int, it's
+  // important to check it is one.
+  bool is_int_ = true;
+
   void handle(const Bool* b) final {
     is_const_ = is_const_ && b->isConst();
   }
@@ -152,6 +158,10 @@ class ConstCheck : private OptOutConstDispatch {
   }
 
   void handle(const Val* val) final {
+    if (!val->isAnInt()) {
+      is_int_ = false;
+    }
+
     if (val->definition() != nullptr) {
       handle(val->definition());
     } else {
@@ -165,6 +175,12 @@ class ConstCheck : private OptOutConstDispatch {
     cc.handle(val);
     return cc.is_const_;
   }
+
+  static bool isConstInt(const Val* val) {
+    ConstCheck cc;
+    cc.handle(val);
+    return cc.is_const_ && cc.is_int_;
+  }
 };
 
 } // namespace
@@ -176,6 +192,44 @@ bool Val::isConstScalar() const {
   return ConstCheck::isConst(this);
 }
 
+bool Val::isConstInt() const {
+  return ConstCheck::isConst(this) && isAnInt();
+}
+
+int64_t Val::evaluateInt() {
+  TORCH_INTERNAL_ASSERT(
+      ConstCheck::isConst(this),
+      "Cannot get Int of not const values through IR nodes, must use runtime ExpressionEvaluator.");
+
+  if (this->as<Int>()->value().has_value()) {
+    return this->as<Int>()->value().value();
+  }
+
+  ExpressionEvaluator ee(fusion());
+  auto evaluated_val = ee.evaluate(this);
+  TORCH_INTERNAL_ASSERT(
+      evaluated_val.has_value(),
+      "Detected a const integer but failed to infer its value.");
+  return evaluated_val->as<int64_t>();
+}
+
+double Val::evaluateDouble() {
+  TORCH_INTERNAL_ASSERT(
+      ConstCheck::isConst(this),
+      "Cannot get Double of not const doubles through IR nodes, must use runtime ExpressionEvaluator.");
+
+  if (this->as<Double>()->value().has_value()) {
+    return this->as<Double>()->value().value();
+  }
+
+  ExpressionEvaluator ee(fusion());
+  auto evaluated_val = ee.evaluate(this);
+  TORCH_INTERNAL_ASSERT(
+      evaluated_val.has_value(),
+      "Detected a const integer but failed to infer its value.");
+  return evaluated_val->as<double>();
+}
+
 c10::optional<int64_t> Val::getInt() const {
   if (isConstScalar() && isAnInt()) {
     if (this->getValType() == ValType::Scalar) {
@@ -184,7 +238,18 @@ c10::optional<int64_t> Val::getInt() const {
       }
     }
   }
-  return c10::optional<int64_t>();
+  return c10::nullopt;
+}
+
+c10::optional<double> Val::getDouble() const {
+  if (isConstScalar() && isAnInt()) {
+    if (this->getValType() == ValType::Scalar) {
+      if (this->isA<Double>()) {
+        return this->as<Double>()->value();
+      }
+    }
+  }
+  return c10::nullopt;
 }
 
 bool Val::isZeroInt() const {

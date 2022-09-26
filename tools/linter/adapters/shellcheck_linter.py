@@ -1,9 +1,9 @@
 import argparse
 import json
 import logging
+import shutil
 import subprocess
 import time
-import shutil
 from enum import Enum
 from typing import List, NamedTuple, Optional
 

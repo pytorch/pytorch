@@ -12,7 +12,41 @@ from typing import Any, List, Tuple, Optional, Dict
 
 import torch
 import torch.nn as nn
-from torch.ao.quantization.utils import check_min_max_valid, calculate_qmin_qmax
+from torch.ao.quantization.utils import (
+    check_min_max_valid, calculate_qmin_qmax, is_per_tensor, is_per_channel)
+
+__all__ = [
+    "default_affine_fixed_qparams_observer",
+    "default_debug_observer",
+    "default_dynamic_quant_observer",
+    "default_fixed_qparams_range_0to1_observer",
+    "default_fixed_qparams_range_neg1to1_observer",
+    "default_float_qparams_observer",
+    "default_float_qparams_observer_4bit",
+    "default_histogram_observer",
+    "default_observer",
+    "default_per_channel_weight_observer",
+    "default_placeholder_observer",
+    "default_reuse_input_observer",
+    "default_symmetric_fixed_qparams_observer",
+    "default_weight_observer",
+    "get_observer_state_dict",
+    "load_observer_state_dict",
+    "per_channel_weight_observer_range_neg_127_to_127",
+    "weight_observer_range_neg_127_to_127",
+    "FixedQParamsObserver",
+    "HistogramObserver",
+    "MinMaxObserver",
+    "MovingAverageMinMaxObserver",
+    "MovingAveragePerChannelMinMaxObserver",
+    "NoopObserver",
+    "ObserverBase",
+    "PerChannelMinMaxObserver",
+    "PlaceholderObserver",
+    "RecordingObserver",
+    "ReuseInputObserver",
+    "UniformQuantizationObserverBase",
+]
 
 
 class _PartialWrapper(object):
@@ -49,6 +83,7 @@ def _with_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_args(a=3, b=4).with_args(answer=42)
         >>> foo_instance1 = foo_builder()
@@ -69,11 +104,12 @@ def _with_callable_args(cls_or_self, **kwargs):
 
     Example::
 
+        >>> # xdoctest: +SKIP("Undefined vars")
         >>> Foo.with_callable_args = classmethod(_with_callable_args)
         >>> Foo.with_args = classmethod(_with_args)
         >>> foo_builder = Foo.with_callable_args(cur_time=get_time_func).with_args(name="dan")
         >>> foo_instance1 = foo_builder()
-        >>> wait 50
+        >>> # wait 50
         >>> foo_instance2 = foo_builder()
         >>> id(foo_instance1.creation_time) == id(foo_instance2.creation_time)
         False
@@ -95,7 +131,8 @@ class ObserverBase(ABC, nn.Module):
     the collected statistics.
 
     Args:
-        dtype: Quantized data type
+        dtype: dtype argument to the `quantize` node needed to implement the
+               reference model spec.
     """
 
     def __init__(self, dtype):
@@ -119,7 +156,8 @@ class UniformQuantizationObserverBase(ObserverBase):
     scale and zero_point.
 
     Args:
-        dtype: Quantized data type.
+        dtype: dtype argument to the `quantize` node needed to implement the
+               reference model spec.
         qscheme: Quantization scheme to be used.
         reduce_range: Reduces the range of the quantized data type by 1 bit.
                       This is sometimes required to avoid instruction overflow.
@@ -346,7 +384,8 @@ class MinMaxObserver(UniformQuantizationObserverBase):
     tensors, and uses this statistic to compute the quantization parameters.
 
     Args:
-        dtype: Quantized data type
+        dtype: dtype argument to the `quantize` node needed to implement the
+               reference model spec.
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
@@ -412,7 +451,11 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-
+        if not is_per_tensor(qscheme):
+            raise NotImplementedError(
+                "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
+                    and torch.per_tensor_affine."
+            )
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
@@ -480,7 +523,8 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
 
     Args:
         averaging_constant: Averaging constant for min/max.
-        dtype: Quantized data type
+        dtype: dtype argument to the `quantize` node needed to implement the
+               reference model spec.
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
@@ -525,6 +569,11 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
+        if not is_per_tensor(qscheme):
+            raise NotImplementedError(
+                "MovingAverageMinMaxObserver's qscheme only support \
+                    torch.per_tensor_symmetric and torch.per_tensor_affine."
+            )
         self.averaging_constant = averaging_constant
         super(MovingAverageMinMaxObserver, self).__init__(
             dtype=dtype,
@@ -565,7 +614,8 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     Args:
         ch_axis: Channel axis
-        dtype: Quantized data type
+        dtype: dtype argument to the `quantize` node needed to implement the
+               reference model spec.
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
@@ -594,6 +644,11 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
+        if not is_per_channel(qscheme):
+            raise NotImplementedError(
+                "PerChannelMinMaxObserver's qscheme only support \
+                    torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
+            )
         super(PerChannelMinMaxObserver, self).__init__(
             dtype=dtype,
             qscheme=qscheme,
@@ -734,8 +789,11 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     @torch.jit.export
     def reset_min_max_vals(self):
         """Resets the min/max values."""
-        self.min_val = torch.tensor([])
-        self.max_val = torch.tensor([])
+        # This used to be torch.ones but that does not work because
+        # JIT compiler can optimize it via common subexpression elimination
+        # in which case both min_val and max_val point to the same tensor.
+        self.min_val = torch.rand(0, )
+        self.max_val = torch.rand(0, )
 
 
 class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
@@ -778,6 +836,11 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
+        if not is_per_channel(qscheme):
+            raise NotImplementedError(
+                "MovingAveragePerChannelMinMaxObserver's qscheme only support \
+                    torch.per_channel_symmetric, torch.per_channel_affine and torch.per_channel_affine_float_qparams."
+            )
         super(MovingAveragePerChannelMinMaxObserver, self).__init__(
             ch_axis=ch_axis,
             dtype=dtype,
@@ -826,7 +889,8 @@ class HistogramObserver(UniformQuantizationObserverBase):
         bins: Number of bins to use for the histogram
         upsample_rate: Factor by which the histograms are upsampled, this is
                        used to interpolate histograms with varying ranges across observations
-        dtype: Quantized data type
+        dtype: dtype argument to the `quantize` node needed to implement the
+               reference model spec
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
@@ -858,6 +922,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
+        if not is_per_tensor(qscheme):
+            raise NotImplementedError(
+                "HistogramObserver's qscheme only support torch.per_tensor_symmetric \
+                    and torch.per_tensor_affine."
+            )
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(
             dtype=dtype,
@@ -1194,6 +1263,9 @@ class HistogramObserver(UniformQuantizationObserverBase):
             error_msgs,
         )
 
+    def extra_repr(self):
+        return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+
 
 class FixedQParamsObserver(ObserverBase):
     r"""
@@ -1242,9 +1314,14 @@ class PlaceholderObserver(ObserverBase):
     ranges.
 
     Args:
-        dtype: Quantized data type
+        dtype: dtype argument to the `quantize` node needed to implement the
+               reference model spec.
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
+        compute_dtype: if set, marks the future quantize function to use
+                       dynamic quantization instead of static quantization.
+                       Note: this field will be removed in the near future and
+                       replaced with `is_dynamic`.
     """
 
     def __init__(
@@ -1256,6 +1333,7 @@ class PlaceholderObserver(ObserverBase):
         self.dtype = dtype
         self.custom_op = custom_op_name
         # used for configuration of computation type for dynamic quantization
+        # TODO(future PR): replace this with `is_dynamic`
         if compute_dtype:
             self.compute_dtype = compute_dtype
 
@@ -1473,7 +1551,7 @@ Per-channel, symmetric weight observer with the 8-bit values restricted to [-127
 """
 
 default_dynamic_quant_observer = PlaceholderObserver.with_args(
-    dtype=torch.float, compute_dtype=torch.quint8
+    dtype=torch.quint8, compute_dtype=torch.quint8
 )
 """
 Default observer for dynamic quantization.

@@ -124,7 +124,8 @@ inline std::string Join(const std::string& delimiter, const Container& v) {
 
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
-size_t C10_API ReplaceAll(std::string& s, const char* from, const char* to);
+size_t C10_API
+ReplaceAll(std::string& s, c10::string_view from, c10::string_view to);
 
 /// Represents a location in source code (for debugging).
 struct C10_API SourceLocation {

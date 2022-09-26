@@ -6,7 +6,7 @@ import traceback
 
 import google.protobuf.text_format
 import onnx.backend.test
-import test_onnx_common
+import onnx_test_common
 from test_caffe2_common import run_generated_test
 
 from torch.testing._internal.common_device_type import get_all_device_types
@@ -20,7 +20,7 @@ _expect_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "expect"
 
 
 def collect_generated_testcases(
-    root_dir=test_onnx_common.pytorch_converted_dir,
+    root_dir=onnx_test_common.pytorch_converted_dir,
     verbose=False,
     fail_dir=None,
     expect=True,
@@ -39,7 +39,7 @@ def collect_generated_testcases(
                         run_generated_test(model_file, data_dir, device)
                 if expect:
                     expect_file = os.path.join(
-                        _expect_dir, "PyTorch-generated-{}.expect".format(d)
+                        _expect_dir, f"PyTorch-generated-{d}.expect"
                     )
                     with open(expect_file, "w") as text_file:
                         model = onnx.load(model_file)
@@ -51,7 +51,7 @@ def collect_generated_testcases(
                 total_pass += 1
             except Exception as e:
                 if verbose:
-                    print("The test case in {} failed!".format(dir_name))
+                    print(f"The test case in {dir_name} failed!")
                     traceback.print_exc()
                 if fail_dir is None:
                     shutil.rmtree(dir_name)
@@ -61,12 +61,10 @@ def collect_generated_testcases(
                         shutil.rmtree(target_dir)
                     shutil.move(dir_name, target_dir)
                 total_fail += 1
-    print(
-        "Successfully generated/updated {} test cases from PyTorch.".format(total_pass)
-    )
+    print(f"Successfully generated/updated {total_pass} test cases from PyTorch.")
     if expect:
-        print("Expected pbtxt files are generated in {}.".format(_expect_dir))
-    print("Failed {} testcases are moved to {}.".format(total_fail, _fail_test_dir))
+        print(f"Expected pbtxt files are generated in {_expect_dir}.")
+    print(f"Failed {total_fail} testcases are moved to {_fail_test_dir}.")
 
 
 if __name__ == "__main__":
@@ -97,7 +95,7 @@ if __name__ == "__main__":
     collect_generated_testcases(verbose=verbose, fail_dir=fail_dir, expect=expect)
     # We already generate the expect files for test_operators.py.
     collect_generated_testcases(
-        root_dir=test_onnx_common.pytorch_operator_dir,
+        root_dir=onnx_test_common.pytorch_operator_dir,
         verbose=verbose,
         fail_dir=fail_dir,
         expect=False,

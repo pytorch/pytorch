@@ -1,19 +1,34 @@
-from torch.autograd.profiler_util import (
-    EventList, FunctionEvent, MemRecordsAcc, MEMORY_EVENT_NAME,
-    _filter_name, _filter_stack_entry, _rewrite_name
-)
-
-from torch.autograd import (
-    DeviceType, ProfilerActivity, ProfilerConfig, ProfilerState,
-    kineto_available, _ProfilerResult, _disable_profiler, _enable_profiler,
-    _prepare_profiler, _supported_activities, _kineto_step,
-)
-from torch._C._autograd import _ExperimentalConfig
-import torch
-import torch.cuda
-from torch.futures import Future
 from typing import Any, Dict, List, Optional
 from warnings import warn
+
+import torch
+import torch.cuda
+from torch._C._profiler import _ExperimentalConfig
+
+from torch.autograd import (
+    _disable_profiler,
+    _enable_profiler,
+    _kineto_step,
+    _prepare_profiler,
+    _ProfilerResult,
+    _supported_activities,
+    DeviceType,
+    kineto_available,
+    ProfilerActivity,
+    ProfilerConfig,
+    ProfilerState,
+)
+from torch.autograd.profiler_util import (
+    _filter_name,
+    _filter_stack_entry,
+    _rewrite_name,
+    EventList,
+    FunctionEvent,
+    MEMORY_EVENT_NAME,
+    MemRecordsAcc,
+    OUT_OF_MEMORY_EVENT_NAME,
+)
+from torch.futures import Future
 
 
 try:
@@ -103,11 +118,12 @@ class profile(object):
         please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         >>>     for _ in range(100):  # any normal python code, really!
         >>>         y = x ** 2
-        >>          y.backward()
+        >>>         y.backward()
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
         -----------------------------------  ---------------  ---------------  ---------------
@@ -233,11 +249,25 @@ class profile(object):
         if self.function_events is None:
             raise RuntimeError("Profiler didn't finish running")
 
-    def table(self, sort_by=None, row_limit=100, max_src_column_width=75, header=None, top_level_events_only=False):
+    def table(
+            self,
+            sort_by=None,
+            row_limit=100,
+            max_src_column_width=75,
+            max_name_column_width=55,
+            max_shapes_column_width=80,
+            header=None,
+            top_level_events_only=False
+    ):
         self._check_finish()
         assert self.function_events is not None
         return self.function_events.table(
-            sort_by=sort_by, row_limit=row_limit, max_src_column_width=max_src_column_width, header=header,
+            sort_by=sort_by,
+            row_limit=row_limit,
+            max_src_column_width=max_src_column_width,
+            max_name_column_width=max_name_column_width,
+            max_shapes_column_width=max_shapes_column_width,
+            header=header,
             top_level_events_only=top_level_events_only
         )
     table.__doc__ = EventList.table.__doc__
@@ -282,6 +312,7 @@ class profile(object):
 
         trace_start_us = result.trace_start_us()
         mem_records = [[evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME]
+        oom_records = [evt for evt in result.events() if evt.name() == OUT_OF_MEMORY_EVENT_NAME]
         mem_records_acc = MemRecordsAcc(mem_records)
 
         def _cpu_memory_usage(mem_record):
@@ -370,30 +401,40 @@ class profile(object):
                         # parents and children
                         f_evt.thread = fe.thread
 
+
+        def createFunctionEventForMemoryEvents(evt):
+            rel_start_us = evt.start_us() - trace_start_us
+            fe = FunctionEvent(
+                id=max_evt_id,
+                name=evt.name(),
+                trace_name=None,  # not outputting in the trace
+                thread=evt.start_thread_id(),
+                start_us=rel_start_us,
+                end_us=rel_start_us,  # no duration
+                fwd_thread=evt.start_thread_id(),
+                input_shapes=[],
+                stack=[],
+                scope=0,  # RecordScope::FUNCTION
+                cpu_memory_usage=_cpu_memory_usage(evt),
+                cuda_memory_usage=_cuda_memory_usage(evt),
+                is_async=False,
+                sequence_nr=-1,
+                device_type=DeviceType.CPU,
+                device_index=0,
+            )
+            return fe
+
         # output top-level memory events
         for mem_record in mem_records:
             if not mem_record[1]:
-                rel_start_us = mem_record[0].start_us() - trace_start_us
                 max_evt_id += 1
-                fe = FunctionEvent(
-                    id=max_evt_id,
-                    name=MEMORY_EVENT_NAME,
-                    trace_name=None,  # not outputting in the trace
-                    thread=mem_record[0].start_thread_id(),
-                    start_us=rel_start_us,
-                    end_us=rel_start_us,  # no duration
-                    fwd_thread=mem_record[0].start_thread_id(),
-                    input_shapes=[],
-                    stack=[],
-                    scope=0,  # RecordScope::FUNCTION
-                    cpu_memory_usage=_cpu_memory_usage(mem_record[0]),
-                    cuda_memory_usage=_cuda_memory_usage(mem_record[0]),
-                    is_async=False,
-                    sequence_nr=-1,
-                    device_type=DeviceType.CPU,
-                    device_index=0,
-                )
+                fe = createFunctionEventForMemoryEvents(mem_record[0])
                 function_events.append(fe)
+
+        for oom_record in oom_records:
+            max_evt_id += 1
+            fe = createFunctionEventForMemoryEvents(oom_record)
+            function_events.append(fe)
 
         function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
         return function_events
@@ -417,6 +458,7 @@ class record_function(ContextDecorator):
         ...         z = y ** 3
         ...     y.backward()
         ...
+        >>> # xdoctest: +IGNORE_WANT
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
         -----------------------------------  ---------------  ---------------  ---------------
@@ -479,6 +521,72 @@ class record_function(ContextDecorator):
         return profiled_future
 
 
+class emit_itt(object):
+    """Context manager that makes every autograd operation emit an ITT range.
+
+    It is useful when running the program under Intel(R) VTune Profiler::
+
+        vtune <--vtune_flags> <regular command here>
+
+    The Instrumentation and Tracing Technology (ITT) API enables your application to generate and
+    control the collection of trace data during its execution across different Intel tools.
+    This context manager is to annotate Intel(R) VTune Profiling trace. With help of this context manager,
+    you will be able to see labled ranges in Intel(R) VTune Profiler GUI.
+
+    .. warning:
+        This context manager should not be called recursively, i.e. at most one
+        instance should be enabled at any given time.
+
+    Args:
+        enabled (bool, optional): Setting ``enabled=False`` makes this context manager a no-op.
+            Default: ``True``.
+        record_shapes (bool, optional): If ``record_shapes=True``, the itt range wrapping
+            each autograd op will append information about the sizes of Tensor arguments received
+            by that op, in the following format:
+            ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
+            Non-tensor arguments will be represented by ``[]``.
+            Arguments will be listed in the order they are received by the backend op.
+            Please note that this order may not match the order in which those arguments were passed
+            on the Python side.  Also note that shape recording may increase the overhead of itt range creation.
+            Default: ``False``
+
+    Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
+        >>> with torch.autograd.profiler.emit_itt():
+        ...     model(x)
+
+    """
+    def __init__(self, enabled=True, record_shapes=False):
+        self.enabled = enabled
+        self.entered = False
+        self.record_shapes = record_shapes
+
+    def __enter__(self):
+        if not self.enabled:
+            return
+        if self.entered:
+            raise RuntimeError("ITT annotation context manager is not reentrant")
+        self.entered = True
+        _enable_profiler(
+            ProfilerConfig(
+                ProfilerState.ITT,
+                self.record_shapes,
+                False,
+                False,
+                False,
+                False,
+                _ExperimentalConfig()),
+            set()
+        )
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.enabled:
+            return
+        _disable_profiler()
+        return False
+
+
 class emit_nvtx(object):
     """Context manager that makes every autograd operation emit an NVTX range.
 
@@ -498,9 +606,9 @@ class emit_nvtx(object):
         instance should be enabled at any given time.
 
     Args:
-        enabled (bool, optional, default=True): Setting ``enabled=False`` makes this context manager a no-op.
+        enabled (bool, optional): Setting ``enabled=False`` makes this context manager a no-op.
             Default: ``True``.
-        record_shapes (bool, optional, default=False): If ``record_shapes=True``, the nvtx range wrapping
+        record_shapes (bool, optional): If ``record_shapes=True``, the nvtx range wrapping
             each autograd op will append information about the sizes of Tensor arguments received
             by that op, in the following format:
             ``[[arg0.size(0), arg0.size(1), ...], [arg1.size(0), arg1.size(1), ...], ...]``
@@ -508,8 +616,10 @@ class emit_nvtx(object):
             Arguments will be listed in the order they are received by the backend op.
             Please note that this order may not match the order in which those arguments were passed
             on the Python side.  Also note that shape recording may increase the overhead of nvtx range creation.
+            Default: ``False``
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> with torch.cuda.profiler.profile():
         ...     model(x) # Warmup CUDA memory allocator and profiler
         ...     with torch.autograd.profiler.emit_nvtx():

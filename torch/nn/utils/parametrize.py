@@ -4,8 +4,13 @@ from torch.nn.parameter import Parameter
 from torch import Tensor
 
 import collections
+import copyreg
+from copy import deepcopy
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
+
+__all__ = ['cached', 'ParametrizationList', 'register_parametrization', 'is_parametrized', 'remove_parametrizations',
+           'type_before_parametrizations', 'transfer_parametrizations_and_params']
 
 _cache_enabled = 0
 _cache: Dict[Tuple[int, str], Optional[Tensor]] = {}
@@ -254,6 +259,8 @@ class ParametrizationList(ModuleList):
                     original_i.set_(tensor)
 
     def forward(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         # Unpack the originals for the first parametrization
         if self.is_tensor:
             x = self[0](self.original)
@@ -280,6 +287,21 @@ def _inject_new_class(module: Module) -> None:
     """
     cls = module.__class__
 
+    def default_deepcopy(self, memo):
+        # Just emulate a standard deepcopy procedure when __deepcopy__ doesn't exist in the current class.
+        obj = memo.get(id(self), None)
+        if obj is not None:
+            return obj
+        replica = self.__new__(self.__class__)
+        memo[id(self)] = replica
+        replica.__dict__ = deepcopy(self.__dict__, memo)
+        # Also save all slots if they exist.
+        slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+        for slot in slots_to_save:
+            if hasattr(self, slot):
+                setattr(replica, slot, deepcopy(getattr(self, slot), memo))
+        return replica
+
     def getstate(self):
         raise RuntimeError(
             "Serialization of parametrized modules is only "
@@ -288,12 +310,16 @@ def _inject_new_class(module: Module) -> None:
             "#saving-loading-a-general-checkpoint-for-inference-and-or-resuming-training"
         )
 
+    dct = {"__getstate__": getstate}
+    # We don't allow serialization of parametrized modules but should still allow deepcopying.
+    # Default 'deepcopy' function invokes __deepcopy__ method instead of __getstate__ when it exists.
+    if not hasattr(cls, "__deepcopy__"):
+        dct["__deepcopy__"] = default_deepcopy  # type: ignore[assignment]
+
     param_cls = type(
         f"Parametrized{cls.__name__}",
         (cls,),
-        {
-            "__getstate__": getstate,
-        },
+        dct,
     )
 
     module.__class__ = param_cls
@@ -325,6 +351,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         return tensor
 
     def get_parametrized(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
             if torch.jit.is_scripting():
@@ -341,6 +369,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
             return parametrization()
 
     def set_original(self, value: Tensor) -> None:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         self.parametrizations[tensor_name].right_inverse(value)
 
     setattr(module.__class__, tensor_name, property(get_parametrized, set_original))
@@ -430,6 +460,7 @@ def register_parametrization(
         ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> import torch
         >>> import torch.nn as nn
         >>> import torch.nn.utils.parametrize as P

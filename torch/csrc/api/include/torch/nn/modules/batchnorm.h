@@ -2,8 +2,8 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/functional/batchnorm.h>
-#include <torch/nn/options/batchnorm.h>
 #include <torch/nn/init.h>
+#include <torch/nn/options/batchnorm.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -12,7 +12,8 @@
 namespace torch {
 namespace nn {
 
-/// Base class for all (dimension-specialized) batchnorm and instancenorm modules.
+/// Base class for all (dimension-specialized) batchnorm and instancenorm
+/// modules.
 template <size_t D, typename Derived, typename DerivedOptions>
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class NormImplBase : public torch::nn::Cloneable<Derived> {
@@ -27,20 +28,28 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
 
   void reset() override {
     if (options.affine()) {
-      weight = this->register_parameter("weight", torch::empty({options.num_features()}));
-      bias = this->register_parameter("bias", torch::empty({options.num_features()}));
+      weight = this->register_parameter(
+          "weight", torch::empty({options.num_features()}));
+      bias = this->register_parameter(
+          "bias", torch::empty({options.num_features()}));
     } else {
-      weight = this->register_parameter("weight", Tensor(), /*requires_grad=*/false);
-      bias = this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
+      weight =
+          this->register_parameter("weight", Tensor(), /*requires_grad=*/false);
+      bias =
+          this->register_parameter("bias", Tensor(), /*requires_grad=*/false);
     }
     if (options.track_running_stats()) {
-      running_mean = this->register_buffer("running_mean", torch::zeros({options.num_features()}));
-      running_var = this->register_buffer("running_var", torch::ones({options.num_features()}));
-      num_batches_tracked = this->register_buffer("num_batches_tracked", torch::tensor(0, torch::dtype(torch::kLong)));
+      running_mean = this->register_buffer(
+          "running_mean", torch::zeros({options.num_features()}));
+      running_var = this->register_buffer(
+          "running_var", torch::ones({options.num_features()}));
+      num_batches_tracked = this->register_buffer(
+          "num_batches_tracked", torch::tensor(0, torch::dtype(torch::kLong)));
     } else {
       running_mean = this->register_buffer("running_mean", Tensor());
       running_var = this->register_buffer("running_var", Tensor());
-      num_batches_tracked = this->register_buffer("num_batches_tracked", Tensor());
+      num_batches_tracked =
+          this->register_buffer("num_batches_tracked", Tensor());
     }
     reset_parameters();
   }
@@ -73,15 +82,18 @@ class NormImplBase : public torch::nn::Cloneable<Derived> {
   Tensor bias;
 
   /// The running mean.
-  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  /// Only defined if the `track_running_stats` option was `true` upon
+  /// construction.
   Tensor running_mean;
 
   /// The running variance.
-  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  /// Only defined if the `track_running_stats` option was `true` upon
+  /// construction.
   Tensor running_var;
 
   /// The number of the forward call.
-  /// Only defined if the `track_running_stats` option was `true` upon construction.
+  /// Only defined if the `track_running_stats` option was `true` upon
+  /// construction.
   Tensor num_batches_tracked;
 };
 
@@ -105,9 +117,11 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
     if (this->is_training() && this->options.track_running_stats()) {
       if (this->num_batches_tracked.defined()) {
         this->num_batches_tracked += 1;
-        if (this->options.momentum() == c10::nullopt) {  // use cumulative moving average
-          exponential_average_factor = 1.0 / this->num_batches_tracked.template item<double>();
-        } else {  // use exponential moving average
+        if (this->options.momentum() ==
+            c10::nullopt) { // use cumulative moving average
+          exponential_average_factor =
+              1.0 / this->num_batches_tracked.template item<double>();
+        } else { // use exponential moving average
           exponential_average_factor = this->options.momentum().value();
         }
       }
@@ -128,23 +142,25 @@ class BatchNormImplBase : public NormImplBase<D, Derived, BatchNormOptions> {
   void pretty_print(std::ostream& stream) const override;
 };
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm1d
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm1d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm1d to learn
 /// about the exact behavior of this module.
 ///
-/// See the documentation for `torch::nn::BatchNorm1dOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::BatchNorm1dOptions` class to learn
+/// what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
-/// BatchNorm1d model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// BatchNorm1d
+/// model(BatchNorm1dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
  protected:
-   void _check_input_dim(const Tensor& input) override;
+  void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<1, BatchNorm1dImpl>::BatchNormImplBase;
@@ -152,28 +168,30 @@ class TORCH_API BatchNorm1dImpl : public BatchNormImplBase<1, BatchNorm1dImpl> {
 
 /// A `ModuleHolder` subclass for `BatchNorm1dImpl`.
 /// See the documentation for `BatchNorm1dImpl` class to learn what methods it
-/// provides, and examples of how to use `BatchNorm1d` with `torch::nn::BatchNorm1dOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `BatchNorm1d` with
+/// `torch::nn::BatchNorm1dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(BatchNorm1d);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm2d
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm2d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm2d to learn
 /// about the exact behavior of this module.
 ///
-/// See the documentation for `torch::nn::BatchNorm2dOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::BatchNorm2dOptions` class to learn
+/// what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
-/// BatchNorm2d model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// BatchNorm2d
+/// model(BatchNorm2dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
  protected:
-   void _check_input_dim(const Tensor& input) override;
+  void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<2, BatchNorm2dImpl>::BatchNormImplBase;
@@ -181,28 +199,30 @@ class TORCH_API BatchNorm2dImpl : public BatchNormImplBase<2, BatchNorm2dImpl> {
 
 /// A `ModuleHolder` subclass for `BatchNorm2dImpl`.
 /// See the documentation for `BatchNorm2dImpl` class to learn what methods it
-/// provides, and examples of how to use `BatchNorm2d` with `torch::nn::BatchNorm2dOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `BatchNorm2d` with
+/// `torch::nn::BatchNorm2dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(BatchNorm2d);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ BatchNorm3d
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Applies the BatchNorm3d function.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.BatchNorm3d to learn
 /// about the exact behavior of this module.
 ///
-/// See the documentation for `torch::nn::BatchNorm3dOptions` class to learn what
-/// constructor arguments are supported for this module.
+/// See the documentation for `torch::nn::BatchNorm3dOptions` class to learn
+/// what constructor arguments are supported for this module.
 ///
 /// Example:
 /// ```
-/// BatchNorm3d model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
+/// BatchNorm3d
+/// model(BatchNorm3dOptions(4).eps(0.5).momentum(0.1).affine(false).track_running_stats(true));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
  protected:
-   void _check_input_dim(const Tensor& input) override;
+  void _check_input_dim(const Tensor& input) override;
 
  public:
   using BatchNormImplBase<3, BatchNorm3dImpl>::BatchNormImplBase;
@@ -210,9 +230,9 @@ class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
 
 /// A `ModuleHolder` subclass for `BatchNorm3dImpl`.
 /// See the documentation for `BatchNorm3dImpl` class to learn what methods it
-/// provides, and examples of how to use `BatchNorm3d` with `torch::nn::BatchNorm3dOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `BatchNorm3d` with
+/// `torch::nn::BatchNorm3dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(BatchNorm3d);
 
 } // namespace nn

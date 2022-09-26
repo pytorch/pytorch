@@ -26,7 +26,8 @@ namespace nn {
 ///
 /// Example:
 /// ```
-/// Upsample model(UpsampleOptions().scale_factor({3}).mode(torch::kLinear).align_corners(false));
+/// Upsample
+/// model(UpsampleOptions().scale_factor({3}).mode(torch::kLinear).align_corners(false));
 /// ```
 // NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API UpsampleImpl : public Cloneable<UpsampleImpl> {
@@ -46,9 +47,9 @@ class TORCH_API UpsampleImpl : public Cloneable<UpsampleImpl> {
 
 /// A `ModuleHolder` subclass for `UpsampleImpl`.
 /// See the documentation for `UpsampleImpl` class to learn what methods it
-/// provides, and examples of how to use `Upsample` with `torch::nn::UpsampleOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
+/// provides, and examples of how to use `Upsample` with
+/// `torch::nn::UpsampleOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Upsample);
 
 } // namespace nn

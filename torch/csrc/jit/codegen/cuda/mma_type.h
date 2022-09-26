@@ -19,6 +19,10 @@ struct GemmTile {
   GemmTile operator/(const GemmTile& other) {
     return GemmTile(m / other.m, n / other.n, k / other.k);
   }
+
+  std::vector<int> toVector() {
+    return {m, n, k};
+  }
 };
 
 //! Utility data structure for recording gemm tiles
@@ -57,7 +61,10 @@ struct MmaOptions {
   enum class MacroType {
     NoMMA = 0,
     Volta_16_16_4,
-    Turing_16_8_16, // place holder for turing/ampere mma
+    Ampere_16_8_16,
+    Ampere_16_16_16,
+    Turing_16_8_16,
+    Turing_16_16_16,
     Ampere_16_8_8 // place holder for tf32
   };
 
@@ -73,7 +80,7 @@ struct MmaOptions {
   enum class MmaInputLayout { NT = 0, TT, TN };
 
   //! Utility to annotate which input of mma this option struct describes
-  enum class Operand { NotOperand = 0, A, B };
+  enum class Operand { Accumulator = 0, A, B };
 
   //! Utility to annotate which mma macro this config uses.
   MacroType macro = MacroType::NoMMA;
@@ -93,14 +100,68 @@ struct MmaOptions {
         operand == other.operand &&
         accumulator_stride == other.accumulator_stride;
   }
+
+  // The accumulator tensorview register supplied by the
+  //  scheduler interface. Each mma builder is responsible
+  //  for the parameters of one mma op, so the options struct
+  //  would need a pointer to keep track of which mma op it
+  //  is describing.
+  // Tracking mma expressions would not be stable as the expression
+  //  can get deleted by mutate passes.
+  TensorView* accumulator_tv = nullptr;
+
+  //! Returns the mma op that this options parameter list
+  //!  is describing. See comment on accumulator_tv.
+  MmaOp* mmaOp() const;
 };
 
-//! User interface generating mma options for mma op
+//! User interface for configuring the mma and mma related
+//!  operators by specifying the mma instruction tile type
+//!  input data layout, and the operand position of a tensor.
 class TORCH_CUDA_CU_API MmaBuilder {
  public:
+  //! Initialized a mma builder, for the given mma instruction type.
+  //!  TODO: the mma implementation is generic and should not have
+  //!   strong dependency on the actual matmul tiling shapes. The
+  //!   MatMulTileOptions provided in here is a WAR for mma format and
+  //!   should be removed once there is support for labeling swizzles
+  //!   on iterdomains.
   MmaBuilder(MmaOptions::MacroType macro, MatMulTileOptions gemm_tile);
+
+  //! User configuration function:
+  //!  Specifies the input matrix layout for the mma instruction.
+  //!    see [Operand Layout Convention].
   MmaBuilder& layout(MmaOptions::MmaInputLayout layout);
+
+  //! User configuration function:
+  //!  Specifies which element in the mma op this builder is generating
+  //!    parameters for, i.e. A or B. This is useful when generating
+  //!    data swizzles for different elements of mma.
+  //!  - Operand::Accumulator means the parameters describe accumulator in mma
+  //!  op.
+  //!  - This option is ignored when configuring the mma operator itself.
   MmaBuilder& operand(MmaOptions::Operand a_or_b);
+
+  //! Generates the matching ldmatrix instruction type for the
+  //!  specified mma option.
+  LoadStoreOpType ldMatrix() const;
+
+  //! Store the accumulator tv register reference in mma builder
+  //!  to avoid automatic matching of which mma ops.
+  void accumulatorTv(TensorView* tv);
+
+  //! Fill in mma options in scheduling time.
+  //!  Each mma op in Fusion IR must be configured once before lowering.
+  //!  Mma options are configuration parameters used in lowering to mma
+  //!  instrinsics, mainly the type of mma macro to use and input data layout
+  //!  etc.
+  //!
+  //! TODO: This step will very likely be removed in a follow up PR. All of
+  //!  the options configured here could actually be inferred from fusion IR
+  //!  once we are feature complete.
+  void configureMma(TensorView* mma_output) const;
+
+  //! Export all the parameters with user's configurations applied.
   MmaOptions build() const;
 
  private:

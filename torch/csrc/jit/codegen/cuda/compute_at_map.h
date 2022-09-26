@@ -93,6 +93,14 @@ class TORCH_CUDA_CU_API IterDomainGraph {
 
   void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
 
+  // Returns if first and second are expressions with inputs match through exact
+  // map (if forward), or outputs match (if not forward).
+  bool exprsMap(Expr* first, Expr* second, bool forward);
+
+  // Checks if exprsMap then if forward will map outputs else inputs in exact
+  // and permissive map.
+  void mapThroughExpr(Expr* first, Expr* second, bool forward);
+
   DisjointSets<IterDomain*> permissive_nodes_;
   DisjointSets<IterDomain*> exact_nodes_;
   DisjointSets<IterDomain*> loop_nodes_;
@@ -112,15 +120,40 @@ class TORCH_CUDA_CU_API IterDomainGraph {
 
 class TrivialReductionInfo;
 
+using DoubleBufferIndices = std::unordered_map<DoubleBufferLoopStage, Int*>;
+
 class TORCH_CUDA_CU_API ComputeAtMap {
  public:
   ComputeAtMap() = delete;
+  ComputeAtMap(const ComputeAtMap&) = delete;
+  ComputeAtMap& operator=(const ComputeAtMap&) = delete;
+  ComputeAtMap(ComputeAtMap&&) = default;
+  ComputeAtMap& operator=(ComputeAtMap&&) = default;
   ComputeAtMap(Fusion* fusion);
 
   //! Run through disjoint sets in the LOOP map, make sure there's only one
   //! non-serial parallel type in each disjoint set, set the parallel type of
   //! all IterDomains in the disjoint set to that PType.
   void validateAndPropagatePType();
+
+  //! Run through disjoint sets in the LOOP map and allocate the index
+  //!  variable for the associated for loop that will be generated
+  //!  for each disjoint sets in the loop map. This pre-allocation makes
+  //!  2 key assumptions about computeAt map that would very likely be
+  //!  long term invariant:
+  //!    1. All kir::forloop created in the lowering pass should belong
+  //!  to one of the disjoint sets in loop map.
+  //!    2. The lowering pass will *never* create a loop nest with 2
+  //!  different nesting levels mapped together, i.e. the case below
+  //!  never occurs:
+  //!   for i in IterDomain1
+  //!    for j in IterDomain2
+  //!     ...
+  //!   With loop_map.areMapped(IterDomain1, IterDomain2) == true.
+  //! Under this condition, we can pre-allocate all required index
+  //!  variable integers before creating any kir::forloop, and this
+  //!  would help optimizing the generated integer math for indexing.
+  void allocateIndexVariables();
 
   //! Returns if id0 and id1 are mapped to eachother with provided IdMappingMode
   bool areMapped(IterDomain* id0, IterDomain* id1, IdMappingMode mode) const;
@@ -151,6 +184,20 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   //! Get the ID sets for a provided IdMappingMode
   const DisjointSets<IterDomain*>& getIdSets(IdMappingMode mode) const;
 
+  // Returns if the ID actually has a disjoint set meaning it has been processed
+  // in the creation of the compute at map.
+  bool idExistsInMap(IterDomain* id) const;
+
+  //! Returns the pre-allocated index variable integer used in
+  //!  the kir::ForLoop corresponding to the given IterDomain.
+  //!  this interface is only valid if the ID has a loop mapping,
+  //!  ca_map will throw exceptions if given iterdomain doesn't
+  //!  have a loop map entry.
+  Val* getIndexVariable(
+      IterDomain* id,
+      DoubleBufferLoopStage double_buffer_loop_stage =
+          DoubleBufferLoopStage::NotApplicable) const;
+
  private:
   // Build id_graph_
   void build(Fusion* fusion);
@@ -166,7 +213,7 @@ class TORCH_CUDA_CU_API ComputeAtMap {
       IdMappingMode mode) const;
 
   // Should be built once and never modified again.
-  const IterDomainGraph id_graph_;
+  IterDomainGraph id_graph_;
   TrivialReductionInfo trivial_reduction_info_;
 
   // Prevent needing to recompute concrete_id's in compute at map.
@@ -178,6 +225,24 @@ class TORCH_CUDA_CU_API ComputeAtMap {
       std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>,
       IterDomain*>
       concrete_id_cache_;
+
+  //! Allocated Loop index variable through the CA map.
+  //!   only valid for disjoint sets on the loop ca map.
+  std::unordered_map<const VectorOfUniqueEntries<IterDomain*>*, Val*>
+      loop_index_variable_map_;
+
+  //! Allocated loop indices for double buffer loop.
+  //!  only valid for disjoint sets on the loop ca map
+  //!  that have double buffer-ed iterdomains.
+  using DoubleBufferIndicesPtr = std::unique_ptr<DoubleBufferIndices>;
+  std::unordered_map<
+      const VectorOfUniqueEntries<IterDomain*>*,
+      DoubleBufferIndicesPtr>
+      double_buffered_loop_index_variable_map_;
+
+  // Shortcut to access the fusion this computeAt map was
+  //  built from.
+  Fusion* fusion_;
 };
 
 } // namespace cuda

@@ -8,6 +8,8 @@
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/mkldnn_rewrite.h>
 #include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -208,9 +210,7 @@ std::vector<int64_t> _pair_int(IValue v) {
   }
 }
 
-static bool isContiguous(
-    const torch::jit::Value* v,
-    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous) {
+bool isContiguous(const torch::jit::Value* v, at::MemoryFormat memory_format) {
   auto const& tt = v->type()->cast<TensorType>();
   if (!tt) {
     return false;
@@ -231,7 +231,21 @@ static bool isContiguous(
     return false;
   }
 
-  return *strides == TensorType::contiguousStridesOf(*sizes);
+  return *strides == TensorType::contiguousStridesOf(*sizes, memory_format);
+}
+
+size_t get_conv_groups_index(const torch::jit::Node* node) {
+  switch (node->kind()) {
+    case aten::conv2d:
+      return 6;
+    case aten::_convolution:
+      return 8;
+    default:
+      TORCH_CHECK(
+          false,
+          "mkldnnPrepackedConvIsSupportedJit expects node kind to be conv2d or _convolution but got ",
+          node->kind());
+  }
 }
 
 // The fuser only supports conv2d with very specific properties:
@@ -247,7 +261,8 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
   auto const& stride = toIValue(node->input(3));
   auto const& pad = toIValue(node->input(4));
   auto const& dilation = toIValue(node->input(5));
-  auto const& groups = toIValue(node->input(6));
+  size_t groups_index = get_conv_groups_index(node);
+  auto const& groups = toIValue(node->input(groups_index));
 
   // Everything should be statically known.
   if (!input || !weight || !bias || !stride || !pad || !dilation || !groups) {
@@ -270,6 +285,81 @@ bool conv2dIsSupportedJit(const torch::jit::Node* node) {
       _pair_int(*pad),
       _pair_int(*dilation),
       groups->toInt());
+}
+
+bool mkldnnPrepackedConvIsSupportedJit(const torch::jit::Node* node) {
+#if AT_MKLDNN_ENABLED()
+  auto const& input = getTensorInfoJit(node->input(0));
+  auto const& weight = getTensorInfoJit(node->input(1));
+  auto const& stride = toIValue(node->input(3));
+  auto const& pad = toIValue(node->input(4));
+  auto const& dilation = toIValue(node->input(5));
+  size_t groups_index = get_conv_groups_index(node);
+  auto const& groups = toIValue(node->input(groups_index));
+
+  // Everything should be statically known (bias could be NoneType =
+  // prim::Constant()).
+  if (!input || !weight || !stride || !pad || !dilation || !groups) {
+    GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  // Weights and bias should be Constant when using mkldnn backend
+  if (node->input(1)->node()->kind() != prim::Constant ||
+      node->input(2)->node()->kind() != prim::Constant) {
+    GRAPH_DEBUG(
+        "mkldnnPrepackedConvIsSupported: weight or bias is not Constant");
+    return false;
+  }
+
+  // Input and weight should be NHWC contiguous.
+  if (!(isContiguous(node->input(0), at::MemoryFormat::ChannelsLast) &&
+        isContiguous(node->input(1), at::MemoryFormat::ChannelsLast))) {
+    GRAPH_DEBUG(
+        "mkldnnPrepackedConvIsSupported: input or weight is not ChannelsLast contiguous");
+    return false;
+  }
+
+  return mkldnnPrepackedConvIsSupported(
+      *input,
+      *weight,
+      _pair_int(*stride),
+      _pair_int(*pad),
+      _pair_int(*dilation),
+      groups->toInt());
+#endif
+  return false;
+}
+
+bool isConv2d(const Node* node) {
+  if (node->kind() != aten::_convolution) {
+    return false;
+  }
+
+  auto const& stride = toIValue(node->input(3));
+  auto const& pad = toIValue(node->input(4));
+  auto const& dilation = toIValue(node->input(5));
+  auto const& transposed = toIValue(node->input(6));
+  auto const& output_padding = toIValue(node->input(7));
+
+  if (!stride || !pad || !dilation || !transposed || !output_padding) {
+    GRAPH_DEBUG("some params aren't static");
+    return false;
+  }
+
+  if (stride.value().toIntList().size() != 2 ||
+      pad.value().toIntList().size() != 2 ||
+      dilation.value().toIntList().size() != 2 ||
+      output_padding.value().toIntList().size() != 2) {
+    GRAPH_DEBUG("Conv not 2d");
+    return false;
+  }
+
+  if (transposed.value().toBool()) {
+    GRAPH_DEBUG("transposed Conv");
+    return false;
+  }
+  return true;
 }
 
 // The fuser currently only supports matmul of 2D x 2D matrices
@@ -485,32 +575,10 @@ Tensor TensorExprKernel::computeValue(const torch::jit::Value* v) {
     hasRandom_ = true;
   }
 
-  // Check if the tensor is a contiguous tensor
-  bool is_contiguous = false;
-  // Check if the tensor is a channels-last contiguous tensor
-  bool is_channels_last_contiguous = false;
-  for (auto input : inputs) {
-    if (input->type()->kind() != TypeKind::TensorType)
-      continue;
-
-    TORCH_CHECK(bufs_.count(input) > 0);
-    auto buf_ = bufs_.at(input);
-
-    auto _is_contiguous = buf_->is_contiguous();
-    if (_is_contiguous) {
-      is_contiguous |= _is_contiguous;
-    } else {
-      is_channels_last_contiguous |=
-          (buf_->is_contiguous(at::MemoryFormat::ChannelsLast) ||
-           buf_->is_contiguous(at::MemoryFormat::ChannelsLast3d) ||
-           buf_->is_channels_last_1d_contiguous());
-    }
-  }
-
   auto outputType = findDtypeForValue(v);
   std::vector<ExprHandle> outputShape = sizesForValue(v);
-  std::vector<ExprHandle> outputStrides;
-  if (is_channels_last_contiguous && (!is_contiguous)) {
+  std::vector<ExprHandle> outputStrides = {};
+  if (memory_layout_policy_ == MemoryLayoutPolicy::kChannelsLastNdContiguous) {
     outputStrides =
         c10::fmap<ExprHandle>(make_channels_last_strides(outputShape));
   } else {
@@ -952,15 +1020,10 @@ ExprHandle TensorExprKernel::getStrideArg(
   return it->second;
 }
 
-std::vector<torch::jit::StrideInput>& TensorExprKernel::
-    getSymbolicInputStrideDesc(const torch::jit::Value* value) {
-  for (size_t i : c10::irange(graph_->inputs().size())) {
-    if (value == graph_->inputs().at(i)) {
-      TORCH_INTERNAL_ASSERT(sym_stride_inputs_.count(i));
-      return sym_stride_inputs_[i];
-    }
-  }
-  TORCH_INTERNAL_ASSERT(false);
+std::vector<torch::jit::StrideInput>& TensorExprKernel::getSymbolicStrideDesc(
+    const torch::jit::Value* value) {
+  TORCH_INTERNAL_ASSERT(symbolic_strides_.count(value));
+  return symbolic_strides_[value];
 }
 
 std::vector<ExprHandle> TensorExprKernel::getInputStrides(
@@ -978,7 +1041,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
   }
 
   size_t rank = inputTensorDims.size();
-  std::vector<StrideInput>& stride_input = getSymbolicInputStrideDesc(input);
+  std::vector<StrideInput>& stride_input = getSymbolicStrideDesc(input);
   if (stride_input.size() == 1 &&
       (stride_input[0] == StrideInput::TENSOR_CONT_CHANNELS_LAST ||
        stride_input[0] == StrideInput::TENSOR_CONT)) {
@@ -1037,17 +1100,25 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   auto const& outputs = input->owningGraph()->outputs();
   std::unordered_set<const Value*> outputs_set(outputs.begin(), outputs.end());
 
-  auto is_concrete_cont = [](const torch::jit::Value* input) {
+  auto is_concrete_cont = [](const torch::jit::Value* input,
+                             const MemoryLayoutPolicy& mem_layout_policy) {
     if (input->isCompleteTensor()) {
-      return isContiguous(input);
+      auto mem_layout = (mem_layout_policy == MemoryLayoutPolicy::kContiguous)
+          ? at::MemoryFormat::Contiguous
+          : at::MemoryFormat::ChannelsLast;
+      return isContiguous(input, mem_layout);
     } else {
       return false;
     }
   };
 
-  auto is_symbolic_cont = [](std::vector<torch::jit::StrideInput> desc) {
+  auto is_symbolic_cont = [](std::vector<torch::jit::StrideInput> desc,
+                             const MemoryLayoutPolicy& mem_layout_policy) {
     if (desc.size() == 1) {
-      return desc[0] == torch::jit::StrideInput::TENSOR_CONT;
+      auto mem_layout = (mem_layout_policy == MemoryLayoutPolicy::kContiguous)
+          ? torch::jit::StrideInput::TENSOR_CONT
+          : torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST;
+      return desc[0] == mem_layout;
     } else {
       return false;
     }
@@ -1057,11 +1128,13 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
   switch (t->kind()) {
     case TypeKind::TensorType: {
       auto tt = input->type()->cast<TensorType>();
-      bool contiguous_concrete_tensor = is_concrete_cont(input);
+      bool contiguous_concrete_tensor =
+          is_concrete_cont(input, memory_layout_policy_);
       bool contiguous_symbolic_tensor = false;
       if (has_symbolic_shapes_) {
-        auto desc = getSymbolicInputStrideDesc(input);
-        contiguous_symbolic_tensor = is_symbolic_cont(desc);
+        auto desc = getSymbolicStrideDesc(input);
+        contiguous_symbolic_tensor =
+            is_symbolic_cont(desc, memory_layout_policy_);
       }
 
       // Get input size and strides
@@ -1232,15 +1305,22 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
       buildErrorMessage(
           "Ouput tensor has no corresponding bufs in the fuser."));
   BufPtr buf = bufs_.at(v);
-  // output is contiguous, no work to do
-  auto stride_desc = tensorOutputStrideDesc_[v->offset()];
-  if (stride_desc == torch::jit::StrideInput::TENSOR_CONT) {
+  TORCH_INTERNAL_ASSERT(buf != nullptr);
+  TORCH_INTERNAL_ASSERT(tt != nullptr);
+  TORCH_INTERNAL_ASSERT(tt->symbolic_sizes().rank() != c10::nullopt);
+
+  auto stride_desc = getSymbolicStrideDesc(v);
+  TORCH_INTERNAL_ASSERT(stride_desc.size() == 1);
+  auto memory_format = (stride_desc[0] == torch::jit::StrideInput::TENSOR_CONT)
+      ? at::MemoryFormat::Contiguous
+      : at::MemoryFormat::ChannelsLast;
+  // output is contiguous with specified memory format, no work to do
+  if (buf->is_contiguous(memory_format)) {
     return Tensor(buf, nullptr);
   }
 
   TORCH_INTERNAL_ASSERT(
-      tensorOutputStrideDesc_[v->offset()] ==
-      torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
+      stride_desc[0] == torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST);
   auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
   auto strides = make_channels_last_strides(sizes);
   // For a tensor with dimensions N C H W, channels last
@@ -1274,7 +1354,12 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
       tt->sizes().concrete_sizes(),
       buildErrorMessage("Output shapes are unknown."));
   auto sizes = *tt->sizes().concrete_sizes();
-  std::vector<int64_t> default_strides = TensorType::contiguousStridesOf(sizes);
+  at::MemoryFormat memory_format =
+      (memory_layout_policy_ == MemoryLayoutPolicy::kContiguous)
+      ? c10::MemoryFormat::Contiguous
+      : c10::MemoryFormat::ChannelsLast;
+  std::vector<int64_t> default_strides =
+      TensorType::contiguousStridesOf(sizes, memory_format);
   if (!tt->strides().concrete_sizes()) {
     return Tensor(buf, nullptr);
   }
@@ -1444,7 +1529,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
       if (!tt) {
         continue;
       }
-      auto symbolic_stride = getSymbolicInputStrideDesc(input);
+      auto symbolic_stride = getSymbolicStrideDesc(input);
       for (size_t j = 0; j < symbolic_stride.size(); ++j) {
         if (symbolic_stride[j] == torch::jit::StrideInput::S_AS_ARG) {
           VarHandle v("v" + input_name_map_[input], kLong);
@@ -1482,11 +1567,116 @@ BlockPtr TensorExprKernel::bindAllInputs() {
   return block;
 }
 
+void TensorExprKernel::deduceMemoryLayoutPolicy() {
+  // If the tensor is channels-last contiguous, the preferred memory layout
+  // propagation policy is to use channes-last. Otherwise, the preferred policy
+  // is to use contiguous.
+  auto _prefer_symbolic_mem =
+      [](const torch::jit::Value* val,
+         const std::vector<torch::jit::StrideInput>& stride_desc_vec) {
+        TORCH_INTERNAL_ASSERT(stride_desc_vec.size() > 0);
+        // Has symbolic stride information
+        auto cur_stride_desc = stride_desc_vec[0];
+        return (cur_stride_desc ==
+                torch::jit::StrideInput::TENSOR_CONT_CHANNELS_LAST)
+            ? MemoryLayoutPolicy::kChannelsLastNdContiguous
+            : MemoryLayoutPolicy::kContiguous;
+      };
+
+  auto _prefer_static_mem = [](const torch::jit::Value* val) {
+    // No shape info is present in the graph
+    TORCH_INTERNAL_ASSERT(
+        val->isCompleteTensor(),
+        buildErrorMessage(val->debugName() + " is not a complete tensor."));
+    const auto& tt = val->type()->expect<TensorType>();
+    const auto sizes = *tt->sizes().concrete_sizes();
+    const auto strides = *tt->strides().concrete_sizes();
+    return (c10::is_channels_last_strides_2d(sizes, strides))
+        ? MemoryLayoutPolicy::kChannelsLastNdContiguous
+        : MemoryLayoutPolicy::kContiguous;
+  };
+
+  // Filter out the tensor from the graph inputs and outputs to
+  // deduce the memory layout propagation policy
+  auto _is_tensor = [](const jit::Value* el) {
+    return el->type()->kind() == TypeKind::TensorType;
+  };
+  std::vector<torch::jit::Value*> graph_io_tensors;
+  std::copy_if(
+      graph_->inputs().begin(),
+      graph_->inputs().end(),
+      std::back_inserter(graph_io_tensors),
+      _is_tensor);
+  std::copy_if(
+      graph_->outputs().begin(),
+      graph_->outputs().end(),
+      std::back_inserter(graph_io_tensors),
+      _is_tensor);
+  // std::all_of returns true if the range is empty. But we prefer to keep
+  // the original memory layout propagation policy for this case. So we
+  // check whether the range is empty.
+  auto prefer_channels_last = (graph_io_tensors.size() > 0);
+  for (auto el : graph_io_tensors) {
+    auto is_complete = el->isCompleteTensor();
+    auto is_symbolic = symbolic_strides_.count(el);
+
+    auto preferred_mem_layout = is_complete
+        ? _prefer_static_mem(el)
+        : (is_symbolic ? _prefer_symbolic_mem(el, symbolic_strides_[el])
+                       : MemoryLayoutPolicy::kContiguous);
+    if (preferred_mem_layout != MemoryLayoutPolicy::kChannelsLastNdContiguous) {
+      prefer_channels_last = false;
+      break;
+    }
+  }
+
+  // If the memory layout of all the input and outputs is channels-last
+  // contiguous, the propagated memory layout should be channels-last.
+  // Otherwise, the propagated memory layout is contiguous which is as
+  // same as current situation.
+  memory_layout_policy_ = prefer_channels_last
+      ? MemoryLayoutPolicy::kChannelsLastNdContiguous
+      : MemoryLayoutPolicy::kContiguous;
+}
+
+void TensorExprKernel::optimizeOwningGraph() {
+  GRAPH_DUMP("TensorExprKernel graph (Before graph optimization):", graph_);
+
+  // We may manipulate output pointers in graph manipulation. So we store the
+  // orignal outputs for symbolic strides information synchronization
+  auto _orignal_graph_outputs = graph_->outputs().vec();
+
+  // Get the graph device information first. The graph optimization
+  // might be device specific.
+  device_ = *pickDeviceType(graph_);
+
+  // Determine the propagated memory layout
+  deduceMemoryLayoutPolicy();
+
+  // Fuse Conv with Eltwise Op
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph_);
+  FuseConvWithEltwise(graph_);
+
+  // Optimize the concatenation
+  OptimizeCat(graph_);
+
+  // Synchronize the symbolic strides information
+  auto graph_outputs = graph_->outputs();
+  TORCH_INTERNAL_ASSERT(graph_outputs.size() == _orignal_graph_outputs.size());
+  for (int i : c10::irange(graph_outputs.size())) {
+    auto el_orig = _orignal_graph_outputs.at(i);
+    auto el_new = graph_outputs.at(i);
+    if (symbolic_strides_.count(el_orig) && (el_orig != el_new)) {
+      symbolic_strides_[el_new] = symbolic_strides_[el_orig];
+      symbolic_strides_.erase(el_orig);
+    }
+  }
+
+  GRAPH_DUMP("TensorExprKernel graph (After graph optimization):", graph_);
+}
+
 void TensorExprKernel::compile() {
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
-
-  device_ = *pickDeviceType(graph_);
-  OptimizeCat(graph_);
 
   has_symbolic_shapes_ = !symbolic_shape_inputs_.empty();
   nInputs_ = graph_->inputs().size();
@@ -1575,8 +1765,10 @@ void TensorExprKernel::compile() {
     if (has_symbolic_shapes_) {
       auto sizes = sizesFromSymbolicShape(tt->symbolic_sizes());
       tensorOutputSymbolicSizes_.push_back(sizes);
-      TORCH_INTERNAL_ASSERT(sym_stride_outputs_.count(i));
-      auto stride_desc = sym_stride_outputs_[i];
+      TORCH_INTERNAL_ASSERT(symbolic_strides_.count(output));
+      auto stride_desc_vec = symbolic_strides_[output];
+      TORCH_INTERNAL_ASSERT(stride_desc_vec.size() == 1);
+      auto stride_desc = stride_desc_vec[0];
       tensorOutputStrideDesc_.push_back(stride_desc);
       Tensor properly_strided_output =
           convertSymbolicOutputToCorrectStrides(output);
@@ -1656,21 +1848,9 @@ TensorExprKernel::TensorExprKernel(
       symbolic_shape_inputs_(std::move(symbolic_shape_inputs)),
       custom_lowerings_(std::move(custom_lowerings)),
       pre_alloc_(pre_alloc),
-      kernel_func_name_(kernel_func_name) {
-  // convert symbolic_stride to map by output and input index,
-  // since we may manipulate output pointers in graph manipulation
-  for (size_t i : c10::irange(graph_->inputs().size())) {
-    if (symbolic_strides.count(graph_->inputs().at(i))) {
-      sym_stride_inputs_[i] = symbolic_strides[graph_->inputs().at(i)];
-    }
-  }
-  for (size_t i : c10::irange(graph_->outputs().size())) {
-    if (symbolic_strides.count(graph_->outputs().at(i))) {
-      auto& desc = symbolic_strides[graph_->outputs().at(i)];
-      TORCH_INTERNAL_ASSERT(desc.size() == 1);
-      sym_stride_outputs_[i] = desc[0];
-    }
-  }
+      kernel_func_name_(kernel_func_name),
+      symbolic_strides_(std::move(symbolic_strides)) {
+  optimizeOwningGraph();
 
   allow_fallback_ = fallbackAllowed();
 

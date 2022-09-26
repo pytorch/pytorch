@@ -19,6 +19,66 @@ namespace cuda {
 
 namespace {
 
+TensorView* maybe_broadcast_inner_to_rank(TensorView* t, size_t rank) {
+  size_t t_rank = TensorDomain::noReductions(t->getMaybeRFactorDomain()).size();
+
+  // broadcast inner on inp to match rank with other.
+  if (t_rank < rank) {
+    const int num_bcast = static_cast<int>(rank - t_rank);
+    std::vector<bool> inner_bcast_dims(rank, false);
+    std::fill(
+        inner_bcast_dims.begin(), inner_bcast_dims.begin() + num_bcast, true);
+    t = broadcast(t, inner_bcast_dims);
+  }
+  return t;
+}
+
+Val* simplifiedInt(Val* val) {
+  TORCH_INTERNAL_ASSERT(
+      val->isConstInt(), "Expecting Const Int's only in this routine.");
+  if (val->as<Int>()->value().has_value()) {
+    return val;
+  }
+  return IrBuilder::create<Int>(val->evaluateInt());
+}
+
+// If one size is nullptr, return the other. If both symbolic just return v1. If
+// one's concrete, prefer that one (simplified). If both concrete make sure
+// they're the same size.
+Val* promoteSize(Val* v1, Val* v2) {
+  if (v1 == nullptr) {
+    TORCH_INTERNAL_ASSERT(
+        v2 == nullptr || v2->isAnInt(),
+        "Expecting Int's only in this routine.");
+    return v2;
+  }
+  if (v2 == nullptr) {
+    return v1;
+  }
+  TORCH_INTERNAL_ASSERT(
+      v1->isAnInt() && v2->isAnInt(), "Expecting Int's only in this routine.");
+
+  if (!v1->isConstInt() && !v2->isConstInt()) {
+    return v1;
+  } else if (v1->isConstInt() && v2->isConstInt()) {
+    TORCH_INTERNAL_ASSERT(
+        v1->evaluateInt() == v2->evaluateInt(),
+        "Expected sizes of, ",
+        v1->toString(),
+        " and ",
+        v2->toString(),
+        " to match but found ",
+        v1->evaluateInt(),
+        " and ",
+        v2->evaluateInt(),
+        ".");
+    return simplifiedInt(v1);
+  } else if (v1->isConstInt()) {
+    return simplifiedInt(v1);
+  }
+  return simplifiedInt(v2);
+}
+
 // Will return a new value of type val with the DataType dtype.
 Val* newScalar(ValType vtype, DataType dtype) {
   switch (vtype) {
@@ -54,12 +114,56 @@ Val* newScalar(ValType vtype, DataType dtype) {
       " in newScalar.");
 }
 
+IterType promoteIterType(IterType type1, IterType type2) {
+  // Iteration: Default
+  // Reduction: Should not appear here
+  // Broadcast: Propagated only if type1 and type2 are Broadcast
+  // Gather: Converted to Iteration
+  // Stride: Shold not appear here
+  // VectorComponent: Converted to Iteration
+
+  TORCH_INTERNAL_ASSERT(
+      type1 != IterType::Reduction && type1 != IterType::Stride,
+      "Invalid IterType: ",
+      type1)
+  TORCH_INTERNAL_ASSERT(
+      type2 != IterType::Reduction && type2 != IterType::Stride,
+      "Invalid IterType: ",
+      type2);
+
+  // Do not propagate Gather and VectorComponent
+  if (type1 == IterType::Gather || type1 == IterType::VectorComponent) {
+    type1 = IterType::Iteration;
+  }
+  if (type2 == IterType::Gather || type2 == IterType::VectorComponent) {
+    type2 = IterType::Iteration;
+  }
+
+  // At this point, type1 and type2 must be either Iteration or
+  // Broadcast
+  TORCH_INTERNAL_ASSERT(
+      type1 == IterType::Iteration || type1 == IterType::Broadcast,
+      "Unexpected IterType: ",
+      type1);
+  TORCH_INTERNAL_ASSERT(
+      type2 == IterType::Iteration || type2 == IterType::Broadcast,
+      "Unexpected IterType: ",
+      type2);
+
+  if (type1 == IterType::Broadcast) {
+    return type2;
+  } else {
+    return type1;
+  }
+}
+
 TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<TensorView*> tvs;
-  for (auto val : vals)
-    if (val->getValType() == ValType::TensorView)
+  for (auto val : vals) {
+    if (val->getValType() == ValType::TensorView) {
       tvs.push_back(val->as<TensorView>());
-
+    }
+  }
   TORCH_CHECK(
       !tvs.empty(),
       "Tried to create new output TensorView but received empty list.");
@@ -76,63 +180,68 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<int64_t> start_offsets(out_domain.size(), 0);
   std::vector<int64_t> stop_offsets(out_domain.size(), 0);
   std::vector<Val*> extent_vals(out_domain.size(), nullptr);
-  std::vector<IterType> iter_types(out_domain.size(), IterType::Iteration);
+  std::vector<Val*> expanded_extent_vals(out_domain.size(), nullptr);
+  std::vector<c10::optional<IterType>> iter_types(
+      out_domain.size(), c10::nullopt);
 
   for (auto tv : tvs) {
     auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
     TORCH_INTERNAL_ASSERT(
         dom.size() == out_domain.size(),
-        "Invalid tensor view found while producing and output, it has ",
+        "Invalid tensor view found while producing an output, it has ",
         dom.size(),
         " dimensions but expected ",
         out_domain.size());
     for (const auto i : c10::irange(dom.size())) {
       if (dom[i]->isBroadcast()) {
+        if (dom[i]->hasExpandedExtent()) {
+          expanded_extent_vals[i] =
+              promoteSize(expanded_extent_vals[i], dom[i]->expandedExtent());
+        }
         continue;
       }
-      if (extent_vals[i] == nullptr) {
-        extent_vals[i] = dom[i]->extent();
+      extent_vals[i] = promoteSize(extent_vals[i], dom[i]->extent());
+      if (iter_types[i].has_value()) {
+        iter_types[i] =
+            promoteIterType(iter_types[i].value(), dom[i]->getIterType());
+      } else {
         iter_types[i] = dom[i]->getIterType();
       }
+
       auto start_offset = dom[i]->start()->as<Int>();
       auto stop_offset = dom[i]->stopOffset()->as<Int>();
       // Currently, start is always constant
       TORCH_INTERNAL_ASSERT(
-          start_offset->isConst(), "Invalid IterDomain start: ", start_offset);
+          start_offset->isConstInt(),
+          "Invalid IterDomain start: ",
+          start_offset);
       TORCH_INTERNAL_ASSERT(
-          stop_offset->isConst(),
+          stop_offset->isConstInt(),
           "Invalid IterDomain stop offset: ",
           stop_offset);
       start_offsets[i] =
-          std::max(start_offsets[i], start_offset->value().value());
-      stop_offsets[i] = std::max(stop_offsets[i], stop_offset->value().value());
+          std::max(start_offsets[i], start_offset->evaluateInt());
+      stop_offsets[i] = std::max(stop_offsets[i], stop_offset->evaluateInt());
     }
   }
   for (const auto dim_i : c10::irange(out_domain.size())) {
     if (extent_vals[dim_i] != nullptr) {
-      out_domain[dim_i] = IrBuilder::create<IterDomain>(
-          IrBuilder::create<Int>(start_offsets[dim_i]),
-          extent_vals[dim_i],
-          IrBuilder::create<Int>(stop_offsets[dim_i]),
-          ParallelType::Serial,
-          iter_types[dim_i]);
+      TORCH_INTERNAL_ASSERT(
+          iter_types[dim_i].has_value(),
+          "Could not deduce iter type for new tensor view.");
+      out_domain[dim_i] =
+          IterDomainBuilder(
+              IrBuilder::create<Int>(start_offsets[dim_i]), extent_vals[dim_i])
+              .stop_offset(IrBuilder::create<Int>(stop_offsets[dim_i]))
+              .iter_type(iter_types[dim_i].value())
+              .build();
     } else {
-      IterType itype = IterType::BroadcastWithoutStride;
-      for (const auto tv : tvs) {
-        auto dim =
-            TensorDomain::noReductions(tv->getMaybeRFactorDomain())[dim_i];
-        // If there's an unresolved bcast dim and it came from a strided dim,
-        // assume output of it should be strided too
-        if (dim->getIterType() == IterType::BroadcastWithStride) {
-          itype = IterType::BroadcastWithStride;
-          break;
-        }
-      }
-      out_domain[dim_i] = IrBuilder::create<IterDomain>(
-          FusionGuard::getCurFusion()->zeroVal(),
-          FusionGuard::getCurFusion()->oneVal(),
-          ParallelType::Serial,
-          itype);
+      out_domain[dim_i] = IterDomainBuilder(
+                              FusionGuard::getCurFusion()->zeroVal(),
+                              FusionGuard::getCurFusion()->oneVal())
+                              .expanded_extent(expanded_extent_vals[dim_i])
+                              .iter_type(IterType::Broadcast)
+                              .build();
     }
   }
 
@@ -158,17 +267,7 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
   for (const auto i : c10::irange(vals.size())) {
     if (vals[i]->getValType().value() == ValType::TensorView) {
       auto tv = vals[i]->as<TensorView>();
-      size_t tv_dims =
-          TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size();
-      if (tv_dims < n_dims) {
-        std::vector<bool> bcast_flags(n_dims, false);
-        for (const auto j : c10::irange(n_dims - tv_dims)) {
-          bcast_flags[j] = true;
-        }
-        out_vals[i] = broadcast(tv, bcast_flags);
-      } else {
-        out_vals[i] = vals[i];
-      }
+      out_vals[i] = maybe_broadcast_inner_to_rank(tv, n_dims);
     } else {
       out_vals[i] = vals[i];
     }
@@ -309,17 +408,6 @@ Val* unaryOp(UnaryOpType type, Val* v1) {
   TORCH_INTERNAL_ASSERT(
       type != UnaryOpType::Address,
       "The reference operator & is not accessible in the Fusion IR");
-
-  // TODO: We should add the following, but we need to go through schedulers
-  // and make sure all calls to "fusion->inputs" includes the output of RandLike
-  //
-  //  If rand like, there isn't a real dependency on the input value, so map it
-  //  to a dummy scalar. if
-  //
-  // (type == UnaryOpType::RandLike) {
-  //   v1 = new NamedScalar("__rnd", v1->getDataType().value());
-  // }
-
   Val* out = newValLike(v1, v1->getDataType().value());
   IrBuilder::create<UnaryOp>(type, out, v1);
   return out;
@@ -352,6 +440,48 @@ TensorView* unaryOp(
   return unaryOp(type, cast_v1)->as<TensorView>();
 }
 
+// TENSOR FACTORIES
+TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(RNGOpType::Uniform, out);
+  return out;
+}
+
+TensorView* arange(Val* end, DataType dtype) {
+  return arange(FusionGuard::getCurFusion()->zeroVal(), end, dtype);
+}
+
+TensorView* arange(Val* start, Val* end, DataType dtype) {
+  return arange(start, end, FusionGuard::getCurFusion()->oneVal(), dtype);
+}
+
+TensorView* arange(Val* start, Val* end, Val* step, DataType dtype) {
+  if (isIntegralType(dtype)) {
+    start = castOp(DataType::Int, start);
+    end = castOp(DataType::Int, end);
+    step = castOp(DataType::Int, step);
+  } else if (isFloatingPointType(dtype)) {
+    start = castOp(DataType::Double, start);
+    end = castOp(DataType::Double, end);
+    step = castOp(DataType::Double, step);
+  }
+  auto size = castOp(DataType::Int, ceilDiv(sub(end, start), step));
+  auto out = TensorViewBuilder()
+                 .ndims(1)
+                 .dtype(dtype)
+                 .contiguity({true})
+                 .shape({size})
+                 .build();
+  IrBuilder::create<ARangeOp>(out, start, end, step);
+  return out;
+}
+
 // UNARY OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_OP(op_name, op_type) \
@@ -363,7 +493,6 @@ TensorView* unaryOp(
   }
 
 NVFUSER_DEFINE_UNARY_OP(set, Set)
-NVFUSER_DEFINE_UNARY_OP(randlike, RandLike)
 NVFUSER_DEFINE_UNARY_OP(ceil, Ceil)
 NVFUSER_DEFINE_UNARY_OP(floor, Floor)
 NVFUSER_DEFINE_UNARY_OP(frac, Frac)
@@ -372,7 +501,25 @@ NVFUSER_DEFINE_UNARY_OP(relu, Relu)
 NVFUSER_DEFINE_UNARY_OP(round, Round)
 NVFUSER_DEFINE_UNARY_OP(silu, Silu)
 NVFUSER_DEFINE_UNARY_OP(trunc, Trunc)
+NVFUSER_DEFINE_UNARY_OP(print, Print)
 #undef NVFUSER_DEFINE_UNARY_OP
+
+TensorView* randlike(TensorView* v) {
+  TORCH_CHECK(
+      isFloatingPointType(v->dtype()),
+      "input must have floating point type, but got ",
+      v->dtype());
+  std::vector<Val*> shape;
+  shape.reserve(v->getMaybeRFactorDomain().size());
+  for (auto id : v->getMaybeRFactorDomain()) {
+    shape.emplace_back(id->getMaybeExpandedExtent());
+  }
+  return rand(shape, v->dtype());
+}
+
+Val* randlike(Val* v) {
+  return randlike(v->as<TensorView>());
+}
 
 Val* bitwise_not(Val* v) {
   TORCH_CHECK(
@@ -407,6 +554,46 @@ Val* abs(Val* v) {
 
 TensorView* abs(TensorView* tv) {
   return abs(tv->as<Val>())->as<TensorView>();
+}
+
+// The output of real(complex_tensor) are real numbers
+Val* real(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  // We use UnaryOpType::Set instead of UnaryOpType::Real to support non-complex
+  // tensors
+  return unaryOp(UnaryOpType::Set, v);
+}
+
+TensorView* real(TensorView* tv) {
+  return real(tv->as<Val>())->as<TensorView>();
+}
+
+// The output of imag(complex_tensor) are real numbers
+Val* imag(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Imag, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Imag, out, v);
+    return out;
+  }
+  TORCH_CHECK(false, "imag not supported for non-complex tensors");
+}
+
+TensorView* imag(TensorView* tv) {
+  return imag(tv->as<Val>())->as<TensorView>();
 }
 
 // UNARY FLOAT CAST OPERATIONS
@@ -466,8 +653,9 @@ namespace {
 // Helper function to reduce repetitive code
 template <typename T1, typename T2>
 TensorView* arithOpOverloads(Val* (*func)(Val*, Val*), T1* v1, T2* v2) {
-  return func(v1->template as<Val>(), v2->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(v1->template as<Val>(), v2->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2>
@@ -476,9 +664,10 @@ TensorView* arithOpOverloads(
     T1* v1,
     T2* v2,
     DataType common_dtype) {
-  return binaryOp(
-             type, v1->template as<Val>(), v2->template as<Val>(), common_dtype)
-      ->template as<TensorView>();
+  Val* out = binaryOp(
+      type, v1->template as<Val>(), v2->template as<Val>(), common_dtype);
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2, typename T3>
@@ -488,11 +677,12 @@ TensorView* arithOpOverloads(
     T2* v2,
     T3* v3) {
   auto vals = maybeBroadcast({v1, v2, v3});
-  return func(
-             vals[0]->template as<Val>(),
-             vals[1]->template as<Val>(),
-             vals[2]->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(
+      vals[0]->template as<Val>(),
+      vals[1]->template as<Val>(),
+      vals[2]->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2, typename T3, typename T4>
@@ -503,12 +693,13 @@ TensorView* arithOpOverloads(
     T3* v3,
     T4* v4) {
   auto vals = maybeBroadcast({v1, v2, v3, v4});
-  return func(
-             vals[0]->template as<Val>(),
-             vals[1]->template as<Val>(),
-             vals[2]->template as<Val>(),
-             vals[3]->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(
+      vals[0]->template as<Val>(),
+      vals[1]->template as<Val>(),
+      vals[2]->template as<Val>(),
+      vals[3]->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 // Output type promotion logic for binary operators
@@ -634,7 +825,7 @@ TensorView* binaryOp(
   }                                                                     \
   TensorView* op_name(Val* v1, TensorView* v2) {                        \
     return binaryOp(                                                    \
-        BinaryOpType::op_type, v2, v2, TypePromotion::float_op_config); \
+        BinaryOpType::op_type, v1, v2, TypePromotion::float_op_config); \
   }                                                                     \
   TensorView* op_name(TensorView* v1, TensorView* v2) {                 \
     return binaryOp(                                                    \
@@ -839,12 +1030,16 @@ static TensorView* newForReduction(
         " of tensor ",
         tv);
 
-    new_domain.push_back(IrBuilder::create<IterDomain>(
-        id->start(),
-        id->extent(),
-        id->stopOffset(),
-        ParallelType::Serial,
-        isReduction ? IterType::Reduction : id->getIterType()));
+    new_domain.push_back(
+        IterDomainBuilder(id)
+            // If the domain is being reduced, but it's coming in as an expanded
+            // extent, we need to realize the expand.
+            .extent(
+                isReduction && id->hasExpandedExtent() ? id->expandedExtent()
+                                                       : id->extent())
+            .resetSchedulingParams()
+            .iter_type(isReduction ? IterType::Reduction : id->getIterType())
+            .build());
   }
 
   TensorDomain* td = IrBuilder::create<TensorDomain>(
@@ -854,6 +1049,17 @@ static TensorView* newForReduction(
       data_type == DataType::Null ? tv->getDataType().value() : data_type;
   return IrBuilder::create<TensorView>(td, data_type);
 }
+
+namespace {
+
+// PyTorch accepts reductions of zero-dimensional tensors, which are
+// just ignored.
+TensorView* reductionOpZeroDimTensor(TensorView* inp) {
+  TORCH_INTERNAL_ASSERT(inp->domain()->noReductions().size() == 0);
+  return set(inp);
+}
+
+} // namespace
 
 TensorView* reductionOp(
     BinaryOpType reduction_op_type,
@@ -870,9 +1076,12 @@ TensorView* reductionOp(
       TensorDomain::sameAs(tv->getMaybeRFactorDomain(), tv->domain()->domain()),
       "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
 
-  TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
-
   TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  // PyTorch allows reduction of 0-dim tensors
+  if (tv->domain()->noReductions().size() == 0) {
+    return reductionOpZeroDimTensor(tv);
+  }
 
   std::vector<unsigned int> uint_axes;
   const int ndims = tv->domain()->noReductions().size();
@@ -912,7 +1121,6 @@ TensorView* reductionOp(
     for (auto axis : uint_axes) {
       is_broadcast.at(axis) = true;
     }
-
     out = broadcast(out, is_broadcast);
   }
   return out;
@@ -956,7 +1164,11 @@ TensorView* sum(
 TensorView* max(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(
+      dtype == DataType::Null,
+      "A dtype other than Null is not currently supported.");
   Val* init = getMinimumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Max, axes, init, v1, keep_dim);
@@ -965,7 +1177,11 @@ TensorView* max(
 TensorView* min(
     TensorView* v1,
     const std::vector<int>& axes,
-    bool keep_dim /*=false*/) {
+    bool keep_dim /*=false*/,
+    DataType dtype /* DataType::Null */) {
+  TORCH_CHECK(
+      dtype == DataType::Null,
+      "A dtype other than Null is not currently supported.");
   Val* init = getMaximumValue(v1->getDataType().value());
   TORCH_CHECK(init != nullptr, "Missing initial value");
   return reductionOp(BinaryOpType::Min, axes, init, v1, keep_dim);
@@ -1005,18 +1221,14 @@ TensorView* broadcast(
   size_t iinp = 0, ibdim = 0;
   while (ibdim < is_broadcast_dim.size()) {
     if (is_broadcast_dim[ibdim]) {
-      out_domain.push_back(IrBuilder::create<IterDomain>(
-          FusionGuard::getCurFusion()->zeroVal(),
-          FusionGuard::getCurFusion()->oneVal(),
-          ParallelType::Serial,
-          IterType::BroadcastWithoutStride));
+      out_domain.push_back(IterDomainBuilder(
+                               FusionGuard::getCurFusion()->zeroVal(),
+                               FusionGuard::getCurFusion()->oneVal())
+                               .iter_type(IterType::Broadcast)
+                               .build());
     } else {
-      out_domain.push_back(IrBuilder::create<IterDomain>(
-          inp_domain[iinp]->start(),
-          inp_domain[iinp]->extent(),
-          inp_domain[iinp]->stopOffset(),
-          inp_domain[iinp]->getParallelType(),
-          inp_domain[iinp]->getIterType()));
+      out_domain.push_back(
+          IterDomainBuilder(inp_domain[iinp]).resetSchedulingParams().build());
       iinp++;
     }
     ibdim++;
@@ -1027,6 +1239,140 @@ TensorView* broadcast(
           out_domain, std::vector<bool>(out_domain.size(), true)),
       inp->getDataType().value());
   IrBuilder::create<BroadcastOp>(out_tensor, inp, is_broadcast_dim);
+  return out_tensor;
+}
+
+TensorView* expand(TensorView* inp, const std::vector<Val*>& expanded_sizes) {
+  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
+
+  TORCH_CHECK(
+      expanded_sizes.size() >= inp_domain.size(),
+      "Invalid expand, number of sizes provided is expected to be at least ",
+      inp_domain.size(),
+      " but received ",
+      expanded_sizes.size());
+
+  inp = maybe_broadcast_inner_to_rank(inp, expanded_sizes.size());
+  inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
+
+  std::vector<Val*> maybe_expanded_sizes;
+  maybe_expanded_sizes.resize(inp_domain.size(), nullptr);
+
+  // Did a dimension actually get expanded
+  bool expanded = false;
+
+  std::vector<IterDomain*> out_domain;
+  for (auto i : c10::irange(inp_domain.size())) {
+    auto inp_id = inp_domain[i];
+    auto out_id_builder = IterDomainBuilder(inp_id);
+    maybe_expanded_sizes[i] = inp_domain[i]->extent();
+
+    auto expanded_size_int = expanded_sizes[i]->getInt();
+
+    // If the expanded size is -1, let the input extent be propagated
+    // as is
+    if (expanded_size_int == -1) {
+      // This is just done for clarity. It isn't necessary as it's
+      // already done when constructing out_id_builder.
+      out_id_builder.extent(inp_id->extent());
+    } else if (inp_id->isBroadcast() && expanded_size_int != 1) {
+      // When input id is a broadcast, expand the extent to the given
+      // size, which can be concrete or symbolic.
+      expanded = true;
+      out_id_builder.expanded_extent(expanded_sizes[i]);
+      maybe_expanded_sizes[i] = expanded_sizes[i];
+    } else if (!inp_id->extent()->isConstInt()) {
+      // Input id is non-broadcast and its extent is symbolic. Promote
+      // the extent to the given expanded size.
+      // Note that expansion to 1 just means its extent becomes 1 and
+      // does not mean the ID becomes a broadcast.
+      out_id_builder.extent(expanded_sizes[i]);
+    } else {
+      // Input id is non-expand and its extent is concrete. Nothing
+      // to expand, but the input and expanded sizes should match if
+      // the expanded size is also concrete.
+      auto inp_id_size_int = inp_id->extent()->getInt();
+      if (expanded_size_int.has_value()) {
+        TORCH_CHECK(
+            inp_id_size_int == expanded_size_int,
+            "Invalid expand size, ",
+            expanded_sizes[i]->toString(),
+            ", for ",
+            inp_id->toString());
+      }
+    }
+    out_domain.push_back(out_id_builder.build());
+  }
+
+  TensorView* out_tensor = IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      inp->getDataType().value());
+  if (!expanded) {
+    IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_tensor, inp);
+  } else {
+    IrBuilder::create<ExpandOp>(out_tensor, inp, maybe_expanded_sizes);
+  }
+  return out_tensor;
+}
+
+TensorView* expand_as(TensorView* inp, TensorView* other) {
+  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
+  auto other_domain =
+      TensorDomain::noReductions(other->getMaybeRFactorDomain());
+
+  TORCH_CHECK(
+      inp_domain.size() <= other_domain.size(),
+      "Invalid expand_as, dimensions of inp is higher than dimensions of other, expected other to be at least ",
+      inp_domain.size(),
+      " but received ",
+      other_domain.size());
+
+  inp = maybe_broadcast_inner_to_rank(inp, other_domain.size());
+  inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
+
+  std::vector<IterDomain*> out_domain;
+  std::vector<Val*> maybe_expanded_sizes;
+  bool expanded = false;
+  for (auto i : c10::irange(inp_domain.size())) {
+    auto inp_id = inp_domain[i];
+    auto other_id = other_domain[i];
+
+    auto out_id_builder = IterDomainBuilder(inp_id);
+    Val* maybe_expanded_size = inp_id->extent();
+
+    if (!inp_id->isBroadcast()) {
+      TORCH_INTERNAL_ASSERT(
+          !other_id->isBroadcast(),
+          "Cannot expand as a tensor if other has broadcast dimensions that don't map to broadcast dimensions in the input.");
+      if (!inp_id->isConstInt() && other_id->isConstInt()) {
+        out_id_builder.extent(
+            promoteSize(inp_id->extent(), other_id->extent()));
+      }
+    } else {
+      if (!other_id->isBroadcast()) {
+        expanded = true;
+        out_id_builder.expanded_extent(other_id->extent());
+        maybe_expanded_size = other_id->extent();
+      } else if (other_id->isBroadcast() && other_id->hasExpandedExtent()) {
+        expanded = true;
+        out_id_builder.expanded_extent(other_id->expandedExtent());
+        maybe_expanded_size = other_id->expandedExtent();
+      }
+    }
+    out_domain.push_back(out_id_builder.build());
+    maybe_expanded_sizes.push_back(maybe_expanded_size);
+  }
+
+  TensorView* out_tensor = IrBuilder::create<TensorView>(
+      IrBuilder::create<TensorDomain>(
+          out_domain, std::vector<bool>(out_domain.size(), true)),
+      inp->getDataType().value());
+  if (!expanded) {
+    IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_tensor, inp);
+  } else {
+    IrBuilder::create<ExpandOp>(out_tensor, inp, maybe_expanded_sizes);
+  }
   return out_tensor;
 }
 
@@ -1099,12 +1445,12 @@ WelfordResult Welford(
       out_avg,
       out_var,
       out_N, /*out var/avg/count */
+      tv, /*in var/avg/count */
+      FusionGuard::getCurFusion()->zeroVal(),
+      FusionGuard::getCurFusion()->oneVal(),
       init_avg_val,
       init_var_val,
-      init_N, /*init var/avg/count */
-      tv,
-      FusionGuard::getCurFusion()->zeroVal(),
-      FusionGuard::getCurFusion()->oneVal()); /*in var/avg/count */
+      init_N); /*init var/avg/count */
 
   return WelfordResult(out_avg, out_var, out_N);
 }
@@ -1116,33 +1462,6 @@ WelfordResult::WelfordResult(
     : avg(in_avg), var_sum(in_var_sum), n(in_n) {
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(var_sum->definition()));
   TORCH_INTERNAL_ASSERT(avg->definition()->sameAs(n->definition()));
-}
-
-WelfordResult WelfordResult::rFactor(const std::vector<int>& axes) {
-  auto o_tv = avg->definition()->as<WelfordOp>()->out()->as<TensorView>();
-  auto rf_tvs = o_tv->rFactor(axes, std::vector<TensorView*>{avg, var_sum, n});
-  return WelfordResult{rf_tvs.at(0), rf_tvs.at(1), rf_tvs.at(2)};
-}
-
-TensorView* transpose(
-    TensorView* inp,
-    const std::unordered_map<int, int>& old2new) {
-  auto inp_domain = TensorDomain::noReductions(inp->getMaybeRFactorDomain());
-  std::vector<IterDomain*> out_domain(inp_domain.size());
-
-  auto new2old = ir_utils::normalizeOld2New(old2new, inp_domain.size());
-
-  for (const auto i : c10::irange(out_domain.size())) {
-    auto in_id = inp_domain[new2old[i]];
-    out_domain[i] = in_id->cloneWithoutRFactor();
-  }
-
-  TensorView* out_tensor = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          out_domain, std::vector<bool>(out_domain.size(), true)),
-      inp->getDataType().value());
-  IrBuilder::create<TransposeOp>(out_tensor, inp, new2old);
-  return out_tensor;
 }
 
 // COMPOUND OPERATIONS
@@ -1284,15 +1603,21 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  auto cast_values = promoteValues(TypePromotion::default_op_config, {v1, v2});
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
+  auto cast_values = promoteValues(operands, common_dtype);
   v1 = cast_values[0];
   v2 = cast_values[1];
 
   TORCH_CHECK(c->getDataType().value() == DataType::Bool);
-  auto out_dtype =
-      promote_type(v1->getDataType().value(), v2->getDataType().value());
+  auto out_dtype = common_dtype;
   auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
+  // Even when v1 and v2 are scalar, the output is a tensor if the
+  // conditional input is a tensor.
+  if (c->getValType() == ValType::TensorView) {
+    out_vtype = ValType::TensorView;
+  }
   auto vals = maybeBroadcast({c, v1, v2});
   Val* out = nullptr;
   if (out_vtype == ValType::TensorView) {
@@ -1582,12 +1907,12 @@ TensorView* shift(
           ".");
     }
 
-    out_dom.push_back(IrBuilder::create<IterDomain>(
-        IrBuilder::create<Int>(out_start_offset),
-        inp_axis->extent(),
-        IrBuilder::create<Int>(out_stop_offset),
-        ParallelType::Serial,
-        inp_axis->getIterType()));
+    out_dom.push_back(
+        IterDomainBuilder(
+            IrBuilder::create<Int>(out_start_offset), inp_axis->extent())
+            .stop_offset(IrBuilder::create<Int>(out_stop_offset))
+            .iter_type(inp_axis->getIterType())
+            .build());
   }
 
   out = IrBuilder::create<TensorView>(
@@ -1704,11 +2029,11 @@ TensorView* gather(
     const auto pad_right = pad_width[i][1];
     // This may be over-conservative
     TORCH_INTERNAL_ASSERT(inp_axis->start()->isZeroInt());
-    const auto inp_stop_offset = inp_axis->stopOffset()->getInt();
     TORCH_INTERNAL_ASSERT(
-        inp_stop_offset.has_value(),
+        inp_axis->stopOffset()->isConstInt(),
         "Dynamic stop offset not supported: ",
         inp_axis);
+    const auto inp_stop_offset = inp_axis->stopOffset()->evaluateInt();
     const auto extent_adjustment = window_dim - 1 - pad_left - pad_right;
     TORCH_CHECK(
         extent_adjustment >= 0,
@@ -1719,19 +2044,19 @@ TensorView* gather(
         pad_left,
         ". Padding right: ",
         pad_right);
-    const auto out_stop_offset = inp_stop_offset.value() + extent_adjustment;
-    out_root_domains.push_back(IrBuilder::create<IterDomain>(
-        FusionGuard::getCurFusion()->zeroVal(),
-        inp_axis->extent(),
-        IrBuilder::create<Int>(out_stop_offset),
-        ParallelType::Serial,
-        inp_axis->getIterType()));
+    const auto out_stop_offset = inp_stop_offset + extent_adjustment;
+    out_root_domains.push_back(
+        IterDomainBuilder(
+            FusionGuard::getCurFusion()->zeroVal(), inp_axis->extent())
+            .stop_offset(IrBuilder::create<Int>(out_stop_offset))
+            .iter_type(inp_axis->getIterType())
+            .build());
     // create a new axis for the gathered domain
-    out_gather_dom.push_back(IrBuilder::create<IterDomain>(
-        FusionGuard::getCurFusion()->zeroVal(),
-        IrBuilder::create<Int>(window_dim),
-        ParallelType::Serial,
-        IterType::Gather));
+    out_gather_dom.push_back(IterDomainBuilder(
+                                 FusionGuard::getCurFusion()->zeroVal(),
+                                 IrBuilder::create<Int>(window_dim))
+                                 .iter_type(IterType::Gather)
+                                 .build());
   }
 
   out_root_domains.insert(
@@ -1772,13 +2097,11 @@ TORCH_CUDA_CU_API TensorView* viewAsScalar(TensorView* inp) {
     out_domain.push_back(d->cloneWithoutRFactor());
   }
 
-  IterDomain* id = IrBuilder::create<IterDomain>(
-      inp_domain[0]->container(),
-      inp_domain[0]->container()->zeroVal(),
-      IrBuilder::create<Int>(vec_size),
-      ParallelType::Serial,
-      IterType::VectorComponent,
-      false);
+  IterDomain* id = IterDomainBuilder(
+                       inp_domain[0]->container()->zeroVal(),
+                       IrBuilder::create<Int>(vec_size))
+                       .iter_type(IterType::VectorComponent)
+                       .build();
   out_domain.push_back(id);
 
   auto out = IrBuilder::create<TensorView>(
@@ -1845,12 +2168,11 @@ static TensorView* newForMma(
         "and",
         tv_b);
 
-    new_domain.push_back(IrBuilder::create<IterDomain>(
-        id->start(),
-        id->extent(),
-        id->stopOffset(),
-        ParallelType::Serial,
-        isReduction ? IterType::Reduction : id->getIterType()));
+    new_domain.push_back(
+        IterDomainBuilder(id->start(), id->extent())
+            .stop_offset(id->stopOffset())
+            .iter_type(isReduction ? IterType::Reduction : id->getIterType())
+            .build());
   }
 
   TensorDomain* td = IrBuilder::create<TensorDomain>(

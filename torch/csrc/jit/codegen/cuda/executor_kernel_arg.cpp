@@ -120,11 +120,39 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
 
 } // namespace
 
+KernelArgumentHolder KernelArgumentHolder::createKernelArgumentHolder(
+    const c10::ArrayRef<c10::IValue>& inputs) {
+  if (inputs.empty()) {
+    // default to int32 on device 0
+    KernelArgumentHolder args(KernelIndexMode::INT32);
+    args.setDeviceIndex(0);
+    return args;
+  }
+  auto device_index = getCommonDeviceCUDA(inputs);
+  auto index_mode = collectIndexMode(inputs);
+
+  KernelArgumentHolder args(index_mode);
+  args.setDeviceIndex(device_index);
+  args.push(inputs);
+
+  return args;
+}
+
 // Push a tensor to the arguments
 void KernelArgumentHolder::push(const at::Tensor& tensor) {
   changed_ = true;
   if (is_cpu_scalar(tensor)) {
     switch (tensor.scalar_type()) {
+      case c10::ScalarType::ComplexDouble:
+        arguments_.push_back(std::make_unique<CpuScalarTensorArg<
+                                 CpuScalarTensorCodegen<c10::complex<double>>>>(
+            tensor.data_ptr<c10::complex<double>>()[0]));
+        break;
+      case c10::ScalarType::ComplexFloat:
+        arguments_.push_back(std::make_unique<CpuScalarTensorArg<
+                                 CpuScalarTensorCodegen<c10::complex<float>>>>(
+            tensor.data_ptr<c10::complex<float>>()[0]));
+        break;
       case c10::ScalarType::Double:
         arguments_.push_back(
             std::make_unique<
@@ -178,7 +206,9 @@ void KernelArgumentHolder::push(const at::Tensor& tensor) {
     c10::ScalarType dtype = tensor.scalar_type();
     std::unique_ptr<TensorArgAbstract> tensor_arg =
         getTensorArg(dtype, nDims, index_mode_);
+    tensor_arg->setTensor(tensor);
     tensor_arg->setPointer(tensor.data_ptr());
+    tensor_arg->setDataType(aten_to_data_type(dtype));
     for (const auto i : c10::irange(nDims)) {
       tensor_arg->setSize(i, tensor.sizes()[i]);
       tensor_arg->setStride(i, tensor.strides()[i]);
@@ -220,6 +250,10 @@ void KernelArgumentHolder::push(const IValue& val) {
       " Tried to create argument to send to a fused kernel, but got a non-scalar type.");
 }
 
+void KernelArgumentHolder::push(int64_t val) {
+  arguments_.push_back(std::make_unique<LongArg>(val));
+}
+
 void KernelArgumentHolder::push(const at::PhiloxCudaState& val) {
   arguments_.push_back(std::make_unique<PhiloxCudaStateArg>(val));
 }
@@ -254,6 +288,17 @@ void KernelArgumentHolder::push(const std::vector<at::Tensor>& tensors) {
   for (const auto& tensor : tensors) {
     push(tensor);
   }
+}
+
+void KernelArgumentHolder::push(const ArgAbstract* arg) {
+  changed_ = true;
+  arguments_.emplace_back(arg->copy_unique_ptr());
+}
+
+void KernelArgumentHolder::swap(int i, const ArgAbstract* arg) {
+  changed_ = true;
+  auto holder = arg->copy_unique_ptr();
+  arguments_[i].swap(holder);
 }
 
 void KernelArgumentHolder::appendPhiloxRNGSeed(uint64_t rand_offset) {

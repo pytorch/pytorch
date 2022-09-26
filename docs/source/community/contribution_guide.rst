@@ -2,18 +2,19 @@ PyTorch Contribution Guide
 ==========================
 
 PyTorch is a GPU-accelerated Python tensor computation package for
-building deep neural networks built on tape-based autograd systems.
+building deep neural networks using a on tape-based autograd systems.
 
-The PyTorch Contribution Process
---------------------------------
+Contribution Process
+--------------------
 
 The PyTorch organization is governed by :doc:`PyTorch
-Governance <governance>`.
+Governance <governance>` and the technical guide to contributing
+can be found in `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_.
 
 The PyTorch development process involves a healthy amount of open
 discussions between the core development team and the community.
 
-PyTorch operates similar to most open source projects on GitHub.
+PyTorch operates similarly to most open source projects on GitHub.
 However, if you've never contributed to an open source project before,
 here is the basic process.
 
@@ -30,7 +31,8 @@ here is the basic process.
       We also maintain some labels for issues that are likely to be
       good for new people, e.g., **bootcamp** and **1hr**, although
       these labels are less well maintained.
-   -  Join us on Slack and let us know you're interested in getting to
+   -  Join us on `dev discuss <https://dev-discuss.pytorch.org/>`_
+      and let us know you're interested in getting to
       know PyTorch. We're very happy to help out researchers and
       partners get up to speed with the codebase.
 
@@ -39,10 +41,12 @@ here is the basic process.
    requests are small; in that case, no need to let us know about what
    you want to do, just get cracking. But if the change is going to be
    large, it's usually a good idea to get some design comments about it
-   first.
+   first by `submitting an RFC <https://github.com/pytorch/rfcs/blob/master/README.md>`__.
 
    -  If you don't know how big a change is going to be, we can help you
-      figure it out! Just post about it on issues or Slack.
+      figure it out! Just post about it on
+      `issues <https://github.com/pytorch/pytorch/issues/>`_ or
+      `dev discuss <https://dev-discuss.pytorch.org/>`_.
    -  Some feature additions are very standardized; for example, lots of
       people add new operators or optimizers to PyTorch. Design
       discussion in these cases boils down mostly to, “Do we want this
@@ -56,34 +60,37 @@ here is the basic process.
         become a standard in the field. If you are not sure where your method falls,
         open an issue first before implementing a PR.
 
-   -  Core changes and refactors can be quite difficult to coordinate,
-      as the pace of development on PyTorch master is quite fast.
+   -  Core changes and refactors can be quite difficult to coordinate
+      since the pace of development on PyTorch master is quite fast.
       Definitely reach out about fundamental or cross-cutting changes;
       we can often give guidance about how to stage such changes into
       more easily reviewable pieces.
 
 -  **Code it out!**
 
-   -  See the technical guide for advice for working with PyTorch in a
+   -  See the `CONTRIBUTING.md <https://github.com/pytorch/pytorch/blob/master/CONTRIBUTING.md>`_ file for advice for working with PyTorch in a
       technical form.
 
 -  **Open a pull request.**
 
-   -  If you are not ready for the pull request to be reviewed, tag it
-      with [WIP]. We will ignore it when doing review passes. If you are
-      working on a complex change, it's good to start things off as WIP,
-      because you will need to spend time looking at CI results to see
-      if things worked out or not.
+   -  If you are not ready for the pull request to be reviewed, create a draft
+      pull request first - you can later convert it to a full PR by pressing
+      "Ready for review" button. You can also prepend the title of the PR with
+      "[WIP]" ("work in progress") while it's still in draft. We will ignore
+      draft PRs when doing review passes. If you are working on a complex change,
+      it's good to start things off as a draft, because you will need to spend
+      time looking at CI results to see if things worked out or not.
    -  Find an appropriate reviewer for your change. We have some folks
       who regularly go through the PR queue and try to review
       everything, but if you happen to know who the maintainer for a
       given subsystem affected by your patch is, feel free to include
-      them directly on the pull request. You can learn more about this
-      structure at PyTorch Subsystem Ownership.
+      them directly on the pull request. You can learn more about
+      `Persons of Interest <https://pytorch.org/docs/master/community/persons_of_interest.html>`_
+      that could review your code.
 
 -  **Iterate on the pull request until it's accepted!**
 
-   -  We'll try our best to minimize the number of review roundtrips and
+   -  We'll try our best to minimize the number of review round trips and
       block PRs only when there are major issues. For the most common
       issues in pull requests, take a look at `Common Mistakes <#common-mistakes-to-avoid>`__.
    -  Once a pull request is accepted and CI is passing, there is
@@ -92,7 +99,7 @@ here is the basic process.
 Getting Started
 ---------------
 
-Proposing new features
+Proposing New Features
 ~~~~~~~~~~~~~~~~~~~~~~
 
 New feature ideas are best discussed on a specific issue. Please include
@@ -143,13 +150,15 @@ can fix, send us a pull request for consideration.
 Take a look at the `Documentation <#on-documentation>`__ section to learn how our system
 works.
 
-Participating in online discussions
+Participating in Online Discussions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-You can find active discussions happening on the PyTorch Discussion
-`forum <https://discuss.pytorch.org/>`__.
+You can find active discussions happening on the `PyTorch Discussion
+Forums <https://discuss.pytorch.org/>`__  for users as well as the
+`PyTorch Dev Discussion Forums <https://dev-discuss.pytorch.org/>`__
+for developers and maintainers.
 
-Submitting pull requests to fix open issues
+Submitting Pull Requests to Fix Open Issues
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can view a list of all open issues
@@ -160,29 +169,29 @@ share your ideas and how you plan to resolve the issue.
 For more challenging issues, the team will provide feedback and
 direction for how to best solve the issue.
 
-If you're not able to fix the issue itself, commenting and sharing
-whether you can reproduce the issue can be useful for helping the team
+If you're not able to fix the issue yourself, commenting and sharing
+whether you can reproduce the issue can help the team
 identify problem areas.
 
-Reviewing open pull requests
+Reviewing Open Pull Requests
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We appreciate your help reviewing and commenting on pull requests. Our
 team strives to keep the number of open pull requests at a manageable
 size, we respond quickly for more information if we need it, and we
 merge PRs that we think are useful. However, due to the high level of
-interest, additional eyes on the pull requests are appreciated.
+interest, additional eyes on the pull requests are always appreciated.
 
-Improving code readability
+Improving Code Readability
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Improve code readability helps everyone. It is often better to submit a
-small number of pull requests that touch few files versus a large pull
+Improving code readability helps everyone. It is often better to submit a
+small number of pull requests that touch a few files versus a large pull
 request that touches many files. Starting a discussion in the PyTorch
 forum `here <https://discuss.pytorch.org/>`__ or on an issue related to
 your improvement is the best way to get started.
 
-Adding test cases to make the codebase more robust
+Adding Test Cases to Make the Codebase More Robust
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Additional test coverage is appreciated.
@@ -193,17 +202,17 @@ Promoting PyTorch
 Your use of PyTorch in your projects, research papers, write ups, blogs,
 or general discussions around the internet helps to raise awareness for
 PyTorch and our growing community. Please reach out to
-`pytorch-marketing@fb.com <http://mailto:pytorch-marketing@fb.com/>`__
+`marketing@pytorch.org <mailto:marketing@pytorch.org>`__
 for marketing support.
 
-Triaging issues
+Triaging Issues
 ~~~~~~~~~~~~~~~
 
 If you feel that an issue could benefit from a particular tag or level
 of complexity, comment on the issue and share your opinion. If you
 feel an issue isn't categorized properly, comment and let the team know.
 
-About open source development
+About Open Source Development
 -----------------------------
 
 If this is your first time contributing to an open source project, some
@@ -215,11 +224,11 @@ aspects of the development process may seem unusual to you.
    really work too well in open source, since someone may decide to work
    on something, and end up not having time to do it. Feel free to give
    information in an advisory fashion, but at the end of the day, we
-   will take running code and rough consensus.
--  **There is a high bar for new functionality that is added.** Unlike
+   will take running code and rough consensus to move forward quickly.
+-  **There is a high bar for new functionality.** Unlike
    in a corporate environment, where the person who wrote code
-   implicitly “owns” it and can be expected to take care of it at the
-   beginning of its lifetime, once a pull request is merged into an open
+   implicitly “owns” it and can be expected to take care of it for the
+   code's lifetime, once a pull request is merged into an open
    source project, it immediately becomes the collective responsibility
    of all maintainers on the project. When we merge code, we are saying
    that we, the maintainers, can review subsequent changes and
@@ -274,11 +283,11 @@ Common Mistakes To Avoid
    an open discussion with the team and the rest of the community before
    building new features. This helps us stay aware of what you're
    working on and increases the chance that it'll be merged.
--  **Did you touch unrelated code to the PR?** To aid in code review,
+-  **Did you touch code unrelated to the PR?** To aid in code review,
    please only include files in your pull request that are directly
    related to your changes.
 
-Frequently asked questions
+Frequently Asked Questions
 --------------------------
 
 -  **How can I contribute as a reviewer?** There is lots of value if
@@ -286,10 +295,10 @@ Frequently asked questions
    otherwise help us identify or troubleshoot issues. Commenting on
    tasks or pull requests with your environment details is helpful and
    appreciated.
--  **CI tests failed, what does it mean?** Maybe you need to merge with
-   master or rebase with latest changes. Pushing your changes should
-   re-trigger CI tests. If the tests persist, you'll want to trace
-   through the error messages and resolve the related issues.
+-  **CI tests failed, what does it mean?** Maybe your PR is based
+   off a broken master? You can try to rebase your change on top
+   of the latest master. You can also see the current status of
+   master's CI at https://hud.pytorch.org/.
 -  **What are the most high risk changes?** Anything that touches build
    configuration is a risky area. Please avoid changing these unless
    you've had a discussion with the team beforehand.
@@ -334,7 +343,7 @@ PyTorch tutorials are documents used to help understand using PyTorch to
 accomplish specific tasks or to understand more holistic concepts.
 Tutorials are built using
 `Sphinx-Gallery <https://sphinx-gallery.readthedocs.io/en/latest/index.html>`__
-from executable python sources files, or from restructured-text (rst)
+from executable python source files, or from restructured-text (rst)
 files.
 
 -  Site: https://pytorch.org/tutorials
@@ -351,10 +360,11 @@ minutes total. At the same time, we do a Netlify build using *make
 html-noplot*, which builds the site without rendering the notebook
 output into pages for quick review.
 
-After a PR is accepted, the site is rebuilt and deployed from CircleCI.
+After a PR is accepted, the site is rebuilt and deployed using GitHub
+Actions.
 
-Contributing a new Tutorial
+Contributing a New Tutorial
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`PyTorch.org Tutorial Contribution
-Guide <https://github.com/pytorch/tutorials/#contributing>`__
+See `PyTorch.org Tutorial Contribution
+Guide <https://github.com/pytorch/tutorials/#contributing>`__.

@@ -15,6 +15,12 @@ class TestFunctionSchema(TestCase):
             self.assertEqual(parsed_schema, schema)
             self.assertTrue(parsed_schema.is_backward_compatible_with(schema))
 
+    def test_out_schema(self):
+        schema_with_out = parse_schema('any.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)')
+        self.assertTrue(schema_with_out.arguments[-1].is_out)
+        schema_without_out = parse_schema('any.not_out(Tensor self, Tensor b) -> Tensor')
+        self.assertFalse(schema_without_out.arguments[-1].is_out)
+
     def test_backward_compatible_structure(self):
         old_schema = parse_schema('any.over(Tensor self, *, Tensor b) -> Tensor')
         # BC: A new schema without changes.
@@ -179,6 +185,26 @@ class TestFunctionSchema(TestCase):
     def test_schema_error(self):
         with self.assertRaisesRegex(RuntimeError, r"schemas with vararg \(...\) can't have default value args"):
             schema = parse_schema("any.foo(int arg1, int arg2=0, ...)")
+
+    def test_tensor_list_alias_annotation_properly_parsed(self):
+        schema_str = 'foo(Tensor self, *, Tensor(a!)[] out) -> ()'
+        schema = parse_schema(schema_str)
+        self.assertTrue(schema.arguments[-1].alias_info.is_write)
+        self.assertEqual(str(schema), schema_str)
+
+    def test_tensor_option_arguments_properly_parsed(self):
+        schema_str = '_to_copy(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, ' \
+                     'bool? pin_memory=None, bool non_blocking=False, MemoryFormat? memory_format=None) -> Tensor'
+        schema = parse_schema(schema_str)
+        # fake type of MemoryFormat? is int?
+        self.assertEqual(schema.arguments[-1].type.str(), "int?")
+        # fake type of Layout? is int?
+        self.assertEqual(schema.arguments[2].type.str(), "int?")
+        # fake type of Device? is Device?
+        self.assertEqual(schema.arguments[3].type.str(), "Device?")
+        # print real types in FunctionSchema
+        self.assertEqual(str(schema), schema_str)
+
 
 if __name__ == '__main__':
     run_tests()

@@ -11,8 +11,6 @@ graph {
     output: "6"
     output: "7"
     output: "8"
-    output: "batch_norm_dead_output-13"
-    output: "batch_norm_dead_output-14"
     name: "BatchNormalization_0"
     op_type: "BatchNormalization"
     attribute {
@@ -24,6 +22,11 @@ graph {
       name: "momentum"
       f: 0.9
       type: FLOAT
+    }
+    attribute {
+      name: "training_mode"
+      i: 1
+      type: INT
     }
   }
   name: "torch_jit"
@@ -149,5 +152,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

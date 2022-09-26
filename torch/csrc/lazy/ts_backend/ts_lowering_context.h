@@ -13,22 +13,6 @@ namespace lazy {
 
 using TSOpVector = std::vector<torch::jit::Value*>;
 
-class TORCH_API TSNodeLoweringInterface {
-  /**
-   * This interface is only needed for legacy ops, and can be removed once all
-   * ops implement TSNode->lower().
-   * */
- public:
-  TSNodeLoweringInterface() = default;
-
-  virtual ~TSNodeLoweringInterface() = default;
-
-  virtual bool Lower(const Node* node) = 0;
-
-  static std::unique_ptr<TSNodeLoweringInterface> Create(
-      LoweringContext* loctx);
-};
-
 class TORCH_API TSComputation : public Computation {
  public:
   TSComputation(const std::shared_ptr<torch::jit::Graph>& graph)
@@ -102,6 +86,8 @@ class TORCH_API TSLoweringContext : public LoweringContext {
     TORCH_INTERNAL_ASSERT(false, "not implemented");
   }
 
+  void Lower(const Node* node);
+
   ComputationPtr Build() override {
     for (torch::jit::Value* output : root_tuple_) {
       graph_->block()->registerOutput(output);
@@ -117,8 +103,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
     if (it == emitted_outputs_.end()) {
       auto post_order = Util::ComputePostOrder(output.node, &emit_status_);
       for (auto node : post_order) {
-        bool ok = lowering_->Lower(node);
-        TORCH_CHECK(ok, "Failed to lower: ", node->ToString());
+        Lower(node);
       }
       // At this point the output better be present, otherwise there is an issue
       // with the lowering code.
@@ -157,10 +142,10 @@ class TORCH_API TSLoweringContext : public LoweringContext {
   }
 
   std::shared_ptr<torch::jit::Graph> graph_;
+  std::shared_ptr<torch::jit::GraphFunction> function_;
   std::unordered_map<BackendData::Handle, Parameter> parameters_map_;
   std::vector<torch::jit::Value*> root_tuple_;
   OutputMap<torch::jit::Value*> emitted_outputs_;
-  std::unique_ptr<TSNodeLoweringInterface> lowering_;
 };
 
 } // namespace lazy

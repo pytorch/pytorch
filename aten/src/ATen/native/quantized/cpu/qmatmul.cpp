@@ -3,7 +3,7 @@
 
 #ifdef USE_RUY_QMATMUL
 #include <ATen/Parallel.h>
-#include <ATen/native/quantized/cpu/ruy_utils.h>
+#include <ATen/native/quantized/cpu/RuyUtils.h>
 #include <ruy/ruy.h>
 #endif
 

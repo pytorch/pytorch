@@ -27,12 +27,6 @@ std::string ptrType(DataType dt) {
   return ss.str();
 }
 
-std::string refType(DataType dt) {
-  std::stringstream ss;
-  ss << dt << "&";
-  return ss.str();
-}
-
 //! Utility class to build an argument list
 class ArgumentBuilder {
  public:
@@ -120,6 +114,38 @@ std::string genCall(
   return ss.str();
 }
 
+//! A utility class to check if an expression of a particular type exists
+class ExprFinder : kir::ConstIrVisitor {
+ public:
+  //! True if expr or any of its nested expressions is included in
+  //! expr_types
+  static bool exists(
+      const Expr* expr,
+      const std::unordered_set<ExprType>& expr_types) {
+    ExprFinder finder(expr_types);
+    finder.handle(std::vector<const Expr*>{expr});
+    return finder.is_found_;
+  }
+
+ private:
+  ExprFinder(const std::unordered_set<ExprType>& expr_types)
+      : expr_types_(expr_types) {}
+
+  using kir::ConstIrVisitor::handle;
+
+  void handle(const Expr* expr) final {
+    if (expr_types_.find(expr->etype()) != expr_types_.end()) {
+      is_found_ = true;
+      return;
+    }
+    kir::ConstIrVisitor::handle(expr);
+  }
+
+ private:
+  const std::unordered_set<ExprType>& expr_types_;
+  bool is_found_ = false;
+};
+
 class CudaKernelGenerator : private OptOutConstDispatch {
   static constexpr const char* kTab = "  ";
 
@@ -138,7 +164,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
  private:
-  explicit CudaKernelGenerator(const kir::Kernel* kernel) : kernel_(kernel) {}
+  explicit CudaKernelGenerator(const kir::Kernel* kernel) : kernel_(kernel) {
+    initStringStreamFormat(code_);
+  }
+
+  void initStringStreamFormat(std::stringstream& ss) {
+    const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
+    ss.imbue(std::locale("C"));
+    ss << std::scientific << std::setprecision(digits);
+  }
 
   // Generates the kernel function declaration
   void genDeclaration(const std::string& kernel_name) {
@@ -207,16 +241,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       const auto nDims = std::count_if(
           maybe_rfactor_domain.begin(),
           maybe_rfactor_domain.end(),
-          [](const IterDomain* id) {
-            return !id->isReduction() &&
-                id->getIterType() != IterType::BroadcastWithoutStride;
-          });
+          [](const IterDomain* id) { return !id->isReduction(); });
       code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
             << varName(tv);
     }
 
     // Kernels generating random numbers take extra (seed, offset) arguments
-    if (kernel_summary.is_stochastic) {
+    if (kernel_summary.max_rng_offsets >= 0) {
       code_ << ", at::PhiloxCudaState philox_args";
     }
 
@@ -228,14 +259,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto& kernel_summary = kernel_->summary();
 
     // Random number generator (optional)
-    if (kernel_summary.is_stochastic) {
-      indent()
-          << "const auto idx = ((((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x) * blockDim.z + threadIdx.z) * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;";
-      indent() << "auto offset = philox_args.captured_ ?\n";
+    if (kernel_summary.max_rng_offsets >= 0) {
+      indent() << "auto philox_offset = philox_args.captured_ ?\n";
       indent()
           << "  static_cast<uint64_t>(*(philox_args.offset_.ptr) + philox_args.offset_intragraph_) :\n";
       indent() << "  philox_args.offset_.val;\n";
-      indent() << "Philox rnd(philox_args.seed_, idx, offset);\n";
+      indent() << "auto seed = philox_args.captured_ ?\n";
+      indent()
+          << "  static_cast<uint64_t>(*(philox_args.seed_.ptr)) : philox_args.seed_.val;\n";
+      indent() << "uint4 rng_result;\n";
+      indent() << "nvfuser_index_t rng_subseq = -1;\n";
+      indent() << "nvfuser_index_t rng_offset = -1;\n";
     }
 
     // Do we have any dynamic shared memory buffers?
@@ -251,7 +285,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // Shared memory
     if (has_dynamic_smem || has_reductions || has_parallel_welford) {
       indent() << "alignas("
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
                << 16 // always align to 16B for any shared mem allocation
 #else
                << 8 // for HIP, we want 8-aligned even for smaller datatypes
@@ -259,18 +293,18 @@ class CudaKernelGenerator : private OptOutConstDispatch {
                << ") extern __shared__ char array[];\n";
 
       if (has_dynamic_smem) {
-        indent() << "unsigned offset = 0;\n";
+        indent() << "unsigned smem_offset = 0;\n";
       }
 
       if (has_reductions || has_parallel_welford) {
         indent() << "void* shared_mem = array;\n";
         if (has_dynamic_smem) {
           if (has_parallel_welford) {
-            indent() << "offset += "
+            indent() << "smem_offset += "
                      << "((blockDim.x * blockDim.y * blockDim.z) * 3 * sizeof("
                      << kernel_summary.largest_smem_data_type << "));\n";
           } else {
-            indent() << "offset += "
+            indent() << "smem_offset += "
                      << "((blockDim.x * blockDim.y * blockDim.z) * sizeof("
                      << kernel_summary.largest_smem_data_type << "));\n";
           }
@@ -329,6 +363,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   std::string gen(const Statement* stmt) {
     std::stringstream tmp_code;
+    initStringStreamFormat(tmp_code);
     std::swap(tmp_code, code_);
     OptOutConstDispatch::handle(stmt);
     std::swap(tmp_code, code_);
@@ -339,6 +374,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     std::stringstream name;
     if (val->isA<TensorView>()) {
       name << "T";
+    } else if (val->isA<kir::IntPair>()) {
+      name << "ip";
     } else {
       name << typePrefix(val->dtype());
     }
@@ -390,9 +427,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       } else if (std::isnan(val)) {
         code_ << "NAN";
       } else {
-        const int digits =
-            std::numeric_limits<Double::ScalarType>::max_digits10;
-        code_ << std::setprecision(digits) << val;
+        code_ << val;
       }
     } else {
       code_ << varName(d);
@@ -400,6 +435,14 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const Int* i) final {
+    // Check the replacement map first. If there's an entry for i, use
+    // the corresponding replacement.
+    auto replace_it = index_replacement_map_.find(i);
+    if (replace_it != index_replacement_map_.end()) {
+      code_ << replace_it->second;
+      return;
+    }
+
     const auto def = i->definition();
     const bool has_alloc = alloc_map_.find(i) != alloc_map_.end();
     if (def != nullptr && !has_alloc) {
@@ -417,9 +460,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
     } else if (c->isConst()) {
-      const int digits = std::numeric_limits<double>::max_digits10;
-      code_ << "std::complex<double>" << std::setprecision(digits)
-            << *c->value();
+      code_ << "std::complex<double>" << *c->value();
     } else {
       code_ << varName(c);
     }
@@ -436,7 +477,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::TensorIndex* ti) final {
+  //! Returns the sum of all indices in a TensorIndex,
+  //!  or 0 if the indices vector is empty.
+  //! Used lowering generic tensor index and lowering
+  //!  mma fragment indices.
+  std::string genTensorIndex(const kir::TensorIndex* ti) {
     bool first = true;
     std::stringstream index;
     for (auto* ind : ti->indices()) {
@@ -452,12 +497,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (first) {
       index << "0";
     }
+
+    return index.str();
+  }
+
+  void handle(const kir::TensorIndex* ti) final {
     bool is_volatile = ti->view()->getMemoryType() == MemoryType::Global &&
         kernel_->summary().sync_map.needsRawSync(ti->view()).hasBID();
     if (is_volatile) {
       code_ << "*(volatile " << ti->getDataType().value() << "*)&";
     }
-    code_ << varName(ti->view()) << "[" << index.str() << "]";
+    code_ << varName(ti->view()) << "[" << genTensorIndex(ti) << "]";
   }
 
   void handle(const ViewAsScalar* sv) final {
@@ -475,6 +525,50 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handle(const TensorView*) final {
     TORCH_INTERNAL_ASSERT(false, "Unreachable");
+  }
+
+  //! Utility for generating vectorized pointer access in ldsm and
+  //!  cpasync.
+  //! TODO: this access pattern as is could be merged with exisiting
+  //!  vectorization handling logic but this path will be updated in
+  //!  follow ups to optimize the generated assembly so keeping them
+  //!  separate path for now.
+  std::string genVectorPointer(Val* val, DataType dtype, int vec_size) {
+    std::stringstream ss;
+
+    ss << "reinterpret_cast<Array<" << dtype << "," << vec_size << ","
+       << vec_size << ">*>(&" << gen(val) << ")";
+
+    return ss.str();
+  }
+
+  // Utility function to emit a cp.async intrinsic
+  void genCpAsync(const LoadStoreOp* ldst, int vec_size) {
+    auto dtype = ldst->in()->getDataType().value();
+
+    indent() << "Ampere::cpAsync("
+             << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+             << genVectorPointer(ldst->in(), dtype, vec_size) << ");\n";
+  }
+
+  void genLdMatrix(const LoadStoreOp* ldst, int vector_word_size) {
+    auto dtype = ldst->in()->getDataType().value();
+    indent() << "Turing::ldMatrix";
+    if (ldst->opType() == LoadStoreOpType::LdMatrixTranspose) {
+      code_ << "T";
+    }
+    code_ << " (";
+    code_ << "*" << genVectorPointer(ldst->out(), dtype, vector_word_size)
+          << ","
+          << "&" << gen(ldst->in()) << ");\n";
+  }
+
+  void handle(const ARangeOp* aop) final {
+    auto index = genTensorIndex(aop->getLinearIndex()->as<kir::TensorIndex>());
+    indent() << gen(aop->output(0)) << " = arange<" << aop->output(0)->dtype()
+             << ">";
+    code_ << "(" << index << ", " << gen(aop->start()) << ", "
+          << gen(aop->step()) << ");\n";
   }
 
   void handle(const UnaryOp* uop) final {
@@ -514,7 +608,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
             vector_size_optional.has_value(),
             "Could not evaluate constant value bound to vectorized dim.");
 
-        vector_word_size = vector_size_optional.value();
+        vector_word_size = vector_size_optional->as<int64_t>();
 
         vectorize_op = id->getParallelType() == ParallelType::Vectorize;
         misaligned_op =
@@ -547,7 +641,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           //  Double buffered local tensors need indexed initialization,
           //   so will need to use `arraySet` option.
           if (out_tv->getMemoryType() == MemoryType::Local &&
-              !out_tv->isDoubleBuffered()) {
+              !(out_tv->isDoubleBuffered() || out_tv->isCircularBuffered())) {
             // Vectorized initialization
             indent() << varName(out_tv) << ".set(" << gen(uop->in()) << ");\n";
           } else {
@@ -612,8 +706,9 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       }
     }
 
+    const auto op_type = uop->getUnaryOpType();
+
     if (uop->out()->isA<NamedScalar>()) {
-      const auto op_type = uop->getUnaryOpType();
       if (auto op = inline_op_str(op_type)) {
         indent() << gen(uop->out()) << " = " << *op << genInline(uop->in())
                  << ";\n";
@@ -630,7 +725,6 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       code_ << " = ";
     }
 
-    const auto op_type = uop->getUnaryOpType();
     if (auto op = inline_op_str(op_type)) {
       if (alsoBooleanOperator(op_type) &&
           uop->out()->dtype() == DataType::Bool) {
@@ -657,18 +751,42 @@ class CudaKernelGenerator : private OptOutConstDispatch {
         }
       }
 
-      code_ << "(";
-      if (op_type == UnaryOpType::RandLike) {
-        code_ << "rnd";
-      } else {
-        code_ << gen(uop->in());
-      }
-      code_ << ")";
+      code_ << "(" << gen(uop->in()) << ")";
     }
 
     if (!print_inline_) {
       code_ << ";\n";
     }
+  }
+
+  void handle(const RNGOp* rop) final {
+    // TODO: TORCH_INTERNAL_ASSERT that the scheduler correctly creates an
+    // innermost ID of size 4 (float) or size 2 (double)?
+    auto out_tv = rop->output(0)->as<kir::TensorIndex>()->view();
+    auto index = genTensorIndex(rop->getPhiloxIndex()->as<kir::TensorIndex>());
+    int multiple = out_tv->getDataType() == DataType::Double ? 2 : 4;
+    indent() << "nvfuser_index_t linear_index" << rop->name() << " = " << index
+             << ";\n";
+    indent() << "nvfuser_index_t rng_subseq" << rop->name() << " = linear_index"
+             << rop->name() << " / " << multiple << ";\n";
+    indent() << "nvfuser_index_t rng_component" << rop->name()
+             << " = linear_index" << rop->name() << " % " << multiple << ";\n";
+    indent() << "nvfuser_index_t rng_offset" << rop->name() << " = "
+             << rop->getRNGOffset() << ";\n";
+    indent() << "if (rng_subseq != rng_subseq" << rop->name()
+             << " || rng_offset != rng_offset" << rop->name() << ") {\n";
+    indent() << "  rng_result = philox(seed, rng_subseq" << rop->name()
+             << ", philox_offset / 4 + rng_offset" << rop->name() << ");\n";
+    indent() << "  rng_subseq = rng_subseq" << rop->name() << ";\n";
+    indent() << "  rng_offset = rng_offset" << rop->name() << ";\n";
+    indent() << "}\n";
+    auto op_type = rop->getRNGOpType();
+    indent() << gen(rop->output(0)) << " = " << op_type;
+    if (needFloatSuffix(op_type) &&
+        rop->output(0)->dtype() == DataType::Float) {
+      code_ << "f";
+    }
+    code_ << "(rng_result, rng_component" << rop->name() << ");\n";
   }
 
   std::string genBinaryOp(
@@ -897,13 +1015,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  std::string genArchString(MmaOptions options) {
+  std::string genArchString(MmaOptions::MacroType macro) {
     std::stringstream ss;
-    if (isVolta(options.macro)) {
+    if (isVolta(macro)) {
       ss << "Volta";
-    } else if (isTuring(options.macro)) {
+    } else if (isTuring(macro)) {
       ss << "Turing";
-    } else if (isAmpere(options.macro)) {
+    } else if (isAmpere(macro)) {
       ss << "Ampere";
     } else {
       TORCH_INTERNAL_ASSERT(false, "mma macro unknown arch");
@@ -914,11 +1032,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   std::string genMmaOp(const MmaOp* mma, bool init = false) {
     std::stringstream ss;
     auto options = mma->options();
-    ss << genArchString(options) << "::";
+    ss << genArchString(options.macro) << "::";
     if (init) {
       ss << "init";
     }
-    ss << toString(options.macro) << toString(options.operand_layout);
+    ss << toString(options.macro);
+
+    if (isVolta(options.macro)) {
+      ss << toString(options.operand_layout);
+    } else if (isTuring(options.macro) || isAmpere(options.macro)) {
+      // mma's in turing and ampere TN only, transpose is handled either
+      //  via ldmatrix for fp16 or explicitly for other types.
+      ss << "TN";
+    }
     // TODO: additional parameter could be removed by swizzling iterdomain
     auto acc_stride = mma->accStride();
     TORCH_INTERNAL_ASSERT(acc_stride > 0);
@@ -931,14 +1057,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     auto options = mma->options();
     auto in_a = mma->inA()->as<kir::TensorIndex>()->view();
     auto dtype = in_a->getDataType().value();
-    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+    indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputARegisterSize(options.macro) << ","
              << getInputARegisterSize(options.macro) << ">*>(&"
-             << gen(mma->inA()) << "),\n";
-    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+             << varName(mma->inA()->as<kir::TensorIndex>()->view()) << ")["
+             << genTensorIndex(mma->inA()->as<kir::TensorIndex>()) << "])"
+             << ",\n";
+    indent() << kTab << "&(reinterpret_cast<Array<" << dtype << ","
              << getInputBRegisterSize(options.macro) << ","
              << getInputBRegisterSize(options.macro) << ">*>(&"
-             << gen(mma->inB()) << ")";
+             << varName(mma->inB()->as<kir::TensorIndex>()->view()) << ")["
+             << genTensorIndex(mma->inB()->as<kir::TensorIndex>()) << "])";
   }
 
   void genMmaInitialization(const MmaOp* mma, const UnaryOp* uop) {
@@ -1123,6 +1252,52 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
+  void handle(const LoadStoreOp* ldst) {
+    // TODO:
+    //  Need to gradually merge the code path of this
+    //   with UnaryOp::Set for vectorization.
+    //  There is quite a bit of possible clean up.
+    bool vectorize_op = false;
+    size_t vector_word_size = 1;
+    auto ti = ldst->out()->as<kir::TensorIndex>();
+
+    // Check vectorization and set vector word size
+    for (auto id : ti->view()->domain()->domain()) {
+      if (!isParallelTypeVectorize(id->getParallelType())) {
+        continue;
+      }
+
+      ExpressionEvaluator expr_eval(id->fusion());
+      auto vector_size_optional = expr_eval.evaluate(id->extent());
+
+      TORCH_INTERNAL_ASSERT(
+          vector_size_optional.has_value(),
+          "Could not evaluate constant value bound to vectorized dim.");
+
+      TORCH_INTERNAL_ASSERT(
+          id->getParallelType() != ParallelType::MisalignedVectorize,
+          "LoadStoreOp: no support yet for mis-aligned vectorization");
+      vector_word_size = vector_size_optional->as<int64_t>();
+      vectorize_op = true;
+      break;
+    }
+
+    // Dispatch instruction generation:
+    switch (ldst->opType()) {
+      case LoadStoreOpType::LdMatrix:
+      case LoadStoreOpType::LdMatrixTranspose:
+        TORCH_INTERNAL_ASSERT(
+            vectorize_op, "LdMatrix: Vectorization required: ", ldst);
+        genLdMatrix(ldst, vector_word_size);
+        break;
+      case LoadStoreOpType::CpAsync:
+        genCpAsync(ldst, vector_word_size);
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "LoadStoreOp: Unknown op type");
+    }
+  }
+
   void handle(const WelfordOp* wop) final {
     TORCH_INTERNAL_ASSERT(wop->out()->isA<kir::TensorIndex>());
 
@@ -1288,6 +1463,19 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     return flags.str();
   }
 
+  void addProfileArguments(ArgumentBuilder& func_args, const Expr* expr) {
+    if (isOptionEnabled(EnableOption::KernelProfile) &&
+        kernel_->profile().isProfiled(expr)) {
+      const auto& buffer_indices =
+          kernel_->profile().getIndicesInProfileBuffer(expr);
+      auto buffer = kernel_->profile().getBuffer();
+      TORCH_INTERNAL_ASSERT(buffer != nullptr);
+      for (const auto& index : buffer_indices) {
+        func_args.arg(varName(buffer)).append("[").append(index).append("]");
+      }
+    }
+  }
+
   void handle(const kir::GridReduction* grop) final {
     TORCH_INTERNAL_ASSERT(grop->out()->isA<kir::TensorIndex>());
 
@@ -1344,6 +1532,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     func_args.arg(genCall(data_type, genInline(grop->init())));
     func_args.arg(genInline(grop->entrance_index()));
     func_args.arg(genInline(grop->entrances()));
+
+    addProfileArguments(func_args, grop);
 
     indent() << "reduction::gridReduce<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
@@ -1412,6 +1602,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // reduction_op
     func_args.arg(genReductionOp(op_type, out->dtype()));
 
+    addProfileArguments(func_args, grop);
+
     indent() << kTab << func_args << ");\n";
   }
 
@@ -1425,15 +1617,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     const auto sync_buffer =
         grouped_grop->sync_buffer()->buffer()->as<TensorView>();
 
-    TORCH_INTERNAL_ASSERT(
-        grouped_grop->numReductions() == 2,
-        "Only grouping of 2 reductions is supported. ",
-        grouped_grop->toString());
-
     if (grouped_grop->isAllreduce()) {
-      generateGridAllreduce(grouped_grop);
+      generateGroupedGridAllreduce(grouped_grop);
       return;
     }
+
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->numExprs() == 2,
+        "Only grouping of 2 reductions is supported. ",
+        grouped_grop->toString());
 
     const std::string flags_str = generateGridReduceTemplateFlags2(
         grouped_grop, grouped_grop->threadPredicate());
@@ -1449,8 +1641,8 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
     ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
 
-    // Apped arguments for each reduction
-    for (const auto i : c10::irange(grouped_grop->numReductions())) {
+    // Append arguments for each reduction
+    for (const auto i : c10::irange(grouped_grop->numExprs())) {
       TORCH_INTERNAL_ASSERT(
           grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
       const auto work_buffer =
@@ -1483,44 +1675,205 @@ class CudaKernelGenerator : private OptOutConstDispatch {
       func_args.arg(read_pred);
     }
 
+    func_args.arg(genInline(grouped_grop->entrance_index()));
+    func_args.arg(genInline(grouped_grop->entrances()));
+
+    addProfileArguments(func_args, grouped_grop);
+
     indent() << "reduction::gridReduceGroup<" << template_args << ">(\n";
     indent() << kTab << func_args << ");\n";
   }
 
-  void generateGridAllreduce(const kir::GroupedGridReduction* grouped_grop) {
+  void handle(const kir::GroupedGridWelford* grouped_gwop) final {
+    if (grouped_gwop->isAllreduce()) {
+      generateGroupedGridAllreduceWelford(grouped_gwop);
+      return;
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "Non-allreduce grouped grid welford is not yet supported");
+    }
+  }
+
+  // Enumerates all combinations of index values of grouped
+  // loops. Each combination is a vector of loop index values. The
+  // length of the vector is the number of grouped loops.
+  //
+  // Example 1: only one domain of extent 2 is grouped: {{0}, {1}}.
+  // Example 2: two domains of extents 2 and 3 are grouped: {{0, 0},
+  // {0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2}}
+  std::vector<std::vector<int64_t>> getGroupedLoopIndexConcreteIntSets() {
+    std::vector<std::vector<int64_t>> index_combinationsatoins;
+
+    // Initialize with an empty vector
+    index_combinationsatoins.push_back(std::vector<int64_t>());
+
+    // Incrementally build a combinatorial set
+    for (const auto loop : grouped_loops_) {
+      const auto iter_count = loop->stop()->evaluateInt();
+      std::vector<std::vector<int64_t>> new_combinations;
+      // Append integers from 0 to iter_count to all the vectors built
+      // so far
+      for (const auto& index_vec : index_combinationsatoins) {
+        for (int64_t i = 0; i < iter_count; ++i) {
+          auto index_vec_appended = index_vec;
+          index_vec_appended.push_back(i);
+          new_combinations.push_back(index_vec_appended);
+        }
+      }
+      index_combinationsatoins = std::move(new_combinations);
+    }
+
+    return index_combinationsatoins;
+  }
+
+  //! Returns all combinations of maps from index Vals of grouped loops to their
+  //! conrete integers.
+  std::vector<std::unordered_map<const Int*, int64_t>>
+  getLoopIndexReplacementMaps() {
+    std::vector<std::unordered_map<const Int*, int64_t>> maps;
+
+    if (grouped_loops_.empty()) {
+      std::unordered_map<const Int*, int64_t> empty_map;
+      return {empty_map};
+    }
+
+    // Vector of indices of grouped loops
+    std::vector<Int*> loop_indices;
+    std::transform(
+        grouped_loops_.begin(),
+        grouped_loops_.end(),
+        std::back_inserter(loop_indices),
+        [](const kir::ForLoop* loop) { return loop->index()->as<Int>(); });
+
+    // All combinations of loop index integer values
+    const auto index_val_sets = getGroupedLoopIndexConcreteIntSets();
+
+    // Create maps from loop index Vals to integers
+    for (const auto& index_values : index_val_sets) {
+      TORCH_INTERNAL_ASSERT(loop_indices.size() == index_values.size());
+      std::unordered_map<const Int*, int64_t> index_val_map;
+      for (const auto i : c10::irange(loop_indices.size())) {
+        auto loop_index = loop_indices.at(i);
+        auto index_val = index_values.at(i);
+        index_val_map.emplace(loop_index, index_val);
+      }
+      maps.emplace_back(std::move(index_val_map));
+    }
+
+    return maps;
+  }
+
+  void generateGroupedGridAllreduce(
+      const kir::GroupedGridReduction* grouped_grop) {
     TORCH_INTERNAL_ASSERT(grouped_grop->isAllreduce());
 
-    // First, build a list of function arguments
-    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    // There are two dimensions of grouping: horizontal grouping and
+    // iteration grouping. The total number of individual reductions
+    // is the number of horizontal reductions * the extent of grouped
+    // iterations. All of them are packed into a single grid reduction
+    // call. The number of reductions is limited, and currently it is
+    // simply an error if exceeded. This could be avoided by
+    // decomposing grouped_grop into smaller groups within the
+    // limit. TODO: Support a larger number of reductions.
 
-    for (const auto i : c10::irange(grouped_grop->numReductions())) {
-      const auto data_type = grouped_grop->outputs().at(i)->dtype();
-      TORCH_INTERNAL_ASSERT(
-          grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
+    // First, enumerate all combinations of loop index values of
+    // grouped IterDomains. If only a single domain is grouped, this
+    // is simply just a 1D vector of integer from 0 to extent-1. If
+    // two domains are grouped, combinations of two integer vectors
+    // are returned. These loop index value vectors are returned as a
+    // map from loop index Vals to concrete int values.
+    const auto index_replacement_maps = getLoopIndexReplacementMaps();
+    const auto num_grouped_iterations = index_replacement_maps.size();
 
-      // out
-      func_args.arg(
-          genCall("RefTuple", data_type, gen(grouped_grop->outputs().at(i))));
+    // This is also checked at the lowering validaiton time, so it
+    // isn't strictly necessary.
+    TORCH_INTERNAL_ASSERT(
+        num_grouped_iterations * grouped_grop->numExprs() <=
+            kMaxNumGroupedReductions,
+        "Too many grouped reductions: ",
+        grouped_grop->toString(),
+        ". Up to ",
+        kMaxNumGroupedReductions,
+        " reductions are allowed.");
 
-      // inp
-      func_args.arg(genCall(
-          "ConstRefTuple", data_type, gen(grouped_grop->inputs().at(i))));
+    ArgumentBuilder types;
+    ArgumentBuilder outputs;
+    ArgumentBuilder inputs;
+    ArgumentBuilder work_bufs;
+    ArgumentBuilder init_vals;
+    ArgumentBuilder reduction_ops;
 
-      // global_work_buffer
-      const auto work_buffer =
-          grouped_grop->reduction_buffers().at(i)->buffer()->as<TensorView>();
-      func_args.arg(genCall(
-          "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
+    ArgumentBuilder bool_types;
+    ArgumentBuilder read_preds;
+    ArgumentBuilder write_preds;
 
-      // init
-      func_args.arg(genCall(
-          "LocalTuple", data_type, genInline(grouped_grop->initVal(i))));
+    for (const auto expr_index : c10::irange(grouped_grop->numExprs())) {
+      const auto data_type = grouped_grop->outputs().at(expr_index)->dtype();
+      TORCH_INTERNAL_ASSERT(grouped_grop->reduction_buffers()
+                                .at(expr_index)
+                                ->buffer()
+                                ->isA<TensorView>());
 
-      // reduction op
-      func_args.arg(genReductionOp(
-          grouped_grop->getReductionOpType(i),
-          grouped_grop->output(i)->dtype()));
+      for (const auto& group_index :
+           c10::irange(index_replacement_maps.size())) {
+        // Set the index replacement map with the concrete values of
+        // indices of grouped loops.
+        index_replacement_map_ = index_replacement_maps.at(group_index);
+
+        types.arg(data_type);
+
+        // out
+        outputs.arg(gen(grouped_grop->outputs().at(expr_index)));
+
+        // inp
+        inputs.arg(gen(grouped_grop->inputs().at(expr_index)));
+
+        // global_work_buffer
+        const auto work_buffer = grouped_grop->reduction_buffers()
+                                     .at(expr_index)
+                                     ->buffer()
+                                     ->as<TensorView>();
+        // Separate Work buffer is used for each reduction.
+        auto work_buffer_offset = group_index == 0
+            ? "0"
+            : (genInline(grouped_grop->buffer_stride()) + " * " +
+               std::to_string(group_index));
+        work_bufs.arg("&")
+            .append(varName(work_buffer))
+            .append("[")
+            .append(work_buffer_offset)
+            .append("]");
+        init_vals.arg(genInline(grouped_grop->initVal(expr_index)));
+
+        reduction_ops.arg(genReductionOp(
+            grouped_grop->getReductionOpType(expr_index),
+            grouped_grop->output(expr_index)->dtype()));
+
+        // read and write predicates
+        bool_types.arg("bool");
+        // Same argument for all inputs. Different predicates would be
+        // used when grouping is done across iterations
+        TORCH_INTERNAL_ASSERT(
+            grouped_grop->predicate() != nullptr &&
+            grouped_grop->predicate()->hasValue());
+        const auto read_pred = genInline(grouped_grop->predicate());
+        read_preds.arg(read_pred);
+        if (grouped_grop->writePredicate() != nullptr) {
+          TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
+          write_preds.arg(genInline(grouped_grop->writePredicate()));
+        } else {
+          write_preds.arg(read_pred);
+        }
+
+        index_replacement_map_.clear();
+      }
     }
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    func_args.arg(genCall("RefTuple", types, outputs));
+    func_args.arg(genCall("ConstRefTuple", types, inputs));
+    func_args.arg(genCall("VolatilePtrTuple", types, work_bufs));
+    func_args.arg(genCall("LocalTuple", types, init_vals));
 
     // global_sync_buffer
     const auto sync_buffer =
@@ -1530,22 +1883,164 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // shared_buf
     func_args.arg("shared_mem");
 
-    // read and write predicates
-    TORCH_INTERNAL_ASSERT(
-        grouped_grop->predicate() != nullptr &&
-        grouped_grop->predicate()->hasValue());
-    const auto read_pred = genInline(grouped_grop->predicate());
-    func_args.arg(read_pred);
-    if (grouped_grop->writePredicate() != nullptr) {
-      TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
-      func_args.arg(genInline(grouped_grop->writePredicate()));
-    } else {
-      func_args.arg(read_pred);
-    }
+    func_args.arg(genCall("LocalTuple", bool_types, read_preds));
+    func_args.arg(genCall("LocalTuple", bool_types, write_preds));
+
+    addProfileArguments(func_args, grouped_grop);
+
+    func_args.arg(reduction_ops);
 
     indent() << genFusedReductionName(ir_utils::getTvOutput(grouped_grop))
              << ".reduceGroup(\n";
     indent() << kTab << func_args << ");\n";
+  }
+
+  // Mostly the same as the grouped grid redution version
+  void generateGroupedGridAllreduceWelford(
+      const kir::GroupedGridWelford* grouped_gwop) {
+    TORCH_INTERNAL_ASSERT(grouped_gwop->isAllreduce());
+
+    const auto index_replacement_maps = getLoopIndexReplacementMaps();
+    const auto num_grouped_iterations = index_replacement_maps.size();
+
+    // This is also checked at the lowering validaiton time, so it
+    // isn't strictly necessary.
+    TORCH_INTERNAL_ASSERT(
+        num_grouped_iterations * grouped_gwop->numExprs() <=
+            kMaxNumGroupedReductions,
+        "Too many grouped reductions: ",
+        grouped_gwop->toString(),
+        ". Up to ",
+        kMaxNumGroupedReductions,
+        " reductions are allowed.");
+
+    ArgumentBuilder data_types;
+    ArgumentBuilder index_types;
+
+    // Note that the data type of var and avg and that of N are the
+    // same with all the welford ops since we only support
+    // grouping of iterations.
+    const auto data_type = grouped_gwop->outputVals().at(0).avg()->dtype();
+    const auto index_type = grouped_gwop->outputVals().at(0).N()->dtype();
+
+    std::array<ArgumentBuilder, 3> out_args;
+    std::array<ArgumentBuilder, 3> in_args;
+    std::array<ArgumentBuilder, 3> init_args;
+    std::array<ArgumentBuilder, 3> work_bufs;
+
+    ArgumentBuilder bool_types;
+    ArgumentBuilder read_preds;
+    ArgumentBuilder write_preds;
+
+    for (const auto expr_index : c10::irange(grouped_gwop->numExprs())) {
+      const auto& output = grouped_gwop->outputVals().at(expr_index);
+      const auto& input = grouped_gwop->inputVals().at(expr_index);
+      const auto& init = grouped_gwop->initVals().at(expr_index);
+
+      for (const auto& group_index :
+           c10::irange(index_replacement_maps.size())) {
+        // Set the index replacement map with the concrete values of
+        // indices of grouped loops.
+        index_replacement_map_ = index_replacement_maps.at(group_index);
+
+        data_types.arg(data_type);
+        index_types.arg(index_type);
+
+        auto work_buffer_offset = group_index == 0
+            ? "0"
+            : (genInline(grouped_gwop->buffer_stride()) + " * " +
+               std::to_string(group_index));
+
+        // Setup arguments for avg, var, and N
+        for (const auto i : c10::irange(3)) {
+          out_args[i].arg(gen(output.get(i)));
+          in_args[i].arg(gen(input.get(i)));
+          init_args[i].arg(gen(init.get(i)));
+          const auto work_buffer = grouped_gwop->reduction_buffers()[i]
+                                       .at(expr_index)
+                                       ->buffer()
+                                       ->as<TensorView>();
+          work_bufs[i]
+              .arg("&")
+              .append(varName(work_buffer))
+              .append("[")
+              .append(work_buffer_offset)
+              .append("]");
+        }
+
+        // read and write predicates
+        bool_types.arg("bool");
+        // Same argument for all inputs. Different predicates would be
+        // used when grouping is done across iterations
+        TORCH_INTERNAL_ASSERT(grouped_gwop->predicate() != nullptr);
+        TORCH_INTERNAL_ASSERT(
+            grouped_gwop->predicate() != nullptr &&
+            grouped_gwop->predicate()->hasValue());
+        const auto read_pred = genInline(grouped_gwop->predicate());
+        read_preds.arg(read_pred);
+        if (grouped_gwop->writePredicate() != nullptr) {
+          TORCH_INTERNAL_ASSERT(grouped_gwop->writePredicate()->hasValue());
+          write_preds.arg(genInline(grouped_gwop->writePredicate()));
+        } else {
+          write_preds.arg(read_pred);
+        }
+
+        index_replacement_map_.clear();
+      }
+    }
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    // output
+    func_args.arg(genCall("RefTuple", data_types, out_args[0]));
+    func_args.arg(genCall("RefTuple", data_types, out_args[1]));
+    func_args.arg(genCall("RefTuple", index_types, out_args[2]));
+    // input
+    func_args.arg(genCall("ConstRefTuple", data_types, in_args[0]));
+    func_args.arg(genCall("ConstRefTuple", data_types, in_args[1]));
+    func_args.arg(genCall("ConstRefTuple", index_types, in_args[2]));
+    // init
+    func_args.arg(genCall("LocalTuple", data_types, init_args[0]));
+    func_args.arg(genCall("LocalTuple", data_types, init_args[1]));
+    func_args.arg(genCall("LocalTuple", index_types, init_args[2]));
+    // work buffer
+    func_args.arg(genCall("VolatilePtrTuple", data_types, work_bufs[0]));
+    func_args.arg(genCall("VolatilePtrTuple", data_types, work_bufs[1]));
+    func_args.arg(genCall("VolatilePtrTuple", index_types, work_bufs[2]));
+    // global_sync_buffer
+    const auto sync_buffer =
+        grouped_gwop->sync_buffer()->buffer()->as<TensorView>();
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+
+    // shared_buf
+    ArgumentBuilder smem_buffer_args;
+    smem_buffer_args.arg(
+        genCall("reinterpret_cast", ptrType(data_type), "shared_mem_avg"));
+    smem_buffer_args.arg(
+        genCall("reinterpret_cast", ptrType(data_type), "shared_mem_var"));
+    smem_buffer_args.arg(
+        genCall("reinterpret_cast", ptrType(index_type), "shared_mem_n"));
+    func_args.arg(genCall(
+        "PtrTuple",
+        ArgumentBuilder().arg(data_type).arg(data_type).arg(index_type),
+        smem_buffer_args));
+
+    func_args.arg(genCall("LocalTuple", bool_types, read_preds));
+    func_args.arg(genCall("LocalTuple", bool_types, write_preds));
+
+    addProfileArguments(func_args, grouped_gwop);
+
+    ArgumentBuilder func_template_args;
+    func_template_args.arg(
+        grouped_gwop->numExprs() * index_replacement_maps.size());
+    func_template_args.arg(data_type);
+    func_template_args.arg(index_type);
+
+    indent() << genCall(
+                    genFusedReductionName(ir_utils::getTvOutput(grouped_gwop)) +
+                        ".welfordGroup",
+                    func_template_args,
+                    func_args)
+             << ";\n";
   }
 
   void handle(const kir::GridBroadcast* grop) final {
@@ -1836,7 +2331,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   void handleTrivialLoop(const kir::ForLoop* loop) {
     if (loop->vectorize()) {
-      vectorize_scope_ = loop->vectorize();
+      vectorize_scope_ = true;
     }
     handleScope(loop->body());
     if (loop->vectorize()) {
@@ -1845,7 +2340,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   }
 
   void handle(const GroupedReductionOp* grouped_rop) final {
-    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+    for (const auto i : c10::irange(grouped_rop->numExprs())) {
       TORCH_INTERNAL_ASSERT(grouped_rop->output(i)->isA<kir::TensorIndex>());
 
       const auto output = grouped_rop->output(i)->as<kir::TensorIndex>();
@@ -1858,7 +2353,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
       TORCH_INTERNAL_ASSERT(
           !has_grid_reduce,
-          "GroupedReductionOp does not support block parallelization. GroupedGridReductionOp must be used. ",
+          "GroupedReductionOp does not support block parallelization. GroupedGridReduction must be used. ",
           grouped_rop->toString());
 
       if (!has_block_reduce) {
@@ -1884,9 +2379,37 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
+  void handle(const GroupedWelfordOp* grouped_wop) final {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Should not reach here as grouped welford is only enabled for grid welford,",
+        " which is handled by its own handler");
+  }
+
+  //! True if loop is grouped. The IterDomain of the loop must have
+  //! ParallelType::Group, but it isn't sufficient as the loop may be
+  //! for an initialization expression, for which the loop shold not
+  //! be grouped. Make sure a GroupedGridReduction is found.
+  bool isGroupedLoop(const kir::ForLoop* loop) {
+    if (loop->iter_domain()->getParallelType() != ParallelType::Group) {
+      return false;
+    }
+    return ExprFinder::exists(
+        loop, {ExprType::GroupedGridReduction, ExprType::GroupedGridWelford});
+  }
+
   void handle(const kir::ForLoop* loop) final {
     if (loop->isTrivial()) {
       handleTrivialLoop(loop);
+      return;
+    }
+
+    // If a loop is grouped, no loop is created, but it isn't
+    // considered trivial as the loop trip count is not one.
+    if (isGroupedLoop(loop)) {
+      grouped_loops_.push_back(loop);
+      handleScope(loop->body());
+      grouped_loops_.pop_back();
       return;
     }
 
@@ -1985,15 +2508,15 @@ class CudaKernelGenerator : private OptOutConstDispatch {
           break;
         case MemoryType::Shared:
           // Align Offset Position
-          indent() << "offset = alignBufferSize(offset, "
+          indent() << "smem_offset = alignBufferSize(smem_offset, "
                    // Always align to 128b / 16B
                    << 16 << ");\n";
           // Shared Memory Pointer
           indent() << buffer_dtype << "* " << varName(tv)
                    << " = reinterpret_cast<" << buffer_dtype << "*>"
-                   << "(array + offset);\n";
+                   << "(array + smem_offset);\n";
           // Increment Offset Position
-          indent() << "offset += (" << genInline(size) << " * sizeof("
+          indent() << "smem_offset += (" << genInline(size) << " * sizeof("
                    << buffer_dtype << "));\n";
           break;
         case MemoryType::Local: {
@@ -2012,13 +2535,29 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     }
   }
 
-  void handle(const kir::BlockSync*) final {
+  void handle(const kir::BlockSync* sync) final {
     // Use a custom synchronization method if enabled
     if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
       indent() << "block_sync::sync();\n";
     } else {
       indent() << "__barrier_sync(0);\n";
     }
+  }
+
+  void handle(const kir::CpAsyncWait* cpasync_wait) final {
+    if (cpasync_wait->keepStages() > 0) {
+      // Perform partial sync, see comment on kir::CpAsyncWait.
+      indent() << "Ampere::cpAsyncPartialBarrier<" << cpasync_wait->keepStages()
+               << ">();\n";
+    } else {
+      // Perform sync all, see comment on kir::CpAsyncWait.
+      indent() << "Ampere::cpAsyncBarrier();\n";
+    }
+  }
+
+  void handle(const kir::CpAsyncCommit* cpasync_wait) final {
+    // Commit inflight cp.async transfers. See comment on kir::CpAsyncCommit.
+    indent() << "Ampere::cpAsyncCommit();\n";
   }
 
   void handle(const kir::GridSync* sync) final {
@@ -2061,6 +2600,50 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
   }
 
+  void handle(const kir::Swizzle2DInt* swizzle_2d) {
+    TORCH_INTERNAL_ASSERT(print_inline_);
+    TORCH_INTERNAL_ASSERT(
+        swizzle_2d->swizzleType() != Swizzle2DType::NoSwizzle,
+        "Swizzle type undefined.");
+    if (print_inline_) {
+      code_ << swizzle_2d->swizzleType() << "({" << gen(swizzle_2d->inX())
+            << "," << gen(swizzle_2d->inY()) << "} , "
+            << "{" << gen(swizzle_2d->extentX()) << ","
+            << gen(swizzle_2d->extentY()) << "})";
+    }
+  }
+
+  void handle(const kir::IntPair* int_pair) {
+    const auto def = int_pair->definition();
+    TORCH_INTERNAL_ASSERT(
+        def != nullptr, "no support for un-inlined int pair yet.");
+    code_ << gen(def);
+  }
+
+  void handle(const kir::PairSelect* pair_select) {
+    if (print_inline_) {
+      code_ << gen(pair_select->in());
+    } else {
+      indent() << gen(pair_select->out()) << " = " << gen(pair_select->in());
+    }
+
+    switch (pair_select->selection()) {
+      case kir::PairSelect::Selection::X:
+        code_ << ".x";
+        break;
+      case kir::PairSelect::Selection::Y:
+        code_ << ".y";
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "unknown select")
+        break;
+    }
+
+    if (!print_inline_) {
+      code_ << ";\n";
+    }
+  }
+
  private:
   std::stringstream code_;
   const kir::Kernel* kernel_;
@@ -2070,10 +2653,13 @@ class CudaKernelGenerator : private OptOutConstDispatch {
 
   // Mark when we are inside of a vectorized for-loop
   bool vectorize_scope_ = false;
-
   //! Keep track of Allocate node for Val. Used to determine if Val
   //! should be inlined.
   std::unordered_map<const Val*, const kir::Allocate*> alloc_map_;
+  //! Keep track of grouped loops
+  std::deque<const kir::ForLoop*> grouped_loops_;
+  //! Used to replace symbolic indices with concrete values
+  std::unordered_map<const Int*, int64_t> index_replacement_map_;
 };
 
 } // namespace

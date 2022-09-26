@@ -7,6 +7,11 @@ graph {
     name: "RandomNormal_0"
     op_type: "RandomNormal"
     attribute {
+      name: "dtype"
+      i: 1
+      type: INT
+    }
+    attribute {
       name: "shape"
       ints: 1
       ints: 2
@@ -69,5 +74,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

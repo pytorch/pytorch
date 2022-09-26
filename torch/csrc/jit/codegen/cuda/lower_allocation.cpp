@@ -141,7 +141,8 @@ class AllocationInserter : public kir::ExprMutator {
             nullptr,
             false,
             nullptr,
-            false);
+            false,
+            DoubleBufferLoopStage::NotApplicable);
       } else {
         new_loop = IrBuilder::create<kir::ForLoop>(id);
       }
@@ -160,8 +161,7 @@ class AllocationInserter : public kir::ExprMutator {
     std::vector<Val*> alloc_dims;
 
     for (const auto id : maybe_rfactor_domain) {
-      if (id->isReduction() || id->isStride() ||
-          id->getIterType() == IterType::BroadcastWithoutStride) {
+      if (id->isReduction() || id->isStride() || id->isBroadcast()) {
         continue;
       }
       auto extent = id->extent();
@@ -408,7 +408,7 @@ class AllocationInserter : public kir::ExprMutator {
 
     // Double the allocation size if double-buffered. Record the
     // original size for indexing.
-    if (info.buffer->isDoubleBuffered()) {
+    if (info.buffer->isDoubleBuffered() || info.buffer->isCircularBuffered()) {
       Val* original_alloc_size = nullptr;
       for (auto alloc_dim : alloc_dims) {
         if (original_alloc_size == nullptr) {
@@ -420,7 +420,11 @@ class AllocationInserter : public kir::ExprMutator {
       }
       GpuLower::current()->doubleBufferInfo().setOriginalAllocSize(
           info.buffer, original_alloc_size);
-      alloc_dims.push_back(IrBuilder::create<Int>(2));
+      int double_buffer_stage = 2;
+      if (info.buffer->isCircularBuffered()) {
+        double_buffer_stage = info.buffer->circularBufferDepth();
+      }
+      alloc_dims.push_back(IrBuilder::create<Int>(double_buffer_stage));
     }
 
     // Create the allocation node
@@ -474,6 +478,11 @@ class AllocationInserter : public kir::ExprMutator {
               out->name() == welford->outN()->name(), "Unreachable");
           init = welford->initN();
         }
+      } else if (expr->isA<GroupedWelfordOp>()) {
+        TORCH_INTERNAL_ASSERT(
+            default_val == nullptr,
+            "Welford should not have a default initialization value for predicate elimination.");
+        init = expr->as<GroupedWelfordOp>()->getInitValOfOutput(out);
       } else if (default_val != nullptr) {
         init = default_val;
       }

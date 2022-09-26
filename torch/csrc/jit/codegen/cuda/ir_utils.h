@@ -106,6 +106,10 @@ class FilteredView {
     return begin() == end();
   }
 
+  std::vector<value_type> vector() const {
+    return std::vector<value_type>(begin(), end());
+  }
+
  private:
   const InputIt input_it_;
   const InputIt last_;
@@ -123,6 +127,14 @@ template <typename FilterType, typename ContainerType>
 auto filterByType(const ContainerType& inputs) {
   return filterByType<FilterType>(inputs.cbegin(), inputs.cend());
 }
+
+//! Returns a list of new-to-old mappings.
+//!
+//! This funcion canonicalizes the dimensions and validates that multiple old
+//! dimension are mapped to the same new dimension.
+std::vector<int64_t> normalizeNew2Old(
+    const std::vector<int64_t>& new2old_in,
+    size_t ndims);
 
 //! Returns a list of new-to-old mappings.
 //!
@@ -148,6 +160,18 @@ std::vector<int> normalizeOld2New(
 // Reference is found through direct pointer comparison.
 Expr* replaceValInExpr(Expr* expr, Val* reference, Val* substitute);
 
+//! Replace Vals in an index Val as specified by replacement_map while
+//! cloning the given index Val. The index val is assumed to represent
+//! a tensor index consisting of Ints  and arithmetic expressions.
+//!
+//! This is similar to replaceValInExpr but is different as Vals are
+//! cloned such that no other exprs using the same leaf Vals are not
+//! modified. TODO: Consider cleaning up the multiple replacement
+//! routines.
+Val* replaceValInIndexVal(
+    Val* index,
+    const std::unordered_map<Val*, Val*>& replacement_map);
+
 // Makes rfactor generic with reduction ops and Welford
 TORCH_CUDA_CU_API TensorView* rfactorHelper(
     TensorView* red_tv,
@@ -172,6 +196,16 @@ TORCH_CUDA_CU_API std::vector<Val*> producerValsOf(Val* val);
 // strictly between fusion inputs/outputs, it could effectively return dead
 // code.
 TORCH_CUDA_CU_API std::vector<Val*> consumerValsOf(Val* val);
+
+// Return immediate siblings of val, this function can be used on any Val and
+// will return siblings through Exprs.
+//
+// Warning: returned val's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses val->definition() or val->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<Val*> siblingValsOf(Val* val);
 
 // Return immediate producers of vals, this function can be used on any vals and
 // will return producers through Exprs.
@@ -215,6 +249,16 @@ TORCH_CUDA_CU_API std::vector<TensorView*> producerTvsOf(TensorView* tv);
 // code.
 TORCH_CUDA_CU_API std::vector<TensorView*> consumerTvsOf(TensorView* tv);
 
+// Return immediate siblings of tv, this function will return all immediate
+// siblings of tv through Exprs.
+//
+// Warning: returned tv's are not guaranteed to be between fusion inputs and
+// outputs. This function simply uses tv->definition() or tv->uses() which is
+// limited to not go through fusion inputs/outputs, but if on a path that isn't
+// strictly between fusion inputs/outputs, it could effectively return dead
+// code.
+TORCH_CUDA_CU_API std::vector<TensorView*> siblingTvsOf(TensorView* tv);
+
 // Return immediate producers of tvs, this function will return all immediate
 // producers of tvs through Exprs.
 //
@@ -254,12 +298,24 @@ TORCH_CUDA_CU_API std::vector<TensorView*> outputTvsOf(
 // returns all tensor views in fusion that are used between outputs and inputs.
 TORCH_CUDA_CU_API std::vector<TensorView*> allTvs(Fusion* fusion);
 
+// returns all tensor views in fusion that are used between outputs and inputs
+// except the specified set.
+TORCH_CUDA_CU_API std::vector<TensorView*> allTvsExcept(
+    Fusion* fusion,
+    const std::unordered_set<TensorView*>& except);
+
 TORCH_CUDA_CU_API std::vector<Expr*> getReductionOps(
     Fusion* fusion,
     bool ignore_trivial = true);
 
 // Returns the initialization value of tv or nullptr if not initialized.
 TORCH_CUDA_CU_API Val* getReductionInitValOf(TensorView* tv);
+
+// Returns if Expr is a reduction op
+TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
+
+// Returns if Expr is a reduction op with TensorView or TensorIndex
+TORCH_CUDA_CU_API bool isReductionTvOp(const Expr*);
 
 template <typename T>
 std::string toString(const T& nodes) {

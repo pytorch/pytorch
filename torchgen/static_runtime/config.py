@@ -1,10 +1,13 @@
-from torchgen.model import NativeFunctionsGroup
+from typing import Dict, Union
 
-from typing import Dict
+from torchgen.model import NativeFunctionsGroup, NativeFunctionsViewGroup
 
 
-def func_name_base_str(g: NativeFunctionsGroup) -> str:
-    return str(g.functional.func.name.name.base)
+def func_name_base_str(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> str:
+    if isinstance(g, NativeFunctionsGroup):
+        return str(g.functional.func.name.name.base)
+    else:
+        return str(g.view.root_name)
 
 
 is_hand_written_ops_ = frozenset(
@@ -35,11 +38,24 @@ is_hand_written_ops_ = frozenset(
         "sign",
         "sub",
         "tanh",
+        "detach",
+        "expand_as",
+        "flatten",
+        "narrow",
+        "reshape_as",
+        "select",
+        "slice",
+        "softmax",
+        "split",
+        "squeeze",
+        "transpose",
+        "view",
+        "where",
     )
 )
 
 
-def is_hand_written(g: NativeFunctionsGroup) -> bool:
+def is_hand_written(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
     name_base = func_name_base_str(g)
     return name_base in is_hand_written_ops_
 
@@ -86,9 +102,9 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
         return
     if op_name == "take_along_dim":
         if index == 0:
-            arg_map["indices"] = "at::argsort(self0, 1)"
+            arg_map["indices"] = "at::argsort(self0, 1, true)"
         else:
-            arg_map["indices"] = "at::argsort(self1, 1)"
+            arg_map["indices"] = "at::argsort(self1, 1, true)"
         return
     if op_name == "masked_select":
         if index == 0:
@@ -198,23 +214,39 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
         return
     if op_name == "adaptive_max_pool2d_backward":
         if index == 0:
-            arg_map["grad_output"] = "at::randint(-3, 2, {2,2,2})"
-            arg_map["self"] = "at::randint(-3, 2, {2,2,2})"
-            arg_map["indices"] = "at::randint(0, 1, {2,2,2}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({2, 2, 2}, at::kFloat)"
+            arg_map["self"] = "at::rand({2, 2, 2}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {2, 2, 2}, at::kLong)"
         else:
-            arg_map["grad_output"] = "at::randint(-3, 3, {3,3,3})"
-            arg_map["self"] = "at::randint(-3, 2, {3,3,3})"
-            arg_map["indices"] = "at::randint(0, 1, {3,3,3}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({3, 3, 3}, at::kFloat)"
+            arg_map["self"] = "at::rand({3, 3, 3}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {3, 3, 3}, at::kLong)"
         return
     if op_name == "adaptive_max_pool3d_backward":
         if index == 0:
-            arg_map["grad_output"] = "at::randint(-3, 2, {2,2,2,2})"
-            arg_map["self"] = "at::randint(-3, 2, {2,2,2,2})"
-            arg_map["indices"] = "at::randint(0, 1, {2,2,2,2}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({2, 2, 2, 2}, at::kFloat)"
+            arg_map["self"] = "at::rand({2, 2, 2, 2}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {2, 2, 2, 2}, at::kLong)"
         else:
-            arg_map["grad_output"] = "at::randint(-3, 3, {3,3,3,3})"
-            arg_map["self"] = "at::randint(-3, 2, {3,3,3,3})"
-            arg_map["indices"] = "at::randint(0, 1, {3,3,3,3}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({3, 3, 3, 3}, at::kFloat)"
+            arg_map["self"] = "at::rand({3, 3, 3, 3}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {3, 3, 3, 3}, at::kLong)"
+        return
+    if op_name == "bitwise_left_shift":
+        if index == 0:
+            arg_map["self"] = "at::randint(1, 1 << 4, {6, 6, 6}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 26, {6, 6, 6}, at::kInt)"
+        else:
+            arg_map["self"] = "at::randint(1, 1 << 4, {22, 22, 22}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 26, {22, 22, 22}, at::kInt)"
+        return
+    if op_name == "bitwise_right_shift":
+        if index == 0:
+            arg_map["self"] = "at::randint(1 << 21, 1 << 30, {6, 6, 6}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 22, {6, 6, 6}, at::kInt)"
+        else:
+            arg_map["self"] = "at::randint(1 << 21, 1 << 30, {22, 22, 22}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 22, {22, 22, 22}, at::kInt)"
         return
     if op_name == "gather":
         if index == 0:
@@ -348,4 +380,9 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
             arg_map["self"] = "at::randint(0, 3, {12}, at::kInt)"
             arg_map["size"] = "24"
             arg_map["out_int32"] = "false"
+        return
+    if op_name in ("diagonal", "linalg_diagonal"):
+        arg_map["offset"] = "0"
+        arg_map["dim0"] = "1"
+        arg_map["dim1"] = "2"
         return

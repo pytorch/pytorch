@@ -12,10 +12,11 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
-    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
+    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
+    TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
 
 # The implementation should be moved here as soon as the deprecation period is over.
@@ -273,7 +274,7 @@ def _update_param_kwargs(param_kwargs, name, value):
     if isinstance(value, list) or isinstance(value, tuple):
         # Make name plural (e.g. devices / dtypes) if the value is composite.
         param_kwargs['{}s'.format(name)] = value
-    elif value:
+    elif value is not None:
         param_kwargs[name] = value
 
     # Leave param_kwargs as-is when value is None.
@@ -486,6 +487,25 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
+# See Note [Lazy Tensor tests in device agnostic testing]
+lazy_ts_backend_init = False
+class LazyTestBase(DeviceTypeTestBase):
+    device_type = 'lazy'
+
+    def _should_stop_test_suite(self):
+        return False
+
+    @classmethod
+    def setUpClass(cls):
+        import torch._lazy
+        import torch._lazy.metrics
+        import torch._lazy.ts_backend
+        global lazy_ts_backend_init
+        if not lazy_ts_backend_init:
+            # Need to connect the TS backend to lazy key before running tests
+            torch._lazy.ts_backend.init()
+            lazy_ts_backend_init = True
+
 class MPSTestBase(DeviceTypeTestBase):
     device_type = 'mps'
 
@@ -570,7 +590,7 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -592,6 +612,14 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
                                                                  except_for, only_for)
+    if include_lazy:
+        # Note [Lazy Tensor tests in device agnostic testing]
+        # Right now, test_view_ops.py runs with LazyTensor.
+        # We don't want to opt every device-agnostic test into using the lazy device,
+        # because many of them will fail.
+        # So instead, the only way to opt a specific device-agnostic test file into
+        # lazy tensor testing is with include_lazy=True
+        desired_device_type_test_bases.append(LazyTestBase)
 
     def split_if_not_empty(x: str):
         return x.split(",") if len(x) != 0 else []
@@ -717,6 +745,7 @@ class ops(_TestParametrizer):
                                'context; use it with instantiate_device_type_tests() instead of '
                                'instantiate_parametrized_tests()')
 
+        op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
             dtypes: Union[Set[torch.dtype], Set[None]]
@@ -794,6 +823,9 @@ class ops(_TestParametrizer):
                     # Provides an error message for debugging before rethrowing the exception
                     print("Failed to instantiate {0} for op {1}!".format(test_name, op.name))
                     raise ex
+        if op is check_exhausted_iterator:
+            raise ValueError('An empty op_list was passed to @ops. '
+                             'Note that this may result from reuse of a generator.')
 
 # Decorator that skips a test if the given condition is true.
 # Notes:
@@ -1129,69 +1161,10 @@ def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 def expectedFailureMeta(fn):
-    return expectedFailure('meta')(fn)
+    return skipIfTorchDynamo()(expectedFailure('meta')(fn))
 
 def expectedFailureXLA(fn):
     return expectedFailure('xla')(fn)
-
-# This decorator checks that the decorated function produces a nondeterministic
-# alert for the expected device types
-class expectedAlertNondeterministic:
-    # Args:
-    #
-    #   caller_name (str): Name of the operation that produces the
-    #       nondeterministic alert. This name is expected to appear
-    #       in the error/warning message.
-    #
-    #   device_types (list[str], optional): If provided, the alert is
-    #       expected to only be triggered for the specified devices, and
-    #       no others. If None, then the alert is expected to be triggered
-    #       for all devices. Default: None
-    #
-    def __init__(self, caller_name, device_types=None):
-        if device_types is not None:
-            assert isinstance(device_types, list)
-            for device_type in device_types:
-                assert isinstance(device_type, str)
-        self.device_types = device_types
-        self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
-
-    def __call__(self, fn):
-        @wraps(fn)
-        def efail_fn(slf, device, *args, **kwargs):
-            should_alert = self.device_types is None or slf.device_type in self.device_types
-
-            # Check that errors are thrown correctly
-            with DeterministicGuard(True):
-                if should_alert:
-                    with slf.assertRaisesRegex(
-                            RuntimeError,
-                            self.error_message,
-                            msg='expected a non-deterministic error, but it was not raised'):
-                        fn(slf, device, *args, **kwargs)
-
-                else:
-                    # If a nondeterministic error is not expected, make sure
-                    # that it is not raised
-                    try:
-                        return fn(slf, device, *args, **kwargs)
-                    except RuntimeError as e:
-                        if 'does not have a deterministic implementation' in str(e):
-                            slf.fail(
-                                'did not expect non-deterministic error message, '
-                                + 'but got one anyway: "' + str(e) + '"')
-                        # Reraise exceptions unrelated to nondeterminism
-                        raise
-
-            # Check that warnings are thrown correctly
-            if should_alert:
-                with DeterministicGuard(True, warn_only=True):
-                    with slf.assertWarnsRegex(
-                            UserWarning,
-                            self.error_message):
-                        fn(slf, device, *args, **kwargs)
-
-        return efail_fn
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
@@ -1311,6 +1284,12 @@ def skipCUDAIfCudnnVersionLessThan(version=0):
 # Skips a test on CUDA if cuSparse generic API is not available
 def skipCUDAIfNoCusparseGeneric(fn):
     return skipCUDAIf(not TEST_CUSPARSE_GENERIC, "cuSparse Generic API not available")(fn)
+
+def skipCUDAIfNoHipsparseGeneric(fn):
+    return skipCUDAIf(not TEST_HIPSPARSE_GENERIC, "hipSparse Generic API not available")(fn)
+
+def skipCUDAIfNoSparseGeneric(fn):
+    return skipCUDAIf(not (TEST_CUSPARSE_GENERIC or TEST_HIPSPARSE_GENERIC), "Sparse Generic API not available")(fn)
 
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)

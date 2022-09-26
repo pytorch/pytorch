@@ -13,38 +13,42 @@ namespace mps {
 
 typedef MPSGraphTensor* (^UnaryOpBlock)(MPSGraph*, MPSGraphTensor*);
 
-void unary_op(const Tensor& self_t, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
+void unary_op(const Tensor& self, const Tensor& output, std::string op_name, UnaryOpBlock unaryBlock)
 {
-  Tensor self = self_t.contiguous(at::MemoryFormat::Contiguous);
+  TORCH_CHECK_TYPE(self.scalar_type() != ScalarType::Long, "Operation '", op_name, "()' does not support input type 'int64' in MPS backend.");
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
-  struct CachedGraph : public MPSCachedGraph
-  {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
-  };
+  // Empty tensor is noop
+  if (self.numel() == 0) {
+    return;
+  }
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self});
-    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    string key = op_name + getTensorsStringKey({self}, /*use_scalar_value*/ false);
+    auto cachedGraph = cache_->LookUpAs<MPSUnaryCachedGraph>(key);
 
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph* () {
-        CachedGraph *newCachedGraph = nil;
+        MPSUnaryCachedGraph *newCachedGraph = nil;
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
-          newCachedGraph = new CachedGraph(mpsGraph);
-          newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-          newCachedGraph->outputTensor = unaryBlock(mpsGraph, newCachedGraph->inputTensor);
+          newCachedGraph = new MPSUnaryCachedGraph(mpsGraph);
+          newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* castTensor = newCachedGraph->inputTensor_;
+          // Integer input must be cast to float if output is float
+          if (isIntegralType(self.scalar_type()) && isFloatingType(output.scalar_type())) {
+            castTensor = castMPSTensor(mpsGraph, newCachedGraph->inputTensor_, output.scalar_type());
+          }
+          newCachedGraph->outputTensor_ = unaryBlock(mpsGraph, castTensor);
         }
         return newCachedGraph;
       });
-      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+      cachedGraph = tmpCachedGraph->as<MPSUnaryCachedGraph>();
     }
 
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
     };
@@ -57,6 +61,14 @@ void unary_op(const Tensor& self_t, const Tensor& output, std::string op_name, U
 
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor)
 {
+  // Rounding is a no-op for integral types, and also a reasonable workaround
+  // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
+  // See https://github.com/pytorch/pytorch/issues/84995
+  bool isFloatInput = ([inputTensor dataType] & MPSDataTypeFloatBit) != 0;
+  if (!isFloatInput) {
+    return inputTensor;
+  }
+
   MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
                                                    dataType:inputTensor.dataType];
   MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
@@ -121,45 +133,47 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
 CREATE_MPS_UNARY_TORCH_IMPL_FUNC(abs_out_mps, absolute)
 
+Tensor& logical_not_out_mps(const Tensor& self, Tensor& output)
+{
+  auto bool_self = self.to(ScalarType::Bool);
+  mps::unary_op(bool_self, output, "logical_not_out_mps", [](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor){ return [mpsGraph notWithTensor:inputTensor name:nil];});
+  return output;
+}
+
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
 {
     using namespace mps;
     if (!output.is_same_size(self)) {
       output.resize_(self.sizes());
     }
-    struct CachedGraph : public MPSCachedGraph
-    {
-      CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-      MPSGraphTensor *inputTensor = nil, *outputTensor = nil;
-    };
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
     @autoreleasepool {
       string key = string("log1p_out_mps") + getTensorsStringKey({self});
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+      auto cachedGraph = cache_->LookUpAs<MPSUnaryCachedGraph>(key);
 
       if(!cachedGraph) {
         MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph* () {
-          CachedGraph *newCachedGraph = nil;
+          MPSUnaryCachedGraph *newCachedGraph = nil;
           @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
-            newCachedGraph = new CachedGraph(mpsGraph);
-            newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+            newCachedGraph = new MPSUnaryCachedGraph(mpsGraph);
+            newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, self);
               MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0
                                                           shape:getMPSShape(self)
                                                        dataType:mps::getMPSDataType(self.scalar_type())];
-              MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:newCachedGraph->inputTensor
+              MPSGraphTensor* addedTensor = [mpsGraph additionWithPrimaryTensor:newCachedGraph->inputTensor_
                                                          secondaryTensor:oneTensor
                                                                     name:nil];
-            newCachedGraph->outputTensor = [mpsGraph logarithmWithTensor:addedTensor
+            newCachedGraph->outputTensor_ = [mpsGraph logarithmWithTensor:addedTensor
                                                                     name:nil];
           }
           return newCachedGraph;
         });
-        cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+        cachedGraph = tmpCachedGraph->as<MPSUnaryCachedGraph>();
       }
 
-      Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor, self);
-      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+      Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+      Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
       NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
         selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
       };

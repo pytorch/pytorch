@@ -1,9 +1,13 @@
+import inspect
+from collections import defaultdict
+from functools import wraps
+from itertools import chain
+from typing import Callable, Dict, NamedTuple, Sequence, Tuple, Union
+
 import torch
 import torch._ops
 import torch.library
-from typing import Callable, Union, Dict, Sequence, List
 from torch.utils._pytree import tree_map
-from collections import defaultdict
 
 __all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
 
@@ -36,7 +40,50 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
     a Meta implementation, we will register it to the dispatcher.  Use
     `disable_meta` to disable this behavior.
     """
-    def decomposition_decorator(f):
+
+    def decomposition_decorator(f: Callable) -> Callable:
+        sig = inspect.signature(f)
+        out_annotation = f.__annotations__.get("out")
+        # Hack to detect when out is a Tuple. There seems to be no pretty way of doing this
+        fn = f
+        if out_annotation and getattr(out_annotation, "__origin__", None) is tuple:
+            out_names = sig.return_annotation._fields
+            # If out is a tuple, we need to register a function that unpacks all the out
+            # elements as this is what native_functions.yaml expects
+
+            @wraps(f)
+            def _fn(*args, **kwargs):
+                out_kwargs = tuple(kwargs.pop(o, None) for o in out_names)
+                # Either all of the out kwargs are set or none of them
+                is_none = out_kwargs[0] is None
+                assert all((o is None) == is_none for o in out_kwargs)
+                return f(*args, **kwargs, out=None if is_none else out_kwargs)
+
+            out_params = [
+                inspect.Parameter(
+                    o,
+                    kind=inspect.Parameter.KEYWORD_ONLY,
+                    default=None,
+                    annotation=t,
+                )
+                for o, t in zip(out_names, out_annotation.__args__)
+            ]
+            # Drop the out parameter and concatenate the new kwargs in the signature
+            params = chain(
+                (v for k, v in sig.parameters.items() if k != "out"), out_params
+            )
+            _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+                parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+            )
+            # Drop the out parameter and concatenate the new kwargs in the annotations
+            _fn.__annotations__ = {
+                k: v for k, v in f.__annotations__.items() if k != "out"
+            }
+            for o in out_params:
+                _fn.__annotations__[o.name] = o.annotation
+
+            fn = _fn
+
         nonlocal registry
         if registry is None:
             registry = decomposition_table
@@ -52,7 +99,7 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
             for op_overload in overloads:
                 if op_overload in registry:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
-                registry[op_overload] = f
+                registry[op_overload] = fn
                 # TODO: factor this logic into OpOverload or Library API
                 name = op_overload._schema.name
                 if op_overload._schema.overload_name:
@@ -63,13 +110,35 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                     # which don't have corresponding dispatcher entries, we need
                     # to filter those out
                     and torch._C._dispatch_has_kernel(name)
-                    and not torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta')
+                    # Don't register a python meta kernel to any operator that has
+                    # should already work with meta tensors today.
+                    # We can check that by seeing if the "computed table" for the operator
+                    # has a registration to Meta;
+                    # either through a direct registration, or an indirect one through
+                    # an alias dispatch key (e.g. CompositeImplicitAutograd)
+                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                        name, "Meta"
+                    )
                 ):
-                    meta_lib.impl(op_overload, f)
+                    if any(
+                        a.alias_info is not None and not a.alias_info.is_write
+                        for a in op_overload._schema.arguments
+                    ):
+                        raise RuntimeError(
+                            f"""
+Attempting to register a python meta kernel for a view operator: {str(op_overload)}.
+We shouldn't do this, because the output will report as not having aliased storages.
+All view ops have meta kernels in C++ today, so we should use those instead.
+
+If you're registering an operator through the `@register_decomposition` decorator,
+Please set `disable_meta=True`.
+                        """
+                        )
+                    meta_lib.impl(op_overload, fn)
 
         # To handle allowing multiple aten_ops at once
         tree_map(add_op_to_table, aten_op)
-        return f
+        return fn
 
     return decomposition_decorator
 
@@ -99,6 +168,7 @@ def get_decompositions(
         elif isinstance(op, torch._ops.OpOverload) and op in decomposition_table:
             decompositions[op] = decomposition_table[op]
     return decompositions
+
 
 # populate the table
 import torch._decomp.decompositions

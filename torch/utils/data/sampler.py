@@ -169,6 +169,7 @@ class WeightedRandomSampler(Sampler[int]):
         generator (Generator): Generator used in sampling.
 
     Example:
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
         [4, 4, 1, 4, 5]
         >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
@@ -187,7 +188,13 @@ class WeightedRandomSampler(Sampler[int]):
         if not isinstance(replacement, bool):
             raise ValueError("replacement should be a boolean value, but got "
                              "replacement={}".format(replacement))
-        self.weights = torch.as_tensor(weights, dtype=torch.double)
+
+        weights_tensor = torch.as_tensor(weights, dtype=torch.double)
+        if len(weights_tensor.shape) != 1:
+            raise ValueError("weights should be a 1d sequence but given "
+                             "weights have shape {}".format(tuple(weights_tensor.shape)))
+
+        self.weights = weights_tensor
         self.num_samples = num_samples
         self.replacement = replacement
         self.generator = generator

@@ -48,6 +48,29 @@ Tensor ffn(
   res = linear_for_ffn(b2, res, w2, c10::nullopt);
   return res;
 }
+
+void add_in_place(Tensor& input, const Tensor& arg, bool use_nested_tensor) {
+  if (use_nested_tensor) {
+    NestedTensor_add_NestedTensor_in_place(input, arg);
+  } else {
+    input.add_(arg);
+  }
+}
+
+Tensor norm(
+    const Tensor& input,
+    const int64_t embed_dim,
+    const double eps,
+    const Tensor& weight,
+    const Tensor& bias,
+    const bool use_nested_tensor) {
+  if (use_nested_tensor) {
+    return NestedTensor_layer_norm(input, weight, bias, eps);
+  } else {
+    return at::layer_norm(input, {embed_dim}, weight, bias, eps, true);
+  }
+}
+
 } // namespace
 
 Tensor transformer_encoder_layer_forward(
@@ -69,7 +92,8 @@ Tensor transformer_encoder_layer_forward(
     const Tensor& ffn_bias_1,
     const Tensor& ffn_weight_2,
     const Tensor& ffn_bias_2,
-    const c10::optional<Tensor>& mask) {
+    const c10::optional<Tensor>& mask,
+    const c10::optional<int64_t> mask_type) {
   {
     const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
     if (check_for_empty.numel() == 0) {
@@ -78,9 +102,102 @@ Tensor transformer_encoder_layer_forward(
         : src.clone();
     }
   }
+  const bool use_nested_tensor = src.is_nested();
+  Tensor x = src;
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  }
+
+#if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
+  if (x.is_nested() && x.is_cuda() && x.dtype() == at::kHalf && !mask.has_value() &&
+      (embed_dim / num_heads == 16 ||
+       embed_dim / num_heads == 32 ||
+       embed_dim / num_heads == 64 ||
+       embed_dim / num_heads == 128)) {
+     TORCH_WARN_ONCE("transformer_encoder_layer_forward is using flash attention.");
+     x = at::linear(x, qkv_weight, qkv_bias);
+     x = x.view({x.size(0), -1, 3, num_heads, embed_dim / num_heads});
+     x = flash_attention_helper(x, x, x, 0.0, false);
+     x = x.view({-1, -1, embed_dim});
+     x = at::linear(x, proj_weight, proj_bias);
+  } else {
+#endif
+     x = std::get<0>(native_multi_head_attention(
+         x,
+         x,
+         x,
+         embed_dim,
+         num_heads,
+         qkv_weight,
+         qkv_bias,
+         proj_weight,
+         proj_bias,
+         mask,
+         false /* need_weights */,
+         true /* average_attn_weights */,
+         mask_type));
+#if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
+  }
+#endif
+  add_in_place(x, src, use_nested_tensor);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
+  }
+
+  auto pre_ffn_res = x;
+
+  if (norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  }
+  x = ffn(
+      x,
+      ffn_weight_1,
+      ffn_bias_1,
+      ffn_weight_2,
+      ffn_bias_2,
+      use_gelu,
+      /* add_norm* */ false);
+  add_in_place(x, pre_ffn_res, use_nested_tensor);
+  if (!norm_first) {
+    x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
+  }
+  return x;
+}
+
+std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
+    const Tensor& src,
+    const int64_t embed_dim,
+    const int64_t num_heads,
+    const Tensor& qkv_weight,
+    const Tensor& qkv_bias,
+    const Tensor& proj_weight,
+    const Tensor& proj_bias,
+    const bool use_gelu,
+    const bool norm_first,
+    const double layer_norm_eps,
+    const Tensor& layer_norm_weight_1,
+    const Tensor& layer_norm_bias_1,
+    const Tensor& layer_norm_weight_2,
+    const Tensor& layer_norm_bias_2,
+    const Tensor& ffn_weight_1,
+    const Tensor& ffn_bias_1,
+    const Tensor& ffn_weight_2,
+    const Tensor& ffn_bias_2,
+    const c10::optional<Tensor>& mask,
+    const c10::optional<Tensor>& incr_key,
+    const c10::optional<Tensor>& incr_value) {
+  {
+    const Tensor& check_for_empty = src.is_nested() ? get_nested_tensor_impl(src)->get_buffer() : src;
+    if (check_for_empty.numel() == 0) {
+      auto src_out = src.is_nested()
+        ? at::detail::make_tensor<NestedTensorImpl>(check_for_empty, get_nested_tensor_impl(src)->get_nested_size_tensor())
+        : src.clone();
+      return std::make_tuple(src_out, incr_key.value(), incr_value.value());
+    }
+  }
   TORCH_CHECK(!norm_first, "norm_first is not supported yet");
   const bool use_nested_tensor = src.is_nested();
-  auto x = std::get<0>(native_multi_head_attention(
+  auto mha_out = native_decoder_only_multi_head_attention(
       src,
       src,
       src,
@@ -91,7 +208,12 @@ Tensor transformer_encoder_layer_forward(
       proj_weight,
       proj_bias,
       mask,
-      false /* need_weights */));
+      incr_key,
+      incr_value,
+      false /* need_weights */);
+  auto x = std::get<0>(mha_out);
+  auto incr_key_out = std::get<2>(mha_out);
+  auto incr_value_out = std::get<3>(mha_out);
   if (use_nested_tensor) {
     NestedTensor_add_NestedTensor_in_place(x, src);
     x = NestedTensor_layer_norm(
@@ -130,7 +252,7 @@ Tensor transformer_encoder_layer_forward(
         layer_norm_eps,
         true);
   }
-  return x;
+  return std::make_tuple(std::move(x), std::move(incr_key_out), std::move(incr_value_out));
 }
 
 } // namespace native

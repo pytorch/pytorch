@@ -82,7 +82,7 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
 
   outputs_.reserve(operator_def.output_size());
   for (const string& output_str : operator_def.output()) {
-    outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
+    outputs_.push_back(TORCH_CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
 
   type_ = operator_def.type();

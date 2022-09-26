@@ -3,6 +3,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['Rprop', 'rprop']
 
 class Rprop(Optimizer):
     r"""Implements the resilient backpropagation algorithm.
@@ -51,29 +52,32 @@ class Rprop(Optimizer):
             maximal allowed step sizes (default: (1e-6, 50))
         foreach (bool, optional): whether foreach implementation of optimizer
             is used (default: None)
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
     """
 
     def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50),
-                 foreach: Optional[bool] = None):
+                 foreach: Optional[bool] = None, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
-        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=foreach)
+        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=foreach, maximize=maximize)
         super(Rprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault('foreach', None)
+            group.setdefault('maximize', False)
 
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -89,6 +93,7 @@ class Rprop(Optimizer):
             etaminus, etaplus = group['etas']
             step_size_min, step_size_max = group['step_sizes']
             foreach = group['foreach']
+            maximize = group['maximize']
 
             for p in group['params']:
                 if p.grad is None:
@@ -105,7 +110,12 @@ class Rprop(Optimizer):
                 if len(state) == 0:
                     state['step'] = 0
                     state['prev'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-                    state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
+                    if p.dtype.is_complex:
+                        # Complex Number should be as if they are two independent real numbers.
+                        # Hence the step_size shouldn't be zero for imaginary part.
+                        state['step_size'] = grad.new().resize_as_(grad).fill_(complex(group['lr'], group['lr']))
+                    else:
+                        state['step_size'] = grad.new().resize_as_(grad).fill_(group['lr'])
 
                 prevs.append(state['prev'])
                 step_sizes.append(state['step_size'])
@@ -120,7 +130,8 @@ class Rprop(Optimizer):
                   step_size_max=step_size_max,
                   etaminus=etaminus,
                   etaplus=etaplus,
-                  foreach=foreach)
+                  foreach=foreach,
+                  maximize=maximize)
 
         return loss
 
@@ -132,6 +143,7 @@ def rprop(params: List[Tensor],
           # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
+          maximize: bool = False,
           *,
           step_size_min: float,
           step_size_max: float,
@@ -161,7 +173,8 @@ def rprop(params: List[Tensor],
          step_size_min=step_size_min,
          step_size_max=step_size_max,
          etaminus=etaminus,
-         etaplus=etaplus)
+         etaplus=etaplus,
+         maximize=maximize)
 
 
 def _single_tensor_rprop(params: List[Tensor],
@@ -172,12 +185,20 @@ def _single_tensor_rprop(params: List[Tensor],
                          step_size_min: float,
                          step_size_max: float,
                          etaminus: float,
-                         etaplus: float):
+                         etaplus: float,
+                         maximize: bool):
 
     for i, param in enumerate(params):
         grad = grads[i]
+        grad = grad if not maximize else -grad
         prev = prevs[i]
         step_size = step_sizes[i]
+
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            prev = torch.view_as_real(prev)
+            param = torch.view_as_real(param)
+            step_size = torch.view_as_real(step_size)
 
         sign = grad.mul(prev).sign()
         sign[sign.gt(0)] = etaplus
@@ -206,10 +227,23 @@ def _multi_tensor_rprop(params: List[Tensor],
                         step_size_min: float,
                         step_size_max: float,
                         etaminus: float,
-                        etaplus: float):
+                        etaplus: float,
+                        maximize: bool):
 
     if len(params) == 0:
         return
+
+    # Handle complex params
+    def _view_complex_as_real(tensor_list):
+        return [torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list]
+
+    grads = _view_complex_as_real(grads)
+    prevs = _view_complex_as_real(prevs)
+    params = _view_complex_as_real(params)
+    step_sizes = _view_complex_as_real(step_sizes)
+
+    if maximize:
+        grads = torch._foreach_neg(grads)
 
     signs = torch._foreach_mul(grads, prevs)
     signs = [s.sign() for s in signs]
@@ -225,6 +259,7 @@ def _multi_tensor_rprop(params: List[Tensor],
 
     # for dir<0, dfdx=0
     # for dir>=0 dfdx=dfdx
+    grads = list(grads)
     for i in range(len(grads)):
         grads[i] = grads[i].clone(memory_format=torch.preserve_format)
         grads[i][signs[i].eq(etaminus)] = 0

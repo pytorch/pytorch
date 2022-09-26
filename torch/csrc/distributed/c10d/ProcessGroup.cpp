@@ -51,128 +51,10 @@ std::string opTypeToString(OpType opType) {
 }
 
 bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
-  if (batchP2P) return false;
+  if (batchP2P)
+    return false;
   return opType == OpType::SEND || opType == OpType::RECV ||
       opType == OpType::RECVANYSOURCE;
-}
-
-ProcessGroup::Work::Work(
-    int rank,
-    OpType opType,
-    const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputTensors)
-    : rank_(rank), opType_(opType) {
-  if (profilingTitle != nullptr) {
-    auto recordingFunction =
-        std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-    if (recordingFunction->isActive()) {
-      // Work events follow a future like pattern and can potentially be marked
-      // as complete by different threads, so explicitly set as async event.
-      recordingFunction->_setAsync();
-      // Passing input tensor to recordFunction allows for shape information in
-      // profiling output.
-      std::vector<c10::IValue> inputs;
-      if (inputTensors) {
-        inputs.reserve(inputTensors->size());
-        for (const auto& tensor : *inputTensors) {
-          inputs.emplace_back(tensor);
-        }
-      }
-      recordingFunction->before(profilingTitle, c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
-      std::function<void()> end_handler = [recordingFunction]() {
-        recordingFunction->end();
-      };
-      recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
-    }
-  }
-}
-
-OpType ProcessGroup::Work::retrieveOpType() {
-  return opType_;
-}
-
-ProcessGroup::Work::~Work()=default;
-
-bool ProcessGroup::Work::isCompleted() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return completed_;
-}
-
-bool ProcessGroup::Work::isSuccess() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return !exception_;
-}
-
-std::exception_ptr ProcessGroup::Work::exception() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return exception_;
-}
-
-int ProcessGroup::Work::sourceRank() const {
-  TORCH_CHECK(false,
-      "sourceRank() may only be called on work objects "
-      "that correspond to a recv or recv-from-any call.");
-}
-
-std::vector<at::Tensor> ProcessGroup::Work::result() {
-  TORCH_CHECK(false, "result() not implemented.");
-}
-
-void ProcessGroup::Work::synchronize() {}
-
-bool ProcessGroup::Work::wait(std::chrono::milliseconds timeout) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (timeout == kNoTimeout) {
-    // This waits without a timeout.
-    cv_.wait(lock, [&] { return completed_; });
-  } else {
-    // Waits for the user-provided timeout.
-    cv_.wait_for(lock, timeout, [&] { return completed_; });
-    if (!completed_) {
-      // Throw exception if the wait operation timed out and the work was not
-      // completed.
-      TORCH_CHECK(false, "Operation timed out!");
-    }
-  }
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
-  synchronize();
-  // Always return true, because abort API is not implemented.
-  return true;
-}
-
-void ProcessGroup::Work::abort() {
-  TORCH_CHECK(false, "ProcessGroup::Work::abort not implemented.");
-}
-
-c10::intrusive_ptr<c10::ivalue::Future> ProcessGroup::Work::getFuture() {
-  TORCH_CHECK(false, "ProcessGroup::Work::getFuture not implemented.")
-}
-
-void ProcessGroup::Work::finish(std::exception_ptr exception) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (recordFunctionEndCallback_) {
-    recordFunctionEndCallback_();
-    recordFunctionEndCallback_ = nullptr;
-  }
-  lock.unlock();
-  cv_.notify_all();
-}
-
-void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  completed_ = true;
-  exception_ = exception;
-  if (recordFunctionEndCallback_) {
-    recordFunctionEndCallback_();
-    recordFunctionEndCallback_ = nullptr;
-  }
-  if (exception_) {
-    std::rethrow_exception(exception_);
-  }
 }
 
 ProcessGroup::ProcessGroup(int rank, int size)
@@ -183,7 +65,7 @@ ProcessGroup::ProcessGroup(int rank, int size)
 ProcessGroup::~ProcessGroup() {}
 
 void ProcessGroup::init() {
-  C10_LOG_API_USAGE_ONCE(fmt::format("c10d.process_group_{}", getBackendName()));
+  C10_LOG_API_USAGE_ONCE(
+      fmt::format("c10d.process_group_{}", getBackendName()));
 }
-
 } // namespace c10d

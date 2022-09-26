@@ -1,39 +1,64 @@
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+# see Note [Edit Symbolic Files] in README.md
 
 # This file exports ONNX ops for opset 13
+import functools
+
 import torch
 import torch._C._onnx as _C_onnx
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import symbolic_opset11 as opset11
-from torch.onnx import utils
+from torch.onnx import (
+    _type_utils,
+    errors,
+    symbolic_helper,
+    symbolic_opset11 as opset11,
+    symbolic_opset9 as opset9,
+    utils,
+)
+from torch.onnx._internal import _beartype, registration
 
 
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)
+
+
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
+@_onnx_symbolic("aten::softmax")
 @symbolic_helper.parse_args("v", "i", "none")
+@_beartype.beartype
 def softmax(g, input, dim, dtype=None):
     softmax = g.op("Softmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         softmax = g.op(
-            "Cast", softmax, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", softmax, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
 
     return softmax
 
 
+@_onnx_symbolic("aten::log_softmax")
 @symbolic_helper.parse_args("v", "i", "none")
+@_beartype.beartype
 def log_softmax(g, input, dim, dtype=None):
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
         return_op = g.op(
-            "Cast", return_op, to_i=symbolic_helper.scalar_type_to_onnx[parsed_dtype]
+            "Cast", return_op, to_i=_type_utils.JitScalarType(parsed_dtype).onnx_type()
         )
     return return_op
 
 
+@_onnx_symbolic("aten::frobenius_norm")
 @symbolic_helper.parse_args("v", "v", "i")
+@_beartype.beartype
 def frobenius_norm(g, self, dim=None, keepdim=False):
     dim_val = symbolic_helper._maybe_get_const(dim, "is")
     if not symbolic_helper._is_value(dim_val) and len(dim_val) == 0:
@@ -43,7 +68,9 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
     return g.op("Sqrt", sumsqr)
 
 
+@_onnx_symbolic("aten::split")
 @symbolic_helper.parse_args("v", "v", "i", "i")
+@_beartype.beartype
 def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
@@ -78,7 +105,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             for i in range(_outputs)
         ]
 
-    split_val = split_size_or_sizes.node()["value"]
+    split_val = symbolic_helper._node_get(split_size_or_sizes.node(), "value")
     if split_val.dim() > 0:
         return g.op("Split", self, split_size_or_sizes, axis_i=dim, outputs=_outputs)
     split_size = symbolic_helper._get_const(split_size_or_sizes, "i", "split_size")
@@ -88,7 +115,9 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         if _outputs is not None:
             size = split_size * _outputs
         else:
-            raise RuntimeError("Unknown dimension size not supported")
+            raise errors.SymbolicValueError(
+                "Unknown dimension size not supported", self
+            )
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
@@ -97,19 +126,160 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
+@_onnx_symbolic("aten::split_with_sizes")
+@_beartype.beartype
 def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split(g, self, split_sizes, dim, _outputs)
 
 
+@_onnx_symbolic("aten::unsafe_split")
+@_beartype.beartype
 def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
     return split(g, self, split_size_or_sizes, dim, _outputs)
 
 
+@_onnx_symbolic("aten::unsafe_split_with_sizes")
+@_beartype.beartype
 def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split_with_sizes(g, self, split_sizes, dim, _outputs)
 
 
+@_onnx_symbolic("aten::tensor_split")
+@symbolic_helper.parse_args("v", "v", "i", "i")
+@_beartype.beartype
+def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
+    axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
+    axis = opset11.unsqueeze(g, axis, 0)
+    const_1 = g.op("Constant", value_t=torch.tensor(1, dtype=torch.long))
+
+    if symbolic_helper._is_split_static(indices_or_sections, _outputs):
+        split_val = symbolic_helper._node_get(indices_or_sections.node(), "value")
+
+        if split_val.dim() > 0:
+            start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            res = []
+            assert _outputs is not None
+            for i in range(_outputs - 1):
+                end = g.op(
+                    "Gather",
+                    indices_or_sections,
+                    g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)),
+                    axis_i=0,
+                )
+                res.append(g.op("Slice", self, start, end, axis))
+                start = end
+
+            end = symbolic_helper._size_helper(g, self, axis)
+            res.append(g.op("Slice", self, start, end, axis))
+            return res
+
+        split_size = symbolic_helper._get_const(
+            indices_or_sections, "i", "indices_or_sections"
+        )
+
+        size = symbolic_helper._get_tensor_dim_size(self, dim)
+        if size is None:
+            if _outputs is not None:
+                size = split_size * _outputs
+            else:
+                raise errors.SymbolicValueError(
+                    "Unknown dimension size not supported", self
+                )
+
+        min_split_size = size // split_size
+        num_splits_one_extra = size % split_size
+
+        splits = num_splits_one_extra * [min_split_size + 1]
+        leftover = (split_size - num_splits_one_extra) * [min_split_size]
+
+        splits = g.op(
+            "Constant", value_t=torch.tensor(splits + leftover, dtype=torch.long)
+        )
+        return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
+
+    if (
+        symbolic_helper._is_tensor(indices_or_sections)
+        and symbolic_helper._get_tensor_rank(indices_or_sections) == 1
+    ):
+        loop_len = symbolic_helper._size_helper(
+            g, indices_or_sections, g.op("Constant", value_t=torch.tensor(0))
+        )
+        loop_len = opset11.unsqueeze(g, loop_len, 0)
+        loop_condition = g.op("Cast", const_1, to_i=_C_onnx.TensorProtoDataType.BOOL)
+
+        # To make the first slice in the below loop work,
+        # we pad a zero to the first position so that it will be the initial start of slice.
+        padding_0 = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+        indices_or_sections = g.op("Concat", padding_0, indices_or_sections, axis_i=0)
+
+        final_splits = g.op("SequenceEmpty")
+        loop = g.op("Loop", loop_len, loop_condition, final_splits)
+
+        # Loop inputs
+        loop_block = utils._add_block(loop.node())
+        block_input_iter = utils._add_input_to_block(loop_block)
+        cond = utils._add_input_to_block(loop_block)
+        final_splits = utils._add_input_to_block(loop_block)
+
+        start = loop_block.op("Gather", indices_or_sections, block_input_iter, axis_i=0)
+        end = loop_block.op(
+            "Gather",
+            indices_or_sections,
+            loop_block.op("Add", block_input_iter, const_1),
+            axis_i=0,
+        )
+
+        slice = loop_block.op("Slice", self, start, end, axis)
+        final_splits = loop_block.op("SequenceInsert", final_splits, slice)
+
+        # Loop outputs
+        cond_out = loop_block.op("Identity", loop_condition)
+        utils._add_output_to_block(loop_block, cond_out)
+        utils._add_output_to_block(loop_block, final_splits)
+
+        loop_out = loop.node().output()
+        start = g.op(
+            "Gather",
+            indices_or_sections,
+            g.op("Constant", value_t=torch.tensor(-1, dtype=torch.long)),
+            axis_i=0,
+        )
+        start = opset11.unsqueeze(g, start, 0)
+        end = symbolic_helper._size_helper(g, self, axis)
+
+        last_slice = g.op("Slice", self, start, end, axis)
+
+        return g.op("SequenceInsert", loop_out, last_slice)
+
+    else:  # scalar tensor
+        dim_size = symbolic_helper._size_helper(g, self, axis)
+        min_split_size = g.op("Div", dim_size, indices_or_sections)
+        min_split_size_plus_1 = g.op(
+            "Add",
+            min_split_size,
+            const_1,
+        )
+        num_splits_one_extra = g.op("Mod", dim_size, indices_or_sections)
+        splits = g.op("Tile", min_split_size_plus_1, num_splits_one_extra)
+        leftover = g.op(
+            "Tile",
+            min_split_size,
+            g.op(
+                "Sub",
+                opset11.unsqueeze(g, indices_or_sections, 0),
+                num_splits_one_extra,
+            ),
+        )
+
+        splits = g.op("Concat", splits, leftover, axis_i=0)
+        if _outputs is None:
+            return g.op("SplitToSequence", self, splits, axis_i=dim)
+        return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
+
+
+@_onnx_symbolic("aten::unbind")
 @symbolic_helper.parse_args("v", "i", "i")
+@_beartype.beartype
 def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
         return g.op(
@@ -130,18 +300,20 @@ def unbind(g, self, dim=0, _outputs=None):
     return squeezed_outputs
 
 
+@_onnx_symbolic("aten::nonzero_numpy")
 # Emitted from `torch.nonzero(x, as_tuple=True)`
+@_beartype.beartype
 def nonzero_numpy(g, input, _outputs=None):
     return unbind(g, opset9.nonzero(g, input), 1, _outputs=_outputs)
 
 
+@_onnx_symbolic("aten::where")
 @symbolic_helper.parse_args("v", "v", "v", "i")
+@_beartype.beartype
 def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
-    if condition.type().scalarType() != "Bool":
-        condition = g.op(
-            "Cast", condition, to_i=symbolic_helper.cast_pytorch_to_onnx["Bool"]
-        )
+    if not symbolic_helper._is_bool(condition):
+        condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     if self is None:
         condition = opset9.nonzero(g, condition)
         return symbolic_helper._unbind_helper(
@@ -150,16 +322,19 @@ def where(g, condition, self=None, other=None, _outputs=None):
     return g.op("Where", condition, self, other)
 
 
+@_onnx_symbolic("aten::fake_quantize_per_channel_affine")
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i")
+@_beartype.beartype
 def fake_quantize_per_channel_affine(
     g, inputs, scale, zero_point, axis, quant_min=-128, quant_max=127
 ):
     # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
     #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
     if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max)
+            f"Got ({quant_min}, {quant_max})",
+            inputs,
         )
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
@@ -177,16 +352,19 @@ def fake_quantize_per_channel_affine(
     return g.op("DequantizeLinear", quantized, scale, zero_point, axis_i=axis)
 
 
+@_onnx_symbolic("aten::fake_quantize_per_tensor_affine")
 @symbolic_helper.parse_args("v", "v", "v", "i", "i")
+@_beartype.beartype
 def fake_quantize_per_tensor_affine(
     g, inputs, scale, zero_point, quant_min=-128, quant_max=127
 ):
     # NOTE: (0, 127) is allowed as special case. PyTorch restricts activations to be in the range (0, 127).
     #   https://github.com/pytorch/pytorch/blob/b34b192d6b97325c9f78e5995c48c8498ede34bd/torch/ao/quantization/observer.py#L1422
     if (quant_min, quant_max) not in [(0, 255), (-128, 127), (0, 127)]:
-        raise RuntimeError(
+        raise errors.SymbolicValueError(
             "For (quant_min, quant_max), ONNX allows only (0, 127), (0, 255) and (-128, 127). "
-            "Got ({}, {})".format(quant_min, quant_max)
+            f"Got ({quant_min}, {quant_max})",
+            inputs,
         )
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=_C_onnx.TensorProtoDataType.UINT8)
@@ -205,7 +383,9 @@ def fake_quantize_per_tensor_affine(
     return g.op("DequantizeLinear", quantized, scale, zero_point)
 
 
+@_beartype.beartype
 def _reduce_op_symbolic(onnx_op_name):
+    @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
         self = opset9._maybe_cast_reduce_op_input(g, self)
         if dim is None:
@@ -218,31 +398,39 @@ def _reduce_op_symbolic(onnx_op_name):
     return symbolic
 
 
+@_onnx_symbolic(
+    "aten::sum",
+    decorate=[_apply_params("ReduceSum", "sum")],
+)
+@_beartype.beartype
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
 
     @opset9.overload_by_arg_count
+    @_beartype.beartype
     def reduce(g, *args, **kwargs):
         @symbolic_helper.parse_args("v", "none")
+        @_beartype.beartype
         def reduce_nodim(g, self, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype")
+                return symbolic_helper._unimplemented(name, "dtype", dtype)
             return symbolic(g, self)
 
         @symbolic_helper.parse_args("v", "v", "i", "none")
+        @_beartype.beartype
         def reduce_dim(g, self, dim, keepdim, dtype):
             if dtype.node().kind() == "onnx::Constant":
                 dtype = symbolic_helper._get_const(dtype, "i", "dtype")
                 self = g.op(
-                    "Cast", self, to_i=symbolic_helper.scalar_type_to_onnx[dtype]
+                    "Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type()
                 )
             elif dtype.node().kind() != "prim::Constant":
-                return symbolic_helper._unimplemented(name, "dtype")
+                return symbolic_helper._unimplemented(name, "dtype", dtype)
             return symbolic(g, self, dim, keepdim)
 
         return reduce_nodim, reduce_dim
@@ -250,11 +438,9 @@ def _reduce_with_dtype(onnx_op, name):
     return reduce
 
 
-# TODO(justinchuby): Rename the op to avoid colliding with the builtin sum.
-sum = _reduce_with_dtype("ReduceSum", "sum")
-
-
+@_onnx_symbolic("aten::unsafe_chunk")
 @symbolic_helper.parse_args("v", "i", "i", "i")
+@_beartype.beartype
 def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if _outputs is None:
         return g.op(
@@ -281,6 +467,8 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
 
 
+@_onnx_symbolic("aten::repeat_interleave")
+@_beartype.beartype
 def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     final_dim = dim
@@ -298,16 +486,19 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     repeats_sizes = symbolic_helper._get_tensor_sizes(repeats)
     input_sizes = symbolic_helper._get_tensor_sizes(input)
     if repeats_dim is None:
-        raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats rank."
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats rank.",
+            self,
         )
     if repeats_sizes is None:
-        raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "repeats size."
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown repeats size.",
+            self,
         )
     if input_sizes is None:
-        raise RuntimeError(
-            "Unsupported: ONNX export of repeat_interleave for unknown " "input size."
+        raise errors.SymbolicValueError(
+            "Unsupported: ONNX export of repeat_interleave for unknown input size.",
+            self,
         )
     # Handle cases where dim is negative
     if dim < 0:
@@ -410,7 +601,9 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     return loop_out
 
 
+@_onnx_symbolic("aten::diagonal")
 @symbolic_helper.parse_args("v", "i", "i", "i")
+@_beartype.beartype
 def diagonal(g, self, offset, dim1, dim2):
     dim1_size = opset9.size(
         g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1]))
@@ -526,75 +719,72 @@ def diagonal(g, self, offset, dim1, dim2):
     return if_op
 
 
-class Quantized:
-    """
-    https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
-    """
+# Quantized ops
 
-    domain = "quantized"
 
-    @staticmethod
-    def linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale, axis
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+@_onnx_symbolic("quantized::linear")
+@_beartype.beartype
+def quantized_linear(g, q_input, q_weight, bias, op_scale, op_zero_point):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-        output = opset9.linear(g, input, weight, bias)
+    output = opset9.linear(g, input, weight, bias)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @staticmethod
-    def conv2d(
-        g,
-        q_input,
-        q_weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        groups,
-        op_scale,
-        op_zero_point,
-    ):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale, axis
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-        output = opset9.conv2d(
-            g, input, weight, bias, stride, padding, dilation, groups
-        )
+@_onnx_symbolic("quantized::conv2d")
+@_beartype.beartype
+def quantized_conv2d(
+    g,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
 
-    @staticmethod
-    def conv2d_relu(
-        g,
-        q_input,
-        q_weight,
-        bias,
-        stride,
-        padding,
-        dilation,
-        groups,
-        op_scale,
-        op_zero_point,
-    ):
-        input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
-        weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
-        q_bias = symbolic_helper.requantize_bias_helper(
-            g, bias, input_scale, weight_scale, axis
-        )
-        bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-        output = opset9.conv2d(
-            g, input, weight, bias, stride, padding, dilation, groups
-        )
-        output = opset9.relu(g, output)
 
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+@_onnx_symbolic("quantized::conv2d_relu")
+@_beartype.beartype
+def quantized_conv2d_relu(
+    g,
+    q_input,
+    q_weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    op_scale,
+    op_zero_point,
+):
+    input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
+    weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
+    q_bias = symbolic_helper.requantize_bias_helper(
+        g, bias, input_scale, weight_scale, axis
+    )
+    bias, _, _, _ = symbolic_helper.dequantize_helper(g, q_bias)
+
+    output = opset9.conv2d(g, input, weight, bias, stride, padding, dilation, groups)
+    output = opset9.relu(g, output)
+
+    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)

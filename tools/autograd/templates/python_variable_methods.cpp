@@ -110,17 +110,15 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   if(r.has_torch_function()){
     return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
   }
-
   if (r.idx == 0) {
     if (jit::tracer::isTracing()) {
+      // will error out if a tensor has symints
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
     } else {
-      return wrap(self_.size(r.toInt64(0)));
+      return torch::toPyObject(self_.sym_size(r.toInt64(0)));
     }
   } else if (r.idx == 1) {
-    // we can't do the normal wrapping here because IntArrayRef maps to both
-    // torch.Size and tuple in python.
-    return THPSize_New(self_);
+    return THPSize_NewFromSymSizes(self_);
   }
   else if (r.idx == 2) {
     if (jit::tracer::isTracing()) {
@@ -149,13 +147,21 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   }
 
   if (r.idx == 0) {
-    return wrap(self_.stride(r.toInt64(0)));
+    return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
   } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
-    IntArrayRef strides = self_.strides();
+    at::SymIntArrayRef strides = self_.sym_strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
-    return THPUtils_packInt64Array(strides.size(), strides.data());
+    // TODO: consider factoring this out
+    THPObjectPtr tuple(PyTuple_New(strides.size()));
+    if (!tuple) throw python_error();
+    for (size_t i = 0; i != strides.size(); i++) {
+      PyObject* s = torch::toPyObject(strides[i]);
+      if (!s) throw python_error();
+      PyTuple_SET_ITEM(tuple.get(), i, s);
+    }
+    return tuple.release();
   }
   else if (r.idx == 2) {
     return wrap(self_.stride(r.dimname(0)));
@@ -207,7 +213,7 @@ static PyObject * THPVariable_storage_offset(PyObject* self_, PyObject* args)
     return handle_torch_function(self_, "storage_offset");
   }
   auto& self = THPVariable_Unpack(self_);
-  return wrap(self.storage_offset());
+  return py::cast(self.sym_storage_offset()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
@@ -234,7 +240,12 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    if (jit::tracer::isTracing()) {
      return wrap(jit::tracer::getNumelOf(self_));
    } else {
-     return THPUtils_packInt64(self_.numel());
+     auto si = self_.sym_numel();
+     if (si.is_symbolic()) {
+       return py::cast(si.toSymIntNodeImpl()).release().ptr();
+     } else {
+       return THPUtils_packInt64(si.as_int_unchecked());
+     }
    }
    END_HANDLE_TH_ERRORS
 }
@@ -791,15 +802,22 @@ static PyObject * THPVariable_element_size(PyObject* self, PyObject* args)
 
 // implemented on the python object bc PyObjects not declarable in native_functions.yaml
 // See: ATen/native/README.md for more context
-static PyObject * THPVariable_numpy(PyObject* self, PyObject* arg)
+static PyObject * THPVariable_numpy(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  if (check_has_torch_function(self)) {
-    return handle_torch_function(self, "numpy");
-  }
-  jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
+  static PythonArgParser parser({
+    "numpy(*, bool force=False)"
+  });
   auto& self_ = THPVariable_Unpack(self);
-  return torch::utils::tensor_to_numpy(self_);
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+
+  if (r.has_torch_function()) {
+    return handle_torch_function(r, self, args, kwargs, THPVariableClass, "torch.Tensor");
+  }
+
+  jit::tracer::warn("Converting a tensor to a NumPy array", jit::tracer::WARN_PYTHON_DATAFLOW);
+  return torch::utils::tensor_to_numpy(self_, r.toBool(0));
   END_HANDLE_TH_ERRORS
 }
 
@@ -902,6 +920,10 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
         "Can't call map_() on Variable that requires grad. Use "
         "var.detach().map_() instead.");
   }
+  TORCH_CHECK(
+      !self_.unsafeGetTensorImpl()->is_python_dispatch() && !other.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map_ is not supported for tensor subclasses.");
+
   return THPVariable_Wrap(torch::utils::map_(self_, other, r.pyobject(1)));
   END_HANDLE_TH_ERRORS
 }
@@ -927,6 +949,9 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
         "Can't call map2_() on Variable that requires grad. Use "
         "var.detach().map2_() instead.");
   }
+  TORCH_CHECK(
+      !x.unsafeGetTensorImpl()->is_python_dispatch() && !y.unsafeGetTensorImpl()->is_python_dispatch(),
+      ".map2_ is not supported for tensor subclasses.");
   return THPVariable_Wrap(torch::utils::map2_(self_, x, y, r.pyobject(2)));
   END_HANDLE_TH_ERRORS
 }
@@ -1117,7 +1142,7 @@ static PyObject* THPVariable_set_(
           "set_(Storage source)",
           "set_(Storage source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
           "set_(Tensor source)",
-          "set_(Tensor source, int64_t storage_offset, IntArrayRef size, IntArrayRef stride=None)",
+          "set_(Tensor source, SymInt storage_offset, SymIntArrayRef size, SymIntArrayRef stride=None)",
       },
       /*traceable=*/false);
 
@@ -1141,7 +1166,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
@@ -1157,7 +1182,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,
@@ -1185,14 +1210,14 @@ static PyObject* THPVariable_set_(
       at::Tensor storage = _r.tensor(0);
       auto dispatch_set_ = [](const Tensor& self,
                               const Tensor& source,
-                              int64_t storage_offset,
-                              IntArrayRef size,
-                              IntArrayRef stride) -> Tensor {
+                              c10::SymInt storage_offset,
+                              c10::SymIntArrayRef size,
+                              c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set_(source, storage_offset, size, stride);
+        return self.set__symint(source, storage_offset, size, stride);
       };
       return wrap(dispatch_set_(
-          self, storage, _r.toInt64(1), _r.intlist(2), _r.intlist(3)));
+          self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
     }
   }
   Py_RETURN_NONE;
@@ -1271,7 +1296,7 @@ PyMethodDef variable_methods[] = {
   {"new_tensor", castPyCFunctionWithKeywords(THPVariable_new_tensor), METH_VARARGS | METH_KEYWORDS, NULL},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel", THPVariable_numel, METH_NOARGS, NULL},
-  {"numpy", THPVariable_numpy, METH_NOARGS, NULL},
+  {"numpy", castPyCFunctionWithKeywords(THPVariable_numpy), METH_VARARGS | METH_KEYWORDS, NULL},
   {"requires_grad_", castPyCFunctionWithKeywords(THPVariable_requires_grad_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"set_", castPyCFunctionWithKeywords(THPVariable_set_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"short", castPyCFunctionWithKeywords(THPVariable_short), METH_VARARGS | METH_KEYWORDS, NULL},
