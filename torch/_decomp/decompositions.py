@@ -1,5 +1,6 @@
 import functools
 import operator
+import sys
 from enum import Enum
 from itertools import product
 from typing import Callable, Iterable, List, Optional, Tuple
@@ -31,7 +32,11 @@ class Reduction(Enum):
 # This wraps a decomposition and performs various type promotion logic within it, depending on the strategy provided
 # We're currently re-using ELEMENTWISE_TYPE_PROMOTION_KIND, although some of the usages are on non-elementwise ops
 # Will need to validate the non-elementwise uses
-def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND):
+def type_casts(
+    f: Callable,
+    type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIND,
+    compute_dtype_only: bool = False,
+):
     @functools.wraps(f)
     def inner(*args, **kwargs):
         flat_args = [
@@ -55,11 +60,19 @@ def type_casts(f: Callable, type_promotion: utils.ELEMENTWISE_TYPE_PROMOTION_KIN
                 return x
 
         r = f(*tree_map(increase_prec, args), **tree_map(increase_prec, kwargs))
-        return tree_map(decrease_prec, r)
+        if compute_dtype_only:
+            return r
+        else:
+            return tree_map(decrease_prec, r)
 
     return inner
 
 
+compute_only_pw_cast_for_opmath = functools.partial(
+    type_casts,
+    type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    compute_dtype_only=True,
+)
 pw_cast_for_opmath = functools.partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 )
@@ -597,6 +610,58 @@ def slice_backward(
     return torch.slice_scatter(grad_input, grad_output, dim, start, end, step)
 
 
+@register_decomposition(aten.slice.Tensor)
+def slice_forward(
+    # Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1
+    self: Tensor,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = utils.canonicalize_dim(self.dim(), dim)
+    sizes = list(self.size())
+    strides = list(self.stride())
+
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
+
+    start_val = start if start is not None else 0
+    end_val = end if end is not None else sys.maxsize  # 2^63 – 1
+
+    if start_val < 0:
+        start_val += sizes[dim]
+
+    if end_val < 0:
+        end_val += sizes[dim]
+
+    if start_val < 0:
+        start_val = 0
+    elif start_val >= sizes[dim]:
+        start_val = sizes[dim]
+
+    if end_val < start_val:
+        end_val = start_val
+    elif end_val >= sizes[dim]:
+        end_val = sizes[dim]
+
+    storage_offset = self.storage_offset() + start_val * strides[dim]
+    len = end_val - start_val
+    sizes[dim] = (len + step - 1) // step
+    strides[dim] *= step
+
+    if self.is_quantized:
+        raise NotImplementedError(
+            "Slice decomposition for quantized tensors aren't implemented"
+        )
+    else:
+        return self.as_strided(sizes, strides, storage_offset)
+
+
 @register_decomposition(aten.select_backward)
 def select_backward(grad_output: Tensor, input_sizes: List[int], dim: int, index: int):
     grad_input = grad_output.new_zeros(input_sizes)
@@ -611,24 +676,35 @@ def diagonal_backward(
     return torch.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
 
-@register_decomposition(aten._softmax_backward_data)
-@pw_cast_for_opmath
-def _softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
+def _cast_grad_to_input_dtype(
+    grad_output: Tensor, grad_input: Tensor, input_dtype: torch.dtype
 ):
-    new_grad = grad_output * output
-    return new_grad - output * torch.sum(new_grad, dim=dim, keepdim=True)
+    if grad_output.dtype != input_dtype:
+        grad_input = grad_input.to(input_dtype)
+    return grad_input
+
+
+@register_decomposition(aten._softmax_backward_data)
+@compute_only_pw_cast_for_opmath
+def _softmax_backward_data(
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
+):
+    new_grad_output = grad_output * output
+    grad_input = new_grad_output - output * torch.sum(
+        new_grad_output, dim=dim, keepdim=True
+    )
+    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
 
 
 @register_decomposition(aten._log_softmax_backward_data)
-@pw_cast_for_opmath
+@compute_only_pw_cast_for_opmath
 def _log_softmax_backward_data(
-    grad_output: Tensor, output: Tensor, dim: int, input_dtype: int
+    grad_output: Tensor, output: Tensor, dim: int, input_dtype: torch.dtype
 ):
     grad_input = grad_output - torch.exp(output) * torch.sum(
         grad_output, dim=dim, keepdim=True
     )
-    return grad_input
+    return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
 
 
 @register_decomposition(aten.im2col)
@@ -1085,9 +1161,13 @@ def native_layer_norm_backward(
     M = prod(outer_dims)  # type: ignore[arg-type]
     if M <= 0 or N <= 0:
         return (
-            input.new_zeros(input_shape),
-            input.new_zeros(input_shape[axis:]),
-            input.new_zeros(input_shape[axis:]),
+            input.new_zeros(input_shape) if output_mask[0] else None,
+            input.new_zeros(input_shape[axis:])
+            if output_mask[1] and weight_cast
+            else None,
+            input.new_zeros(input_shape[axis:])
+            if output_mask[2] and bias_cast
+            else None,
         )
 
     x_hat = (input_cast - mean) * rstd
