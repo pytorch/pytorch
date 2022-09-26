@@ -8942,9 +8942,11 @@ Example::
 
 add_docstr(
     torch.rand,
-    r"""
-rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
-
+    """
+rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
 
@@ -8961,6 +8963,7 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
@@ -11271,15 +11274,15 @@ Example::
 add_docstr(
     torch.rot90,
     r"""
-rot90(input, k, dims) -> Tensor
+rot90(input, k=1, dims=[0,1]) -> Tensor
 
 Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
 
 Args:
     {input}
-    k (int): number of times to rotate
-    dims (a list or tuple): axis to rotate
+    k (int): number of times to rotate. Default value is 1
+    dims (a list or tuple): axis to rotate. Default value is [0, 1]
 
 Example::
 

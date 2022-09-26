@@ -149,15 +149,16 @@ REDUCE_NAMES = [
 NATIVE_REDUCE_MAP = {
     getattr(torch.ops.aten, name): _torch_reduce(name) for name in REDUCE_NAMES
 }
-
 TORCH_REDUCE_MAP = {
     getattr(torch, name): _torch_grad_reduce(name) for name in REDUCE_NAMES
 }
-
 TENSOR_REDUCE_MAP = {
     getattr(torch.Tensor, name): _torch_grad_reduce(name) for name in REDUCE_NAMES
 }
 
+NATIVE_REDUCE_FNS = list(NATIVE_REDUCE_MAP.keys())
+TORCH_REDUCE_FNS = list(TORCH_REDUCE_MAP.keys())
+TENSOR_REDUCE_FNS = list(TENSOR_REDUCE_MAP.keys())
 
 def _is_reduction(fn):
     return fn in NATIVE_REDUCE_MAP or fn in TORCH_REDUCE_MAP or fn in TENSOR_REDUCE_MAP
