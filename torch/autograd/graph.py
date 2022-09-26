@@ -166,6 +166,7 @@ class _swap_with_cloned(saved_tensors_hooks):
             tid = _get_tid(t)
             sid = _get_sid(t)
 
+            # _sid_to_weakref tracks which storages+version are saved for backward
             handle: Optional[_Handle] = None
             if sid not in _sid_to_weakref or _sid_to_weakref[sid]() is None:
                 handle = _Handle()
@@ -173,6 +174,10 @@ class _swap_with_cloned(saved_tensors_hooks):
             else:
                 handle = _sid_to_weakref[sid]()
 
+            # We save the original and the clone!
+            # We clone if in-place is done, can we free the original though?
+            # If during unpack time, there is a entry in _cloned that means
+            # it was modified in-place.
             return _ctx_id, t, sid, tid, t._is_view(), handle
 
         def unpack_hook(tup):
