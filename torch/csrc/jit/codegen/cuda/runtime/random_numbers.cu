@@ -46,20 +46,24 @@ __device__ uint4 philox(
 
 __device__ float uniformf(unsigned int x) {
   constexpr float kRanInvM32 = 2.3283064e-10f; // Inverse of 2^32.
-  return x * kRanInvM32;
+  float result = x * kRanInvM32;
+  return result == 1 ? 0.0f : result;
 }
 
 __device__ double uniform(unsigned int x, unsigned int y) {
   constexpr double kRan2Pow53Inv = 1.1102230246251565e-16;
   const unsigned long long z =
       (unsigned long long)x ^ ((unsigned long long)y << (53 - 32));
-  return z * kRan2Pow53Inv + (kRan2Pow53Inv / 2.0);
+  double result = z * kRan2Pow53Inv + (kRan2Pow53Inv / 2.0);
+  return result == 1 ? 0.0 : result;
 }
 
-__device__ double randLike(const uint4 &rng_result, int rng_component) {
-  return uniform((&rng_result.x)[rng_component * 2], (&rng_result.x)[rng_component * 2 + 1]);
+__device__ double rng_uniform(const uint4& rng_result, int rng_component) {
+  return uniform(
+      (&rng_result.x)[rng_component * 2],
+      (&rng_result.x)[rng_component * 2 + 1]);
 }
 
-__device__ float randLikef(const uint4 &rng_result, int rng_component) {
+__device__ float rng_uniformf(const uint4& rng_result, int rng_component) {
   return uniformf((&rng_result.x)[rng_component]);
 }
