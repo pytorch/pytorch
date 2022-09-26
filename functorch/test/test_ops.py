@@ -476,14 +476,14 @@ class TestOperators(TestCase):
         # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
         # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
         # The failure occurred for item [0]
-        xfail('_masked.prod')
+        xfail('masked.prod')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('prod',
              {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
-        tol1('_masked.cumprod',
+        tol1('masked.cumprod',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -590,8 +590,8 @@ class TestOperators(TestCase):
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
-        xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
+        xfail("masked.softmax", device_type='cuda'),  # Mismatch in values!
+        xfail("masked.softmin", device_type='cuda'),  # Mismatch in values!
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
@@ -759,7 +759,7 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
-        xfail('_masked.mean'),  # silent incorrectness (nan difference)
+        xfail('masked.mean'),  # silent incorrectness (nan difference)
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
@@ -832,7 +832,7 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('complex'),
-        skip('_masked.mean'),  # ???
+        skip('masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
         xfail('put'),
@@ -870,7 +870,7 @@ class TestOperators(TestCase):
         xfail('linalg.lu_solve', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
-        xfail('_masked.cumprod', ''),
+        xfail('masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -977,7 +977,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
-        xfail('_masked.cumprod', ''),
+        xfail('masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
@@ -1140,9 +1140,9 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
-        tol1('_masked.prod',
+        tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
-        tol1('_masked.cumprod',
+        tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),

@@ -577,10 +577,10 @@ class TestSparseCompressed(TestCase):
 
         # FIXME: remove in followup once integer support is landed for segment_reduce
         if (layout == torch.sparse_csr and not dtype.is_floating_point
-                and op.name in ('_masked.mean', '_masked.amax', '_masked.amin')):
+                and op.name in ('masked.mean', 'masked.amax', 'masked.amin')):
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
-        require_mask = isinstance(op, ReductionOpInfo) and '_masked.' in op.name
+        require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
@@ -627,7 +627,7 @@ class TestSparseCompressed(TestCase):
             assert torch.is_tensor(output)
             strided_output = output.to_dense()
             if require_mask:
-                output_mask = torch._masked._output_mask(op.op, sample.input, **sample.kwargs)
+                output_mask = torch.masked._output_mask(op.op, sample.input, **sample.kwargs)
                 expected.masked_fill_(~output_mask, 0)
             self.assertEqual(strided_output, expected)
             count += 1
