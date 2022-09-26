@@ -11967,6 +11967,8 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
+                            'TestJit', 'test_variant_consistency_jit'),
            ),
            sample_inputs_func=sample_inputs_batch_norm),
     OpInfo(
