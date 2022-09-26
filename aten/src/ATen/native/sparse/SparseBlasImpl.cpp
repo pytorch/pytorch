@@ -21,9 +21,16 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   const auto compressed_layout = compressed.layout();
   const auto compressed_layout_str = at::sparse_csr::layoutToString(compressed_layout);
 
+  // Device restrictions
+  TORCH_CHECK(compressed.device() == strided.device()
+      && compressed.device() == result.device(),
+      "spmm_out(): all input arguments are expected to be on the same device.");
+
   // Layout restrictions.
   TORCH_CHECK(compressed_layout == kSparseCsr || compressed_layout == kSparseBsr,
       "spmm(", compressed_layout_str, ", Strided): only Csr and Bsr formats are supported for the sparse argument.");
+  TORCH_CHECK(result.layout() == kStrided,
+      "spmm_out(): out argument is expected to be strided.");
 
   // Dtype restrictions.
   TORCH_CHECK(compressed.scalar_type() == strided.scalar_type(),
@@ -44,8 +51,6 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
       "Got ", compressed_layout_str, ".sizes(-1) == ", k, " is not equal to ",
       "Strided.sizes(-2) == ", strided.size(-2), ".");
 
-  TORCH_CHECK(result.layout() == kStrided,
-      "spmm_out(): out argument is expected to be strided.");
   // We assume that result is properly resized.
   auto result_expected_size = at::DimVector(strided.sizes().slice(0, strided.dim() - 2));
   result_expected_size.push_back(m);
@@ -63,6 +68,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
     blocksize = {values.size(-2), values.size(-1)};
   }
 
+  // (..., r, c) -> (..., r / b0, c / b1, b0, b1)
   // NOTE: this function ALWAYS creates a view upon successful execution.
   const auto tile_tensor = [compressed_layout](
       const Tensor& t, Blocksize blocksize) -> Tensor {
@@ -120,16 +126,16 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   Tensor compressed_indices, plain_indices;
   std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(compressed);
 
-  // Select blocked rows of the strided input that intersect with the blocked colums of the sparse input.
+  // Select block rows of the strided input that intersect with the block colums of the sparse input.
   auto strided_tiled_selected_rows = strided_tiled.index_select(-4, plain_indices);
 
   // Now that we know which block rows intersect with which block columns,
-  // we can perform matrix produts between pairs of blocks.
+  // we can perform matrix products between pairs of blocks.
   const auto pairwise_block_mm = values.unsqueeze(-3).matmul(strided_tiled_selected_rows);
 
   // Having pairwise block matrix products stored in pairwise_block_mm,
   // it is sufficient to sum all the block products that share the same row
-  // incoded in the sparse index. Since the reduction step is done via
+  // encoded in the sparse index. Since the reduction step is done via
   // advanced indexing methods, the compressed index ought to get converted
   // to the COO format.
   const auto compressed_indices_coo = at::_convert_indices_from_csr_to_coo(
