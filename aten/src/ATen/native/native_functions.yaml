@@ -4688,6 +4688,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: slice
+    NestedTensorCPU, NestedTensorCUDA: slice_nested
 # NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
 # that if adding specific implementations here!
 
@@ -4784,7 +4785,9 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: split
+    # NestedTensors is not supported by default with ComposoiteExplicitAutograd
+    # We explicitly add the same kernel here to support it.
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: split
 
 - func: split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
@@ -4803,7 +4806,9 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: split_with_sizes
+    # NestedTensors is not supported by default with ComposoiteExplicitAutograd
+    # We explicitly add the same kernel here to support it.
+    CompositeExplicitAutograd, NestedTensorCPU, NestedTensorCUDA: split_with_sizes
 
 - func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
