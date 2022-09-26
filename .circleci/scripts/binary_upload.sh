@@ -24,6 +24,11 @@ if [[ "${DRY_RUN}" = "disabled" ]]; then
   AWS_S3_CP="aws s3 cp"
 fi
 
+# Sleep 2 minutes between retries for conda upload
+retry () {
+  "$@"  || (sleep 2m && "$@") || (sleep 2m && "$@")
+}
+
 do_backup() {
   local backup_dir
   backup_dir=$1
@@ -37,13 +42,14 @@ do_backup() {
 conda_upload() {
   (
     set -x
+    retry \
     ${ANACONDA} \
-      upload  \
-      ${PKG_DIR}/*.tar.bz2 \
-      -u "pytorch-${UPLOAD_CHANNEL}" \
-      --label main \
-      --no-progress \
-      --force
+    upload  \
+    ${PKG_DIR}/*.tar.bz2 \
+    -u "pytorch-${UPLOAD_CHANNEL}" \
+    --label main \
+    --no-progress \
+    --force
   )
 }
 
