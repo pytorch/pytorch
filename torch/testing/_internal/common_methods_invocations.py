@@ -3083,8 +3083,9 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(arg, kwargs=kwargs)
 
 def error_inputs_max_pool1d(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     # error inputs when pad is negative
-    x = torch.rand([0, 1, 49], device=device, dtype=torch.float32)
+    x = make_arg((0, 1, 49))
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
 
@@ -3104,14 +3105,14 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
     # NOTE: CPU and CUDA error messages are different
     error_msg = 'stride must be greater than zero, but got 0' if torch.device(
         device).type == 'cpu' else 'stride should not be zero'
-    yield ErrorInput(SampleInput(torch.randn(3, 3, 3, device=device), kwargs={'kernel_size': 1, 'stride': 0}),
+    yield ErrorInput(SampleInput(make_arg((3, 3, 3)), kwargs={'kernel_size': 1, 'stride': 0}),
                      error_regex=error_msg)
 
     # error inputs for empty input with dilation=0
     # NOTE: CPU and CUDA error messages are different
     error_msg = 'dilation must be greater than zero, but got 0' if torch.device(
         device).type == 'cpu' else 'dilation should be greater than zero, but got dilation'
-    yield ErrorInput(SampleInput(torch.randn(3, 3, 3, device=device),
+    yield ErrorInput(SampleInput(make_arg((3, 3, 3)),
                                  kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
                      error_regex=error_msg)
 
@@ -3119,7 +3120,7 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
     # NOTE: CPU and CUDA error messages are different
     error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' else \
         r'Given input size: \(2x1x2\). Calculated output size: \(2x1x-2\). Output size is too small'
-    yield ErrorInput(SampleInput(torch.randn(2, 2, 2, device=device),
+    yield ErrorInput(SampleInput(make_arg((3, 3, 3)),
                                  kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
                      error_regex=error_msg)
 

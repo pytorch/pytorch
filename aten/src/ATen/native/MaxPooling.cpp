@@ -100,11 +100,19 @@ Tensor max_pool1d(
     bool ceil_mode) {
 
   auto ndim = self.ndimension();
-  TORCH_CHECK(
-      (ndim == 2 && self.size(0) != 0 && self.size(1) != 0) ||
-          (ndim == 3 && self.size(1) != 0 && self.size(2) != 0),
-      "max_pool1d: Expected 2D or 3D (batch mode) tensor with optional 0 dim batch size for input, but got:",
-      self.sizes());
+  for (auto i : c10::irange(ndim)) {
+    if (ndim == 3 && i == 0) {
+      continue;
+    }
+    TORCH_CHECK(
+        self.size(i) > 0,
+        "max_pool1d: Expected input's non-batch dimensions to have positive length,"
+        " but input has a shape of ",
+        self.sizes(),
+        " and non-batch dimension ",
+        self.size(i),
+        " has length zero!");
+  }
 
   if (self.is_quantized()) {
     return at::quantized_max_pool1d(
