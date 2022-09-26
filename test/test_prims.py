@@ -759,7 +759,7 @@ class TestDecomp(TestCase):
             )
             self.assertFalse(includes_aten_to_copy)
 
-    @ops([op for op in op_db if op.name in {"permute"}], allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db if op.supports_varargs], allowed_dtypes=(torch.float,))
     def test_decomposition_method_vararg(self, device, dtype, op):
         # some ops have vararg variants for the methods. this tests it.
         # we don't have tests for varargs in OpInfo, so we need to
@@ -767,21 +767,26 @@ class TestDecomp(TestCase):
         # The rule for general functions (the special cases being e.g. tensor
         # creation functions taking shapes) is that things can be vararg
         # if the method has only one argument of sequence type.
+        # e.g. permute can be called on a 3d tensor t as t.permute(0, 2, 1)
+        #      als well as t.permute([0, 2, 1])
+        #      when the signature in native_functions.yaml
+        #      shows arguments Tensor self, IntList dims
         # we might need to adjust things for the factory functions or
         # have them do their own test
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsMode
 
-        sample_inputs = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample_input in sample_inputs:
-            a = sample_input.input
-            if not sample_input.args[-1]:  # empty tuple cannot be varargs
-                continue
-
-            def f(a, b, c):
-                return getattr(a, op.name)(*b, *c)
-            with TorchRefsMode():
-                gm = make_fx(f)(a, sample_input.args[:-1], sample_input.args[-1])
+        # filter out empty tuple as that cannot be the varargs
+        sample_inputs = (si for si in op.sample_inputs(device, dtype, requires_grad=False)
+                         if (si.args[-1] if si.args else si.input))
+        sample_input = next(sample_inputs)  # just test one
+        all_args = (sample_input.input,) + sample_input.args
+        if op.is_factory_function:
+            fn = op.op
+        else:
+            fn = op.method_variant
+        with TorchRefsMode():
+            gm = make_fx(fn)(*all_args[:-1], *all_args[-1])
 
 instantiate_device_type_tests(TestDecomp, globals())
 
