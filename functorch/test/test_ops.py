@@ -766,7 +766,7 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
-        decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64)),
+        decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean'),  # silent incorrectness (nan difference)
 
