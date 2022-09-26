@@ -210,7 +210,7 @@ int64_t Val::evaluateInt() {
   TORCH_INTERNAL_ASSERT(
       evaluated_val.has_value(),
       "Detected a const integer but failed to infer its value.");
-  return evaluated_val.value();
+  return evaluated_val->as<int64_t>();
 }
 
 double Val::evaluateDouble() {
@@ -227,7 +227,7 @@ double Val::evaluateDouble() {
   TORCH_INTERNAL_ASSERT(
       evaluated_val.has_value(),
       "Detected a const integer but failed to infer its value.");
-  return evaluated_val.value();
+  return evaluated_val->as<double>();
 }
 
 c10::optional<int64_t> Val::getInt() const {
