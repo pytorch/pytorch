@@ -295,13 +295,13 @@ std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
   // when any of the inputs are on cuda.
   // We do this because on cuda, buffer is a dummy tensor always of logical rank 1 and
   // it becomes an issue when the rest of the inputs are scalar
-  int64_t out_logical_rank = std::max(rankWithoutBatchDim(grad, grad_bdim), rankWithoutBatchDim(grad, grad_bdim));
+  int64_t out_logical_rank = std::max(rankWithoutBatchDim(grad, grad_bdim), rankWithoutBatchDim(self, self_bdim));
   if (!grad.is_cuda() && !self.is_cuda() && !buffer.is_cuda()) {
     out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
   }
   Tensor out_grad = maybePadToLogicalRank(moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
   Tensor out_self =  maybePadToLogicalRank(moveBatchDimToFront(self, self_bdim), self_bdim, out_logical_rank);
-  Tensor out_buffer =  maybePadToLogicalRank(moveBatchDimToFront(self, buffer_bdim), buffer_bdim, out_logical_rank);
+  Tensor out_buffer =  maybePadToLogicalRank(moveBatchDimToFront(buffer, buffer_bdim), buffer_bdim, out_logical_rank);
 
   optional<int64_t> out_bdim = nullopt;
   if (grad_bdim || self_bdim || buffer_bdim) {
