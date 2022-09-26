@@ -608,6 +608,14 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'dimension 1 is irregular'):
             x.chunk(2, dim=1)
 
+        # Errors when calling slice.backwards()
+        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        nt_grad = torch.nested_tensor([a, b])
+        output = nt_grad[1:]
+        self.assertRaisesRegex(NotImplementedError, "the derivative for 'slice' is not implemented.",
+                               lambda: output.backward(output.clone()))
+
     @dtypes(*floating_types_and_half())
     def test_nested_tensor_chunk(self, device, dtype):
         # transformer case
@@ -638,6 +646,14 @@ class TestNestedTensorDeviceType(TestCase):
         # Failure chunking on ragged dimensions
         self.assertRaisesRegex(
             RuntimeError, "Given dimension 1 is irregular and does not have a size.", lambda: torch.chunk(nt, 5, 1))
+
+        # Failure when calling backward on a chunk
+        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        nt_grad = torch.nested_tensor([a, b])
+        chunked = torch.chunk(nt_grad, 2, dim=-1)
+        self.assertRaisesRegex(NotImplementedError, "the derivative for 'split' is not implemented.",
+                               lambda: chunked[0].backward(chunked[0].clone()))
 
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
