@@ -3375,7 +3375,7 @@ as the input tensor excluding its innermost dimension'):
 
     @onlyCUDA
     @largeTensorTest("8GB")
-    @dtypes(torch.half, torch.chalf)
+    @dtypes(torch.half, torch.chalf, torch.bfloat16)
     def test_reductions_large_half_tensors(self, device, dtype):
         t = torch.ones(2**31, device=device, dtype=dtype)
         t[2**30:] = -1
