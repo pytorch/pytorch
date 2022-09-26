@@ -24,7 +24,7 @@ inline Tensor nested_tensor(
   }
   auto out = torch::_nested_tensor_from_tensor_list(
       new_list, dtype, c10::nullopt, device, pin_memory);
-  if (requires_grad.has_value() and requires_grad.value()) {
+  if (requires_grad.has_value() && requires_grad.value()) {
     out.requires_grad_(true);
   }
   return out;
