@@ -24,6 +24,12 @@ def wrapped_gemm_bias_mul(a, b, bias):
     mul_res = lin_res * a
     return lin_res, mul_res
 
+@torch.fx.wrap
+def wrapped_gemm_bias_mul_with_c(a, b, bias, c):
+    lin_res = torch.nn.functional.linear(a, b, bias=bias)
+    mul_res = lin_res * c
+    return lin_res, mul_res
+
 class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_preserves_logic(self):
@@ -663,7 +669,7 @@ class TestSubgraphRewriter(JitTestCase):
         test_outs = traced.forward(x1)
         self.assertEqual(ref_outs, test_outs)
 
-    def test_subgraph_rewriter_kwargs(self):
+    def test_subgraph_rewriter_nodes_with_kwargs(self):
 
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -698,3 +704,63 @@ class TestSubgraphRewriter(JitTestCase):
                 break
 
         self.assertTrue(found_repalcement_node)
+
+    def test_subgraph_rewriter_local_revert(self):
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w0 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b0 = torch.nn.Parameter(torch.empty([128]))
+                self.w1 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b1 = torch.nn.Parameter(torch.empty([128]))
+                self.w2 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b2 = torch.nn.Parameter(torch.empty([128]))
+                self.w3 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b3 = torch.nn.Parameter(torch.empty([128]))
+                self.w4 = torch.nn.Parameter(torch.empty([128, 128]))
+                self.b4 = torch.nn.Parameter(torch.empty([128]))
+
+            def forward(self, in0, in1):
+                lin_res_1 = torch.nn.functional.linear(in1, self.w0, bias=self.b0)
+                lin_res_2 = torch.nn.functional.linear(lin_res_1, self.w1, bias=self.b1)
+                mul_res_1 = in1 * lin_res_2
+                sum_res_1 = mul_res_1 + in1
+                lin_res_3 = torch.nn.functional.linear(
+                    sum_res_1, self.w2, bias=self.b2
+                )
+                sigmoid_res_1 = torch.sigmoid(lin_res_3)
+                mul_res_2 = lin_res_3 * sigmoid_res_1
+                lin_res_4 = torch.nn.functional.linear(in0, self.w3, bias=self.b3)
+                lin_res_5 = torch.nn.functional.linear(lin_res_4, self.w4, bias=self.b4)
+                mul_res_3 = in0 * lin_res_5
+                sum_res_2 = mul_res_3 + in0
+                cat_res = torch.cat(
+                    [mul_res_2, sum_res_2],
+                    dim=1,
+                )
+                return cat_res
+
+        def gemm_bias_mul_pattern_with_c(a, b, bias, c):
+            lin_res = torch.nn.functional.linear(a, b, bias=bias)
+            mul_res = c * lin_res
+            return lin_res, mul_res
+
+        def gemm_bias_mul_replacement_with_c(a, b, bias, c):
+            lin_res, mul_res = wrapped_gemm_bias_mul_with_c(a, b, bias, c)
+            return lin_res, mul_res
+
+        traced = symbolic_trace(M())
+        matches = subgraph_rewriter.replace_pattern(
+            traced,
+            gemm_bias_mul_pattern_with_c,
+            gemm_bias_mul_replacement_with_c)
+
+        self.assertEqual(len(matches), 2)
+
+        repalcement_node_found = 0
+        for node in traced.graph.nodes:
+            if node.target == wrapped_gemm_bias_mul_with_c:
+                repalcement_node_found += 1
+
+        self.assertEqual(repalcement_node_found, 2)
