@@ -89,7 +89,8 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
     ``list``, ``tuple``, ``set`` and ``dict``.
     Args:
         datapipe: the end DataPipe of the graph
-        only_datapipe: If ``False`` (default), all attributes of each DataPipe are traversed.
+        only_datapipe: If ``False``, all attributes of each DataPipe are traversed.
+          If ``True`` (by default), only DataPipe will be traversed.
           This argument is deprecating and will be removed after the next release.
     Returns:
         A graph represented as a nested dictionary, where keys are ids of DataPipe instances
@@ -98,10 +99,10 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
     if only_datapipe is not None:
         msg = "`only_datapipe` is deprecated from `traverse` function and will be removed after 1.13."
         if not only_datapipe:
-            msg += "And, default value will be changed to `only_datapipe=True`"
+            msg += "And, it will behave like `only_datapipe=True`."
         warnings.warn(msg, FutureWarning)
     else:
-        only_datapipe = False
+        only_datapipe = True
     cache: Set[int] = set()
     return _traverse_helper(datapipe, only_datapipe, cache)
 
