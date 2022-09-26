@@ -658,7 +658,7 @@ Tensor clone_nested(
   else if (memory_format == c10::MemoryFormat::Contiguous) {
     const Tensor& self_buffer = self_ptr->get_buffer(),
         sizemat = self_ptr->get_nested_size_tensor();
-    Tensor output_buffer = at::empty_like(self_buffer);
+    Tensor output_buffer = at::empty(self.numel(), self_buffer.options());
     Tensor output = wrap_buffer(output_buffer, sizemat);
     std::vector<Tensor> self_unbind = self.unbind(),
         output_unbind = output.unbind();

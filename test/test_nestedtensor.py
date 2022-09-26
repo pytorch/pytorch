@@ -703,6 +703,27 @@ class TestNestedTensorDeviceType(TestCase):
             torch.nested.nested_tensor([torch.tensor([3, 4, 5]), torch.tensor([1, 2])]).sum(-1)
 
     @dtypes(torch.float, torch.float16)
+    def test_contiguous(self, device, dtype):
+        # Since we don't have access to the buffer in python this is harder to show what
+        # we are testing for. When we call chunk on a consistent dim of a NT
+        # for chunk_size > 1 the resulting tensors are views of the original NT
+        # whose numels is now less than the size of the buffer. Clone was
+        # previously creating a new NT with a buffer that was the same size as the
+        # original.
+        nt_contiguous = torch.nested_tensor([torch.randn(2, 20, device=device, dtype=dtype),
+                                             torch.randn(4, 20, device=device, dtype=dtype)])
+        # Split up the last dimension which has a consistent size of 20 into 5 chunks
+        chunks = nt_contiguous.chunk(5, dim=-1)
+
+        # Check that the chunks are non-contiguous
+        for chunk in chunks:
+            self.assertFalse(chunk.is_contiguous())
+
+        # Check chunks are contiguous after calling contiguous
+        for chunk in chunks:
+            self.assertTrue(chunk.contiguous().is_contiguous())
+
+    @dtypes(torch.float, torch.float16)
     @skipMeta
     def test_clone(self, device, dtype):
         nt1 = self.random_nt(device, dtype, 4, (4, 4), (1, 1))
