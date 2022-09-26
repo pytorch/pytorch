@@ -7899,6 +7899,9 @@ class TestConsistency(TestCase):
                          'torch.int16',
                          'torch.int32',
                          'torch.float32',],
+            'clamp': ['torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
+            'clamp_max': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
+            'clamp_min': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
         }
 
     # These ops that are problematic. So never run them even when
@@ -7996,9 +7999,6 @@ class TestConsistency(TestCase):
         'bernoulli': ['torch.float32'], 
         'byte': ['torch.float16', 'torch.float32'], 
         'char': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64'], 
-        'clamp': ['torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
-        'clamp_max': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
-        'clamp_min': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
         'constant_pad_nd': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
         'cos': ['torch.bool'], 
         'cosh': ['torch.bool'], 
