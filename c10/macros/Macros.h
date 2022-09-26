@@ -327,8 +327,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
 #if defined(__ANDROID__) || defined(__APPLE__) ||  \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100) || \
-    (defined(USE_ROCM) && !defined(TORCH_ENABLE_GPU_ASSERTS))
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)

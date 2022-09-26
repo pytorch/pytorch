@@ -154,4 +154,4 @@ by recompiling the PyTorch from source.
 
 Please add below line as an argument to cmake command parameters::
 
-    -DTORCH_ENABLE_GPU_ASSERTS:BOOL=TRUE
+    -DFORCE_ENABLE_GPU_ASSERTS:BOOL=ON
