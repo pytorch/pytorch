@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import ctypes
 import inspect
@@ -10,6 +11,7 @@ import torch._C
 
 import torch.jit
 from torch import _utils_internal
+from torch.utils._python_dispatch import BaseTorchDispatchMode
 
 # Query `hasattr` only once.
 
@@ -303,6 +305,7 @@ class OpOverload(PyOperatorABC):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def __getattr__(self, attr):
+        OpTracker.maybe_track_op(qualified_op_name=self._name)
         if len(attr) == 0 or not attr[0].isupper():
             raise AttributeError()
 
@@ -356,6 +359,58 @@ class OpOverload(PyOperatorABC):
         return self._tags
 
     # TODO: add more methods to expose information about input and output arguments
+
+
+class OpTracker(BaseTorchDispatchMode):
+    _ops_tracker = None
+
+    def __init__(self):
+        super().__init__()
+        self.tracked_ops = None
+
+    def __enter__(self):
+        assert OpTracker._ops_tracker is None, "Only one OpTracker at a time"
+        OpTracker._ops_tracker = collections.OrderedDict()
+        self._py_dispatcher = torch._C._EnablePythonDispatcher()
+        return super().__enter__()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.tracked_ops = list(OpTracker._ops_tracker.items())
+        OpTracker._ops_tracker = None
+        del self._py_dispatcher
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        self.maybe_track_op(torchdispatch_name=func)
+        return super().__torch_dispatch__(func, types, args=args, kwargs=kwargs)
+
+    @classmethod
+    def maybe_track_op(cls, *, qualified_op_name=None, torchdispatch_name=None):
+        """
+        Tries to make leaving this hooked up to OpOverloadPacket.__getattr__ not impact perf when not actively tracking
+        """
+        if cls._ops_tracker is not None:
+            msg = "Provide exactly one of qualified_op_name and torchdispatch_name"
+            if torchdispatch_name:
+                assert not qualified_op_name, msg
+                key = str(torchdispatch_name)
+            else:
+                assert qualified_op_name, msg
+                key = f"{qualified_op_name.replace('::', '.')}"
+            if key not in cls._ops_tracker:
+                cls._ops_tracker[key] = 0
+            cls._ops_tracker[key] += 1
+
+    def ops(self):
+        """
+        Get the ops tracked either by _Ops namespace __getattr__ or TorchDispatch, in sorted order of first appearance.
+
+        Returns each op only once (set)
+        """
+        assert (
+            self.tracked_ops is not None
+        ), "Must first use OpTracker as contextmanager before calling get_ops"
+        return self.tracked_ops
 
 
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
