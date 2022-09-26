@@ -311,10 +311,9 @@ class TestOptim(TestCase):
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
 
-        for i in range(3):
+        for _ in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
-
             complex_opt.step()
             real_opt.step()
 
@@ -331,7 +330,7 @@ class TestOptim(TestCase):
         optim1 = optimizer_constructor([a1])
         optim2 = optimizer_constructor([a1_real, a1_imag])
 
-        for i in range(10):
+        for _ in range(10):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
@@ -437,10 +436,10 @@ class TestOptim(TestCase):
     def test_sgd_sparse(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=5e-3)
+                lambda params: optimizer(params, lr=4.8e-3)
             )
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=0.005),
+                lambda params: optimizer(params, lr=0.0048),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
@@ -462,47 +461,17 @@ class TestOptim(TestCase):
                 lambda param: optimizer([param], lr=0.001, momentum=1, dampening=0.5, weight_decay=1)
             )
 
-    def test_multi_tensor_optimizers(self):
+    def _test_derived_optimizers(self, optimizer_pairs_with_flags, flag):
         if not torch.cuda.is_available():
             return
-
-        optimizer_pairs_with_flags = [
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=1., amsgrad=False)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=True)),
-            ((optim.Adam, optim._multi_tensor.Adam), dict(weight_decay=0., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
-            ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=6e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=1., momentum_decay=6e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0., momentum_decay=4e-3)),
-            ((optim.NAdam, optim._multi_tensor.NAdam), dict(weight_decay=0.01, momentum_decay=4e-3)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
-            ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
-            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=0)),
-            ((optim.RAdam, optim._multi_tensor.RAdam), dict(weight_decay=1)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=0, centered=True)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=False)),
-            ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=0, momentum=1, centered=False)),
-            ((optim.Rprop, optim._multi_tensor.Rprop), dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=0)),
-            ((optim.ASGD, optim._multi_tensor.ASGD), dict(weight_decay=1)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=0)),
-            ((optim.Adamax, optim._multi_tensor.Adamax), dict(weight_decay=1)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=0)),
-            ((optim.Adadelta, optim._multi_tensor.Adadelta), dict(weight_decay=1)),
-            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=0)),
-            ((optim.Adagrad, optim._multi_tensor.Adagrad), dict(weight_decay=1)),
-        ]
+        assert flag in ("foreach", "fused")
 
         kIterations = 4
         device = 'cuda'
-        for optimizers, params in optimizer_pairs_with_flags:
+        for optimizer_ctor, params in optimizer_pairs_with_flags:
             res, state = [], []
-            for opt in optimizers:
+            for flag_value in (False, True):
+                params[flag] = flag_value
                 input = torch.tensor([0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=torch.float64, device=device).reshape(3, 2)
 
                 torch.manual_seed(1)
@@ -511,7 +480,7 @@ class TestOptim(TestCase):
                                             torch.nn.Linear(3, 1),
                                             torch.nn.Sigmoid())
                 model.to(dtype=torch.float64, device=device)
-                optimizer = opt(model.parameters(), **params)
+                optimizer = optimizer_ctor(model.parameters(), **params)
 
                 for _ in range(kIterations):
                     optimizer.zero_grad()
@@ -538,7 +507,55 @@ class TestOptim(TestCase):
                 mt_p_state = mt_state[mt_p]
 
                 for k in st_p_state:
-                    self.assertEqual(st_p_state[k], mt_p_state[k], atol=5e-5, rtol=0)
+                    actual = mt_p_state[k]
+                    # If `torch.optim.Adam` is `__init__`ed with either `fused=True` or `capturable=True`,
+                    # `step` Tensor is 1D while usually it's 0D.
+                    if k == "step" and isinstance(actual, torch.Tensor) and actual.ndim == 1:
+                        actual = actual[0]
+                    self.assertEqual(st_p_state[k], actual, atol=5e-5, rtol=0)
+
+    def test_multi_tensor_optimizers(self):
+        optimizer_pairs_with_flags = [
+            (optim.Adam, dict(weight_decay=1., amsgrad=True)),
+            (optim.Adam, dict(weight_decay=1., amsgrad=False)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=False)),
+            (optim.AdamW, dict(weight_decay=1., amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=1., amsgrad=False)),
+            (optim.AdamW, dict(weight_decay=0., amsgrad=True)),
+            (optim.AdamW, dict(weight_decay=0., amsgrad=False)),
+            (optim.NAdam, dict(weight_decay=0., momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=1., momentum_decay=6e-3)),
+            (optim.NAdam, dict(weight_decay=0., momentum_decay=4e-3)),
+            (optim.NAdam, dict(weight_decay=0.01, momentum_decay=4e-3)),
+            (optim.SGD, dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
+            (optim.SGD, dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
+            (optim.RAdam, dict(weight_decay=0)),
+            (optim.RAdam, dict(weight_decay=1)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=0, centered=True)),
+            (optim.RMSprop, dict(weight_decay=1, momentum=1, centered=False)),
+            (optim.RMSprop, dict(weight_decay=0, momentum=1, centered=False)),
+            (optim.Rprop, dict(lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50))),
+            (optim.ASGD, dict(weight_decay=0)),
+            (optim.ASGD, dict(weight_decay=1)),
+            (optim.Adamax, dict(weight_decay=0)),
+            (optim.Adamax, dict(weight_decay=1)),
+            (optim.Adadelta, dict(weight_decay=0)),
+            (optim.Adadelta, dict(weight_decay=1)),
+            (optim.Adagrad, dict(weight_decay=0)),
+            (optim.Adagrad, dict(weight_decay=1)),
+        ]
+        self._test_derived_optimizers(optimizer_pairs_with_flags, "foreach")
+
+    def test_fused_optimizers(self):
+        optimizer_pairs_with_flags = [
+            (optim.Adam, dict(weight_decay=1., amsgrad=False)),
+            (optim.Adam, dict(weight_decay=1., amsgrad=True)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=False)),
+            (optim.Adam, dict(weight_decay=0., amsgrad=True)),
+        ]
+        self._test_derived_optimizers(optimizer_pairs_with_flags, "fused")
 
     def test_adam(self):
         for optimizer in [optim.Adam, optim_mt.Adam]:
@@ -871,6 +888,14 @@ class TestOptim(TestCase):
                     lr=1e-2, momentum=0.1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
+            self._test_complex_2d(lambda param: optimizer(param, centered=True))
+            self._test_complex_2d(lambda param: optimizer(param, momentum=0.1))
+            self._test_complex_2d(lambda param: optimizer(param, maximize=True))
+            self._test_complex_optimizer(lambda param: optimizer([param]))
+            self._test_complex_optimizer(lambda param: optimizer([param], centered=True))
+            self._test_complex_optimizer(lambda param: optimizer([param], momentum=0.1))
+            self._test_complex_optimizer(lambda param: optimizer([param], maximize=True))
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
 
@@ -892,6 +917,14 @@ class TestOptim(TestCase):
                     lr=1e-3, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            # Ref: https://github.com/pytorch/pytorch/issues/84560
+            # self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(lambda params: optimizer([params]))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=False, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], weight_decay=0.9))
+
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
 
@@ -907,6 +940,13 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2),
                     lr=2e-4, maximize=maximize),
                 constructor_accepts_maximize=True
+            )
+            self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, maximize=True)
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 optimizer(None, lr=1e-2, etas=(1.0, 0.5))
@@ -965,6 +1005,49 @@ class TestOptim(TestCase):
             # make sure step can still run even if
             # all params have no grad
             opt.step()
+
+    # make sure that `state_steps` is correctly either updated or not updated when `found_inf`.
+    def test_functional_fused_adam_with_foundinf(self):
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA is required.")
+
+        from torch.optim import adam
+
+        num_tensors = 5
+        for amsgrad in (False, True):
+            params, grads, exp_avgs, exp_avg_sqs = [[torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
+            state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
+            grad_scale = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
+                torch.ones((1,), dtype=torch.float32, device="cuda"))
+            found_inf = torch.cuda.amp.grad_scaler._MultiDeviceReplicator(
+                torch.ones((1,), dtype=torch.float32, device="cuda"))
+
+            adam.adam(
+                params,
+                grads,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+                foreach=False,
+                capturable=False,
+                fused=True,
+                amsgrad=amsgrad,
+                beta1=0.9,
+                beta2=0.99,
+                lr=1e-2,
+                weight_decay=.0,
+                eps=1e-8,
+                maximize=False,
+                grad_scale=grad_scale,
+                found_inf=found_inf,
+            )
+
+            self.assertEqual(
+                state_steps,
+                [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)],
+            )
 
 
 class SchedulerTestNet(torch.nn.Module):
@@ -2758,6 +2841,7 @@ class TestSWAUtils(TestCase):
         # check that momentum is preserved
         self.assertEqual(dnn.bn.momentum, 0.3)
 
+
 instantiate_parametrized_tests(TestLRScheduler)
 
 
@@ -2768,11 +2852,15 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     # dict
     p = p.clone()
     p.grad = grad
-    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt_differentiable_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v
+        for k, v in opt_differentiable_state.items()
+    }
     opt = opt_class([p], **kwargs)
-    opt.state.update(opt_differentiable_state)
+    opt.state[p].update(opt_differentiable_state)
     opt.step()
-    return (p,) + tuple(opt_differentiable_state.values())
+    return (p,) + tuple(
+        v for v in opt_differentiable_state.values() if isinstance(v, torch.Tensor) and v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2783,6 +2871,38 @@ class TestDifferentiableOptimizer(TestCase):
         mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state = {'momentum_buffer': mbuff}
         gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
+    def test_adam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['max_exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adam,
+             {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
+        )
+
+    def test_rmsprop(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['step'] = 0
+        state['square_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['momentum_buffer'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # This can cause issues with large values and nan due to sqrt ops
+        state['grad_avg'] = 1e-2 * torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.RMSprop,
+             {'lr': 0.9, 'maximize': True, 'momentum': 0.9, 'differentiable': True, 'centered': True, 'weight_decay': 0.1},
+             *state.values()))
 
 
 if __name__ == '__main__':

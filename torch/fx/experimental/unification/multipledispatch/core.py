@@ -3,8 +3,9 @@ import sys
 
 from .dispatcher import Dispatcher, MethodDispatcher
 
-global_namespace = dict()  # type: ignore[var-annotated]
+global_namespace = {}  # type: ignore[var-annotated]
 
+__all__ = ["dispatch", "ismethod"]
 
 def dispatch(*types, **kwargs):
     """ Dispatch function on the types of the inputs
@@ -25,7 +26,7 @@ def dispatch(*types, **kwargs):
     >>> f(3.0)
     2.0
     >>> # Specify an isolated namespace with the namespace keyword argument
-    >>> my_namespace = dict()
+    >>> my_namespace = {}
     >>> @dispatch(int, namespace=my_namespace)
     ... def foo(x):
     ...     return x + 1

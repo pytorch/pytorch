@@ -28,6 +28,7 @@ from torch.nn import Module
 from torch.nn.parameter import Parameter
 from torch.utils.hooks import RemovableHandle
 
+__all__ = ["RemoteModule"]
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -71,6 +72,7 @@ _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING = (
     "forward_async",
     "forward",
 )
+
 
 # RPC handler.
 def _instantiate_template(module_interface_cls, enable_moving_cpu_tensors_to_cuda):
@@ -193,13 +195,13 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
             >>> from torch import nn, Tensor
             >>> from torch.distributed.nn.api.remote_module import RemoteModule
             >>>
-            >>> # xdoctest: +SKIP
             >>> rpc.init_rpc("worker0", rank=0, world_size=2)
             >>> remote_linear_module = RemoteModule(
             >>>     "worker1/cpu", nn.Linear, args=(20, 30),
@@ -500,13 +502,13 @@ class _RemoteModule(nn.Module):
         Example::
             Run the following code in two different processes:
 
+            >>> # xdoctest: +SKIP("distributed")
             >>> # On worker 0:
             >>> import torch
             >>> import torch.distributed.rpc as rpc
             >>> from torch import nn, Tensor
             >>> from torch.distributed.nn.api.remote_module import RemoteModule
             >>>
-            >>> # xdoctest: +SKIP
             >>> rpc.init_rpc("worker0", rank=0, world_size=2)
             >>> remote_module = RemoteModule(
             >>>     "worker1/cpu", nn.Linear, args=(20, 30),
@@ -622,13 +624,13 @@ class RemoteModule(_RemoteModule):
     Example::
         Run the following code in two different processes:
 
+        >>> # xdoctest: +SKIP("distributed")
         >>> # On worker 0:
         >>> import torch
         >>> import torch.distributed.rpc as rpc
         >>> from torch import nn, Tensor
         >>> from torch.distributed.nn.api.remote_module import RemoteModule
         >>>
-        >>> # xdoctest: +SKIP
         >>> rpc.init_rpc("worker0", rank=0, world_size=2)
         >>> remote_linear_module = RemoteModule(
         >>>     "worker1/cpu", nn.Linear, args=(20, 30),

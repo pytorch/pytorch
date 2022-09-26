@@ -188,6 +188,16 @@ void GpuLower::collectPaddedParallelDims() {
   }
 }
 
+void assignRNGOffset(Fusion* fusion) {
+  int counter = 0;
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<RNGOp>()) {
+      auto rop = expr->as<RNGOp>();
+      rop->setRNGOffset(counter++);
+    }
+  }
+}
+
 void GpuLower::lower(Fusion* fusion, DataType index_type) {
   FUSER_PERF_SCOPE("GpuLower::lower");
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
@@ -213,6 +223,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
       tv->resolveIndexDtype();
     }
   }
+  assignRNGOffset(fusion_);
 
   FusionGuard fg(fusion_);
   // prepare for lowering

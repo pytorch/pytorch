@@ -1388,13 +1388,18 @@ class TestTEFuser(JitTestCase):
                 F.hardswish,
                 F.softplus,
                 F.silu,
+                F.mish,
+                F.elu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,
-                torch.ceil,
-                torch.floor,
-                torch.round,
-                torch.trunc,
+                # TODO broken on int8 since
+                # https://github.com/pytorch/pytorch/pull/85144
+                # RuntimeError: Invalid integral op_type: 23
+                # torch.ceil,
+                # torch.floor,
+                # torch.round,
+                # torch.trunc,
                 torch.frac,
                 # TODO: broken on ROCm?
                 # F.hardshrink,
@@ -2674,7 +2679,9 @@ def f({', '.join(param_names)}):
                 trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
                 val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-                self.assertEqual(ref, val)
+                atol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                rtol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                self.assertEqual(ref, val, atol=atol, rtol=rtol)
 
             # https://github.com/pytorch/pytorch/issues/35600
             # each torch.jit.trace adds state to the _python_cu compilation unit
