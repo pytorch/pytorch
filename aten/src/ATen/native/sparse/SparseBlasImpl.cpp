@@ -94,7 +94,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   // 3. both strided.size(-1) and result.size(-1)
   //    have to be divisible by x.
   //
-  // Restriction 2 is trivially satisfied.
+  // Restrictions 1 and 2 are trivially satisfied.
   // Regarding restriction 3:
   // it would make sense to take the largest possible x for better
   // performance since it is very likely that the last dimension
