@@ -1697,11 +1697,11 @@ c10::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
   return c10::nullopt;
 }
 
-std::vector<Tensor> to_meta(const at::TensorList& t_list) {
+std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   std::vector<Tensor> outs;
   outs.reserve(t_list.size());
-  for (const auto& i : c10::irange(t_list.size())) {
-    outs.push_back(to_meta(t_list[i]));
+  for (const auto& tensor : t_list) {
+    outs.push_back(to_meta(tensor));
   }
   return outs;
 }

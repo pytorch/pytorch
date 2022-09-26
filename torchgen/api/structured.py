@@ -69,7 +69,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):
         if t.elem == BaseType(BaseTy.Tensor):
-            return NamedCType(binds, BaseCType(iTensorListRefT))
+            return NamedCType(binds, ConstRefCType(BaseCType(iTensorListRefT)))
         elif t.elem == OptionalType(BaseType(BaseTy.Tensor)):
             return NamedCType(binds, BaseCType(iOptTensorListRefT))
         # TODO: delete these special cases; see torchgen.api.cpp--these

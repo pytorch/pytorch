@@ -4,6 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
 #include <c10/util/TypeList.h>
+#include <ATen/core/IListRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
@@ -339,6 +340,13 @@ namespace impl {
     static const at::Tensor& call(IValue& v) {
       // const Tensor& is valid, don't bother asserting
       return v.toTensor();
+    }
+  };
+
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::ITensorListRef, AllowDeprecatedTypes> final {
+    static List<at::Tensor> call(IValue& v) {
+      return v.toTensorList();
     }
   };
 
