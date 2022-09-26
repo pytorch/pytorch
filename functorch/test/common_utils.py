@@ -371,6 +371,14 @@ def skipOps(test_case_name, base_test_name, to_skip):
     return wrapped
 
 
+def expectedFailureIf(condition):
+    def decorator(fn):
+        if condition:
+            return unittest.expectedFailure(fn)
+        return fn
+    return decorator
+
+
 def tol2(op_name, variant_name, override_dct, *, device_type=None):
     return (op_name, variant_name, override_dct, device_type)
 
