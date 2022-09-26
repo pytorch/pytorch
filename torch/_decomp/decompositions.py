@@ -2,7 +2,7 @@ import functools
 import operator
 from enum import Enum
 from itertools import product
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, cast, Iterable, List, Optional, Tuple
 
 import torch
 import torch._prims_common as utils
@@ -2238,19 +2238,15 @@ def upsample_bicubic2d_vec(
     align_corners: bool,
     scale_factors: Optional[Tuple[float, float]] = None,
 ) -> Tensor:
-    def compute_output_size(input_size, output_size=None, scale_factors=None):
-        utils.check(
-            bool(output_size) + bool(scale_factors) == 1,
-            lambda: "Must specify exactly one of output_size and scale_factors.",
+    utils.check(
+        bool(output_size) + bool(scale_factors) == 1,
+        lambda: "Must specify exactly one of output_size and scale_factors.",
+    )
+    if output_size is None:
+        assert scale_factors is not None
+        output_size = cast(
+            Tuple[int, int],
+            tuple(int(w * scale) for w, scale in zip(a.shape[2:], scale_factors)),
         )
-        if output_size:
-            return output_size
-        else:
-            return tuple(
-                int(w * scale) for w, scale in zip(input_size[2:], scale_factors)
-            )
-
-    output_size = compute_output_size(a.shape, output_size, scale_factors)
-    scale_h = scale_factors[0] if scale_factors else None
-    scale_w = scale_factors[1] if scale_factors else None
+    scale_h, scale_w = scale_factors if scale_factors else (None, None)
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
