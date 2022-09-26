@@ -137,7 +137,7 @@ void ReplayTransformations::handle(Swizzle2D* swizzle_2d) {
   auto id_in_y = swizzle_2d->inY();
 
   // Make sure we have a corresponding entry in our map pointing to the ID we're
-  // going to replay the split on
+  // going to replay the swizzle on
   auto it_x = id_map_.find(id_in_x);
   auto it_y = id_map_.find(id_in_y);
 
@@ -162,7 +162,7 @@ void ReplayTransformations::handle(Swizzle2D* swizzle_2d) {
   auto outs = std::make_pair(mapped_x, mapped_y);
 
   if (replay_swizzle_) {
-    // Replay the split onto mapped
+    // Replay the swizzle onto mapped
     outs = IterDomain::swizzle(swizzle_2d->swizzleType(), mapped_x, mapped_y);
 
     // Remove mapped from the leaf IDs

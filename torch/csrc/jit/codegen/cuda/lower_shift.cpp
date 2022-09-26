@@ -440,8 +440,20 @@ void HaloInfo::build(TensorDomain* td) {
       } else {
         setHaloWidth(merge->out(), 0);
       }
-    } else if (expr->getExprType().value() == ExprType::Swizzle2D) {
+    } else if (auto swizzle = dynamic_cast<Swizzle2D*>(expr)) {
       // Assume no halo on swizzled domain for now.
+      TORCH_INTERNAL_ASSERT(
+          getExtent(swizzle->inX()) == nullptr,
+          "Halo is not supported with swizzle. Halo-extended ID: ",
+          swizzle->inX()->toString(),
+          " used in ",
+          swizzle->toString());
+      TORCH_INTERNAL_ASSERT(
+          getExtent(swizzle->inY()) == nullptr,
+          "Halo is not supported with swizzle. Halo-extended ID: ",
+          swizzle->inY()->toString(),
+          " used in ",
+          swizzle->toString());
       for (auto id : ir_utils::filterByType<IterDomain>(expr->outputs())) {
         setHaloWidth(id, 0);
       }
