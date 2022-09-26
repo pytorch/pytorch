@@ -484,7 +484,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('prod',
              {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
-        tol1('_masked.cumprod',
+        tol1('masked.cumprod',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -1150,7 +1150,7 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
         tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
-        tol1('_masked.cumprod',
+        tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
