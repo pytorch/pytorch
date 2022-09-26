@@ -44,7 +44,7 @@ from torch.utils.data import (
     runtime_validation,
     runtime_validation_disabled,
 )
-from torch.utils.data.graph import traverse
+from torch.utils.data.graph import traverse, traverse_datapipes
 from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
@@ -985,10 +985,10 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Pickle Test:
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
-        traverse(dp1)  # This should not raise any error
+        traverse_datapipes(dp1)  # This should not raise any error
         for _ in zip(dp1, dp2, dp3):
             pass
-        traverse(dp2)  # This should not raise any error either
+        traverse_datapipes(dp2)  # This should not raise any error either
 
     def test_mux_iterdatapipe(self):
 
@@ -1155,10 +1155,10 @@ class TestFunctionalIterDataPipe(TestCase):
 
         # Pickle Test:
         dp1, dp2 = input_dp.demux(num_instances=2, classifier_fn=odd_or_even)
-        traverse(dp1)  # This should not raise any error
+        traverse_datapipes(dp1)  # This should not raise any error
         for _ in zip(dp1, dp2):
             pass
-        traverse(dp2)  # This should not raise any error either
+        traverse_datapipes(dp2)  # This should not raise any error either
 
     def test_map_iterdatapipe(self):
         target_length = 10
@@ -2374,7 +2374,7 @@ class TestGraph(TestCase):
         shuffled_dp = numbers_dp.shuffle()
         sharded_dp = shuffled_dp.sharding_filter()
         mapped_dp = sharded_dp.map(lambda x: x * 10)
-        graph = torch.utils.data.graph.traverse(mapped_dp, only_datapipe=True)
+        graph = traverse_datapipes(mapped_dp)
         expected: Dict[Any, Any] = {
             id(mapped_dp): (mapped_dp, {
                 id(sharded_dp): (sharded_dp, {
@@ -2397,7 +2397,7 @@ class TestGraph(TestCase):
         dp0_upd = dp0.map(lambda x: x * 10)
         dp1_upd = dp1.filter(lambda x: x % 3 == 1)
         combined_dp = dp0_upd.mux(dp1_upd, dp2)
-        graph = torch.utils.data.graph.traverse(combined_dp, only_datapipe=True)
+        graph = traverse_datapipes(combined_dp)
         expected = {
             id(combined_dp): (combined_dp, {
                 id(dp0_upd): (dp0_upd, {
@@ -2431,21 +2431,21 @@ class TestGraph(TestCase):
     def test_traverse_mapdatapipe(self):
         source_dp = dp.map.SequenceWrapper(range(10))
         map_dp = source_dp.map(partial(_fake_add, 1))
-        graph = torch.utils.data.graph.traverse(map_dp)
+        graph = traverse_datapipes(map_dp)
         expected: Dict[Any, Any] = {id(map_dp): (map_dp, {id(source_dp): (source_dp, {})})}
         self.assertEqual(expected, graph)
 
     def test_traverse_mixdatapipe(self):
         source_map_dp = dp.map.SequenceWrapper(range(10))
         iter_dp = dp.iter.IterableWrapper(source_map_dp)
-        graph = torch.utils.data.graph.traverse(iter_dp)
+        graph = traverse_datapipes(iter_dp)
         expected: Dict[Any, Any] = {id(iter_dp): (iter_dp, {id(source_map_dp): (source_map_dp, {})})}
         self.assertEqual(expected, graph)
 
     def test_traverse_circular_datapipe(self):
         source_iter_dp = dp.iter.IterableWrapper(list(range(10)))
         circular_dp = TestGraph.CustomIterDataPipe(source_iter_dp)
-        graph = torch.utils.data.graph.traverse(circular_dp, only_datapipe=True)
+        graph = traverse_datapipes(circular_dp)
         # See issue: https://github.com/pytorch/data/issues/535
         expected: Dict[Any, Any] = {
             id(circular_dp): (circular_dp, {
@@ -2464,7 +2464,7 @@ class TestGraph(TestCase):
     def test_traverse_unhashable_datapipe(self):
         source_iter_dp = dp.iter.IterableWrapper(list(range(10)))
         unhashable_dp = TestGraph.CustomIterDataPipe(source_iter_dp)
-        graph = torch.utils.data.graph.traverse(unhashable_dp, only_datapipe=True)
+        graph = traverse_datapipes(unhashable_dp)
         with self.assertRaises(NotImplementedError):
             hash(unhashable_dp)
         expected: Dict[Any, Any] = {
@@ -2533,7 +2533,7 @@ class TestCircularSerialization(TestCase):
         m1_1 = m2_1.datapipe
         src_1 = m1_1.datapipe
 
-        res1 = traverse(dp1, only_datapipe=True)
+        res1 = traverse_datapipes(dp1)
         res2 = traverse(dp1, only_datapipe=False)
 
         exp_res_1 = {id(dp1): (dp1, {
@@ -2563,7 +2563,7 @@ class TestCircularSerialization(TestCase):
         m2_2 = dm_2.main_datapipe
         m1_2 = m2_2.datapipe
 
-        res3 = traverse(dp2, only_datapipe=True)
+        res3 = traverse_datapipes(dp2)
         res4 = traverse(dp2, only_datapipe=False)
         exp_res_3 = {id(dp2): (dp2, {
             id(dp1): (dp1, {
@@ -2643,7 +2643,7 @@ class TestCircularSerialization(TestCase):
         m1_1 = m2_1.datapipe
         src_1 = m1_1.datapipe
 
-        res1 = traverse(dp1, only_datapipe=True)
+        res1 = traverse_datapipes(dp1)
         res2 = traverse(dp1, only_datapipe=False)
 
         exp_res_1 = {id(dp1): (dp1, {
@@ -2673,7 +2673,7 @@ class TestCircularSerialization(TestCase):
         m2_2 = dm_2.main_datapipe
         m1_2 = m2_2.datapipe
 
-        res3 = traverse(dp2, only_datapipe=True)
+        res3 = traverse_datapipes(dp2)
         res4 = traverse(dp2, only_datapipe=False)
         exp_res_3 = {id(dp2): (dp2, {
             id(dp1): (dp1, {
