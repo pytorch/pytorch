@@ -63,7 +63,7 @@ struct FMHAEpilogue {
         Element, ElementC, /*ElementsPerAccess=*/4, ThreadblockShape, typename WarpMma::Shape,
         typename WarpMma::Policy::Operator::Shape, typename OutputTileThreadMap::CompactedThreadMap>;
     using WarpTileIterator = typename DefaultIterators::WarpTileIterator;
-    static_assert(WarpTileIterator::kIterations == kIterationsStore);
+    static_assert(WarpTileIterator::kIterations == kIterationsStore, "");
     using SharedLoadIterator = typename DefaultIterators::SharedLoadIterator;
     using OutputFragment = typename SharedLoadIterator::Fragment;
 
