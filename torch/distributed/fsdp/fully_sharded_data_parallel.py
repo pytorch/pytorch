@@ -3080,7 +3080,6 @@ class FullyShardedDataParallel(nn.Module):
             f"Inconsistent `_use_orig_params` -- FSDP: {self._use_orig_params} "
             f"handle: {handle._use_orig_params}"
         )
-        flat_param = handle.flat_param
         handle._deregister_orig_params()
         self._fsdp_wrapped_module._register_flat_param()
 
@@ -3091,7 +3090,6 @@ class FullyShardedDataParallel(nn.Module):
         if not self._handles:
             return
         handle = self._handles[0]
-        flat_param = handle.flat_param
         self._fsdp_wrapped_module._deregister_flat_param()
         if handle.is_sharded(handle.flat_param):
             handle._use_sharded_views()
@@ -3443,6 +3441,9 @@ class FullyShardedDataParallel(nn.Module):
                 # are underway in the post_backward stream. See:
                 # github.com/NVIDIA/apex/blob/master/apex/parallel/distributed.py
                 orig_grad_data.record_stream(self._streams["post_backward"])
+
+                if handle._use_orig_params:
+                    handle._use_sharded_grad_views()
 
     def _cast_grad_to_param_dtype(
         self,

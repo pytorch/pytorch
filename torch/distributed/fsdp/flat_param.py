@@ -474,7 +474,6 @@ class FlatParamHandle:
                 orig_storage.resize_(0)
         if self._use_orig_params:
             self._use_sharded_views()
-            self._use_sharded_grad_views()
 
     def _init_shard_metadata(
         self,
@@ -939,8 +938,6 @@ class FlatParamHandle:
                 "All sharded parameters that received a gradient in the "
                 "post-backward should use `_saved_grad_shard`",
             )
-        if self._use_orig_params:
-            self._use_sharded_grad_views()
         # TODO (awgu): I am not sure that deleting this is necessary.
         if hasattr(flat_param, "_saved_grad_shard"):
             delattr(flat_param, "_saved_grad_shard")
@@ -1158,7 +1155,7 @@ class FlatParamHandle:
             self._use_unsharded_views(as_params=False)
 
     @torch.no_grad()
-    def _use_sharded_views(self):
+    def _use_sharded_views(self) -> None:
         """
         Sets the original module parameter variables' data to be flattened
         views into the sharded flattened parameter.
@@ -1213,7 +1210,7 @@ class FlatParamHandle:
             param.data = prim_param  # could be both empty and non-empty
 
     @torch.no_grad()
-    def _use_sharded_grad_views(self):
+    def _use_sharded_grad_views(self) -> None:
         """
         Sets the original module parameter variables' gradients to be flattened
         views into the sharded flattened parameter's gradient. This is a no-op
@@ -1226,9 +1223,17 @@ class FlatParamHandle:
         creates new ``Tensor`` variables instead.
         """
         self._check_sharded(self.flat_param)
-        if self.flat_param.grad is None:
+        # Use `_saved_grad_shard` when possible since that owns the sharded
+        # gradient storage (`flat_param.grad` will share the reference in the
+        # post-backward callback, but the underlying data does not change)
+        grad = (
+            self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
+            if hasattr(self.flat_param, "_saved_grad_shard")
+            else self.flat_param.grad
+        )
+        if grad is None:
             return  # no-op
-        self._check_sharded(self.flat_param.grad)
+        self._check_sharded(grad)
         start, end = self.flat_param._shard_indices  # type: ignore[attr-defined]
         offset = 0
         assert self.flat_param._params is not None
@@ -1242,9 +1247,9 @@ class FlatParamHandle:
                 param_start, param_end = self.flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
                 numel_in_shard = param_end - param_start + 1
                 if param.requires_grad:
-                    param.grad = self.flat_param.grad[
-                        offset : offset + numel_in_shard
-                    ].reshape(param.shape)
+                    param.grad = grad[offset : offset + numel_in_shard].reshape(
+                        param.shape
+                    )
                 else:
                     param.grad = None
                 offset += numel_in_shard
@@ -1316,12 +1321,11 @@ class FlatParamHandle:
             # is only called in the pre-forward or pre-backward, the
             # sharded gradient should be guaranteed to be in `.grad`, not
             # in `._saved_grad_shard`.
-            if (
-                param.grad is None
-                and flat_param.grad is not None
-            ):
+            if param.grad is None and flat_param.grad is not None:
                 expected_shape = torch.Size([numel_in_shard])
-                self._writeback_tensor(None, flat_param.grad, expected_shape, offset, False)
+                self._writeback_tensor(
+                    None, flat_param.grad, expected_shape, offset, False
+                )
             elif param.grad is not None:
                 needs_grad_writeback = flat_param.grad is None or not _same_storage(
                     param.grad, flat_param.grad
