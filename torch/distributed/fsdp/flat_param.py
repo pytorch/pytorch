@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._utils import _alloc_storage, _free_storage, p_assert
+from ._utils import _alloc_storage, _free_storage, _set_fsdp_flattened, p_assert
 
 __all__ = [
     "FlatParameter",
@@ -108,6 +108,7 @@ class HandleConfig:
     offload_params: bool
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
+    keep_low_precision_grads: Optional[bool] = False
 
 
 class FlatParameter(nn.Parameter):
@@ -222,6 +223,7 @@ class FlatParameter(nn.Parameter):
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
         self._unpadded_unsharded_size = self.size()
+        _set_fsdp_flattened(self)
 
 
 class FlatParamHandle:
@@ -310,7 +312,7 @@ class FlatParamHandle:
                         )
                     )
                 else:
-                    if isinstance(param, FlatParameter):
+                    if type(param) is FlatParameter:
                         raise ValueError("`FlatParameter` does not support nesting")
                     if dtype is not None and param.dtype != dtype:
                         raise ValueError(
@@ -792,6 +794,21 @@ class FlatParamHandle:
                 # a GPU tensor (the new sharded gradient).
                 if not grad_offloaded:
                     flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
+                    # If we're using mixed precision with keeping grads
+                    # casted, gradient here might still be of the reduced
+                    # dtype if we didn't clear / set the gradients to None
+                    # after previous backward. In that case, make sure
+                    # p._saved_grad_shard is cast to the full precision type
+                    # so that we can accumulate in full precision in
+                    # _post_backward_hook and assign back in full precision
+                    # in _wait_for_post_backward.
+                    if (
+                        self._config.keep_low_precision_grads and
+                        flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                    ):
+                        flat_param._saved_grad_shard = (  # type: ignore[attr-defined]
+                            flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)  # type: ignore[attr-defined]
+                        )
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
                 p_assert(
@@ -931,8 +948,8 @@ class FlatParamHandle:
             f"{tensor.numel()} numel",
         )
         views = (
-            tensor.view(shape)
-            for (tensor, shape) in zip(
+            subtensor.view(shape)
+            for (subtensor, shape) in zip(
                 torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes  # type: ignore[arg-type]
             )
         )
