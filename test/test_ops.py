@@ -63,7 +63,6 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._subclasses.fake_utils import outputs_alias_inputs
 
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
@@ -173,8 +172,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = FakeTensorMode()
-        with mode:
+        with FakeTensorMode() as mode:
             pass
 
         def _to_tensormeta(x):
@@ -189,7 +187,7 @@ class TestCommon(TestCase):
 
             meta_sample = sample.transform(_to_tensormeta)
             try:
-                with enable_torch_dispatch_mode(mode):
+                with mode:
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
@@ -1863,7 +1861,7 @@ class TestFakeTensor(TestCase):
                     continue
 
                 with context():
-                    with enable_torch_dispatch_mode(mode):
+                    with mode:
                         res_fake = op(input, *args, **kwargs)
 
 
