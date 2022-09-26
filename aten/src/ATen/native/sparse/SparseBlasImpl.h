@@ -7,6 +7,20 @@ namespace at {
 namespace native {
 namespace sparse {
 namespace impl {
+
+Tensor& _compressed_row_strided_mm_out(
+    const Tensor& compressed_row_sparse,
+    const Tensor& strided,
+    Tensor& result);
+
+Tensor& _compressed_row_strided_addmm_out(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Tensor& result);
+
 namespace cpu {
 
 void addmv_out_sparse_csr(

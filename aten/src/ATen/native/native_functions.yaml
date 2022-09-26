@@ -6205,12 +6205,6 @@
     SparseCPU, SparseCUDA, SparseMeta: sparse_resize_and_clear_
   autogen: sparse_resize_and_clear, sparse_resize_and_clear.out
 
-- func: test_test(Tensor x, Tensor y) -> Tensor
-  variants: function
-  dispatch:
-    SparseCsrCPU: test_test
-    SparseCsrCUDA: test_test
-
 - func: sparse_mask(Tensor self, Tensor mask) -> Tensor
   variants: method
   dispatch:
