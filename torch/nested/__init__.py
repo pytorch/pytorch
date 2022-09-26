@@ -43,9 +43,7 @@ def nested_tensor(tensor_list: List[Tensor], *, dtype: Optional[DType] = None, d
     """
     if not isinstance(tensor_list, list) or any([not torch.is_tensor(t) for t in tensor_list]):
         raise TypeError("nested_tensor(): Expected first argument to be a list of tensors ")
-    new_data = []
-    for t in tensor_list:
-        new_data.append(t.clone().detach())
+    new_data = [t.detach() for t in tensor_list]
     nt = torch._nested_tensor_from_tensor_list(new_data, dtype, None, device, pin_memory)
     if (requires_grad):
         nt.requires_grad_(requires_grad)
