@@ -3179,5 +3179,28 @@ TEST_F(Composed, ComposedOp) {
 #endif
 }
 
+TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+  const auto src = R"IR(
+    graph():
+        %none: NoneType = prim::Constant()
+        %dim: int = prim::Constant[value=3]()
+        %shape: int[] = prim::ListConstruct(%dim, %dim)
+        %weight: Tensor = aten::ones(%shape, %none, %none, %none, %none)
+        %scale: float = prim::Constant[value=1.]()
+        %zero_point: int = prim::Constant[value=0]()
+        %dtype: int = prim::Constant[value=12]()
+        %weight_q: Tensor = aten::quantize_per_tensor(%weight, %scale, %zero_point, %dtype)
+        %params: __torch__.torch.classes.quantized.LinearPackedParamsBase = quantized::linear_prepack(%weight_q, %none)
+        return (%params)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  ConstantPropagation(graph);
+
+  testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
+}
+
 } // namespace jit
 } // namespace torch
