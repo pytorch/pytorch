@@ -827,11 +827,7 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   append_cxx_flag_if_supported("-Werror=return-type" CMAKE_CXX_FLAGS)
-  if(NOT USE_CUDNN)
-    # Temporary fix to ignore non virtual dtor error if cudnn is used. A
-    # separate PR to cudnn_frontend is needed to address this later on
-    append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
-  endif()
+  append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
