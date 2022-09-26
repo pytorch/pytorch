@@ -17435,7 +17435,7 @@ python_ref_db = [
             # AssertionError: Tensor-likes are not close!
             # Greatest absolute difference: 6.103515625e-05 at index (4,) (up to 1e-05 allowed)
             # Greatest relative difference: 8.519846983548175e-06 at index (4,) (up to 1.3e-06 allowed)
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.uint8,), device_type="cpu"),
         )
     ),
@@ -17449,7 +17449,7 @@ python_ref_db = [
             # AssertionError: Tensor-likes are not close!
             # Greatest absolute difference: 6.103515625e-05 at index (4,) (up to 1e-05 allowed)
             # Greatest relative difference: 8.519846983548175e-06 at index (4,) (up to 1.3e-06 allowed)
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.uint8,), device_type="cpu"),
         )
     ),
