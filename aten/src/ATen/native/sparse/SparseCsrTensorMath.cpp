@@ -163,7 +163,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
 
 template <typename F, typename... Args>
 Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "unary_op_inplace", [](){});
 
   auto self_values = self.values();
   (self_values.*op_inplace)(std::forward<Args>(args)...);
@@ -299,6 +299,23 @@ Tensor mul_scalar_sparse_csr(const Tensor& self, const Scalar& other) {
       result_values.device());
 }
 
+Tensor& zero_sparse_csr_(Tensor& self) {
+  /*
+    csr.zero_() resets nnz to 0.
+
+    If the original sparsity pattern needs to be preserved, use
+    `csr.values().zero_()` instead.
+
+    The above behavior also implies that torch.zeros_like(csr) returns
+    a new tensor with nnz == 0. If one needs a zeros_like semantics
+    where the result has the same sparsity pattern as input, then use
+    `result = csr.clone(); result.values.zero_();`
+  */
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "zero_sparse_csr_", [](){});
+  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.sizes());
+  return self;
+}
+
 /* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
  * Only simple funcs, with 0->0 correspondence are currently supported. */
 
@@ -349,8 +366,6 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-
-CREATE_UNARY_UFUNC_INPLACE(zero);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.

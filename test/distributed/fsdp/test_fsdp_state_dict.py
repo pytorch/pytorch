@@ -20,10 +20,10 @@ from torch.distributed.fsdp import (
     MixedPrecision,
     StateDictType,
 )
+from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     FullyShardedDataParallel,
 )
-from torch.distributed.fsdp.shard_utils import _gather_state_dict
 from torch.distributed.fsdp.wrap import (
     enable_wrap,
     transformer_auto_wrap_policy,
@@ -205,8 +205,9 @@ class TestFSDPStateDict(FSDPTest):
                     self.assertEqual(fsdp_state_dict, {})
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("checkpoint_wrap", ["first", "second", "both"])
-    def test_fsdp_state_dict_with_activation_checkpoint(self, checkpoint_wrap):
+    def test_fsdp_state_dict_with_activation_checkpoint(self, state_dict_type, checkpoint_wrap):
         """Tests saving the state dict, zeroing a target model's parameters, and
         loading the state dict, where the source and target models may have a
         checkpoint wrapper."""
@@ -215,15 +216,16 @@ class TestFSDPStateDict(FSDPTest):
             partial(self._get_simple_nested_model)
         ]:
             model = model_call(checkpoint_wrap=(checkpoint_wrap in ["first", "both"]))
-            state_dict = _get_state_dict(model, False, False)
-            # Possibly wrap new model in activation checkpoint wrapper to test save/
-            # load with this wrapper
-            model_new = model_call(checkpoint_wrap=(checkpoint_wrap in ["second", "both"]))
-            _zero_model(model_new)
-            self._compare_models(model, model_new, self.assertNotEqual)
-            # Would fail if checkpoint_wrapper did not correctly implement state_dict pre/post hooks
-            model_new.load_state_dict(state_dict)
-            self._compare_models(model, model_new, self.assertEqual)
+            with FSDP.state_dict_type(model, STATE_DICT_MAPPING[state_dict_type]):
+                state_dict = _gather_state_dict(_get_state_dict(model, False, False))
+                # Possibly wrap new model in activation checkpoint wrapper to test save/
+                # load with this wrapper
+                model_new = model_call(checkpoint_wrap=(checkpoint_wrap in ["second", "both"]))
+                _zero_model(model_new)
+                self._compare_models(model, model_new, self.assertNotEqual)
+                # Would fail if checkpoint_wrapper did not correctly implement state_dict pre/post hooks
+                model_new.load_state_dict(state_dict, strict=True)
+                self._compare_models(model, model_new, self.assertEqual)
 
     @skip_if_lt_x_gpu(2)
     def test_state_dict_rank0_offload_save_load_flow(self):
@@ -258,7 +260,7 @@ class TestFSDPStateDict(FSDPTest):
         _zero_model(new_model, zero_buffers=True)
         # Only load the checkpoint on rank 0
         if self.rank == 0:
-            new_model.load_state_dict(state_dict)
+            new_model.load_state_dict(state_dict, strict=True)
         _assert_module_states(
             new_model,
             process_group=self.process_group,
@@ -352,7 +354,7 @@ class TestFSDPStateDict(FSDPTest):
                 for key in fsdp_state_dict.keys():
                     fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
             with FSDP.state_dict_type(model_new, STATE_DICT_MAPPING[state_dict_type]):
-                model_new.load_state_dict(fsdp_state_dict)
+                model_new.load_state_dict(fsdp_state_dict, strict=True)
 
             self._compare_models(model, model_new, self.assertEqual, check_fp16=fp16)
 
@@ -422,7 +424,7 @@ class TestFSDPStateDict(FSDPTest):
                 state_dict[key] = state_dict[key].cuda()
 
         with FSDP.state_dict_type(model, STATE_DICT_MAPPING[state_dict_type]):
-            model.load_state_dict(state_dict)
+            model.load_state_dict(state_dict, strict=True)
         loaded_params = get_full_params(model)
         self.assertEqual(loaded_params, trained_params)
 
@@ -462,7 +464,7 @@ class TestFSDPStateDict(FSDPTest):
             raise ValueError(f"No state_dict for {state_dict_type}")
 
         with FSDP.state_dict_type(model, enum_val):
-            return model.load_state_dict(state_dict)
+            return model.load_state_dict(state_dict, strict=True)
 
     def _dist_train(self, wrap_fsdp: bool, state_dict_type: str = ""):
         # TODO: Move this test to common_fsdp.
@@ -581,7 +583,7 @@ class TestFSDPStateDict(FSDPTest):
                 fsdp_state_dict[key] = fsdp_state_dict[key].cuda()
 
         # if self.rank == 0:
-        blank_local_model.load_state_dict(fsdp_state_dict)
+        blank_local_model.load_state_dict(fsdp_state_dict, strict=True)
         local_params = list(blank_local_model.parameters())
         for fsdp_param, local_param in zip(fsdp_params, local_params):
             self.assertEqual(fsdp_param, local_param)
@@ -638,7 +640,7 @@ class TestFSDPStateDict(FSDPTest):
             if state_dict_type != "local_state_dict":
                 # FlatParameter has not supported deepcopy yet.
                 state_dict = deepcopy(state_dict)
-            new_fsdp.load_state_dict(state_dict)
+            new_fsdp.load_state_dict(state_dict, strict=True)
         for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertEqual(p1, p2)
 
@@ -657,7 +659,7 @@ class TestFSDPStateDict(FSDPTest):
         state_dict = _gather_state_dict(state_dict)
         with fsdp.summon_full_params(fsdp):
             if self.rank == 0:
-                local.load_state_dict(state_dict)
+                local.load_state_dict(state_dict, strict=True)
                 for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
                     self.assertEqual(p1, p2)
 
@@ -671,9 +673,10 @@ class TestFSDPStateDict(FSDPTest):
                 pass
 
     @skip_if_lt_x_gpu(2)
+    @parametrize("state_dict_type", _UNFLATTENED_STATE_DICT_IMPLS)
     @parametrize("prefix", [True, False])
     @parametrize("ignore_inner", [True, False])
-    def test_state_dict_with_ignored_modules(self, prefix, ignore_inner):
+    def test_state_dict_with_ignored_modules(self, state_dict_type, prefix, ignore_inner):
         # Initialize an FSDP-wrapped model with an ignored module that includes
         # both parameters and a buffer
         model = Model(wrap_fsdp=True, register_buffers=True, ignore_inner=ignore_inner).cuda()
@@ -695,8 +698,8 @@ class TestFSDPStateDict(FSDPTest):
         }
         fsdp_model = FSDP(model, ignored_modules=ignored_modules)
         prefix_str = "foo." if prefix else ""
-        with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
-            sd1 = fsdp_model.state_dict(prefix=prefix_str)
+        with FSDP.state_dict_type(fsdp_model, STATE_DICT_MAPPING[state_dict_type]):
+            sd1 = _gather_state_dict(fsdp_model.state_dict(prefix=prefix_str))
         with FSDP.summon_full_params(fsdp_model):
             fsdp_params = deepcopy(list(fsdp_model.parameters()))
         # Check that the ignored parameters and all buffers are not cloned
@@ -715,13 +718,13 @@ class TestFSDPStateDict(FSDPTest):
                 param.zero_()
 
         to_load = {k[len(prefix_str):] : v for k, v in sd1.items()}
-        nonwrapped_model.load_state_dict(to_load)
+        nonwrapped_model.load_state_dict(to_load, strict=True)
         local_params = list(nonwrapped_model.parameters())
         for fsdp_param, local_param in zip(fsdp_params, local_params):
             self.assertEqual(fsdp_param, local_param)
         # Check that if we save a state dict again, the ignored parameters and
         # buffer still have the same data pointer
-        with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
+        with FSDP.state_dict_type(fsdp_model, STATE_DICT_MAPPING[state_dict_type]):
             sd2 = fsdp_model.state_dict(prefix=prefix_str)
         for tensor, tensor_name in {
             **ignored_tensor_to_tensor_name,
