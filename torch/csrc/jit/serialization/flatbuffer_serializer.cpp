@@ -20,7 +20,6 @@
 #include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 
 #if defined(FBCODE_CAFFE2) or defined(FB_XPLAT_BUILD)
@@ -712,7 +711,7 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
   } else if (ivalue.isString()) {
     ivalue_type = IValueUnion::String;
     offset = mobile::serialization::CreateString(
-                 fbb, fbb.CreateSharedString(ivalue.toString()->string()))
+                 fbb, fbb.CreateSharedString(ivalue.toStringRef()))
                  .Union();
   } else if (ivalue.isGenericDict()) {
     ivalue_type = IValueUnion::Dict;

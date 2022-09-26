@@ -37,6 +37,9 @@ TORCH_API std::string parse_env(const char* env_var_name);
 // Retrieve tensor shapes from a given tensor.
 TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
 
+// Use -2 to represent unset state of env vars
+#define C10D_ENV_NOT_SET -2
+
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
@@ -70,7 +73,7 @@ inline void assertSameType(
   }
 }
 
-inline bool parseEnvVarFlag(const char* envVarName) {
+inline int parseEnvVarInt(const char* envVarName) {
   char* stringValue = std::getenv(envVarName);
   if (stringValue != nullptr) {
     int val;
@@ -80,16 +83,21 @@ inline bool parseEnvVarFlag(const char* envVarName) {
       TORCH_CHECK(false,
           "Invalid value for environment variable: " + std::string(envVarName));
     }
+    return val;
+  }
+  return C10D_ENV_NOT_SET;
+}
+
+inline bool parseEnvVarFlag(const char* envVarName) {
+    int val = parseEnvVarInt(envVarName);
     if (val == 1) {
       return true;
-    } else if (val == 0) {
+    } else if (val == 0 || val == C10D_ENV_NOT_SET) {
       return false;
-    } else {
-      TORCH_CHECK(false,
-          "Invalid value for environment variable: " + std::string(envVarName));
     }
-  }
-  return false;
+    TORCH_CHECK(false,
+        "Invalid value for environment variable: " + std::string(envVarName));
+    return false;
 }
 
 inline void assertSameSizes(

@@ -572,6 +572,7 @@ class MultipleOutputsIdenticalAnchor:
         TestCase(False, True, 0),
     ]
 
+
 class MultipleOutputsHorizontalPattern:
     @staticmethod
     def forward(x):
@@ -598,60 +599,69 @@ class MultipleOutputsHorizontalPattern:
         TestCase(True, True, 0)
     ]
 
-class PatternWithPseudoAny:
+class MultiOutputWithWithInvalidMatches:
     @staticmethod
     def forward(x):
-        x = x.relu()
-        x = x.sigmoid()
-
-        y = x.relu()
-        y = y + 1
-
-        z = y.relu()
-        z = z.relu()
-
-        return z
+        res0 = torch.nn.functional.linear(x, torch.rand(3, 3))
+        res1 = torch.sigmoid(res0)
+        res2 = res0 * res1
+        res3 = torch.sum(res2, dim=1)
+        return res3
 
     @staticmethod
-    def pattern(a):
-        y = a.relu()
-        z = torch.ops.pseudo.any(y)
-        return z
+    def pattern(a, b, c):
+        lin_res = torch.nn.functional.linear(a, b)
+        mul_res = lin_res * c
+        return lin_res, mul_res
 
     test_cases = [
         # match_output, match_placeholder, num_matches
-        TestCase(False, False, 3),
-        TestCase(True, False, 1),
-        TestCase(False, True, 1),
-        TestCase(True, True, 0)
+        TestCase(False, False, 0),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
     ]
 
-class PatternWithPseudoOneof:
-    @staticmethod
-    def forward(x):
-        x = x.relu()
-        x = torch.sigmoid(x)
+class QuantizationFp8Pattern:
+    @classmethod
+    def setup(cls):
+        cls.quantization = torch.library.Library("fp8_quantization", "DEF")
+        cls.quantization.define("quantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
+        cls.quantization.define("dequantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
 
-        z = x.relu()
-        z = torch.relu(z)
-
-        y = x.relu()
-        y = y + 1
-
-        return y
+    @classmethod
+    def tearDown(cls):
+        del cls.quantization
 
     @staticmethod
-    def pattern(a):
-        y = a.relu()
-        z = torch.ops.pseudo.oneof(y, targets=["torch.sigmoid", "operator.add"])
-        return z
+    def forward(self, arg0_1, arg1_1):
+        qt = torch.ops.fp8_quantization
+        _scale_0 = self._scale_0
+        quantize_per_tensor_affine_fp8 = qt.quantize_per_tensor_affine_fp8(arg0_1, 0, _scale_0)
+        dequantize_per_tensor_affine_fp8 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8, 0, _scale_0)
+        _scale_1 = self._scale_0
+        quantize_per_tensor_affine_fp8_1 = qt.quantize_per_tensor_affine_fp8(arg1_1, 0, _scale_1)
+        dequantize_per_tensor_affine_fp8_1 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_1, 0, _scale_1)
+        add = torch.ops.aten.add.Tensor(dequantize_per_tensor_affine_fp8, dequantize_per_tensor_affine_fp8_1)
+        _scale_2 = self._scale_0
+        quantize_per_tensor_affine_fp8_2 = qt.quantize_per_tensor_affine_fp8(add, 0, _scale_2)
+        dequantize_per_tensor_affine_fp8_2 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_2, 0, _scale_2)
+        return dequantize_per_tensor_affine_fp8_2
+
+    @staticmethod
+    def pattern(a, a_dtype, a_scale, b, b_dtype, b_scale, out_scale):
+        qt = torch.ops.fp8_quantization
+        a = qt.dequantize_per_tensor_affine_fp8(a, a_dtype, a_scale)
+        b = qt.dequantize_per_tensor_affine_fp8(b, b_dtype, b_scale)
+        output = torch.ops.aten.add.Tensor(a, b)
+
+        qt.dequantize_per_tensor_affine_fp8
+
+        output = qt.quantize_per_tensor_affine_fp8(output, a_dtype, out_scale)
+        return output
 
     test_cases = [
         # match_output, match_placeholder, num_matches
-        TestCase(False, False, 2),
-        TestCase(True, False, 1),
-        TestCase(False, True, 1),
-        TestCase(True, True, 0)
+        TestCase(False, False, 1),
     ]
 
 @instantiate_parametrized_tests
@@ -671,10 +681,15 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsMultipleNonOverlappingMatches,
         MultipleOutputsIdenticalAnchor,
         MultipleOutputsHorizontalPattern,
-        PatternWithPseudoAny,
-        PatternWithPseudoOneof,
+        MultiOutputWithWithInvalidMatches,
+        QuantizationFp8Pattern,
     ])
     def test_subgraph_matcher(self, test_model):
+
+        setup = getattr(test_model, "setup", None)
+        if callable(setup):
+            setup()
+
         traced = symbolic_trace(test_model.forward)
         pattern_traced = symbolic_trace(test_model.pattern)
 
@@ -695,6 +710,10 @@ class TestFXMatcherUtils(JitTestCase):
                     if not test_case.match_output and node.op == "output":
                         continue
                     assert node in match.nodes_map
+
+        tearDown = getattr(test_model, "tearDown", None)
+        if callable(setup):
+            tearDown()
 
 
 if __name__ == "__main__":

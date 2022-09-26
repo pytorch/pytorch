@@ -1,6 +1,7 @@
 import torch
 from typing import Callable, Any
 
+
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
@@ -93,7 +94,7 @@ class save_on_cpu(saved_tensors_hooks):
 
     Example::
 
-        >>> # xdoctest: +REQUIRES(env:CUDAHOME)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> a = torch.randn(5, requires_grad=True, device="cuda")
         >>> b = torch.randn(5, requires_grad=True, device="cuda")
         >>> c = torch.randn(5, requires_grad=True, device="cuda")
