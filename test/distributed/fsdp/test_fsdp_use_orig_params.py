@@ -183,7 +183,9 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             for p1, p2 in zip(ddp_model.parameters(), fsdp_model.parameters()):
                 torch.testing.assert_close(p1, p2, atol=atol, rtol=rtol)
 
-    def _get_sharding_strategy_from_str(self, sharding_strategy_str: str) -> ShardingStrategy:
+    def _get_sharding_strategy_from_str(
+        self, sharding_strategy_str: str
+    ) -> ShardingStrategy:
         if sharding_strategy_str == "no_shard":
             sharding_strategy = ShardingStrategy.NO_SHARD
         elif sharding_strategy_str == "shard_grad_op":
@@ -285,7 +287,9 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             backward_prefetch=backward_prefetch,
             cpu_offload=cpu_offload,
         )
-        self._check_train_parity(ddp_model, ddp_optim, fsdp_model, fsdp_optim, set_to_none)
+        self._check_train_parity(
+            ddp_model, ddp_optim, fsdp_model, fsdp_optim, set_to_none
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_diff_trainability(self):
@@ -300,7 +304,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     ShardingStrategy.FULL_SHARD,
                     ShardingStrategy.SHARD_GRAD_OP,
                     ShardingStrategy.NO_SHARD,
-                ]
+                ],
             },
             self._test_diff_trainability,
         )
@@ -613,7 +617,25 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
 
 class TestFSDPUseOrigParamsWriteback(FSDPTest):
     """Tests parameter and gradient writeback."""
-    # TODO (awgu): Add test for gradient writeback.
+
+    class Model(nn.Module):
+        def __init__(self):
+            super().__init__()
+            torch.manual_seed(42)
+            self.lin1 = nn.Linear(5, 5, bias=True)
+            self.lin2 = nn.Linear(5, 7, bias=True)
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            z = self.lin1(x)
+            z = nn.functional.relu(z)
+            z = self.lin2(z)
+            return z
+
+        def get_input(self, device: torch.device) -> Tuple[torch.Tensor, ...]:
+            return (torch.randn((2, 5)).to(device),)
+
+        def get_loss(self, inp, out):
+            return out.sum()
 
     @property
     def world_size(self):
@@ -621,46 +643,40 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
         # sharding strategy
         return 2
 
+    def _check_param_parity(self, ddp_model: DDP, fsdp_model: FSDP):
+        with FSDP.summon_full_params(fsdp_model):
+            for (n1, p1), (n2, p2) in zip(
+                ddp_model.module.named_parameters(),
+                fsdp_model.named_parameters(),
+            ):
+                self.assertEqual(n1, n2)
+                torch.testing.assert_close(p1, p2)
+
     @skip_if_lt_x_gpu(2)
     def test_param_writeback(self):
         """Tests that changes to the original parameters are written back."""
         self.run_subtests(
             {
-                "change_first_param": [True, False],  # first vs. second parameter
+                "change_first_weight": [True, False],  # first vs. second `weight`
                 "change_data": [True, False],  # change `.data` vs. variable itself
             },
             self._test_param_writeback,
         )
 
-    def _test_param_writeback(self, change_first_param: bool, change_data: bool):
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                torch.manual_seed(42)
-                self.lin1 = nn.Linear(5, 5, bias=False)
-                self.lin2 = nn.Linear(5, 7, bias=False)
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                z = self.lin1(x)
-                z = nn.functional.relu(z)
-                z = self.lin2(z)
-                return z
-
-            def get_input(self, device: torch.device) -> Tuple[torch.Tensor, ...]:
-                return (torch.randn((2, 5)).to(device),)
-
-            def get_loss(self, inp, out):
-                return out.sum()
-
+    def _test_param_writeback(self, change_first_weight: bool, change_data: bool):
         def transform_param(param: nn.Parameter) -> nn.Parameter:
             return nn.Parameter(torch.ones_like(param) * 2)
 
         # Check that the writeback propagates
-        ddp_model = DDP(Model().cuda(), device_ids=[self.rank])
-        fsdp_model = FSDP(Model().cuda(), use_orig_params=True)
+        ddp_model = DDP(
+            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
+        )
+        fsdp_model = FSDP(
+            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+        )
         ddp = ddp_model.module  # for brevity
         fsdp = fsdp_model.module
-        if change_first_param:
+        if change_first_weight:
             if change_data:
                 ddp.lin1.weight.data = transform_param(ddp.lin1.weight)
                 fsdp.lin1.weight.data = transform_param(fsdp.lin1.weight)
@@ -674,21 +690,105 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
             else:
                 ddp.lin2.weight = transform_param(ddp.lin2.weight)
                 fsdp.lin2.weight = transform_param(fsdp.lin2.weight)
-        with FSDP.summon_full_params(fsdp_model):
-            for (n1, p1), (n2, p2) in zip(
-                ddp_model.module.named_parameters(),
-                fsdp_model.named_parameters(),
-            ):
-                self.assertEqual(n1, n2)
-                torch.testing.assert_close(p1, p2)
+        self._check_param_parity(ddp_model, fsdp_model)  # triggers a writeback
 
+    @skip_if_lt_x_gpu(2)
+    def test_grad_writeback(self):
+        """
+        Tests that changes to the original parameters' gradients are written
+        back.
+        """
+        self.run_subtests(
+            {
+                "change_first_weight_grad": [False, True],
+                "change_data": [False, True],  # change `.data` vs. variable itself
+                "set_to_none": [False, True],
+            },
+            self._test_grad_writeback,
+        )
+
+    def _test_grad_writeback(
+        self,
+        change_first_weight_grad: bool,
+        change_data: bool,
+        set_to_none: bool,
+    ):
+        if change_data and set_to_none:
+            return  # not well-defined
+
+        def transform_grad(param: nn.Parameter) -> nn.Parameter:
+            return None if set_to_none else torch.ones_like(param) * 2
+
+        ddp_model = DDP(
+            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
+        )
+        fsdp_model = FSDP(
+            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+        )
+        LR = 1e-2
+        # TODO: If we add `summon_full_params(with_grads=True)`, then replace
+        # the following. For now, we use the optimizer step as a surrogate for
+        # checking that gradients were written back.
+        ddp_optim = torch.optim.Adam(ddp_model.parameters(), lr=LR)
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), lr=LR)
+
+        # Generate an initial gradient
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        ddp_out = ddp_model(*inp)
+        fsdp_out = fsdp_model(*inp)
+        ddp_out.sum().backward()
+        fsdp_out.sum().backward()
+
+        # Change the gradient through the original parameters
+        ddp = ddp_model.module  # for brevity
+        fsdp = fsdp_model.module
+        if change_first_weight_grad:
+            if change_data:
+                ddp.lin1.weight.grad.data = transform_grad(ddp.lin1.weight)
+                if fsdp.lin1.weight.grad is not None:
+                    fsdp.lin1.weight.grad.data = transform_grad(fsdp.lin1.weight)
+            else:
+                ddp.lin1.weight.grad = transform_grad(ddp.lin1.weight)
+                fsdp.lin1.weight.grad = transform_grad(fsdp.lin1.weight)
+        else:
+            if change_data:
+                ddp.lin2.weight.grad.data = transform_grad(ddp.lin2.weight)
+                if fsdp.lin2.weight.grad is not None:
+                    fsdp.lin2.weight.grad.data = transform_grad(fsdp.lin2.weight)
+            else:
+                ddp.lin2.weight.grad = transform_grad(ddp.lin2.weight)
+                fsdp.lin2.weight.grad = transform_grad(fsdp.lin2.weight)
+        ddp_optim.step()
+        fsdp_optim.step()
+        self._check_param_parity(ddp_model, fsdp_model)  # triggers a writeback
+
+        # Intentionally do not zero the gradient to check writeback
+        inp = fsdp_model.get_input(torch.device("cuda"))
+        ddp_out = ddp_model(*inp)
+        fsdp_out = fsdp_model(*inp)
+        ddp_out.sum().backward()
+        fsdp_out.sum().backward()
+        ddp_optim.step()
+        fsdp_optim.step()
+        self._check_param_parity(ddp_model, fsdp_model)  # triggers a writeback
+
+    @skip_if_lt_x_gpu(2)
+    def test_writeback_shape_mismatch(self):
+        ddp_model = DDP(
+            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
+        )
+        fsdp_model = FSDP(
+            TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
+        )
         # Check that writing back with mismatched shape errors
+        ddp = ddp_model.module  # for brevity
+        fsdp = fsdp_model.module
         assert self.rank in (0, 1), f"Expects world size of 2 but got {self.world_size}"
         with self.assertRaisesRegex(RuntimeError, "Cannot writeback"):
-            # Change the parameter to a new one with 1 added to each dimension
+            # Change the gradient to a new one with 1 added to each dimension
             # to force a shape mismatch when writing back
             if self.rank == 0:
-                # Change `lin1.weight` since it exists on rank 0
+                # Change `lin1.weight.grad` since it exists on rank 0
                 lin1_weight_shape = list(fsdp.lin1.weight.shape)
                 for dim_index in range(len(lin1_weight_shape)):
                     lin1_weight_shape[dim_index] += 1
@@ -697,8 +797,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
                         torch.Size(lin1_weight_shape), device=fsdp.lin1.weight.device
                     )
                 )
+                fsdp.lin1.weight.grad = torch.randn(
+                    torch.Size(lin1_weight_shape), device=fsdp.lin1.weight.device
+                )
             elif self.rank == 1:
-                # Change `lin2.weight` since it exists on rank 1
+                # Change `lin2.weight.grad` since it exists (partially) on rank 1
                 lin2_weight_shape = list(fsdp.lin2.weight.shape)
                 for dim_index in range(len(lin2_weight_shape)):
                     lin2_weight_shape[dim_index] += 1
@@ -707,7 +810,10 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
                         torch.Size(lin2_weight_shape), device=fsdp.lin2.weight.device
                     )
                 )
-            with FSDP.summon_full_params(fsdp_model):  # trigger a writeback
+                fsdp.lin2.weight.grad = torch.randn(
+                    torch.Size(lin2_weight_shape), device=fsdp.lin2.weight.device
+                )
+            with FSDP.summon_full_params(fsdp_model):  # triggers a writeback
                 ...
 
 
@@ -749,7 +855,9 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
                 return z
 
         model = Model()
-        fsdp_model = FSDP(Model(), auto_wrap_policy=auto_wrap_policy, use_orig_params=True)
+        fsdp_model = FSDP(
+            Model(), auto_wrap_policy=auto_wrap_policy, use_orig_params=True
+        )
         param_names = [n for n, _ in model.named_parameters()]
         fsdp_param_names = [n for n, _ in fsdp_model.named_parameters()]
         self.assertEqual(param_names, fsdp_param_names)

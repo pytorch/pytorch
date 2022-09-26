@@ -5,8 +5,8 @@ from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
-    cast,
     Callable,
+    cast,
     Dict,
     Generator,
     Iterator,
@@ -247,7 +247,9 @@ class FlatParameter(nn.Parameter):
         self._param_extensions = tuple(param_extensions)
         assert (params is None) == (shared_params is None)
         if params is not None:
-            assert shared_params is not None
+            assert shared_params is not None and len(shared_params) == len(
+                shared_param_infos
+            )
             self._params: Optional[List[nn.Parameter]] = params
             self._shared_params: Optional[List[nn.Parameter]] = shared_params
             # Mark the original parameters to avoid flattening them into
@@ -345,7 +347,7 @@ class FlatParamHandle:
             for param_name, param in submodule.named_parameters(recurse=False):
                 if param not in params_set:
                     continue
-                if param in shared_param_memo:
+                if param in shared_param_memo:  # shared reference
                     prim_module, prim_module_name, prim_param_name = shared_param_memo[
                         param
                     ]
@@ -816,7 +818,9 @@ class FlatParamHandle:
         unsharded_size = self.flat_param._unpadded_unsharded_size
         self.flat_param.data = padded_unsharded_flat_param[
             : unsharded_size.numel()
-        ].view(unsharded_size)  # this `.view()` is not autograd visible
+        ].view(
+            unsharded_size
+        )  # this `.view()` is not autograd visible
         # TODO (awgu): For `use_orig_params=True`, we create the unsharded
         # views here, not through the FPW. This enables a *single* place for
         # unsharded view creation during runtime. We should coalesce the
@@ -882,7 +886,7 @@ class FlatParamHandle:
                     # If we're using mixed precision with keeping grads
                     # casted, gradient here might still be of the reduced
                     # dtype if we didn't clear / set the gradients to None
-                    # after previous forward. In that case, make sure
+                    # after previous backward. In that case, make sure
                     # p._saved_grad_shard is cast to the full precision type
                     # so that we can accumulate in full precision in
                     # _post_backward_hook and assign back in full precision
@@ -1181,7 +1185,8 @@ class FlatParamHandle:
         ):
             setattr(module, param_name, param)
             in_sharded_flat_param = (
-                i >= start and i <= end
+                i >= start
+                and i <= end
                 and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
             )
             if in_sharded_flat_param:
@@ -1230,16 +1235,17 @@ class FlatParamHandle:
         assert self.flat_param._params is not None
         for i, param in enumerate(self.flat_param._params):
             in_sharded_flat_param = (
-                i >= start and i <= end
+                i >= start
+                and i <= end
                 and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
             )
             if in_sharded_flat_param:
                 param_start, param_end = self.flat_param._shard_param_offsets[i - start]  # type: ignore[attr-defined]
                 numel_in_shard = param_end - param_start + 1
                 if param.requires_grad:
-                    param.grad = (
-                        self.flat_param.grad[offset : offset + numel_in_shard].reshape(param.shape)
-                    )
+                    param.grad = self.flat_param.grad[
+                        offset : offset + numel_in_shard
+                    ].reshape(param.shape)
                 else:
                     param.grad = None
                 offset += numel_in_shard
@@ -1257,7 +1263,7 @@ class FlatParamHandle:
                 param.grad = None
 
     @torch.no_grad()
-    def _writeback_orig_params(self):
+    def _writeback_orig_params(self) -> bool:
         """
         Iterates over the original parameters and writes back any parameters
         that changed storages (due to a non-inplace operator) to the handle's
@@ -1265,8 +1271,8 @@ class FlatParamHandle:
         device even if an original parameter's device changes.
 
         Raises:
-            RuntimeError: An original parameter changes storages and no longer
-            has the expected flattened shape.
+            RuntimeError: If an original parameter or gradient changes storages
+            but no longer has the expected flattened shape.
         Returns: ``True`` if some writeback happened, and ``False`` otherwise.
         """
         if not self.is_sharded(self.flat_param):
@@ -1284,7 +1290,8 @@ class FlatParamHandle:
                 # (e.g. during model checkpointing)
                 continue
             in_sharded_flat_param = (
-                i >= start and i <= end
+                i >= start
+                and i <= end
                 and self.flat_param._shard_param_offsets  # type: ignore[attr-defined]
             )
             if not in_sharded_flat_param:
@@ -1298,27 +1305,12 @@ class FlatParamHandle:
                 or not _same_storage(param, flat_param)  # changed `.data`
             )
             if param_changed:
-                # NOTE: After a parameter change, the gradient is not
-                # preserved.
+                # NOTE: The gradient is not preserved after a parameter change.
                 param = getattr(module, param_name)
                 flat_param._params[i] = param
             if needs_param_writeback:
-                # TODO (awgu): Should we relax this to just having the same
-                # numel? Then, we just flatten and writeback.
                 expected_shape = torch.Size([numel_in_shard])
-                if self._debug_level == dist.DebugLevel.DETAIL:
-                    rank = self.rank if hasattr(self, "rank") else dist.get_rank()
-                    warnings.warn(
-                        f"[Rank {rank}] Needs writeback in {self._training_state}\n"
-                        f"expected shape={expected_shape} shape={param.shape} "
-                        f"expected device={flat_param.device} device={param.device}"
-                    )
-                if param.shape != expected_shape:
-                    raise RuntimeError(
-                        "Cannot writeback when the parameter shape changes\n"
-                        f"Expects {expected_shape} but got {param.shape}"
-                    )
-                flat_param[offset : offset + numel_in_shard].copy_(param)
+                self._writeback_tensor(param, flat_param, expected_shape, offset, True)
                 wroteback = True
             # Check for gradient writeback
             # NOTE: Since this method is called in the pre-unshard, which
@@ -1328,39 +1320,84 @@ class FlatParamHandle:
             if (
                 param.grad is None
                 and flat_param.grad is not None
-                and self._debug_level == dist.DebugLevel.DETAIL
             ):
-                prefixed_param_name = flat_param._prefixed_param_names[i]
-                rank = self.rank if hasattr(self, "rank") else dist.get_rank()
-                warnings.warn(
-                    f"[Rank {rank}] Setting the original parameter {prefixed_param_name}'s "
-                    "`.grad` to `None` does not set the underlying `FlatParameter`'s "
-                    "`.grad` to `None`."
-                )
+                expected_shape = torch.Size([numel_in_shard])
+                self._writeback_tensor(None, flat_param.grad, expected_shape, offset, False)
             elif param.grad is not None:
-                needs_grad_writeback = (
-                    flat_param.grad is None
-                    or not _same_storage(param.grad, flat_param.grad)
+                needs_grad_writeback = flat_param.grad is None or not _same_storage(
+                    param.grad, flat_param.grad
                 )
-                # TODO (awgu): Allocate a new zeroed sharded gradient for
-                # `flat_param.grad` if it is `None`, and write the data
-                # into the appropriate view.
                 if needs_grad_writeback:
-                    raise NotImplementedError("Gradient writeback is not implemented")
+                    if flat_param.grad is None:
+                        flat_param.grad = torch.zeros_like(flat_param)
+                    expected_shape = torch.Size([numel_in_shard])
+                    self._writeback_tensor(
+                        param.grad, flat_param.grad, expected_shape, offset, False
+                    )
             offset += numel_in_shard
-        # TODO (awgu): Shared parameters could become no longer shared??
-        assert flat_param._shared_param_infos is not None
-        for i, (param, (param_name, module, _, _, _, _)) in enumerate(
-            zip(flat_param._shared_params, flat_param._shared_param_infos)  # type: ignore[arg-type]
-        ):
-            if not hasattr(module, param_name):
-                # Do not writeback if original parameters are deregistered
-                # (e.g. during model checkpointing)
-                continue
-            param_changed = getattr(module, param_name) is not param
-            if param_changed:
-                flat_param._shared_params[i] = getattr(module, param_name)  # type: ignore[index]
+        # TODO (awgu): Handle shared parameters. We need to re-generate the
+        # shared parameter data structures in case sharedness changed.
+        for i, (
+            param_name,
+            module,
+            _,
+            prim_param_name,
+            prim_module,
+            _,
+        ) in enumerate(flat_param._shared_param_infos):
+            if getattr(module, param_name) is not getattr(prim_module, prim_param_name):
+                raise NotImplementedError(
+                    "Changing shared parameters is not supported yet"
+                )
         return wroteback
+
+    def _writeback_tensor(
+        self,
+        src_tensor: Optional[Tensor],
+        dst_tensor: Tensor,
+        expected_shape: torch.Size,
+        offset: int,
+        is_param: bool,  # else gradient
+    ) -> None:
+        """
+        Writes back ``src_tensor`` to ``dst_tensor`` at offset ``offset``,
+        where ``src_tensor`` should have shape ``expected_shape``. ``is_param``
+        indicates if the tensor is the parameter (if ``True``) or gradient (if
+        ``False``). If ``src_tensor`` is ``None``, then the effect is zeroing
+        instead of copying.
+
+        Raises:
+            RuntimeError: If the ``src_tensor`` does not have the expected
+            shape.
+        """
+        p_assert(
+            len(expected_shape) == 1,
+            f"Expects a 1D expected shape but got {expected_shape}",
+        )
+        if self._debug_level == dist.DebugLevel.DETAIL:
+            rank = self.rank if hasattr(self, "rank") else dist.get_rank()
+            src_shape = src_tensor.shape if src_tensor is not None else None
+            src_device = src_tensor.device if src_tensor is not None else None
+            warnings.warn(
+                f"[Rank {rank}] {'Parameter' if is_param else 'Gradient'} needs "
+                f"writeback in {self._training_state}\n"
+                f"expected shape={expected_shape} shape={src_shape} "
+                f"expected device={dst_tensor.device} device={src_device}"
+            )
+        if src_tensor is not None and src_tensor.shape != expected_shape:
+            # TODO (awgu): Should we relax this to just having the same numel?
+            # Then, we just flatten and writeback.
+            # NOTE: Gradient shape mismatch is not possible in practice since
+            # the gradient shape is enforced to match that of the parameter and
+            # we already check for parameter shape mismatch.
+            raise RuntimeError(
+                f"Cannot writeback when the {'parameter' if is_param else 'gradient'} "
+                f"shape changes\nExpects {expected_shape} but got {src_tensor.shape}"
+            )
+        if src_tensor is not None:
+            dst_tensor[offset : offset + expected_shape.numel()].copy_(src_tensor)
+        else:
+            dst_tensor[offset : offset + expected_shape.numel()].zero_()
 
     def _clear_grads_if_needed(self):
         """
