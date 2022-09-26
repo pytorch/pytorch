@@ -6,7 +6,7 @@
 
 using namespace torch::jit::fuser::cuda;
 
-std::string toString(ReductionParams rparams) {
+std::string toString(const ReductionParams& rparams) {
   std::stringstream ss;
   ss << (rparams.fastest_dim ? "Red On Fastest Dim // " : "Red On Slow Dim // ")
      << (rparams.persistent_kernel ? "Persistent Kernel // " : "")
@@ -65,7 +65,7 @@ std::string toString(ReductionParams rparams) {
   return ss.str();
 }
 
-std::string toString(PointwiseParams params) {
+std::string toString(const PointwiseParams& params) {
   std::stringstream ss;
   if (params.break_point) {
     ss << "2D Schedule at " << params.break_point << "/";
@@ -89,6 +89,15 @@ std::string toString(PointwiseParams params) {
   return ss.str();
 }
 
+std::string toString(const TransposeParams& params) {
+  std::stringstream ss;
+  ss << "Tile size: (" << params.tile_size1 << "," << params.tile_size2
+     << ")/";
+  ss << "Vectorize size: (" << params.vectorize_factor1 << ","
+     << params.vectorize_factor2 << ")";
+  return ss.str();
+}
+
 std::string toString(const std::shared_ptr<HeuristicParams>& params) {
   auto rparams = std::dynamic_pointer_cast<ReductionParams>(params);
   if (rparams) {
@@ -97,6 +106,10 @@ std::string toString(const std::shared_ptr<HeuristicParams>& params) {
   auto pparams = std::dynamic_pointer_cast<PointwiseParams>(params);
   if (pparams) {
     return toString(*pparams);
+  }
+  auto tparams = std::dynamic_pointer_cast<TransposeParams>(params);
+  if (tparams) {
+    return toString(*tparams);
   }
   TORCH_INTERNAL_ASSERT(
       false,
