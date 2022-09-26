@@ -44,16 +44,17 @@ using TensorImplAddress = strong::type<
     const c10::TensorImpl*,
     struct TensorImplAddress_,
     strong::regular,
-    strong::hashable>;
+    strong::hashable,
+    strong::boolean>;
 
-using StorageImplData = strong::
-    type<void*, struct StorageImplData_, strong::regular, strong::hashable>;
+using StorageImplData = strong::type<
+    void*,
+    struct StorageImplData_,
+    strong::regular,
+    strong::hashable,
+    strong::boolean>;
 
-struct TensorMetadata {
-  c10::Device device() const {
-    return {device_type_, device_index_};
-  }
-
+struct RawTensorMetadata {
   TensorImplAddress impl_;
   StorageImplData data_;
 
@@ -65,6 +66,33 @@ struct TensorMetadata {
   c10::ScalarType dtype_;
   c10::Layout layout_;
   uint32_t dim_;
+};
+
+struct TensorMetadata : public RawTensorMetadata {
+  explicit TensorMetadata(const RawTensorMetadata& m) : RawTensorMetadata(m) {}
+
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  // Identity is a complex concept in PyTorch. A Tensor might not have a
+  // an associated storage, multiple Tensors might share the same underlying
+  // storage, the storage of a Tensor might change over time, etc.
+  //
+  // For the purpose of profiling we're mostly interested in data flow
+  // analysis. As a result, we can take an expansive view of identity:
+  // Tensors share an ID if they share a TensorImpl or storage data.
+  //
+  // This identity equality is transitive; If Tensors T0 and T1 share a storage
+  // S0 and T1 later points to a different storage S1 then all Tensors which
+  // point to either S0 or S1 are considered to have the same identity. (Since
+  // profiler cannot reason beyond that.)
+  //
+  // The profiler will handle lifetime analysis to ensure that identities do
+  // not run afoul of the ABA problem. This does, however, mean that identities
+  // can only be assigned when memory profiling is enabled. (And we cannot
+  // handle ABA for TensorImpl as those allocations are not instrumented.)
+  c10::optional<size_t> id_;
 };
 
 struct Inputs {
@@ -386,7 +414,7 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
-  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+  AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
