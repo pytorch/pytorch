@@ -1,6 +1,7 @@
-from typing import List
+from typing import List, Optional, Tuple
 
 from torch.distributed._shard.metadata import ShardMetadata
+
 
 def _check_shard_metadata_pair_overlap(shard1: ShardMetadata, shard2: ShardMetadata):
     """
@@ -20,6 +21,53 @@ def _check_shard_metadata_pair_overlap(shard1: ShardMetadata, shard2: ShardMetad
 
     return True
 
+
+def _find_nd_overlapping_shards(
+    shards: List[ShardMetadata], sharded_dims: List[int]
+) -> Optional[Tuple[int, int]]:
+    # Each rank has len(sharded_dims) tuples. Each tuple represent the
+    # [begin, end] (inclusive) pair of that dimension.
+    shard_intervals = [
+        [
+            (s.shard_offsets[dim], s.shard_offsets[dim] + s.shard_sizes[dim] - 1)
+            for dim in sharded_dims
+        ]
+        for s in shards
+    ]
+
+    for i in range(len(shards)):
+        shard_i = shard_intervals[i]
+        for j in range(i + 1, len(shards)):
+            shard_j = shard_intervals[j]
+            # For each dim of each shard, check if one shard resides on the other
+            # end of second shard with respect to that dim. As an example for a 2D
+            # shard, we would check if one shard is above or on the left of the
+            # other shard.
+            overlap = True
+            for interval_i, interval_j in zip(shard_i, shard_j):
+                if interval_i[0] > interval_j[1] or interval_j[0] > interval_i[1]:
+                    overlap = False
+                    break
+            if overlap:
+                return (i, j)
+    return None
+
+
+def _find_1d_overlapping_shards(
+    shards: List[ShardMetadata], dim: int
+) -> Optional[Tuple[int, int]]:
+    # (begin, end, index_in_shards). Begin and end are inclusive.
+    intervals = [
+        (s.shard_offsets[dim], s.shard_offsets[dim] + s.shard_sizes[dim] - 1, i)
+        for i, s in enumerate(shards)
+    ]
+    intervals.sort()
+    for i in range(len(shards) - 1):
+        if intervals[i][1] >= intervals[i + 1][0]:
+            return (intervals[i][2], intervals[i + 1][2])
+    return None
+
+
 def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
     """
     Ensures none of the shards overlap with each other.
@@ -30,11 +78,36 @@ def validate_non_overlapping_shards_metadata(shards: List[ShardMetadata]):
     Raises:
         ``ValueError`` if there's overlap in any two shards.
     """
-    # TODO: evaluate optimizing this if needed.
-    for i in range(len(shards)):
-        for j in range(i + 1, len(shards)):
-            if _check_shard_metadata_pair_overlap(shards[i], shards[j]):
-                raise ValueError(f'Shards {shards[i]} and {shards[j]} overlap')
+    if not shards or len(shards) == 1:
+        return
+
+    sharded_dims: List[int] = []
+    for dim in range(len(shards[0].shard_offsets)):
+        for i in range(1, len(shards)):
+            if (
+                shards[i].shard_offsets[dim] != shards[0].shard_offsets[dim] or
+                shards[i].shard_sizes[dim] != shards[0].shard_sizes[dim]
+            ):
+                sharded_dims.append(dim)
+                break
+
+    pair: Optional[Tuple[int, int]] = None
+    if len(sharded_dims) == 0:
+        # All shards are the same, all dims are not partitioned. Choose any 2.
+        pair = (0, 1)
+    elif len(sharded_dims) == 1:
+        # Shards are partitioned over only one dimension. Overlap can be found
+        # using a O(nlogn) overlapping interval algorithm.
+        pair = _find_1d_overlapping_shards(shards, sharded_dims[0])
+    else:
+        # Shards are partitioned over more than one dimension. Fall back to
+        # pair-wise check. Even though O(nlogn) algorithms (line sweep) exist
+        # for 2D overlap, the implementation is not trivial and may not justify
+        # the time saving in most cases.
+        pair = _find_nd_overlapping_shards(shards, sharded_dims)
+
+    if pair:
+        raise ValueError(f'Shards {shards[pair[0]]} and {shards[pair[1]]} overlap')
 
 
 def check_tensor(shards_metadata, tensor_dims) -> None:
