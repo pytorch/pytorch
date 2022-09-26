@@ -5,7 +5,6 @@
 
 namespace at {
 namespace native {
-
 namespace sparse {
 namespace impl {
 

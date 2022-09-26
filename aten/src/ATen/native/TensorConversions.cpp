@@ -5,7 +5,6 @@
 #include <ATen/Parallel.h>
 
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/native/sparse/SparseCsrTensorMath.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
@@ -1706,6 +1705,5 @@ std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
   }
   return outs;
 }
-
 } // namespace native
 } // namespace at
