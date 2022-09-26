@@ -437,9 +437,15 @@ class TestAutograd(TestCase):
         torch.autograd.grad(out, (a,), retain_graph=True)
         self.assertEqual(counter[0], 2)
 
-        with self.assertRaisesRegex(RuntimeError, "should only be used with .grad()"):
-            torch.autograd.backward(out)
+        should_execute = list(map(get_grad_fn, (a, a2, b, c)))
+        should_not_execute = list(map(get_grad_fn, (b2,)))
+        torch.autograd.backward(out)
 
+        with self.assertRaisesRegex(RuntimeError, "during the backward pass"):
+            torch._C._will_engine_execute_node(out.grad_fn)
+
+        with self.assertRaisesRegex(RuntimeError, "expects an grad_fn"):
+            torch._C._will_engine_execute_node(out)
 
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)

@@ -703,10 +703,6 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
-  THPUtils_assert(
-      !exec_info->empty(),
-      "_get_should_execute_nodes should only be used with .grad() or .backward() "
-      "if the `inputs` is passed.");
   torch::autograd::Node* node;
   std::shared_ptr<torch::autograd::Node> node_sp;
   if (isTHPFunction) {
@@ -715,12 +711,26 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   } else {
     node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
   }
-  auto it = exec_info->find(node);
-  if (it == exec_info->end() || !it->second.should_execute()) {
-    Py_RETURN_FALSE;
+  if (exec_info->empty()) {
+    // .backward() without inputs= arg
+    const auto nodes_in_graph =
+        torch::autograd::get_current_graph_task_nodes_in_graph();
+    auto it = nodes_in_graph->find(node);
+    if (it == nodes_in_graph->end()) {
+      Py_RETURN_FALSE;
+    } else {
+      Py_RETURN_TRUE;
+    }
   } else {
-    Py_RETURN_TRUE;
+    // .grad or .backward when inputs= is passed
+    auto it = exec_info->find(node);
+    if (it == exec_info->end() || !it->second.should_execute()) {
+      Py_RETURN_FALSE;
+    } else {
+      Py_RETURN_TRUE;
+    }
   }
+
   END_HANDLE_TH_ERRORS
 }
 
