@@ -26,7 +26,7 @@ from functorch import vmap, grad_and_value
 from functorch import make_functional
 
 # disable warning spam
-functorch._C._set_vmap_fallback_warning_enabled(False)
+torch._C._functorch._set_vmap_fallback_warning_enabled(False)
 
 logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",
