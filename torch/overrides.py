@@ -160,7 +160,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
         torch.mkldnn_linear_backward_weights,
-        torch.nested_tensor,
         torch.normal,
         torch.ones,
         torch.promote_types,
