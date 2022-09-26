@@ -114,6 +114,7 @@ Sparse (torch.sparse)
 -  Nikita Vedeneev (`nikitaved <https://github.com/nikitaved>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+-  Andrew James (`amjames <https://github.com/amjames>`__)
 
 Fast Fourier Transform (torch.fft)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
