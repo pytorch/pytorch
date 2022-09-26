@@ -31,7 +31,7 @@ from functorch import (
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
+from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
 
 # NB: numpy is a testing dependency!
@@ -47,145 +47,96 @@ except ImportError:
                   "`--no-deps` to avoid overwriting the pytorch installation",
                   UserWarning)
 
-# TestCase for _argnums_partial, an important helper funciton
+# TestCase for _slice_argnums, an important helper funciton
 
 
-class TestArgnumsPartial(TestCase):
+class TestSliceArgnums(TestCase):
     def test_invalid_argnum_type(self):
         x = torch.randn(3)
         args = (x,)
         with self.assertRaisesRegex(RuntimeError, "int or Tuple"):
-            _argnums_partial(torch.sin, args, 0.0)
+            _slice_argnums(args, 0.0)
         with self.assertRaisesRegex(RuntimeError, "int or Tuple"):
-            _argnums_partial(torch.sin, args, [0])
+            _slice_argnums(args, [0])
         with self.assertRaisesRegex(RuntimeError, "must be int"):
-            _argnums_partial(torch.sin, args, (0.0,))
+            _slice_argnums(args, (0.0,))
 
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
         with self.assertRaisesRegex(RuntimeError, "must be int"):
-            _argnums_partial(torch.sin, args, ((0, 1), 2))
+            _slice_argnums(args, ((0, 1), 2))
 
     def test_out_of_bounds_argnum_values(self):
         x = torch.randn(3)
         args = (x,)
         with self.assertRaisesRegex(RuntimeError, "positional inputs"):
-            _argnums_partial(torch.sin, args, 1)
+            _slice_argnums(args, 1)
         with self.assertRaisesRegex(RuntimeError, "positional inputs"):
-            _argnums_partial(torch.sin, args, -2)
+            _slice_argnums(args, -2)
         with self.assertRaisesRegex(RuntimeError, "positional inputs"):
-            _argnums_partial(torch.sin, args, (-2,))
+            _slice_argnums(args, (-2,))
 
     def test_not_enough_argnums(self):
         x = torch.randn(3)
         args = (x,)
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            _argnums_partial(torch.sin, args, ())
+            _slice_argnums(args, ())
 
     def test_duplicate_argnums(self):
         x = torch.randn(3)
         args = (x, x)
         with self.assertRaisesRegex(RuntimeError, "must be unique"):
-            _argnums_partial(torch.add, args, (0, 0))
+            _slice_argnums(args, (0, 0))
         with self.assertRaisesRegex(RuntimeError, "must be unique"):
-            _argnums_partial(torch.add, args, (0, -2))
+            _slice_argnums(args, (0, -2))
 
     def test_flat_args_with_positive_int_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
-
-        f_new, res = _argnums_partial(f, args, 0)
+        res = _slice_argnums(args, 0)
         self.assertEqual(res, (0.1,))
-        self.assertEqual(f_new(*res), 0.1)
 
-        f_new, res = _argnums_partial(f, args, 4)
+        res = _slice_argnums(args, 4)
         self.assertEqual(res, (4.1,))
-        self.assertEqual(f_new(*res), 0.1)
 
     def test_flat_args_with_negative_int_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
-
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, -1)
+        res = _slice_argnums(args, -1)
         self.assertEqual(res, (4.1,))
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, -5)
+        res = _slice_argnums(args, -5)
         self.assertEqual(res, (0.1,))
-        self.assertEqual(f_new(*res), expected)
 
     def test_flat_args_with_tuple_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
-
-        f_new, res = _argnums_partial(f, args, (0, 1, 2, 3, 4))
-        self.assertEqual(f_new(*res), 0.1)
+        res = _slice_argnums(args, (0, 1, 2, 3, 4))
         self.assertEqual(res, args)
 
-        f_new, res = _argnums_partial(f, args, (0, -3))
-        self.assertEqual(f_new(*res), 0.1)
+        res = _slice_argnums(args, (0, -3))
         self.assertEqual(res, (0.1, 2.1))
 
     def test_pytree_args(self):
         args = ((0.1, 1.1), 2.0, [3.1])
 
-        def f(a, b, c):
-            return a[0] + a[1] + b + c[0]
-
-        expected = f(*args)
-
-        f_new, res = _argnums_partial(f, args, 0)
+        res = _slice_argnums(args, 0)
         self.assertEqual(res, args[0:1])
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, (0,))
+        res = _slice_argnums(args, (0,))
         self.assertEqual(res, args[0:1])
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, -1)
+        res = _slice_argnums(args, -1)
         self.assertEqual(res, args[-1:])
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, (0, -2))
+        res = _slice_argnums(args, (0, -2))
         self.assertEqual(res, args[0:2])
-        self.assertEqual(f_new(*res), expected)
 
     def test_argnums_reorders(self):
         args = ((0.1, 1.1, 2.1), 3.1, 4.1)
 
-        def f(a, b, c):
-            return a[0] + a[1] + a[2] + b + c
-
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, (1, 0))
+        res = _slice_argnums(args, (1, 0))
         self.assertEqual(res, (args[1], args[0]))
-        self.assertEqual(f_new(*res), expected)
-
-    def test_function_with_default_args(self):
-        args = ((0.1, 1.1, 2.1), 3.1)
-
-        def f(a, b, c=4.1):
-            return a[0] + a[1] + a[2] + b + c
-
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, -2)
-        self.assertEqual(res, args[0:1])
-        self.assertEqual(f_new(*res), expected)
-
-        args = ((0.1, 1.1, 2.1), 3.1, 5.1)
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, -1)
-        self.assertEqual(res, args[-1:])
-        self.assertEqual(f_new(*res), expected)
 
 
 class TestGradTransform(TestCase):
@@ -331,7 +282,7 @@ class TestGradTransform(TestCase):
             return y
 
         grad(foo)(x)
-        self.assertEqual(functorch._C.dlevel(escaped[0]), -1)
+        self.assertEqual(torch._C._functorch.dlevel(escaped[0]), -1)
 
     def test_escaped_wrappers_are_ignored(self, device):
         x = torch.randn([], device=device)
@@ -345,7 +296,7 @@ class TestGradTransform(TestCase):
         grad(foo)(x)
 
         something = escaped[0].sum()
-        self.assertEqual(functorch._C.dlevel(something), 0)
+        self.assertEqual(torch._C._functorch.dlevel(something), 0)
         self.assertEqual(something, x.sin().sum())
 
     def test_vjp(self, device):
@@ -864,6 +815,18 @@ class TestGradTransform(TestCase):
                 buf = buf.replace("\n", "").replace("  ", "")
                 expected = expected.replace("\n", "").replace("  ", "")
                 self.assertEqual(expected, buf)
+
+    def test_print_captured_tensor_inside_transform(self, device):
+        x = torch.tensor([1., 2., 3.], device=device)
+        out = None
+
+        def f(y):
+            nonlocal out
+            out = repr(x)
+            return y
+
+        vjp(f, torch.randn(4, device=device))
+        self.assertEqual(out, repr(x))
 
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)
@@ -1592,7 +1555,16 @@ class TestJac(TestCase):
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
+    def test_against_reference_default_arg(self, device, jacapi):
+        def f(x, y, z=3.):
+            return x * y * z
+
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, device=device)
+        self._test_against_reference(f, (x, y), jacapi)
+
+    @jacrev_and_jacfwd
     def test_inplace(self, device, jacapi):
         def f(x, y):
             y.copy_(x)
@@ -1921,17 +1893,17 @@ class TestJvp(TestCase):
 
     def test_fwd_grad_enabled(self, device):
         # Tests some private helper functions to enable/disable fwd grad mode
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
     def test_autograd_function_disables_fwd_grad(self, device):
@@ -1940,7 +1912,7 @@ class TestJvp(TestCase):
         class MySquare(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertFalse(enabled)
                 return x * x
 
@@ -1954,18 +1926,18 @@ class TestJvp(TestCase):
     def test_enable_fwd_grad(self, device):
         # Tests a private helper function
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
 
             with enable_fwd_grad():
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertTrue(enabled)
 
-            enabled = functorch._C.get_fwd_grad_enabled()
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
