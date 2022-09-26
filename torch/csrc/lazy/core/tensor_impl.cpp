@@ -152,6 +152,7 @@ void LTCTensorImpl::setup_sym_sizes() const {
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
+  std::cout << FLAGS_ltc_enable_symbolic_shapes << std::endl;
   if (FLAGS_ltc_enable_symbolic_shapes) {
     setup_sym_sizes();
     return c10::SymIntArrayRef(sym_sizes_->data(), sym_sizes_->size());

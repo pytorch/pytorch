@@ -1782,7 +1782,11 @@
   self: not_implemented("_standard_gamma_grad")
 
 - name: values(Tensor(a) self) -> Tensor(a)
-  self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
+  dispatch:
+    Default:
+      self: at::_sparse_coo_tensor_unsafe(self.indices(), grad, self.sizes())._coalesced_(true)
+    AutogradNestedTensor:
+      self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_offsets())
 
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
@@ -1949,7 +1953,7 @@
 
 - name: leaky_relu_(Tensor(a!) self, Scalar negative_slope=0.01) -> Tensor(a!)
   self: leaky_relu_backward(grad, result, negative_slope, true)
-  result: self_t.copy_(leaky_relu_backward(original_self_t.conj(), result, negative_slope, true).conj())
+  result: auto_element_wise
 
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
@@ -2020,8 +2024,8 @@
   result: auto_element_wise
 
 - name: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
-  self: threshold_backward(grad, self, threshold)
-  result: self_t.copy_(threshold_backward(self_t.conj(), original_self_p, threshold).conj())
+  self: threshold_backward(grad, result, threshold)
+  result: auto_element_wise
 
 - name: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
   self: reflection_pad1d_backward(grad, self, padding)
@@ -2719,6 +2723,11 @@
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
 
+- name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, int[] offsets) -> Tensor(a)
+  self: grad.values()
+  nested_size: non_differentiable
+  nested_strides: non_differentiable
+
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
@@ -2840,6 +2849,7 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+  result: scatter_reduce_jvp(self_p, self_t, dim, index, src_p, src_t, reduce, include_self, result)
 
 - name: special_airy_ai(Tensor x) -> Tensor
   x: non_differentiable
