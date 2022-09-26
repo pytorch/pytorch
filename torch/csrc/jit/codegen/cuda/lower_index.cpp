@@ -109,6 +109,7 @@ void IndexLowering::handle(const RNGOp* rop) {
       rop->getRNGOpType(),
       out,
       rop->dtype(),
+      rop->getParameters(),
       rop->getRNGOffset(),
       philox_index);
 

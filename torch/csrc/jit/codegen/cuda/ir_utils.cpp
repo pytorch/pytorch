@@ -266,6 +266,10 @@ struct SubstituteInExpr : public OptInDispatch {
   }
 
   void handle(RNGOp* rng_expr) final {
+    std::vector<Val*> subsituted_params;
+    for (auto v : rng_expr->getParameters()) {
+      subsituted_params.emplace_back(reference_->sameAs(v) ? substitute_ : v);
+    }
     auto out = reference_->sameAs(rng_expr->output(0)) ? substitute_
                                                        : rng_expr->output(0);
     expr_ = IrBuilder::create<RNGOp>(
@@ -273,6 +277,7 @@ struct SubstituteInExpr : public OptInDispatch {
         rng_expr->getRNGOpType(),
         out,
         rng_expr->dtype(),
+        subsituted_params,
         rng_expr->getRNGOffset(),
         rng_expr->getPhiloxIndex());
   }

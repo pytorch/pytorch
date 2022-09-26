@@ -233,6 +233,7 @@ class TORCH_CUDA_CU_API RNGOp : public Expr {
       RNGOpType type,
       Val* out,
       DataType dtype,
+      std::vector<Val*> parameters = {},
       int rng_offset = 0,
       Val* philox_index = nullptr);
 
@@ -254,6 +255,14 @@ class TORCH_CUDA_CU_API RNGOp : public Expr {
     rng_offset_ = val;
   }
 
+  const std::vector<Val*>& getParameters() const {
+    return parameters_;
+  }
+
+  const std::vector<Val*>& getShape() const {
+    return shape_;
+  }
+
   Val* getPhiloxIndex() const {
     return philox_index_;
   }
@@ -267,6 +276,8 @@ class TORCH_CUDA_CU_API RNGOp : public Expr {
  private:
   const RNGOpType rng_op_type_;
   const DataType dtype_;
+  std::vector<Val*> parameters_;
+  std::vector<Val*> shape_;
   int rng_offset_ = -1;
   // The index used to feed philox's subsequence and component
   Val* philox_index_ = nullptr;

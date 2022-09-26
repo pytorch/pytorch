@@ -214,8 +214,13 @@ void OptOutMutator::mutate(TernaryOp* top) {
 
 void OptOutMutator::mutate(RNGOp* rop) {
   Val* out = maybeMutated(rop->output(0));
+  auto& parameters = rop->getParameters();
+  std::vector<Val*> mutated_parameters;
+  for (auto v : parameters) {
+    mutated_parameters.emplace_back(maybeMutated(v));
+  }
 
-  if (out == rop->output(0)) {
+  if (out == rop->output(0) && mutated_parameters == parameters) {
     return;
   }
 
@@ -227,6 +232,7 @@ void OptOutMutator::mutate(RNGOp* rop) {
       rop_type,
       out,
       rop->dtype(),
+      mutated_parameters,
       rop->getRNGOffset(),
       rop->getPhiloxIndex());
 }

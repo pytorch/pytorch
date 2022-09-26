@@ -481,14 +481,19 @@ void IrPrinter::handle(const RNGOp* rop) {
 
   os_ << rop->getRNGOpType() << "({";
   bool first = true;
-  for (auto i : rop->inputs()) {
+  for (auto i : rop->getShape()) {
     if (!first) {
       os_ << ", ";
     }
     handle(i);
     first = false;
   }
-  os_ << "}, " << rop->dtype() << ")";
+  os_ << "}";
+  for (auto i : rop->getParameters()) {
+    os_ << ", ";
+    handle(i);
+  }
+  os_ << ", " << rop->dtype() << ")";
 
   indent_size_--;
 

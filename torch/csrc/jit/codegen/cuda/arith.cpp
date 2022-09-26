@@ -453,6 +453,24 @@ TensorView* rand(const std::vector<Val*>& shape, DataType dtype) {
   return out;
 }
 
+// TENSOR FACTORIES
+TensorView* uniform(
+    const std::vector<Val*>& shape,
+    Val* low,
+    Val* high,
+    DataType dtype) {
+  auto n = shape.size();
+  auto out = TensorViewBuilder()
+                 .ndims(n)
+                 .dtype(dtype)
+                 .contiguity(std::vector<bool>(n, true))
+                 .shape(shape)
+                 .build();
+  IrBuilder::create<RNGOp>(
+      RNGOpType::UniformRange, out, dtype, std::vector<Val*>{low, high});
+  return out;
+}
+
 TensorView* rand_like(TensorView* v) {
   TORCH_CHECK(
       isFloatingPointType(v->dtype()),

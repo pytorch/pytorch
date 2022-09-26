@@ -248,7 +248,8 @@ enum class BinaryOpType {
 };
 
 enum class RNGOpType {
-  Uniform,
+  Uniform, // Uniform in [0, 1)
+  UniformRange, // Uniform in [low, high]
 };
 
 // Return if output of operator should be a boolean

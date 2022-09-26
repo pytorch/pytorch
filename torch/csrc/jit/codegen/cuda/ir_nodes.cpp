@@ -441,17 +441,25 @@ RNGOp::RNGOp(
     RNGOpType type,
     Val* out,
     DataType dtype,
+    std::vector<Val*> parameters,
     int rng_offset,
     Val* philox_index)
     : Expr(passkey, ExprType::RNGOp),
       rng_op_type_(type),
       dtype_(dtype),
+      parameters_(std::move(parameters)),
       rng_offset_(rng_offset),
       philox_index_(philox_index) {
   if (out->isA<TensorView>()) {
     for (auto id : out->as<TensorView>()->getRootDomain()) {
-      addInput(id->extent());
+      shape_.emplace_back(id->extent());
     }
+  }
+  for (auto v : shape_) {
+    addInput(v);
+  }
+  for (auto v : parameters_) {
+    addInput(v);
   }
   addOutput(out);
 }
@@ -460,6 +468,7 @@ RNGOp::RNGOp(const RNGOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       rng_op_type_(src->rng_op_type_),
       dtype_(src->dtype()),
+      parameters_(ir_cloner->clone(src->parameters_)),
       rng_offset_(src->rng_offset_),
       philox_index_(ir_cloner->clone(src->philox_index_)) {}
 
@@ -476,6 +485,14 @@ bool RNGOp::sameAs(const Statement* other) const {
   }
   if (dtype_ != other_op->dtype_) {
     return false;
+  }
+  if (parameters_.size() != other_op->parameters_.size()) {
+    return false;
+  }
+  for (auto i : c10::irange(parameters_.size())) {
+    if (!parameters_[i]->sameAs(other_op->parameters_[i])) {
+      return false;
+    }
   }
   if (getRNGOffset() != other_op->getRNGOffset()) {
     return false;

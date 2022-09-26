@@ -794,7 +794,17 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     if (needFloatSuffix(op_type) && rop->dtype() == DataType::Float) {
       code_ << "f";
     }
-    code_ << "(rng_result, rng_component" << rop->name() << ");\n";
+    code_ << "(rng_result, rng_component" << rop->name();
+    switch (op_type) {
+      case RNGOpType::UniformRange: {
+        auto parameters = rop->getParameters();
+        TORCH_INTERNAL_ASSERT(parameters.size() == 2);
+        code_ << ", " << gen(parameters[0]) << ", " << gen(parameters[1]);
+        break;
+      }
+      default:;
+    }
+    code_ << ");\n";
   }
 
   std::string genBinaryOp(

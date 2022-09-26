@@ -329,5 +329,41 @@ TEST_F(NVFuserTest, FusionBroadcastingRNGSmemNonSquareTile_CUDA) {
   TORCH_CHECK((out.select(1, 0) == out.select(1, 4)).all().item<bool>());
 }
 
+TEST_F(NVFuserTest, FusionUniform_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  Int* size_val = IrBuilder::create<Int>();
+  Double* low = IrBuilder::create<Double>();
+  Double* high = IrBuilder::create<Double>();
+  fusion->addInput(size_val);
+  fusion->addInput(low);
+  fusion->addInput(high);
+  TensorView* tv0 = uniform({size_val}, low, high, DataType::Float);
+  TensorView* tv1 = uniform({size_val}, low, high, DataType::Double);
+  fusion->addOutput(tv0);
+  fusion->addOutput(tv1);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+
+  for (int64_t size : {16, 1024, 10001, 10002, 10003, 100000, 10000001}) {
+    at::manual_seed(0);
+    auto cg_outputs = fec.runFusionWithInputs({size, -1.0, 1.0});
+
+    at::manual_seed(0);
+    auto ref0 = generate_uniform(size, kFloat) * 2 - 1;
+    auto ref1 = generate_uniform(size, kDouble) * 2 - 1;
+
+    testValidate(
+        fec.fusion(),
+        cg_outputs,
+        {size, -1.0, 1.0},
+        {ref0, ref1},
+        __LINE__,
+        __FILE__);
+  }
+}
+
 } // namespace jit
 } // namespace torch

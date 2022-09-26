@@ -673,6 +673,8 @@ static const char* rng_op_type_inline_op2string(RNGOpType t) {
   switch (t) {
     case RNGOpType::Uniform:
       return "rng_uniform";
+    case RNGOpType::UniformRange:
+      return "rng_uniform_range";
     default:
       break;
   }
@@ -711,6 +713,8 @@ static const char* rng_op_type2string(RNGOpType t) {
   switch (t) {
     case RNGOpType::Uniform:
       return "rng_uniform";
+    case RNGOpType::UniformRange:
+      return "rng_uniform_range";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected RNGOpType");
   }
