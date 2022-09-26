@@ -724,11 +724,24 @@ void addInputs(
     const c10::optional<at::ScalarType>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
-
 void addInputs(
     Node* n,
     const char* name,
-    at::TensorList value,
+    at::ArrayRef<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorListRef(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined) {
+  addInputs(n, name, at::ITensorListRef(value), allow_undefined);
+}
+void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined) {
   Graph* g = n->owningGraph();
   Node* list_node = nullptr;
@@ -752,7 +765,6 @@ TORCH_API void addInputs(
       OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
-
 void addInputs(
     Node* n,
     const char* name,

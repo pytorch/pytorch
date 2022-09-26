@@ -109,6 +109,12 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
             batch = torch.rand(1).cuda()
             batch.requires_grad = True
 
+            # Run one dummy iteration to trigger the execution order validation
+            # all-gathers
+            out = model(batch)
+            out.backward()
+            model.zero_grad(set_to_none=True)
+
             # We run 20 iterations but only collect timing data from the minimal 10
             # data points because nondeterministic system events can disturb the timing.
             cpu_iter = Min10()

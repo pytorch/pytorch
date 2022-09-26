@@ -176,6 +176,24 @@ class TestPrims(TestCase):
         out = execute(gm, a, a, a, executor="nvfuser")
         self.assertEqual(out, (a, a, a))
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_rand_like_fusion(self, device):
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.rand_like(a)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a)
+
+        out = execute(gm, a, executor="strictly_nvfuser")
+        self.assertEqual(out.size(), a.size())
+
     @skipCUDAMemoryLeakCheckIf(True)  # https://github.com/pytorch/pytorch/issues/84529
     @onlyCUDA
     @skipCUDAIfRocm
@@ -327,7 +345,7 @@ class TestPrims(TestCase):
         # Check that all call_function nodes are prims
         call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
         all_prims_namespace = all(
-            node.target.name.startswith("prims") for node in call_function_nodes
+            node.target.name().startswith("prims") for node in call_function_nodes
         )
         self.assertTrue(all_prims_namespace)
 
