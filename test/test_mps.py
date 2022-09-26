@@ -2961,104 +2961,48 @@ class TestNLLLoss(TestCase):
         helper((9, 5, 6, 7))
 
     # Test var
-    def test_var(self):
-        def helper(shape):
+    def test_var_simple(self):
+        def helper():
+
+            shape = [2, 3, 4, 5]
+
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
             x = cpu_x.detach().clone().to('mps')
 
-            all_var = torch.var(x, unbiased=False)
-            all_var_cpu = torch.var(cpu_x, unbiased=False)
+            for unbiased in [False, True]:
+                for keepdim in [False, True]:
 
-            self.assertEqual(all_var, all_var_cpu)
+                    zero_dim_var = x.var(-1, keepdim=keepdim, unbiased=unbiased)
+                    zero_dim_var_cpu = cpu_x.var(-1, keepdim=keepdim, unbiased=unbiased)
 
-            nil_dim_var = torch.var(x, dim=[], unbiased=False)
-            nil_dim_var_cpu = torch.var(cpu_x, dim=[], unbiased=False)
+                    self.assertEqual(zero_dim_var, zero_dim_var_cpu)
 
-            self.assertEqual(nil_dim_var, nil_dim_var_cpu)
+                    all_var = torch.var(x, unbiased=unbiased)
+                    all_var_cpu = torch.var(cpu_x, unbiased=unbiased)
 
-            nil_dim_var_keepdim = torch.var(x, dim=[], keepdim=True, unbiased=False)
-            nil_dim_var_cpu_keepdim = torch.var(cpu_x, dim=[], keepdim=True, unbiased=False)
+                    self.assertEqual(all_var, all_var_cpu)
 
-            self.assertEqual(nil_dim_var_keepdim, nil_dim_var_cpu_keepdim)
+                    nil_dim_var = torch.var(x, dim=[], keepdim=keepdim, unbiased=unbiased)
+                    nil_dim_var_cpu = torch.var(cpu_x, dim=[], keepdim=keepdim, unbiased=unbiased)
 
-            zero_dim_var = torch.var(x, dim=[0], unbiased=False)
-            zero_dim_var_cpu = torch.var(cpu_x, dim=[0], unbiased=False)
+                    self.assertEqual(nil_dim_var, nil_dim_var_cpu)
 
-            self.assertEqual(zero_dim_var, zero_dim_var_cpu)
+                    zero_dim_var = torch.var(x, dim=[0], keepdim=keepdim, unbiased=unbiased)
+                    zero_dim_var_cpu = torch.var(cpu_x, dim=[0], keepdim=keepdim, unbiased=unbiased)
 
-            zero_dim_var_keepdim = torch.var(x, dim=[0], keepdim=True, unbiased=False)
-            zero_dim_var_cpu_keepdim = torch.var(cpu_x, dim=[0], keepdim=True, unbiased=False)
+                    self.assertEqual(zero_dim_var, zero_dim_var_cpu)
 
-            self.assertEqual(zero_dim_var_keepdim, zero_dim_var_cpu_keepdim)
+                    zero_one_dim_var = torch.var(x, dim=[0, -1], keepdim=keepdim, unbiased=unbiased)
+                    zero_one_dim_var_cpu = torch.var(cpu_x, dim=[0, -1], keepdim=keepdim, unbiased=unbiased)
 
-            zero_one_dim_var = torch.var(x, dim=[0, 1], unbiased=False)
-            zero_one_dim_var_cpu = torch.var(cpu_x, dim=[0, 1], unbiased=False)
+                    self.assertEqual(zero_one_dim_var, zero_one_dim_var_cpu)
 
-            self.assertEqual(zero_one_dim_var, zero_one_dim_var_cpu)
+                    two_three_dim_var = torch.var(x, dim=[2, 3], keepdim=keepdim, unbiased=unbiased)
+                    two_three_dim_var_cpu = torch.var(cpu_x, dim=[2, 3], keepdim=keepdim, unbiased=unbiased)
 
-            zero_one_dim_var_keepdim = torch.var(x, dim=[0, 1], keepdim=True, unbiased=False)
-            zero_one_dim_var_cpu_keepdim = torch.var(cpu_x, dim=[0, 1], keepdim=True, unbiased=False)
+                    self.assertEqual(two_three_dim_var, two_three_dim_var_cpu)
 
-            self.assertEqual(zero_one_dim_var_keepdim, zero_one_dim_var_cpu_keepdim)
-
-            two_three_dim_var = torch.var(x, dim=[2, 3], unbiased=False)
-            two_three_dim_var_cpu = torch.var(cpu_x, dim=[2, 3], unbiased=False)
-
-            self.assertEqual(two_three_dim_var, two_three_dim_var_cpu)
-
-            two_three_keepdim_var = torch.var(x, dim=[2, 3], keepdim=True, unbiased=False)
-            two_three_dim_keepvar_cpu = torch.var(cpu_x, dim=[2, 3], keepdim=True, unbiased=False)
-
-            self.assertEqual(two_three_keepdim_var, two_three_dim_keepvar_cpu)
-
-            all_var = torch.var(x, unbiased=True)
-            all_var_cpu = torch.var(cpu_x, unbiased=True)
-
-            self.assertEqual(all_var, all_var_cpu)
-
-            nil_dim_var = torch.var(x, dim=[], unbiased=True)
-            nil_dim_var_cpu = torch.var(cpu_x, dim=[], unbiased=True)
-
-            self.assertEqual(nil_dim_var, nil_dim_var_cpu)
-
-            nil_dim_var_keepdim = torch.var(x, dim=[], keepdim=True, unbiased=True)
-            nil_dim_var_cpu_keepdim = torch.var(cpu_x, dim=[], keepdim=True, unbiased=True)
-
-            self.assertEqual(nil_dim_var_keepdim, nil_dim_var_cpu_keepdim)
-
-            zero_dim_var = torch.var(x, dim=[0], unbiased=True)
-            zero_dim_var_cpu = torch.var(cpu_x, dim=[0], unbiased=True)
-
-            self.assertEqual(zero_dim_var, zero_dim_var_cpu)
-
-            zero_dim_var_keepdim = torch.var(x, dim=[0], keepdim=True, unbiased=True)
-            zero_dim_var_cpu_keepdim = torch.var(cpu_x, dim=[0], keepdim=True, unbiased=True)
-
-            self.assertEqual(zero_dim_var_keepdim, zero_dim_var_cpu_keepdim)
-
-            zero_one_dim_var = torch.var(x, dim=[0, 1], unbiased=True)
-            zero_one_dim_var_cpu = torch.var(cpu_x, dim=[0, 1], unbiased=True)
-
-            self.assertEqual(zero_one_dim_var, zero_one_dim_var_cpu)
-
-            zero_one_dim_var_keepdim = torch.var(x, dim=[0, 1], keepdim=True, unbiased=True)
-            zero_one_dim_var_cpu_keepdim = torch.var(cpu_x, dim=[0, 1], keepdim=True, unbiased=True)
-
-            self.assertEqual(zero_one_dim_var_keepdim, zero_one_dim_var_cpu_keepdim)
-
-            two_three_dim_var = torch.var(x, dim=[2, 3], unbiased=True)
-            two_three_dim_var_cpu = torch.var(cpu_x, dim=[2, 3], unbiased=True)
-
-            self.assertEqual(two_three_dim_var, two_three_dim_var_cpu)
-
-            two_three_keepdim_var = torch.var(x, dim=[2, 3], keepdim=True, unbiased=True)
-            two_three_dim_keepvar_cpu = torch.var(cpu_x, dim=[2, 3], keepdim=True, unbiased=True)
-
-            self.assertEqual(two_three_keepdim_var, two_three_dim_keepvar_cpu)
-
-        helper((4, 5, 6, 7))
-        # verify if a change in shape of input would cause problems with graph caching
-        helper((9, 5, 6, 7))
+        helper()
 
     # Test forward amax
     def test_amax(self):
@@ -6005,6 +5949,19 @@ class TestConvolutionMPS(TestCase):
 
         self.assertEqual(tcpu, tgpu.cpu(), rtol=2.6e-05, atol=2e-04)
 
+    def test_conv_backward_1d_channels_last(self):
+        # https://github.com/pytorch/pytorch/issues/84511
+        conv_cpu = torch.nn.Conv1d(in_channels=1, out_channels=1, kernel_size=3)
+        conv_mps = copy.deepcopy(conv_cpu).to(device='mps')
+
+        data = torch.rand(1, 176, 1, dtype=torch.float32)
+        x_cpu = data.permute(0, 2, 1).contiguous()
+        x_mps = data.permute(0, 2, 1).contiguous().to("mps")
+        res_cpu = conv_cpu(x_cpu).sum().backward()
+        res_mps = conv_mps(x_mps).sum().backward()
+
+        self.assertEqual(res_cpu, res_mps)
+
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
         a_cpu = torch.ones(128, 1, 176)
@@ -6497,6 +6454,11 @@ class TestConsistency(TestCase):
         'arange': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'amax': ['f32'],
+        'amix': ['f32'],
+        'logsumexp': ['f32'],
+        'mean': ['f32'],
+        'sum': ['f32'],
         'asin': ['f32', 'i16', 'i32', 'u8'],
         'asinh': ['f32', 'i16', 'i32', 'u8'],
         'atan': ['f32', 'i16', 'i32', 'u8'],
