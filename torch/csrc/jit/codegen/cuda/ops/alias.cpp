@@ -111,18 +111,19 @@ TensorView* view(
 }
 
 TensorView* flatten(TensorView* x, int64_t start_dim, int64_t end_dim) {
+  auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
   if (start_dim < 0) {
-    start_dim += x->nDims();
+    start_dim += inp_domain.size();
   }
   if (end_dim < 0) {
-    end_dim += x->nDims();
+    end_dim += inp_domain.size();
   }
   TORCH_CHECK(
-      start_dim >= 0 && start_dim < x->nDims(),
+      start_dim >= 0 && start_dim < inp_domain.size(),
       "Invalid start_dim ",
       start_dim);
   TORCH_CHECK(
-      end_dim >= 0 && end_dim < x->nDims(), "Invalid end_dim ", end_dim);
+      end_dim >= 0 && end_dim < inp_domain.size(), "Invalid end_dim ", end_dim);
   TORCH_CHECK(start_dim <= end_dim, "start_dim must be <= end_dim");
 
   if (start_dim == end_dim) {
@@ -209,6 +210,9 @@ TensorView* unsqueeze(TensorView* x, int dim) {
 }
 
 TensorView* permute(TensorView* x, const std::vector<int64_t>& new2old) {
+  if (new2old.size() == 0) {
+    return set(x);
+  }
   auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
   std::vector<IterDomain*> out_domain(inp_domain.size());
 
