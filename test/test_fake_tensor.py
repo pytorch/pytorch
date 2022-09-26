@@ -44,6 +44,12 @@ class FakeTensorTest(TestCase):
             y = torch.nn.parameter.Parameter(x)
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
+    def test_non_parameter_grad(self):
+        mode = FakeTensorMode()
+        t = torch.rand([4], requires_grad=True)
+        fake_t = mode.from_tensor(t)
+        self.assertEqual(fake_t.requires_grad, t.requires_grad)
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_index_cuda_with_cpu(self):
         with enable_torch_dispatch_mode(FakeTensorMode()):

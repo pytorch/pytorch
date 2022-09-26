@@ -210,6 +210,7 @@ class FakeTensorConverter(object):
                 existing_device,
                 constant=t if make_constant else None,
             )
+            out.requires_grad_(t.requires_grad)
             if make_constant:
                 self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
