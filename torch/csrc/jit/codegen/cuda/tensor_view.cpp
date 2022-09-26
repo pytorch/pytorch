@@ -430,7 +430,7 @@ TensorView* TensorView::split(
   return this;
 }
 
-// Merge "axis" and "axis+1" into 1 dimension
+// Merge "axis_o" and "axis_i" into 1 dimension
 TensorView* TensorView::merge(int axis_o, int axis_i) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do merge on a 0-dim TensorView");
 
@@ -818,6 +818,15 @@ std::vector<TensorView*> TensorView::rFactor(
         "Rfactor of a multi-output reduction not used correctly");
   }
 
+  // Currently grouping of welford is only supported through
+  // ParallelType::Group, so GroupedWelfordOp is only created during
+  // the lowering time. As rFactor is done before lowering, there
+  // should be no GroupedWelfordOp at this point.
+  TORCH_INTERNAL_ASSERT(
+      !definition()->isA<GroupedWelfordOp>(),
+      "GroupedWelfordOp found: ",
+      definition()->toString());
+
   std::vector<TensorView*> rf_tvs(tvs.size());
 
   // Make sure this gets rfactored last so everybody gets
@@ -844,25 +853,25 @@ std::vector<TensorView*> TensorView::rFactor(
     IrBuilder::create<WelfordOp>(
         producer_avg,
         producer_var,
-        producer_n, /*out var/avg/count */
-        wop->initAvg(),
-        wop->initVar(),
-        wop->initN(), /*init var/avg/count */
+        producer_n,
         wop->inAvg(),
         wop->inVar(),
-        wop->inN());
+        wop->inN(),
+        wop->initAvg(),
+        wop->initVar(),
+        wop->initN());
 
     // Expr* consumer_definition =
     IrBuilder::create<WelfordOp>(
         wop->outAvg(),
         wop->outVar(),
         wop->outN(),
-        wop->initAvg(),
-        wop->initVar(),
-        wop->initN(),
         producer_avg,
         producer_var,
-        producer_n);
+        producer_n,
+        wop->initAvg(),
+        wop->initVar(),
+        wop->initN());
   } else if (
       auto grouped_rop = dynamic_cast<GroupedReductionOp*>(definition())) {
     IrBuilder::create<GroupedReductionOp>(
