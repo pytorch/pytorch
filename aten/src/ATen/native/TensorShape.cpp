@@ -3297,35 +3297,22 @@ Tensor detach(const Tensor& self) {
     /*allow_tensor_metadata_change=*/false));
 }
 
-Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
-  // some special handling to deal with allow dimension == 0 when self.dim() == 0
-  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
+  // some special handling to deal with allow d == 0 when self.dim() == 0
+  d = at::maybe_wrap_dim(d, self.dim(), /*wrap_scalar=*/true);
 
-  const auto sizes = self.sizes();
-  const auto strides = self.strides();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
-  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
+  int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
 
-  DimVector new_size(self.dim() + 1);
-  DimVector new_stride(self.dim() + 1);
-
-  new_size[self.dim()] = size;
-  new_stride[self.dim()] = self.dim() == 0 ? 1 : strides[dimension];
-  for(const auto d : c10::irange(self.dim())) {
-    const auto self_size = sizes[d];
-    const auto self_stride = strides[d];
-    if(d == dimension) {
-      new_size[d] = (self_size - size) / step + 1;
-      new_stride[d] = step*self_stride;
-    } else {
-      new_size[d] = self_size;
-      new_stride[d] = self_stride;
-    }
-  }
-
-  return self.as_strided(new_size, new_stride);
+  sizes.push_back(size);
+  strides.push_back(self.dim() == 0 ? 1 : strides[d]);
+  sizes[d] = (sizes[d] - size) / step + 1;
+  strides[d] = step * strides[d];
+  return self.as_strided(sizes, strides);
 }
 
 template <typename scalar_t>
