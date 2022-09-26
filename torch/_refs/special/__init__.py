@@ -1,5 +1,5 @@
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch._prims as prims
@@ -8,7 +8,6 @@ import torch._refs as refs
 
 from torch import Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import 
 from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     Number,
@@ -29,10 +28,10 @@ __all__ = [
     "i1e",
     "logit",
     "xlog1py",
-    "zeta",
     "multigammaln",
     "zeta",
 ]
+
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0e
@@ -66,8 +65,8 @@ def logit(self: TensorLikeType, eps: Optional[float] = None) -> TensorLikeType:
         eps = -1.0
     lo = eps
     hi = 1 - eps
-    self = refs.clamp(self, lo, hi)
-    return refs.log(refs.true_divide(self, refs.sub(1, self)))
+    self = torch.clamp(self, lo, hi)
+    return torch.log(torch.true_divide(self, torch.sub(1, self)))
 
 
 def _xlog1py(
@@ -91,8 +90,8 @@ def _xlog1py(
         elif utils.is_cpu_scalar_tensor(a):
             a = prims.device_put(a, device=b.device)
 
-    rhs = refs.where(refs.eq(a, 0), 0, refs.mul(a, refs.log1p(b)))
-    return refs.where(refs.isnan(b), float("nan"), rhs)
+    rhs = torch.where(refs.eq(a, 0), 0, refs.mul(a, refs.log1p(b)))
+    return torch.where(refs.isnan(b), float("nan"), rhs)
 
 
 # TODO add docstring
@@ -101,6 +100,7 @@ xlog1py = _make_elementwise_binary_reference(
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_xlog1py,
 )
+
 
 @register_decomposition(torch.ops.aten.mvlgamma)
 @out_wrapper()

@@ -161,7 +161,7 @@ __all__ = [
     "sub",
     "true_divide",
     "trunc_divide",
-    # 'xlogy', # where?, log, mul
+    "xlogy",
     #
     # Elementwise Ternary References
     #
@@ -529,12 +529,6 @@ def zero_(a: TensorLikeType) -> TensorLikeType:
     r = prims.fill(a, 0)
     prims.copy_to(a, r)
     return a
-
-i0 = _make_elementwise_unary_reference(
-    prims.bessel_i0,
-    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=torch.ops.aten.special_i0,
-)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -1555,8 +1549,8 @@ def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Number
         elif utils.is_cpu_scalar_tensor(a):
             a = prims.device_put(a, device=b.device)
 
-    rhs = where(eq(a, 0), 0, mul(a, log(b)))
-    return where(isnan(b), float("nan"), rhs)
+    rhs = torch.where(eq(a, 0), 0, mul(a, log(b)))
+    return torch.where(isnan(b), float("nan"), rhs)
 
 
 # TODO: add docstring
@@ -1564,6 +1558,8 @@ xlogy = _make_elementwise_binary_reference(
     _xlogy,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=None,  # Defined in torch/_decomp/decompositions.py
+)
+
 
 def _trunc_divide(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
@@ -4349,16 +4345,6 @@ zeros_like = partial(full_like, fill_value=False)
 #
 # Randomness References
 #
-
-def scalar_tensor(
-    a: NumberType,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-) -> TensorLikeType:
-    # TODO handle optional argument
-    return prims.scalar_tensor(a, dtype=dtype, device=device)
-
 
 
 @register_decomposition(torch.ops.aten.uniform)

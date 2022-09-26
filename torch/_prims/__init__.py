@@ -101,7 +101,6 @@ __all__ = [
     "bitwise_and",
     "bitwise_or",
     "bitwise_xor",
-    "zeta",
     # 'complex',  # needs custom meta
     "div",
     "eq",
@@ -849,13 +848,6 @@ bitwise_or = _make_elementwise_binary_prim(
 bitwise_xor = _make_elementwise_binary_prim(
     "bitwise_xor",
     impl_aten=torch.bitwise_xor,
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-zeta = _make_elementwise_binary_prim(
-    "zeta",
-    impl_aten=torch.special.zeta,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

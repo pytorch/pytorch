@@ -17388,11 +17388,6 @@ python_ref_db = [
         torch_opinfo_name="special.xlog1py",
         supports_one_python_scalar=True,
     ),
-    ElementwiseBinaryPythonRefInfo(
-        "_refs.special.zeta",
-        torch_opinfo_name="special.zeta",
-        supports_one_python_scalar=True,
-    ),
     #
     # Data Conversion & Data Movement Opinfos
     #
