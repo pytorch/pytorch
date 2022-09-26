@@ -887,12 +887,11 @@ class MultiThreadedTestCase(TestCase):
     def threaded_run_test(self):
         self.perThreadSetUp()
         try:
-            failed_ranks = run_with_threaded_pg(self.world_size, TIMEOUT_DEFAULT, self._test_method)
-            for rank, exc_info in failed_ranks:
-                print(f"Rank {rank} raised:")
-                for line in traceback.format_exception(*exc_info):
-                    sys.stdout.write(line)
-            self.assertEqual([], failed_ranks, "Some ranks failed")
+            spawn_threads_and_init_comms(
+                func=self._test_method,
+                timeout=TIMEOUT_DEFAULT,
+                world_size=self.world_size,
+            )()
         finally:
             self.perThreadTearDown()
 

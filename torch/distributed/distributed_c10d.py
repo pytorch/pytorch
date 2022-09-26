@@ -249,7 +249,14 @@ class _reduce_op(object):
 reduce_op = _reduce_op()
 
 # Not including _default_pg_init_method cuz it's dead code (nothing uses it in PT)
-class World:
+class _World:
+    """
+    Container class for c10d process group state.
+    This is used during registration and lookup of PG state.
+
+    .. warning:: This is an experimental API inteded to expose the inner workings
+       of c10d and is subject to change..
+    """
     def __init__(self):
         self._default_pg = None
         self._pg_map = {}
@@ -259,6 +266,10 @@ class World:
 
     @property
     def default_pg(self):
+        """
+        The default ProcessGroup includes all ranks of the cluster.
+        This is used by c10d APIs when a ProcessGroup is needed but None is provided.
+        """
         return self._default_pg
 
     @default_pg.setter
@@ -304,12 +315,20 @@ class World:
 
     @group_count.setter
     def group_count(self, value):
+        """
+        Count is used when computing the name of ProcessGroups when using global synchronization.
+        """
         self._group_count = value
 
 
-_world = World()
+_world = _World()
+"""Holds the singleton instance of ``_World`` used by c10. Experimental extension point to override it"""
 
 class _WorldMeta(type):
+    """
+    Meta class of ``group`` and ``GroupMember`` so they
+    can have the class property ``WORLD``.
+    """
     # Points to the default PG once initialized.
     @property
     def WORLD(cls):

@@ -7,7 +7,6 @@ import torch.distributed as dist
 from torch.futures import Future
 
 from torch._C._distributed_c10d import _create_work_from_future
-from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_flatten
 
 """
@@ -32,7 +31,7 @@ class AllGather:
     def work(self, data):
         for src_rank in range(len(data)):
             in_tensor_list = data[src_rank][1]
-            #Can't handle all_gather with multiple tensors
+            # Can't handle all_gather with multiple tensors
             assert len(in_tensor_list) == 1
             src_tensor = in_tensor_list[0]
 
@@ -50,7 +49,7 @@ class Broadcast:
         for i in range(len(data)):
             out_tensor_list = flatten_list(data[i])
             for j in range(len(in_tensor_list)):
-                with torch.no_grad():                    
+                with torch.no_grad():
                     out_tensor_list[j].copy_(in_tensor_list[j])
 
 class Collective:
@@ -66,7 +65,7 @@ class Collective:
         self._done = False
 
     def join(self, rank, data):
-        with self._start_cond:            
+        with self._start_cond:
             self._data[rank] = data
             self._count += 1
 
@@ -80,7 +79,7 @@ class Collective:
                     self._start_cond.wait()
 
         with self._done_cond:
-            #wait for rank 0 to finish
+            # wait for rank 0 to finish
             if rank > 0:
                 while not self._done:
                     self._done_cond.wait()
@@ -164,13 +163,13 @@ class ThreadLocalWorld:
 
     def _get_world(self):
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world =  dist.World()
+            ThreadLocalWorld._world.world = dist.World()
         return ThreadLocalWorld._world.world
 
     @property
     def default_pg(self):
         return self._get_world().default_pg
-    
+
     @default_pg.setter
     def default_pg(self, value):
         self._get_world().default_pg = value
@@ -191,7 +190,7 @@ class ThreadLocalWorld:
     def group_count(self) -> int:
         return self._get_world().group_count
 
-    @group_count.setter  
+    @group_count.setter
     def group_count(self, value):
         self._get_world().group_count = value
 
@@ -211,11 +210,13 @@ def run_with_threaded_pg(world_size, timeout, callback):
     Run ``callback`` with ``world_size`` threads using the in-proc process group
     """
     world = _install_threaded_pg()
+
     def world_is_valid():
         return world == dist.distributed_c10d._world
 
     global_store = dist.HashStore()
     exception_queue = queue.Queue()
+
     def worker(rank):
         if not world_is_valid():
             raise TimeoutError("Invalid world")
@@ -236,7 +237,7 @@ def run_with_threaded_pg(world_size, timeout, callback):
     try:
         threads = [
             threading.Thread(
-                target=worker, 
+                target=worker,
                 args=(rank,)
             ) for rank in range(world_size)
         ]

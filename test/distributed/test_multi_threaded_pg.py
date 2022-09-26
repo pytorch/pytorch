@@ -14,7 +14,7 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-DEFAULT_WORLD_SIZE=4
+DEFAULT_WORLD_SIZE = 4
 
 class TestObjectCollectivesWithWrapper(TestCase):
     @spawn_threads_and_init_comms(world_size=4)
