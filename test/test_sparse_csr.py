@@ -1054,7 +1054,7 @@ class TestSparseCSR(TestCase):
     @all_sparse_compressed_layouts()
     def test_resize_as_sparse_compressed(self, device, dtype, layout):
 
-        def _check_resize_b_as_a(b, a, should_resize=True):
+        def _check_resize_b_as_a(b, a):
             br = b.clone()
             br.resize_as_sparse_(a)
 
@@ -1120,8 +1120,9 @@ class TestSparseCSR(TestCase):
                                                nnz=nnz,
                                                blocksize=blocksize)
 
-            # This test will not always trigger a resize, if the layouts are the same nothing should happen to b
-            _check_resize_b_as_a(b, a, should_resize=False)
+            # This test will not always trigger a resize, if the layouts are the same nothing should happen to b.
+            # The invariants of the function as checked should still hold
+            _check_resize_b_as_a(b, a)
 
             # same ndim, but bigger, more nnz, different dtype, different blocksize if blocked
             b = self.genSparseCompressedTensor(tuple(s * 2 for s in shape),
