@@ -147,7 +147,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
     // For the case of (0x0) result tensor, manually resize `result` tensor
     // to the size of `self` tensor
     if (result.numel() == 0) {
-      at::native::resize_as_sparse_csr_(result, self);
+      at::native::resize_as_sparse_compressed_(result, self);
     }
     // copy_sparse_compressed_ internally checks the sizes of result and self tensors
     // Hence no external size check required
@@ -768,7 +768,7 @@ Tensor& add_out_sparse_csr_cpu(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
-    at::native::resize_as_sparse_csr_(out, self);
+    at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
   return out;
