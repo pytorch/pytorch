@@ -292,12 +292,11 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
     # input shape, output shape, output stride, output storage offset
     test_cases = [
         ((1,), (1,), (1,), 0),
-        # ((3, 3), (2, 2), (1, 2), 0),
-        # ((3, 3), (2, 2), (1, 2), 1),
-        # Example from docs
+        ((3, 3), (2, 2), (1, 2), 0),
+        ((3, 3), (2, 2), (1, 2), 1),
         ((3, 3), (2, 2), (2, 1), 0),
-        # ((16,), (2, 2, 2, 2), (1, 1, 1, 1), 0),
-        # ((16,), (2, 1, 1, 2), (1, 7, 7, 1), 0),
+        ((16,), (2, 2, 2, 2), (8, 4, 2, 1), 0),
+        ((16,), (2, 1, 1, 2), (1, 2, 4, 8), 0),
     ]
 
     for input_shape, output_shape, stride, storage_offset in test_cases:
@@ -305,6 +304,17 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
         input_src = make_arg(output_shape)
         kwargs = dict(storage_offset=storage_offset)
         yield SampleInput(input_t, args=(input_src, output_shape, stride), kwargs=kwargs)
+
+def error_inputs_as_strided_scatter(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+
+    input_t = make_arg([4,4])
+    input_src = make_arg([2,2])
+    kwargs = dict(storage_offset=0)
+    yield ErrorInput(
+        SampleInput(input_t, args=(input_src, [2, 2], [200, 200]), kwargs=kwargs),
+        error_regex="itemsize 4 requiring a storage size of 1604 are out of bounds for storage of size 64"
+    )
 
 def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
     inputs = (
@@ -10510,6 +10520,7 @@ op_db: List[OpInfo] = [
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided_scatter,
+           error_inputs_func=error_inputs_as_strided_scatter,
            skips=(
                DecorateInfo(unittest.skip('Works only for CPU complex64'), 'TestMathBits', 'test_conj_view'),
                DecorateInfo(unittest.skip('Works for float64, fails for everything else'), 'TestMathBits', 'test_neg_view'),
