@@ -844,6 +844,13 @@ def configure_extension_build():
             extra_compile_args += ['-g']
             extra_link_args += ['-g']
 
+    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
+    if pytorch_extra_install_requirements:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
+        extra_install_requires += pytorch_extra_install_requirements.split(";")
+
+
     # Cross-compile for M1
     if IS_DARWIN:
         macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
@@ -981,6 +988,10 @@ def main():
     extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
 
     install_requires += extra_install_requires
+
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
@@ -1161,6 +1172,7 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,
