@@ -637,7 +637,7 @@ def generate_tensor_like_override_tests(cls):
                         func = func.__get__(instance_gen())
                         continue
                     func_args.append(instance_gen())
-                elif t == 'TensorList':
+                elif t == 'TensorList' or t == 'ITensorListRef':
                     func_args.append([instance_gen(), instance_gen()])
                 elif t == 'c10::List<c10::optional<Tensor>>':
                     func_args.append([instance_gen(), instance_gen()])
@@ -1302,6 +1302,7 @@ class TestTorchFunctionMode(TestCase):
 
     def test_nested_modes_with_python_has_torch_function(self):
         called = []
+
         class A(TorchFunctionMode):
             def __torch_function__(self, func, types, args=(), kwargs=None):
                 called.append("A")

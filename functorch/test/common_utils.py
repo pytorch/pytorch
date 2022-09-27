@@ -14,6 +14,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 import os
 import unittest
 from torch.testing._internal.common_device_type import toleranceOverride
+from collections import namedtuple
 
 IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
 
@@ -310,36 +311,59 @@ def opinfo_in_dict(opinfo, d):
     return (opinfo.name in d) or (f'{opinfo.name}.{opinfo.variant_test_name}' in d)
 
 
-def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, True)
+DecorateMeta = namedtuple("DecorateMeta", [
+    "op_name",
+    "variant_name",
+    "decorator",
+    "device_type",
+    "dtypes",
+])
 
-# TODO: this doesn't work in python < 3.8
+
+def decorate(op_name, variant_name='', *, decorator=None, device_type=None, dtypes=None):
+    assert decorator is not None
+    return DecorateMeta(op_name=op_name,
+                        variant_name=variant_name,
+                        decorator=decorator,
+                        device_type=device_type,
+                        dtypes=dtypes)
+
+
+def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
+    return decorate(op_name=op_name,
+                    variant_name=variant_name,
+                    decorator=unittest.expectedFailure,
+                    device_type=device_type,
+                    dtypes=dtypes)
 
 
 def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return (op_name, variant_name, device_type, dtypes, False)
+    return decorate(op_name=op_name,
+                    variant_name=variant_name,
+                    decorator=unittest.skip("Skipped!"),
+                    device_type=device_type,
+                    dtypes=dtypes)
 
 
 def skipOps(test_case_name, base_test_name, to_skip):
     all_opinfos = op_db + additional_op_db
-    for xfail in to_skip:
-        op_name, variant_name, device_type, dtypes, expected_failure = xfail
+    for decorate_meta in to_skip:
         matching_opinfos = [o for o in all_opinfos
-                            if o.name == op_name and o.variant_test_name == variant_name]
-        assert len(matching_opinfos) >= 1, f"Couldn't find OpInfo for {xfail}"
-        for opinfo in matching_opinfos:
-            decorators = list(opinfo.decorators)
-            if expected_failure:
-                decorator = DecorateInfo(unittest.expectedFailure,
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            else:
-                decorator = DecorateInfo(unittest.skip("Skipped!"),
-                                         test_case_name, base_test_name,
-                                         device_type=device_type, dtypes=dtypes)
-                decorators.append(decorator)
-            opinfo.decorators = tuple(decorators)
+                            if o.name == decorate_meta.op_name and
+                            o.variant_test_name == decorate_meta.variant_name]
+        assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {xfail}"
+        assert len(matching_opinfos) == 1, (
+            "OpInfos should be uniquely determined by their (name, variant_name). "
+            f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
+        )
+        opinfo = matching_opinfos[0]
+        decorators = list(opinfo.decorators)
+        new_decorator = DecorateInfo(decorate_meta.decorator,
+                                     test_case_name, base_test_name,
+                                     device_type=decorate_meta.device_type,
+                                     dtypes=decorate_meta.dtypes)
+        decorators.append(new_decorator)
+        opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way
     def wrapped(fn):
