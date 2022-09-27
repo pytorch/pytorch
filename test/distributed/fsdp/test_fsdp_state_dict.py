@@ -501,13 +501,14 @@ class TestFSDPStateDict(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
-    @parametrize("move_to_cpu", [True, False])
-    def test_state_dict_save_load_flow(self, state_dict_type, move_to_cpu):
-        fsdp_params = self._dist_train(
-            wrap_fsdp=True, state_dict_type=state_dict_type, move_to_cpu=move_to_cpu,
-        )
-        ddp_params = self._dist_train(wrap_fsdp=False)
-        self.assertEqual(ddp_params, fsdp_params)
+    def test_state_dict_save_load_flow(self, state_dict_type):
+        for move_to_cpu in [True, False]:
+            with self.subTest(move_to_cpu=move_to_cpu):
+                fsdp_params = self._dist_train(
+                    wrap_fsdp=True, state_dict_type=state_dict_type, move_to_cpu=move_to_cpu,
+                )
+                ddp_params = self._dist_train(wrap_fsdp=False)
+                self.assertEqual(ddp_params, fsdp_params)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("state_dict_type", _SUPPORTED_STATE_DICT_IMPLS)
