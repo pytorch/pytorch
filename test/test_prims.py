@@ -14,6 +14,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     skipCUDAIfRocm,
     dtypes,
+    OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -759,7 +760,7 @@ class TestDecomp(TestCase):
             )
             self.assertFalse(includes_aten_to_copy)
 
-    @ops([op for op in op_db if op.supports_varargs], allowed_dtypes=(torch.float,))
+    @ops([op for op in op_db if op.supports_varargs], dtypes=OpDTypes.any_one)
     def test_decomposition_method_vararg(self, device, dtype, op):
         # some ops have vararg variants for the methods. this tests it.
         # we don't have tests for varargs in OpInfo, so we need to
@@ -768,7 +769,7 @@ class TestDecomp(TestCase):
         # creation functions taking shapes) is that things can be vararg
         # if the method has only one argument of sequence type.
         # e.g. permute can be called on a 3d tensor t as t.permute(0, 2, 1)
-        #      als well as t.permute([0, 2, 1])
+        #      as well as t.permute([0, 2, 1])
         #      when the signature in native_functions.yaml
         #      shows arguments Tensor self, IntList dims
         # we might need to adjust things for the factory functions or
@@ -779,14 +780,27 @@ class TestDecomp(TestCase):
         # filter out empty tuple as that cannot be the varargs
         sample_inputs = (si for si in op.sample_inputs(device, dtype, requires_grad=False)
                          if (si.args[-1] if si.args else si.input))
-        sample_input = next(sample_inputs)  # just test one
+
+        # just run one test, we assume there is a suitable one in the tests
+        sample_input = next(sample_inputs)
         all_args = (sample_input.input,) + sample_input.args
+
+        # in general, the methods take varargs and not (always?) the function
+        # variants, the exception to this rule are the factory functions
         if op.is_factory_function:
             fn = op.op
         else:
             fn = op.method_variant
         with TorchRefsMode():
             gm = make_fx(fn)(*all_args[:-1], *all_args[-1])
+
+        # in case we add random factory functions
+        torch.manual_seed(1)
+        res = gm(*all_args[:-1], *all_args[-1])
+        torch.manual_seed(1)
+        expected = fn(*all_args[:-1], *all_args[-1])
+        self.assertEqual(res, expected)
+
 
 instantiate_device_type_tests(TestDecomp, globals())
 
