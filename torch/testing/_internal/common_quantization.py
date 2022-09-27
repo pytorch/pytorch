@@ -10,8 +10,8 @@ import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
@@ -94,6 +94,9 @@ class NodeSpec:
 
     def __repr__(self):
         return repr(self.op) + " " + repr(self.target)
+
+def get_supported_device_types():
+    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 def test_only_eval_fn(model, calib_data):
     r"""

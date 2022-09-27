@@ -23,7 +23,7 @@ from torch.onnx import symbolic_helper
 from torch.onnx._internal import registration
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
+# see Note [Edit Symbolic Files] in README.md
 
 __all__ = ["layer_norm"]
 
