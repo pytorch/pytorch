@@ -1156,7 +1156,7 @@ class FlatParamHandle:
             )
             p_assert(
                 not as_params or isinstance(prim_param, nn.Parameter),
-                f"as_paramsflat_param.grad = unsharded_grad{as_params} type(prim_param)={type(prim_param)}",
+                f"as_params={as_params} type(prim_param)={type(prim_param)}",
             )
             if self._use_orig_params and as_params:
                 shared_param = self.flat_param._shared_params[i]  # type: ignore[index]
