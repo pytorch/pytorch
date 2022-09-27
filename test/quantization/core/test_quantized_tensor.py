@@ -2,6 +2,7 @@
 
 import numpy as np
 import math
+import random
 import torch
 import io
 import unittest
@@ -10,7 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, DeterministicGuard
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_quantization import get_supported_device_types
 
@@ -1069,17 +1070,25 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(q_masked_fill.int_repr(), ref.int_repr())
             self.assertEqual(q_masked_fill.dequantize(), ref.dequantize())
 
-    def test_qtensor_index_put(self):
+    def test_qtensor_index_put_cpu(self):
+        self._test_qtensor_index_put('cpu')
+        self._test_qtensor_index_put_non_accumulate_deterministic('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
+    def test_qtensor_index_put_cuda(self):
+        self._test_qtensor_index_put('cuda')
+        self._test_qtensor_index_put_non_accumulate_deterministic('cuda')
+
+    def _test_qtensor_index_put(self, device):
         n = 10
         m = 10
-        x_orig = torch.rand(n, m)
-        indices = tuple(torch.tensor([[0, 0], [1, 1], [5, 5], [7, 3], [0, 5], [6, 9], [-1, -1]]).t())
+        x_orig = torch.rand(n, m, device=device)
+        indices = tuple(torch.tensor([[0, 0], [1, 1], [5, 5], [7, 3], [0, 5], [6, 9], [-1, -1]], device=device).t())
         # for the scalar tensor case, index_put routes to masked_fill
-        values_list = [torch.tensor(2.5), torch.rand(len(indices[0])) * 1000]
+        values_list = [torch.tensor(2.5, device=device), torch.rand(len(indices[0]), device=device) * 1000]
         scale = 0.5
         zero_point = 10
         types = [torch.qint8, torch.quint8, torch.qint32]
-        fills = [-1, 1, 2**32]  # positive, negative, overflow
         for qtype, values in itertools.product(types, values_list):
             x_ref = x_orig.clone()
             x_ref[indices] = values.to(dtype=x_ref.dtype)
@@ -1090,6 +1099,30 @@ class TestQuantizedTensor(TestCase):
             qx[indices] = values
 
             self.assertEqual(qx_ref, qx)
+
+    def _test_qtensor_index_put_non_accumulate_deterministic(self, device):
+        with DeterministicGuard(True):
+            scale = 0.5
+            zero_point = 10
+            types = [torch.qint8, torch.quint8, torch.qint32]
+            for qtype in types:
+                for i in range(3):
+                    m = random.randint(10, 20)
+                    elems = random.randint(20000, 30000)
+                    values = torch.rand(elems, device=device)
+                    indices = torch.randint(m, (elems,), device=device)
+                    x_orig = torch.rand(m, device=device)
+
+                    x = x_orig.clone()
+                    qx = torch.quantize_per_tensor(x, scale=scale, zero_point=zero_point, dtype=qtype)
+                    output = qx.index_put((indices,), values, accumulate=False)
+
+
+                    x_ref = x_orig.clone()
+                    output_ref = x_ref.index_put((indices,), values, accumulate=False)
+                    qx_ref = torch.quantize_per_tensor(output_ref, scale=scale, zero_point=zero_point, dtype=qtype)
+
+                    self.assertEqual(output, qx_ref)
 
     # adapted from test_qtensor_fill_per_channel and test_qtensor_fill_per_tensor_nhwc
     def test_qtensor_fill_per_channel_nhwc(self):
