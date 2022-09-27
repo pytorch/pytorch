@@ -12,6 +12,7 @@ import torch.jit
 from torch import _utils_internal
 
 # Query `hasattr` only once.
+
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
 
@@ -144,9 +145,11 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
+        from torch.utils._python_dispatch import _get_current_dispatch_mode
+
         if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-            curr_mode = type(torch._C._get_torch_dispatch_mode())
+            curr_mode = type(_get_current_dispatch_mode())
             assert (
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
@@ -260,6 +263,10 @@ class OpOverload(PyOperatorABC):
     def __str__(self):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
+    @property
+    def namespace(self):
+        return self._schema.name.split("::")[0]
+
     def decompose(self, *args, **kwargs):
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
@@ -310,9 +317,11 @@ class OpOverload(PyOperatorABC):
                 return key
 
             def handler(*args, **kwargs):
+                from torch.utils._python_dispatch import _get_current_dispatch_mode
+
                 # TODO: We also need to handle tensor subclasses here
                 # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-                curr_mode = type(torch._C._get_torch_dispatch_mode())
+                curr_mode = type(_get_current_dispatch_mode())
                 assert (
                     curr_mode is not None
                 ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."

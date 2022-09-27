@@ -14,7 +14,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, registration, torchscript
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)
@@ -213,27 +213,31 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
         indices_or_sections = g.op("Concat", padding_0, indices_or_sections, axis_i=0)
 
         final_splits = g.op("SequenceEmpty")
-        loop = g.op("Loop", loop_len, loop_condition, final_splits)
-
         # Loop inputs
-        loop_block = utils._add_block(loop.node())
+        loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+            g, "Loop", loop_len, loop_condition, final_splits, outputs=1, n_blocks=1
+        )
+
+        loop_block = loop_context.block
         block_input_iter = utils._add_input_to_block(loop_block)
         cond = utils._add_input_to_block(loop_block)
         final_splits = utils._add_input_to_block(loop_block)
 
-        start = loop_block.op("Gather", indices_or_sections, block_input_iter, axis_i=0)
-        end = loop_block.op(
+        start = loop_context.op(
+            "Gather", indices_or_sections, block_input_iter, axis_i=0
+        )
+        end = loop_context.op(
             "Gather",
             indices_or_sections,
-            loop_block.op("Add", block_input_iter, const_1),
+            loop_context.op("Add", block_input_iter, const_1),
             axis_i=0,
         )
 
-        slice = loop_block.op("Slice", self, start, end, axis)
-        final_splits = loop_block.op("SequenceInsert", final_splits, slice)
+        slice = loop_context.op("Slice", self, start, end, axis)
+        final_splits = loop_context.op("SequenceInsert", final_splits, slice)
 
         # Loop outputs
-        cond_out = loop_block.op("Identity", loop_condition)
+        cond_out = loop_context.op("Identity", loop_condition)
         utils._add_output_to_block(loop_block, cond_out)
         utils._add_output_to_block(loop_block, final_splits)
 
@@ -562,37 +566,40 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
 
     # Loop conditions
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
-    loop_condition = g.op("Cast", loop_condition, to_i=9)
+    loop_condition = g.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
     loop_len = reps
 
     # Create an empty sequence to store final expansions
     final_splits = g.op("SequenceEmpty")
-    loop = g.op("Loop", loop_len, loop_condition, final_splits)
 
     # Loop inputs
-    loop_block = utils._add_block(loop.node())
+    loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+        g, "Loop", loop_len, loop_condition, final_splits, n_blocks=1
+    )
+
+    loop_block = loop_context.block
     block_input_iter = utils._add_input_to_block(loop_block)
     cond = utils._add_input_to_block(loop_block)
     final_splits = utils._add_input_to_block(loop_block)
 
-    r_split = loop_block.op("SequenceAt", r_splits, block_input_iter)
-    i_split = loop_block.op("SequenceAt", i_splits, block_input_iter)
+    r_split = loop_context.op("SequenceAt", r_splits, block_input_iter)
+    i_split = loop_context.op("SequenceAt", i_splits, block_input_iter)
 
     i_split = opset11.unsqueeze(loop_block, i_split, dim + 1)
     r_concat = [
-        loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[: dim + 1])),
+        loop_context.op("Constant", value_t=torch.LongTensor(input_sizes[: dim + 1])),
         r_split,
-        loop_block.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1 :])),
+        loop_context.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1 :])),
     ]
-    r_concat = loop_block.op("Concat", *r_concat, axis_i=0)
+    r_concat = loop_context.op("Concat", *r_concat, axis_i=0)
     i_split = opset9.expand(loop_block, i_split, r_concat, None)
     i_split = symbolic_helper._reshape_helper(
         loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes))
     )
-    final_splits = loop_block.op("SequenceInsert", final_splits, i_split)
+    final_splits = loop_context.op("SequenceInsert", final_splits, i_split)
 
     # Loop outputs
-    cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+    cond_out = loop_context.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
     utils._add_output_to_block(loop_block, cond_out)
     utils._add_output_to_block(loop_block, final_splits)
 
@@ -700,22 +707,21 @@ def diagonal(g, self, offset, dim1, dim2):
             g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64)),
         ),
     )
-    if_op = g.op("If", overrun_cond)
-    if_node = if_op.node()
 
-    if_block = utils._add_block(if_node)
-    gather_indices_if_block = if_block.op("Add", gather_indices, select_window)
-    gather_indices_if_block = symbolic_helper._unsqueeze_helper(
-        if_block, gather_indices_if_block, [rank - 1]
+    if_op, (if_context, else_context), _ = torchscript.add_op_with_blocks(
+        g, "If", overrun_cond, n_blocks=2
     )
-    final_non_overrun_ = if_block.op(
+
+    gather_indices_if_block = if_context.op("Add", gather_indices, select_window)
+    gather_indices_if_block = symbolic_helper._unsqueeze_helper(
+        if_context, gather_indices_if_block, [rank - 1]
+    )
+    final_non_overrun = if_context.op(
         "GatherND", result, gather_indices_if_block, batch_dims_i=rank - 2
     )
-    utils._add_output_to_block(if_block, final_non_overrun_)
-
-    else_block = utils._add_block(if_node)
-    final_overrun_ = opset9.zeros(else_block, gather_shape, 6, None, None)
-    utils._add_output_to_block(else_block, final_overrun_)
+    final_overrun = opset9.zeros(else_context, gather_shape, 6, None, None)
+    utils._add_output_to_block(if_context.block, final_non_overrun)
+    utils._add_output_to_block(else_context.block, final_overrun)
     return if_op
 
 
