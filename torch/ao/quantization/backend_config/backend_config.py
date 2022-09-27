@@ -87,38 +87,38 @@ class DTypeConfig:
 
     Example usage::
 
-    >>> dtype_config1 = DTypeConfig(
-    ...     input_dtype=torch.quint8,
-    ...     output_dtype=torch.quint8,
-    ...     weight_dtype=torch.qint8,
-    ...     bias_dtype=torch.float)
+        >>> dtype_config1 = DTypeConfig(
+        ...     input_dtype=torch.quint8,
+        ...     output_dtype=torch.quint8,
+        ...     weight_dtype=torch.qint8,
+        ...     bias_dtype=torch.float)
 
-    >>> dtype_config2 = DTypeConfig(
-    ...     input_dtype=DTypeWithConstraints(
-    ...         dtype=torch.quint8,
-    ...         quant_min_lower_bound=0,
-    ...         quant_max_upper_bound=255,
-    ...     ),
-    ...     output_dtype=DTypeWithConstraints(
-    ...         dtype=torch.quint8,
-    ...         quant_min_lower_bound=0,
-    ...         quant_max_upper_bound=255,
-    ...     ),
-    ...     weight_dtype=DTypeWithConstraints(
-    ...         dtype=torch.qint8,
-    ...         quant_min_lower_bound=-128,
-    ...         quant_max_upper_bound=127,
-    ...     ),
-    ...     bias_dtype=torch.float)
+        >>> dtype_config2 = DTypeConfig(
+        ...     input_dtype=DTypeWithConstraints(
+        ...         dtype=torch.quint8,
+        ...         quant_min_lower_bound=0,
+        ...         quant_max_upper_bound=255,
+        ...     ),
+        ...     output_dtype=DTypeWithConstraints(
+        ...         dtype=torch.quint8,
+        ...         quant_min_lower_bound=0,
+        ...         quant_max_upper_bound=255,
+        ...     ),
+        ...     weight_dtype=DTypeWithConstraints(
+        ...         dtype=torch.qint8,
+        ...         quant_min_lower_bound=-128,
+        ...         quant_max_upper_bound=127,
+        ...     ),
+        ...     bias_dtype=torch.float)
 
-    >>> dtype_config1.input_dtype
-    torch.quint8
+        >>> dtype_config1.input_dtype
+        torch.quint8
 
-    >>> dtype_config2.input_dtype
-    torch.quint8
+        >>> dtype_config2.input_dtype
+        torch.quint8
 
-    >>> dtype_config2.input_dtype_with_constraints
-    DTypeWithConstraints(dtype=torch.quint8, quant_min_lower_bound=0, quant_max_upper_bound=255, \
+        >>> dtype_config2.input_dtype_with_constraints
+        DTypeWithConstraints(dtype=torch.quint8, quant_min_lower_bound=0, quant_max_upper_bound=255, \
 scale_min_lower_bound=None, scale_max_upper_bound=None)
     """
     input_dtype_with_constraints: DTypeWithConstraints
