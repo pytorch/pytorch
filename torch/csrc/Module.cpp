@@ -48,6 +48,7 @@
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -1019,6 +1020,7 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
+  torch::functorch::impl::initFuncTorchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initReturnTypes(module);
   torch::autograd::initNNFunctions(module);
@@ -1269,6 +1271,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });
+  py_module.def(
+      "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
   py_module.def("_add_meta_to_tls_dispatch_include", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
