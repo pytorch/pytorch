@@ -103,7 +103,6 @@ def _var_vjp(grad, result, self, dims, correction):
 
 
 def _broadcast_in_dim_vjp(grad, result, self, shape, broadcast_dimensions):
-    # TODO: implement prims.sum_to and nvprims.sum_to
     pre_expand_shape = [
         1 if i not in broadcast_dimensions else x for i, x in enumerate(shape)
     ]
