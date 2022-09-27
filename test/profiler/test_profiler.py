@@ -1260,6 +1260,17 @@ def find_node_with_name(nodes, name):
 
 class TestTorchTidyProfiler(TestCase):
 
+    def _get_tensor_fields(self, node, index):
+        self.assertIsNotNone(node)
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._profiler._ExtraFields_TorchOp)
+        tensor_info = node.extra_fields.inputs.tensor_metadata[index]
+        self.assertIsNotNone(tensor_info.impl_ptr)
+        self.assertIsNotNone(tensor_info.storage_data_ptr)
+        self.assertIsNotNone(tensor_info.id)
+        return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
+
     def test_pointers_and_ids(self):
         a = torch.randn(4, 3)
         a_initial_storage_data = a.storage().data_ptr()
@@ -1286,16 +1297,9 @@ class TestTorchTidyProfiler(TestCase):
         nodes = p.profiler.kineto_results.experimental_event_tree()
 
         def get_fields(op_name, index):
-            node = find_node_with_name(nodes, op_name)
-            self.assertIsNotNone(node)
-            self.assertIsInstance(
-                node.extra_fields,
-                torch._C._profiler._ExtraFields_TorchOp)
-            tensor_info = node.extra_fields.inputs.tensor_metadata[index]
-            self.assertIsNotNone(tensor_info.impl_ptr)
-            self.assertIsNotNone(tensor_info.storage_data_ptr)
-            self.assertIsNotNone(tensor_info.id)
-            return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
+            return self._get_tensor_fields(
+                find_node_with_name(nodes, op_name),
+                index)
 
         a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
         b_impl, b_storage_data, b_id = get_fields("aten::mul", 0)
@@ -1325,6 +1329,74 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(d_storage_data, c_storage_data_new)
         self.assertEqual(c_id, c_id_new)
         self.assertEqual(d_id, c_id_new)
+
+    def _test_allocation_ids(self, before_fn, after_fn) -> None:
+        with profile(profile_memory=True, record_shapes=True) as p:
+            # Introduce other operations and allocations to check robustness
+            _ = before_fn()
+
+            x = torch.rand(4, 3)
+            x.resize_(4, 4)
+
+            # We need to use `x` post resize for profiler to determine its ID.
+            x.sin()
+
+            # Introduce other operations and allocations to check robustness
+            _ = after_fn()
+
+            # Ensure `x` is the last variable collected to make it easier to
+            # find the deallocation event.
+            gc.collect()
+            del x
+            gc.collect()
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+
+        def find_chain(names: List[str]):
+            out = []
+            for name in names:
+                root = [out[-1]] if out else nodes
+                out.append(find_node_with_name(root, name))
+                self.assertIsNotNone(out[-1], name)
+            return out
+
+        allocation = find_chain(["aten::rand", "aten::empty", "[memory]"])[-1].extra_fields
+        _, uniform_node = find_chain(["aten::rand", "aten::uniform_"])
+        x_impl, x_storage_data, x_id = self._get_tensor_fields(uniform_node, 0)
+
+        # Make sure IDs are consistent between allocations and op inputs
+        self.assertEqual(allocation.ptr, x_storage_data)
+        self.assertEqual(allocation.id, x_id)
+
+        resize_node = find_node_with_name(nodes, "aten::resize_")
+        self.assertIsNotNone(resize_node)
+        self.assertEqual(len(resize_node.children), 2)
+        allocate_new = resize_node.children[0].extra_fields
+        free_old = resize_node.children[1].extra_fields
+
+        # Destruction of the old storage for x.
+        self.assertEqual(free_old.id, allocation.id)
+        self.assertEqual(free_old.ptr, allocation.ptr)
+
+        # Make sure ID is retained through change in storage.
+        self.assertEqual(allocate_new.id, allocation.id)
+        self.assertNotEqual(allocate_new.ptr, allocation.ptr)
+
+        # Deletion when `x` goes out of scope.
+        free_new = nodes[-1].extra_fields
+        self.assertIsInstance(free_new, torch._C._profiler._ExtraFields_Allocation)
+        self.assertEqual(free_new.id, allocate_new.id)
+        self.assertEqual(free_new.ptr, allocate_new.ptr)
+
+    def test_allocation_ids(self) -> None:
+        self._test_allocation_ids(lambda: None, lambda: None)
+
+    def test_allocation_ids_with_other_ops(self) -> None:
+        x = torch.ones((1,))
+        self._test_allocation_ids(
+            lambda: (x + 1).relu_(),
+            lambda: torch.zeros((1,)).cos()
+        )
 
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:

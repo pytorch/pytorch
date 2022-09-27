@@ -177,8 +177,7 @@ struct ExtraFields<EventType::Backend> {
   jit_modules_t jit_modules_;
 };
 
-template <>
-struct ExtraFields<EventType::Allocation> {
+struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
@@ -190,8 +189,15 @@ struct ExtraFields<EventType::Allocation> {
 
 // For performance.
 static_assert(
-    std::is_pod<ExtraFields<EventType::Allocation>>::value,
-    "Non-POD member of ExtraFields<EventType::Allocation>.");
+    std::is_pod<RawAllocation>::value,
+    "Non-POD member of RawAllocation.");
+
+template <>
+struct ExtraFields<EventType::Allocation> : RawAllocation {
+  ExtraFields(const RawAllocation& allocation) : RawAllocation(allocation) {}
+
+  c10::optional<TensorID> id_;
+};
 
 template <>
 struct ExtraFields<EventType::OutOfMemory> {
@@ -511,7 +517,7 @@ class TORCH_API ThreadLocalSubqueue {
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
 
   // reportMemoryUsage
-  AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
+  AppendOnlyList<RawAllocation, BlockSize> allocations_;
 
   // reportOOMs
   AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
