@@ -19,30 +19,6 @@ def _unsqueeze_dims(a, dims, rank):
     return a
 
 
-def _expand(a, *shape):
-    if len(shape) == 1 and isinstance(shape[0], Sequence):
-        shape = tuple(shape[0])
-    utils.check(
-        len(shape) >= len(a.shape),
-        lambda: "expand: the requested shape has too few dimensions!",
-    )
-    offset = len(shape) - len(a.shape)
-    shape_ = list(shape)
-    for idx, x in enumerate(a.shape):
-        offset_idx = idx + offset
-        requested_length = shape[offset_idx]
-        utils.check(
-            requested_length == x or x == 1 or requested_length == -1,
-            lambda: f"expand: attempting to expand a dimension of length {x}!",
-        )
-
-        shape_[offset_idx] = requested_length if requested_length != -1 else x
-    utils.validate_shape(shape_)
-    return prims.broadcast_in_dim(
-        a, shape_, tuple(range(offset, len(a.shape) + offset))
-    )
-
-
 def _dim_size(a, dims):
     dims = utils.canonicalize_dims(a.ndim, dims)
     reduction_size = 1
@@ -56,7 +32,7 @@ def _restore_reduced_dims(a, dims, shape):
     if a.size() == shape:
         return a
     unsqueezed_a = _unsqueeze_dims(a, dims, len(shape))
-    return _expand(unsqueezed_a, shape)
+    return torch._refs.expand(unsqueezed_a, shape)
 
 
 # Reference: https://github.com/pytorch/pytorch/blob/master/tools/autograd/derivatives.yaml#L1109-L1115
