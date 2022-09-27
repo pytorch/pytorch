@@ -3861,6 +3861,21 @@ class TestNLLLoss(TestCase):
 
         helper((2, 16, 16), (4, 4), False)
 
+        # Output shape larger than input shape
+
+        helper((2, 2, 4, 4), (8, 8), False)
+        helper((2, 2, 2, 2), (4, 4), False)
+        helper((2, 2, 3, 3), (9, 9), False)
+        helper((2, 2, 2, 2), (16, 16), False)
+        helper((2, 2, 2, 16), (16, 16), False)
+
+        helper((2, 4, 4), (16, 16), False)
+
+        try:
+            helper((2, 2, 3, 3), (7, 7), False)
+        except Exception as e:
+            pass
+
     # Test max avg pool2d - when the input size is a multiple of output size
     # Not testing for channels last right now
     def test_adaptive_max_pool2d_simple(self):
