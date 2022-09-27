@@ -20889,9 +20889,9 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization1_CUDA) {
   }
 
   GpuLower gpulw(&fusion);
-  TORCH_CHECK(!gpulw.concretizedBroadcastDomains().isConcretized(
+  TORCH_CHECK(!gpulw.concretizedBroadcastDomains()->isConcretized(
       loweredTv(tv4, gpulw)->axis(1)));
-  TORCH_CHECK(gpulw.concretizedBroadcastDomains().isConcretized(
+  TORCH_CHECK(gpulw.concretizedBroadcastDomains()->isConcretized(
       loweredTv(tv7, gpulw)->axis(1)));
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -21079,8 +21079,7 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization5_CUDA) {
   auto tvs3 = Welford(tv17, {1});
   fusion.addOutput(tvs3.avg);
 
-  ConcretizedBroadcastDomains bcast_concretization_info;
-  bcast_concretization_info.build(&fusion);
+  ConcretizedBroadcastDomains bcast_concretization_info(&fusion);
 
   TORCH_CHECK(
       bcast_concretization_info.maybeNonUniquelyConcretized(tv5->axis(1)),

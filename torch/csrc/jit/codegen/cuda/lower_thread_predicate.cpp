@@ -237,7 +237,7 @@ void ThreadPredicateMap::updateBitSet(const Expr* expr) {
           id_reductions.set(id->getParallelType());
         }
         if (id->isBroadcast() &&
-            GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+            GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
                 id)) {
           id_bcasts.set(id->getParallelType());
         }
@@ -575,7 +575,8 @@ ParallelTypeBitmap ThreadPredicateMap::getParallelBroadcastDomains(
 
   for (auto id : iter_domains) {
     if (!id->isBroadcast() ||
-        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(id)) {
+        !GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
+            id)) {
       continue;
     }
     if (id->isBlockDim() || (!output_smem && id->isThreadDim())) {

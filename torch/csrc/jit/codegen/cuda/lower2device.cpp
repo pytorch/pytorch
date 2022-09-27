@@ -257,7 +257,8 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   compute_at_map_->validateAndPropagatePType();
 
   // Used in parallel dimension map
-  concretized_broadcast_domains_.build(fusion_);
+  concretized_broadcast_domains_ =
+      std::make_shared<const ConcretizedBroadcastDomains>(fusion_);
 
   parallelDimensionMap().build(fusion_);
   if (isDebugDumpEnabled(DebugDumpOption::ParallelDimensions)) {

@@ -62,7 +62,8 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   //! Query if lowering is in progress
   static bool hasCurrent();
 
-  ConcretizedBroadcastDomains& concretizedBroadcastDomains() {
+  std::shared_ptr<const ConcretizedBroadcastDomains>
+  concretizedBroadcastDomains() {
     return concretized_broadcast_domains_;
   }
 
@@ -194,7 +195,8 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   // would be safer to wrap all of these in unique pointers and remove the build
   // interface and default constructor. That way they couldn't be accessed
   // without being initialized.
-  ConcretizedBroadcastDomains concretized_broadcast_domains_;
+  std::shared_ptr<const ConcretizedBroadcastDomains>
+      concretized_broadcast_domains_;
   ThreadPredicateMap thread_pred_map_;
   PredicateElimination pred_elimination_;
   std::shared_ptr<ComputeAtMap> compute_at_map_;

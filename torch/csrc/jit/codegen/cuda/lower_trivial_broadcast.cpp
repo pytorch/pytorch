@@ -10,7 +10,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-void ConcretizedBroadcastDomains::build(Fusion* fusion) {
+ConcretizedBroadcastDomains::ConcretizedBroadcastDomains(Fusion* fusion) {
   exact_map_ = std::make_unique<ExactRootDomainMap>(fusion);
 
   // Initialize the origin map with input broadcast domains

@@ -26,7 +26,7 @@ void validateParallelizationOfTensor(TensorView* tv) {
     // It doesn't matter if this axis is a non-concretized broadcast
     // TODO: merging broadcast and non-broadcast
     if (axis->isBroadcast() &&
-        !GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+        !GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
             axis)) {
       continue;
     }
@@ -195,7 +195,7 @@ void SyncMap::build(Fusion* fusion) {
               (!parallel_bcast_doms.get(consumer_ptype) ||
                !GpuLower::current()
                     ->concretizedBroadcastDomains()
-                    .isConcretized(consumer_axis))) {
+                    ->isConcretized(consumer_axis))) {
             continue;
           }
 
@@ -421,7 +421,7 @@ void SyncMap::build(Fusion* fusion) {
                                      .redundant_types;
 
           if (p_id->isBroadcast() &&
-              GpuLower::current()->concretizedBroadcastDomains().isConcretized(
+              GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
                   p_id) &&
               producer->getMemoryType() == MemoryType::Shared &&
               redundant_preds.hasTID()) {
@@ -436,7 +436,7 @@ void SyncMap::build(Fusion* fusion) {
               (!parallel_bcast_doms.get(producer_ptype) ||
                !GpuLower::current()
                     ->concretizedBroadcastDomains()
-                    .isConcretized(p_id))) {
+                    ->isConcretized(p_id))) {
             continue;
           }
 

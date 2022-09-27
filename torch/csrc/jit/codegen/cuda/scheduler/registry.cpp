@@ -789,8 +789,7 @@ static bool checkPatternEquivalence(
 // being broadcasted to one size multiple times or different sizes. This is a
 // hard to optimize problem and likely indicates we shouldn't be fusing.
 bool hasNonUniqueBcast(Fusion* fusion) {
-  ConcretizedBroadcastDomains concretize_info;
-  concretize_info.build(fusion);
+  ConcretizedBroadcastDomains concretize_info(fusion);
 
   for (auto tv : ir_utils::allTvs(fusion)) {
     for (auto id : tv->getRootDomain()) {
