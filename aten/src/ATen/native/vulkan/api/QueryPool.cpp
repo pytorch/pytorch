@@ -11,11 +11,11 @@ namespace vulkan {
 namespace api {
 
 namespace {
-  // On Mali gpus timestamp_period seems to return 0.
-  // For some reason when 52.08 is used op runtimes seem to make more sense
-  // TODO: Figure out what is special about 52.08
-  constexpr int64_t default_ns_per_tick = 52; // lround(52.08f);
-}
+// On Mali gpus timestamp_period seems to return 0.
+// For some reason when 52.08 is used op runtimes seem to make more sense
+// TODO: Figure out what is special about 52.08
+constexpr int64_t default_ns_per_tick = 52; // lround(52.08f);
+} // namespace
 
 QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
     : mutex_{},
