@@ -516,7 +516,7 @@ TORCH_API void Register${backend_name}${dispatch_key}NativeFunctions() {
                                 Target.ANONYMOUS_DEFINITION,
                                 selector,
                                 rocm=False,
-                                symint=False,
+                                symint=True,
                                 class_method_name=f"{class_name}",
                                 skip_dispatcher_op_registration=False,
                             ),
