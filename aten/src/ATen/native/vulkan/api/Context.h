@@ -57,6 +57,8 @@ class Context final {
   DescriptorPool descriptor_pool_;
   FencePool fences_;
   // Diagnostics
+  // TODO: remove USE_VULKAN_GPU_DIAGNOSTICS
+  bool enable_op_profiling_{false};
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   QueryPool querypool_;
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
@@ -75,6 +77,14 @@ class Context final {
 
   inline Adapter* adapter_ptr() {
     return adapter_p_;
+  }
+
+  inline void enable_op_profiling() {
+    enable_op_profiling_ = true;
+  }
+
+  inline bool op_profiling_enabled() {
+    return enable_op_profiling_;
   }
 
   inline VkDevice device() {
@@ -337,9 +347,12 @@ inline void Context::submit_copy(
   set_cmd();
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  std::string label = "cmd_copy";
-  uint32_t log_idx = querypool_.shader_profile_begin(
+  uint32_t log_idx = UINT32_MAX;
+  if (enable_op_profiling_) {
+    std::string label = "cmd_copy";
+    log_idx = querypool_.shader_profile_begin(
       cmd_, label, create_extent3d({0, 0, 0}), create_extent3d({0, 0, 0}));
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   cmd_.insert_barrier(pipeline_barrier);
@@ -347,7 +360,9 @@ inline void Context::submit_copy(
   record_copy(cmd_, source, destination, copy_range, src_offset, dst_offset);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  querypool_.shader_profile_end(cmd_, log_idx);
+  if (enable_op_profiling_) {
+    querypool_.shader_profile_end(cmd_, log_idx);
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
@@ -382,11 +397,14 @@ inline void Context::submit_compute_job(
   set_cmd();
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  uint32_t log_idx = querypool_.shader_profile_begin(
-      cmd_,
-      shader_descriptor.kernel_name,
-      create_extent3d(global_work_group),
-      create_extent3d(local_work_group_size));
+  uint32_t log_idx = UINT32_MAX;
+  if (enable_op_profiling_) {
+    log_idx = querypool_.shader_profile_begin(
+        cmd_,
+        shader_descriptor.kernel_name,
+        create_extent3d(global_work_group),
+        create_extent3d(local_work_group_size));
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   // Factor out template parameter independent code to minimize code bloat.
@@ -403,7 +421,9 @@ inline void Context::submit_compute_job(
       cmd_, descriptor_set, pipeline_barrier, global_work_group);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-  querypool_.shader_profile_end(cmd_, log_idx);
+  if (enable_op_profiling_) {
+    querypool_.shader_profile_end(cmd_, log_idx);
+  }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
   submit_count_++;
