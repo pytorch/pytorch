@@ -1222,15 +1222,18 @@ class FlatParamHandle:
         this method does not manipulate existing ``Tensor`` data directly and
         creates new ``Tensor`` variables instead.
         """
-        self._check_sharded(self.flat_param)
-        # Use `_saved_grad_shard` when possible since that owns the sharded
-        # gradient storage (`flat_param.grad` will share the reference in the
-        # post-backward callback, but the underlying data does not change)
-        grad = (
-            self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
-            if hasattr(self.flat_param, "_saved_grad_shard")
-            else self.flat_param.grad
-        )
+        flat_param = self.flat_param
+        self._check_sharded(flat_param)
+        # Priority: `_cpu_grad` > `_saved_grad_shard` > `grad`
+        # - CPU offloading: `_cpu_grad`
+        # - No CPU offloading + sharded strategies: `_saved_grad_shard`
+        # - No CPU offloading + `NO_SHARD`: `grad`
+        if hasattr(flat_param, "_cpu_grad"):
+            grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+        elif hasattr(flat_param, "_saved_grad_shard"):
+            grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+        else:
+            grad = flat_param.grad
         if grad is None:
             return  # no-op
         self._check_sharded(grad)
