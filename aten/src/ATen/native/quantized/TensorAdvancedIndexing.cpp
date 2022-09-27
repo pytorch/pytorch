@@ -76,6 +76,51 @@ Tensor & masked_fill__quantized_cpu(Tensor& self, const Tensor & mask, const Ten
   return self;
 }
 
+Tensor & masked_fill_impl_quantized_cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
+  TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
+    mask.device(), " and self on ", self.device());
+  TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
+    "expected mask dtype to be Bool but got ", mask.scalar_type());
+  TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "masked_fill__quantized_cpu for quantized tensors is currently only supported for per tensor quantized tensors");
+
+  auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
+    TORCH_WARN(
+      "Use of masked_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
+  at::assert_no_partial_overlap(self, mask);
+
+  c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
+
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self)
+      .add_input(self)
+      .add_input(*b_mask)
+      .build();
+
+  masked_fill_kernel_quantized_stub(iter.device_type(), iter, value, self.q_scale(), self.q_zero_point());
+  namedinference::propagate_names_if_nonempty(self, maybe_outnames);
+  return self;
+}
+
+Tensor & masked_fill__quantized_cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
+  TORCH_CHECK(!self.device().is_cpu(), "masked_fill_: Expected inputs to be on same device")
+  return masked_fill_impl_quantized_cuda(self, mask, value);
+}
+
+Tensor & masked_fill__quantized_cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
+  TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
+      "with ", value.dim(), " dimension(s).");
+  TORCH_CHECK(!self.device().is_cpu(), "masked_fill_: Expected inputs to be on same device")
+  return masked_fill_impl_quantized_cuda(self, mask, value.item());
+}
+
 Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");

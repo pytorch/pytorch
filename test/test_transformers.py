@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import unittest
 from unittest.mock import patch
+import math
 
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -732,6 +733,26 @@ class TestTransformers(NNTestCase):
     @parametrize("device", device_list)
     def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
         # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
+        def sdp_ref(q,
+                    k,
+                    v,
+                    attn_mask=None,
+                    dropout_p=0.0):
+            B, Nt, E = q.shape
+            q = q / math.sqrt(E)
+            # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
+            if attn_mask is not None:
+                attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
+            else:
+                attn = torch.bmm(q, k.transpose(-2, -1))
+
+            attn = torch.nn.functional.softmax(attn, dim=-1)
+            if dropout_p > 0.0:
+                attn = torch.nn.functional.dropout(attn, p=dropout_p)
+            # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
+            output = torch.bmm(attn, v)
+            return output, attn
+
         dtypes = [torch.double, torch.float]
         for dtype in dtypes:
 
@@ -768,8 +789,7 @@ class TestTransformers(NNTestCase):
                 a = attn_mask_float
                 if a is not None and attn_mask_dim > 3:
                     a = a.view(-1, L, S)
-                expected = F._scaled_dot_product_attention(
-                    q, k, v, attn_mask=a, dropout_p=dropout_p)
+                expected = sdp_ref(q, k, v, attn_mask=a, dropout_p=dropout_p)
                 if input_dim > 3:
                     expected = (expected[0].view(-1, N_prime, L, E), expected[1].view(-1, N_prime, L, S))
 
