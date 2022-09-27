@@ -514,7 +514,6 @@ class TestDecomp(TestCase):
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
 
-
 instantiate_device_type_tests(TestDecomp, globals())
 
 if __name__ == "__main__":
