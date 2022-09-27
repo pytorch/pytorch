@@ -166,6 +166,12 @@ if HAS_SYMPY:
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
 
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
+
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
     'add': lambda a, b: a + b,
@@ -275,7 +281,6 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
-
 class ShapeEnv(object):
     def __init__(self):
         self.guards = []
@@ -286,7 +291,7 @@ class ShapeEnv(object):
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Keys are Mod(x, y), values are 0 (for ease of substitution)
-        self.divisible: Dict["sympy.Expr", "sympy.Integer"] = {}
+        self.divisible = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_symint: Dict[int, torch.SymIntNode] = {}
@@ -447,6 +452,7 @@ class ShapeEnv(object):
         self.replacements[a] = self.replacements[a].xreplace(cur_replace)
         return self.replacements[a]
 
+    @lru_cache(256)
     def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
@@ -465,10 +471,10 @@ class ShapeEnv(object):
         lhs = expr.lhs
         rhs = expr.rhs
         try:
-            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
-            if len(solutions) != 1:
+            solutions = sympy.solve(lhs - rhs, free[0])
+            if len(solutions) != 1 or not solutions[0] or "/" in str(solutions[0]):
                 return
-            solution = solutions[0][free[0]]
+            solution = solutions[0]
             if all(t.is_integer for t in sympy.preorder_traversal(solution)):
                 new_var = self._find(solution)
                 self.replacements[cast(sympy.Symbol, free[0])] = new_var
@@ -476,8 +482,8 @@ class ShapeEnv(object):
             if expr.has(sympy.Mod):
                 mod_expr = tuple(expr.atoms(sympy.Mod))[0]
                 try:
-                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
-                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
+                    solutions = sympy.solve(lhs - rhs, mod_expr)
+                    if len(solutions) == 1 and solutions[0] == 0:
                         self.divisible.add(mod_expr)
                 except NotImplementedError:
                     pass
