@@ -55,7 +55,8 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other, output_}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self, other}, /*use_scalar_value*/ false);
+    //std::cout << key << std::endl;
     BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph *>(cache_->LookUp(key));
 
     if (!cachedGraph) {

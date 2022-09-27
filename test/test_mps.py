@@ -1516,7 +1516,7 @@ class TestMPS(TestCase):
                 #       MPS: True + True = False
                 if binop == 'add' and dtype1 == torch.bool and dtype2 == torch.bool and val1 and val2:
                     continue
-                # print(f'\n{dtype1},{dtype2}: ({val1}).{binop}({val2})')
+                print(f'{dtype1},{dtype2}: ({val1}).{binop}({val2})')
                 # print('assert1')
                 self.assertEqual(
                     getattr(torch.tensor(val1, dtype=dtype1, device='mps'), binop)
@@ -1548,7 +1548,7 @@ class TestMPS(TestCase):
                 # TODO: Stateful bug with False, False, add in assert5? Related to the cache key
                 #       or more serious problem?
                 #         - Cache key looks correct, behavior currently completely unexplained
-                '''
+                #'''
                 print('assert5')
                 x1 = torch.full(full_sh, val1, dtype=dtype1, device='mps')
                 y1 = torch.tensor(val2, dtype=dtype2, device='mps')
@@ -1556,8 +1556,8 @@ class TestMPS(TestCase):
                 y2 = torch.tensor(val2, dtype=dtype2, device='cpu')
                 print('x1', x1, hex(x1.data_ptr()))
                 print('y1', y1, hex(y1.data_ptr()))
-                #print('x2', x2, hex(x2.data_ptr()))
-                #print('y2', y2, hex(y2.data_ptr()))
+                print('x2', x2, hex(x2.data_ptr()))
+                print('y2', y2, hex(y2.data_ptr()))
                 self.assertEqual(getattr(x1, binop)(y1), getattr(x2, binop)(y2))
                 print('assert6')
                 x3 = torch.tensor(val1, dtype=dtype1, device='mps')
@@ -1566,8 +1566,8 @@ class TestMPS(TestCase):
                 y4 = torch.full(full_sh, val2, dtype=dtype2, device='cpu')
                 print('x3', x3, hex(x3.data_ptr()))
                 print('y3', y3, hex(y3.data_ptr()))
-                #print('x4', x4, hex(x4.data_ptr()))
-                #print('y4', y4, hex(y4.data_ptr()))
+                print('x4', x4, hex(x4.data_ptr()))
+                print('y4', y4, hex(y4.data_ptr()))
                 #breakpoint()
                 self.assertEqual(getattr(x3, binop)(y3), getattr(x4, binop)(y4))
                 #self.assertEqual(
