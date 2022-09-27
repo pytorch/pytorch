@@ -33,6 +33,15 @@ ref_nvprims_ops = tuple(
 )
 
 
+def get_call_functions(nodes, namespace):
+    return [
+        str(n.target)
+        for n in nodes
+        if n.op == "call_function"
+        and namespace == str(n.target).split(".")[0]
+    ]
+
+
 class TestNvPrims(TestCase):
     # TODO: some tests from test_nvprims_grad_trace_backward are failing
     # test_nvprims_grad_trace_backward__refs_amax_cuda_float64
@@ -161,14 +170,7 @@ class TestNvPrims(TestCase):
                 gm = make_fx(wrapped)(all_args)
 
                 nodes = list(gm.graph.nodes)
-                aten_ops = set(
-                    [
-                        str(n.target)
-                        for n in nodes
-                        if n.op == "call_function"
-                        and "aten" == str(n.target).split(".")[0]
-                    ]
-                )
+                aten_ops = set(get_call_functions(nodes, "aten"))
                 # Allow aten call from inside the Autograd engine
                 if "aten.is_same_size.default" in aten_ops:
                     aten_ops.remove("aten.is_same_size.default")
@@ -181,24 +183,10 @@ class TestNvPrims(TestCase):
                 if "aten.add.Tensor" in aten_ops:
                     aten_ops.remove("aten.add.Tensor")
                 self.assertEqual(len(aten_ops), 0, f"aten ops found: {aten_ops}")
-                prims_ops = set(
-                    [
-                        str(n.target)
-                        for n in nodes
-                        if n.op == "call_function"
-                        and "prims" == str(n.target).split(".")[0]
-                    ]
-                )
+                prims_ops = set(get_call_functions(nodes, "prims"))
                 self.assertEqual(len(prims_ops), 0, f"prims ops found: {prims_ops}")
-                nvprims_ops = set(
-                    [
-                        str(n.target)
-                        for n in nodes
-                        if n.op == "call_function"
-                        and "nvprims" == str(n.target).split(".")[0]
-                    ]
-                )
-                self.assertTrue(len(nvprims_ops) > 0, f"nvprims ops not found")
+                nvprims_ops = set(get_call_functions(nodes, "nvprims"))
+                self.assertTrue(len(nvprims_ops) > 0, "nvprims ops not found")
 
 
 instantiate_device_type_tests(TestNvPrims, globals())
