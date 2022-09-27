@@ -12,6 +12,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
+#include <ATen/native/quantized/IndexKernel.h>
 
 #include <c10/core/Scalar.h>
 
@@ -239,6 +240,21 @@ static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntAr
   });
 }
 
+void index_put_kernel_quantized_cuda(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate, double scale, int zero_point) {
+  TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
+  AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(iter.dtype(), "index_put", [&] {
+    constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
+    constexpr int64_t qmax = std::numeric_limits<typename scalar_t::underlying>::max();
+    float inv_scale = 1.0f / static_cast<float>(scale);
+
+    gpu_index_kernel(iter, index_size, index_stride, [inv_scale, zero_point, qmin, qmax]C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
+      int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(*(float*)in_data * inv_scale));
+      qvalue = min(max(qvalue, qmin), qmax);
+      *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
+    });
+  });
+}
+
 template <typename scalar_t, typename index_t, typename func_t>
 void cuda_take_put_kernel(
   TensorIterator& iter,
@@ -450,5 +466,7 @@ REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(put_stub, &put_kernel);
 REGISTER_DISPATCH(take_stub, &take_kernel);
 REGISTER_DISPATCH(flip_stub, &flip_kernel);
+
+REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
 
 }} // namespace at::native

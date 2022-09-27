@@ -5,11 +5,13 @@
 #include <ATen/native/TensorAdvancedIndexingUtils.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/core/QScheme.h>
+#include <ATen/native/TensorAdvancedIndexing.h>
 
 namespace at {
 namespace native {
 DEFINE_DISPATCH(masked_fill_kernel_quantized_stub);
 DEFINE_DISPATCH(index_put_kernel_quantized_stub);
+DEFINE_DISPATCH(index_put_with_sort_quantized_stub);
 
 namespace {
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
@@ -149,6 +151,50 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }
+  }
+
+  auto info = make_info(self, indices);
+  auto iter = make_index_put_iterator(info, value_);
+  index_put_kernel_quantized_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate, self.q_scale(), self.q_zero_point());
+  return self;
+}
+
+Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
+  TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
+  TORCH_CHECK(!accumulate, "index_put for quantized tensors is currently only supported for accumulate=False");
+
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
+    TORCH_WARN(
+      "Use of index_put_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[indices] = tensor");
+  }
+
+  auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
+  if (std::get<0>(masked_fill_dispatch)) {
+    return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
+  }
+
+  auto value_ = value;
+  if (value.device() != self.device() && value.numel() == 1 && value.dim() == 0) {
+    value_ = value.to(self.device());
+  }
+  TORCH_CHECK(value.device() == self.device(), "expected device ", self.device(), " but got device ", value.device(), " for value tensor");
+
+  at::assert_no_overlap(self, value);
+  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
+  for (const c10::optional<Tensor>& index: indices) {
+    if (index.has_value()) {
+      at::assert_no_overlap(self, *index);
+    }
+  }
+
+  // See Note [Enabling Deterministic Operations]
+  if (self.device().type() == DeviceType::CUDA && globalContext().deterministicAlgorithms()) {
+      index_put_with_sort_quantized_stub(self.device().type(), self, indices, value_, self.q_scale(), self.q_zero_point(), unsafe);
+      return self;
   }
 
   auto info = make_info(self, indices);
