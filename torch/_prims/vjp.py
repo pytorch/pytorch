@@ -2,7 +2,7 @@
 # primitives.
 
 import math
-from typing import Callable, Dict, Sequence
+from typing import Callable, Dict
 
 import torch
 import torch._prims_common as utils
@@ -126,10 +126,6 @@ vjp_implementations: Dict[str, Callable] = {
     "atanh": lambda grad, result, self: prims.mul(
         grad, prims.reciprocal(prims.sub(1, prims.pow(self, 2)))
     ),
-    "bitwise_and": None,  # Only integers supported
-    "bitwise_not": None,  # Only integers supported
-    "bitwise_or": None,  # Only integers supported
-    "bitwise_xor": None,  # Only integers supported
     "broadcast_in_dim": _broadcast_in_dim_vjp,
     "ceil": lambda grad, result, self: prims.mul(grad, 0),
     "convert_element_type": lambda grad, result, self, dtype: (
@@ -142,7 +138,6 @@ vjp_implementations: Dict[str, Callable] = {
         prims.div(grad, other),
         prims.mul(prims.mul(prims.neg(grad), self), prims.pow(other, -2)),
     ),
-    "eq": None,
     "erf": lambda grad, result, self: prims.mul(
         grad,
         prims.mul(2 / math.sqrt(math.pi), prims.exp(prims.neg(prims.pow(self, 2)))),
@@ -158,28 +153,20 @@ vjp_implementations: Dict[str, Callable] = {
         grad,
         prims.mul(prims.neg(grad), prims.trunc(prims.div(self, other))),
     ),
-    "ge": None,  # Output is not differentiable
-    "gt": None,  # Output is not differentiable
-    "imag": None,  # TODO
-    "isfinite": None,  # Output is not differentiable
-    "le": None,  # Output is not differentiable
     "lgamma": lambda grad, result, self: prims.mul(grad, prims.digamma(self)),
     "log": lambda grad, result, self: prims.div(grad, self),
     "log10": lambda grad, result, self: prims.div(grad, prims.mul(self, math.log(10))),
     "log1p": lambda grad, result, self: prims.div(grad, prims.add(self, 1)),
     "log2": lambda grad, result, self: prims.div(grad, prims.mul(self, math.log(2))),
-    "lt": None,  # Output is not differentiable
     "mul": lambda grad, result, self, other: (
         prims.mul(grad, other),
         prims.mul(grad, self),
     ),
-    "ne": None,  # Output is not differentiable
     "neg": lambda grad, result, self: prims.neg(grad),
     "pow": lambda grad, result, self, other: (
         prims.mul(grad, prims.mul(other, prims.pow(self, prims.sub(other, 1)))),
         prims.mul(grad, prims.mul(prims.log(self), result)),
     ),
-    "real": None,  # TODO
     "reciprocal": lambda grad, result, self: prims.mul(
         grad, prims.neg(prims.pow(result, 2))
     ),
