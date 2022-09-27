@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple, Type
 import torch
 from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX, apply_activation_checkpointing_wrapper
+    _CHECKPOINT_PREFIX, apply_activation_checkpointing
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
@@ -547,7 +547,7 @@ class TestFSDPOptimState(FSDPTest):
         wrapped_model = NestedModel.wrap(model, ignore_modules=True)
         # Add checkpointing to ensure optim_state_dict and state_dict strip out
         # checkpointing prefixes.
-        apply_activation_checkpointing_wrapper(
+        apply_activation_checkpointing(
             model,
             check_fn=lambda module: isinstance(module, torch.nn.Sequential)
         )
