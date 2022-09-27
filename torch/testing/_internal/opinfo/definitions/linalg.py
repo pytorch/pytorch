@@ -35,6 +35,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    IS_MACOS,
     make_fullrank_matrices_with_distinct_singular_values,
     slowTest,
     TEST_WITH_ROCM,
@@ -1327,6 +1328,14 @@ op_db: List[OpInfo] = [
                 unittest.skip("The backward may give different results"),
                 "TestCommon",
                 "test_noncontiguous_samples",
+            ),
+            DecorateInfo(
+                unittest.skip("Backward may give incorrect results"),
+                "TestGradients",
+                "test_fn_grad",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
             ),
             # Both Hessians are incorrect on complex inputs??
             DecorateInfo(
