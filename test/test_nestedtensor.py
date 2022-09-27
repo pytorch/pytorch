@@ -1178,11 +1178,11 @@ class TestNestedTensorDeviceType(TestCase):
             "empty nested tensor cannot be reshaped",
             lambda: nt_empty.view(-1)
         )
-        # error case: invalid proposed shape for underlying tensors
+        # error case: -1 for batch size
         self.assertRaisesRegex(
             RuntimeError,
-            r"view: for now nested view cannot change the implicit batch dimension",
-            lambda: nt.view(-2, 2, 3)
+            r"view: For now nested view cannot change or infer the implicit batch dimension",
+            lambda: nt.view(-1, 2, 3)
         )
         self.assertRaisesRegex(
             RuntimeError,
@@ -1194,9 +1194,10 @@ class TestNestedTensorDeviceType(TestCase):
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
         nt = torch.nested_tensor([x0, x1])
         pt = torch.nested.to_padded_tensor(nt, 0.0)
+        # error case, trying to reshape batch dim to a legit shape
         self.assertRaisesRegex(
             RuntimeError,
-            r"for now view cannot change the implicit batch dimension",
+            r"For now nested view cannot change or infer the implicit batch dimension",
             lambda: nt.transpose(-1, -2).view(40, -1)
         )
         # inherit only the ragged dimension
@@ -1251,11 +1252,11 @@ class TestNestedTensorDeviceType(TestCase):
             "empty nested tensor cannot be reshaped",
             lambda: nt_empty.reshape(-1)
         )
-        # error case: invalid proposed shape for underlying tensors
+        # error case: -1 for batch size
         self.assertRaisesRegex(
             RuntimeError,
-            r"reshape: For now nested reshape cannot change the implicit batch dimension",
-            lambda: nt.reshape(-2, 2, 3)
+            r"reshape: For now nested reshape cannot change or infer the implicit batch dimension",
+            lambda: nt.reshape(-1, 2, 3)
         )
         self.assertRaisesRegex(
             RuntimeError,
@@ -1265,16 +1266,12 @@ class TestNestedTensorDeviceType(TestCase):
         # normal case
         x0 = torch.randn((2, 20), device=device, dtype=dtype)
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
-        nt = torch.nested_tensor([x0, x1])
+        nt = torch.nested_tensor([x0, x1])  # (2, (2, 3), 20)
         pt = torch.nested.to_padded_tensor(nt, 0.0)
+        # error case, trying to reshape batch dim to a legit shape
         self.assertRaisesRegex(
             RuntimeError,
-            r"reshape: For now nested reshape cannot change the implicit batch dimension",
-            lambda: nt.transpose(-1, -2).reshape(40, -1)
-        )
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"reshape: For now nested reshape cannot change the implicit batch dimension",
+            r"reshape: For now nested reshape cannot change or infer the implicit batch dimension",
             lambda: nt.transpose(-1, -2).reshape(40, -1)
         )
         # inherit only the ragged dimension

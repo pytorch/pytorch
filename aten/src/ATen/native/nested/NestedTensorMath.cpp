@@ -997,7 +997,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
         & stride = strides[itensor];
     // compute reshaped size
     std::vector<int64_t> size_reshaped_vector(proposed_shape.begin() + 1, proposed_shape.end());
-    // only allow one "old" size to be -1
+    // only allow one pre-existing dimension to have proposed shape == -1
     int64_t infer_index_old = -1;
     // some negative sizes remain to be infered
     if (ndims_underlying < ndims_underlying_reshaped) {
@@ -1091,7 +1091,7 @@ inline std::tuple<bool, Tensor, Tensor> NestedTensor_compute_size_stride(
 // Note [Special size rule for nested tensor]
 // Instead of infering size, -1 means "inherit the old size", so:
 // * negative size is legal for a ragged dimension
-// * multiple sizes can be -1
+// * however, we only allow one -1
 // In principle we could still infer a dimension,
 // we are designing a better semantics to include both inheritance and inference
 Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
@@ -1108,7 +1108,7 @@ Tensor view_nested(const Tensor& self, IntArrayRef proposed_shape) {
   int64_t ntensors_reshaped = proposed_shape[0];
   TORCH_CHECK(
       ntensors == ntensors_reshaped,
-      "view: for now nested view cannot change the implicit batch dimension");
+      "view: For now nested view cannot change or infer the implicit batch dimension");
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   // reshaping underlying tensor dimensions does not change offset
@@ -1195,7 +1195,7 @@ Tensor reshape_nested(const Tensor& self, IntArrayRef proposed_shape) {
   int64_t ntensors_reshaped = proposed_shape[0];
   TORCH_CHECK(
       ntensors == ntensors_reshaped,
-      "reshape: For now nested reshape cannot change the implicit batch dimension");
+      "reshape: For now nested reshape cannot change or infer the implicit batch dimension");
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
   // reshaping underlying tensor dimensions does not change offset
