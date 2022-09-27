@@ -3719,6 +3719,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3736,6 +3737,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()
