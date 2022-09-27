@@ -9,7 +9,7 @@ from torch.utils.data import IterDataPipe, MapDataPipe
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 
-__all__ = ["traverse", "traverse_datapipes"]
+__all__ = ["traverse", "traverse_dps"]
 
 DataPipe = Union[IterDataPipe, MapDataPipe]
 DataPipeGraph = Dict[int, Tuple[DataPipe, "DataPipeGraph"]]  # type: ignore[misc]
@@ -81,12 +81,13 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
     return captured_connections
 
 
-def traverse_datapipes(datapipe: DataPipe) -> DataPipeGraph:
+def traverse_dps(datapipe: DataPipe) -> DataPipeGraph:
     r"""
     Traverse the DataPipes and their attributes to extract the DataPipe graph.
-    This would only look into the attribute from each DataPipe that is either a
+    This only looks into the attribute from each DataPipe that is either a
     DataPipe and a Python collection object such as ``list``, ``tuple``,
     ``set`` and ``dict``.
+
     Args:
         datapipe: the end DataPipe of the graph
     Returns:
@@ -105,7 +106,7 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
     ``list``, ``tuple``, ``set`` and ``dict``.
 
     Note:
-        This function is deprecated. Please use `traverse_datapipes` instead.
+        This function is deprecated. Please use `traverse_dps` instead.
 
     Args:
         datapipe: the end DataPipe of the graph
@@ -116,7 +117,7 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
         and values are tuples of DataPipe instance and the sub-graph
     """
     msg = "`traverse` function and will be removed after 1.13. " \
-          "Please use `traverse_datapipes` instead."
+          "Please use `traverse_dps` instead."
     if not only_datapipe:
         msg += " And, the behavior will be changed to the equivalent of `only_datapipe=True`."
     warnings.warn(msg, FutureWarning)
