@@ -709,7 +709,7 @@ std::vector<IterDomain*> getLocalDomainOrdering(
   std::sort(
       merged_domain.begin(),
       merged_domain.end(),
-      IterDomainDependencySorter(
+      ir_utils::IterDomainDependencySorter(
           concrete_id_dependencies, GpuLower::current()->caMap()));
   return merged_domain;
 }

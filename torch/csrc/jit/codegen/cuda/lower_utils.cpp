@@ -235,35 +235,6 @@ bool isScalarOp(const Expr* expr) {
   return true;
 }
 
-bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
-  if (expr->isA<kir::BlockSync>()) {
-    return true;
-  }
-
-  if (!isTvOp(expr)) {
-    return false;
-  }
-
-  if (!(isReductionOp(expr) || expr->isA<BroadcastOp>() ||
-        expr->isA<kir::GridBroadcast>())) {
-    return false;
-  }
-
-  // GroupedReductionOp can have multiple output TVs, but they must be
-  // parallelized in the same way, so just checking one of them is enough.
-  auto tv = getTvOutput(expr);
-
-  if (tv->hasBlockReduction() || tv->hasGridReduction()) {
-    return true;
-  } else if (expr->isA<BroadcastOp>()) {
-    const ParallelTypeBitmap pt_map =
-        GpuLower::current()->threadPredMap().getParallelBroadcastDomains(tv);
-    return pt_map.any();
-  }
-
-  return false;
-}
-
 c10::optional<IterDomain*> getMaybeWarpReductionDim(
     const Val* output,
     const Val* input) {
@@ -400,20 +371,6 @@ bool isGlobalLoadInit(const Expr* expr) {
   return false;
 }
 
-kir::Allocate* allocGlobalBufferForGridComm(
-    Val* buffer_size,
-    DataType dtype,
-    bool zero_init) {
-  const std::vector<IterDomain*> new_buffer_ids = {
-      IrBuilder::create<IterDomain>(IterDomainBuilder(
-          GpuLower::current()->kernel()->zeroVal(), buffer_size))};
-  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
-  const auto buffer_tv =
-      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
-  return IrBuilder::create<kir::Allocate>(
-      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
-}
-
 namespace {
 
 class ExprFlattener : private kir::IrVisitor {
@@ -447,112 +404,6 @@ class ExprFlattener : private kir::IrVisitor {
 std::vector<Expr*> flattenScopedExprs(const std::vector<Expr*>& loop_nests) {
   return ExprFlattener::flatten(loop_nests);
 }
-
-IterDomain* caMapExactConcreteId(IterDomain* id) {
-  return GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
-}
-
-std::vector<Expr*> getAllSwizzlesBetween(
-    std::vector<IterDomain*> from,
-    std::vector<IterDomain*> to) {
-  auto all_expr = DependencyCheck::getAllExprsBetween(
-      {from.begin(), from.end()}, {to.begin(), to.end()});
-
-  std::vector<Expr*> all_swizzles;
-
-  std::copy_if(
-      all_expr.begin(),
-      all_expr.end(),
-      std::back_inserter(all_swizzles),
-      [](Expr* expr) {
-        return expr->getExprType().has_value() &&
-            (expr->etype() == ExprType::Swizzle2D);
-      });
-
-  return all_swizzles;
-}
-
-} // namespace ir_utils
-
-namespace loop_utils {
-
-BasicAllocInfo getAllocInformation(
-    const TensorView* tv,
-    const std::vector<kir::ForLoop*>& for_loops,
-    const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-    bool use_id_map) {
-  BasicAllocInfo info;
-  auto gpu_lower = GpuLower::current();
-
-  bool outer_alloc_found = false;
-
-  for (auto fl : for_loops) {
-    if (info.alloc_pos == tv->getComputeAtPosition()) {
-      break;
-    }
-
-    if (tv->axis(info.alloc_pos)->isReduction()) {
-      const auto outputs = FusionGuard::getCurFusion()->getTerminatingOutputs();
-      TORCH_INTERNAL_ASSERT(
-          std::find(outputs.begin(), outputs.end(), tv) != outputs.end(),
-          "Invalid computeAt of T",
-          tv->name(),
-          ". A reducation axis is detected outside computeAt point even though it is not an output tensor.");
-      break;
-    }
-
-    auto fl_id = fl->iter_domain();
-
-    if (fl_id->getParallelType() == ParallelType::Unroll) {
-      break;
-    }
-
-    // Shared memory must be allocated outside of unswitched
-    // domains. See issue #1133.
-    if (fl_id->getParallelType() == ParallelType::Unswitch &&
-        tv->getMemoryType() == MemoryType::Shared) {
-      outer_alloc_found = true;
-    }
-
-    // Assume global memory is allocated at outer most scope.
-    if (tv->getMemoryType() == MemoryType::Global) {
-      outer_alloc_found = true;
-    }
-
-    // Allocation of a double buffered tensor is placed outside its
-    // double buffer axis.
-    if ((tv->isDoubleBuffered() || tv->isCircularBuffered()) &&
-        tv->axis(info.alloc_pos) ==
-            gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
-      outer_alloc_found = true;
-    }
-
-    auto local_id = tv->axis(info.alloc_pos);
-
-    if (use_id_map) {
-      auto id_it = id_map.find(local_id);
-      if (id_it != id_map.end()) {
-        local_id = id_it->second;
-      }
-    }
-
-    if (GpuLower::current()->caMap()->areMapped(
-            local_id, fl_id, IdMappingMode::PERMISSIVE)) {
-      info.alloc_pos++;
-    }
-
-    info.init_for_loop = fl;
-
-    if (!outer_alloc_found) {
-      info.alloc_for_loop = fl;
-    }
-  }
-
-  return info;
-}
-
-} // namespace loop_utils
 
 namespace {
 
@@ -734,14 +585,149 @@ std::vector<Expr*> replaceInputsInExpr(
   return ReplaceExprInput::replace(exprs, replacement_map);
 }
 
-bool isTrivialIterDomain(IterDomain* id) {
-  auto pt = id->getParallelType();
-  return id->isReduction() || id->isBroadcast() || id->isStride() ||
-      (id->extent()->isOneInt() && id->start()->isZeroInt()) ||
-      pt == ParallelType::Vectorize ||
-      (isParallelTypeThread(pt) &&
-       !GpuLower::current()->haloInfo()->hasHaloWidth(id));
+std::vector<Expr*> getAllSwizzlesBetween(
+    std::vector<IterDomain*> from,
+    std::vector<IterDomain*> to) {
+  auto all_expr = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()}, {to.begin(), to.end()});
+
+  std::vector<Expr*> all_swizzles;
+
+  std::copy_if(
+      all_expr.begin(),
+      all_expr.end(),
+      std::back_inserter(all_swizzles),
+      [](Expr* expr) {
+        return expr->getExprType().has_value() &&
+            (expr->etype() == ExprType::Swizzle2D);
+      });
+
+  return all_swizzles;
 }
+
+} // namespace ir_utils
+
+namespace lower_utils {
+
+bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map) {
+  if (expr->isA<kir::BlockSync>()) {
+    return true;
+  }
+
+  if (!ir_utils::isTvOp(expr)) {
+    return false;
+  }
+
+  if (!(ir_utils::isReductionOp(expr) || expr->isA<BroadcastOp>() ||
+        expr->isA<kir::GridBroadcast>())) {
+    return false;
+  }
+
+  // GroupedReductionOp can have multiple output TVs, but they must be
+  // parallelized in the same way, so just checking one of them is enough.
+  auto tv = ir_utils::getTvOutput(expr);
+
+  if (tv->hasBlockReduction() || tv->hasGridReduction()) {
+    return true;
+  } else if (expr->isA<BroadcastOp>()) {
+    const ParallelTypeBitmap pt_map =
+        GpuLower::current()->threadPredMap().getParallelBroadcastDomains(tv);
+    return pt_map.any();
+  }
+
+  return false;
+}
+
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init) {
+  const std::vector<IterDomain*> new_buffer_ids = {
+      IrBuilder::create<IterDomain>(IterDomainBuilder(
+          GpuLower::current()->kernel()->zeroVal(), buffer_size))};
+  const auto buffer_domain = IrBuilder::create<TensorDomain>(new_buffer_ids);
+  const auto buffer_tv =
+      IrBuilder::create<TensorView>(buffer_domain, dtype, MemoryType::Global);
+  return IrBuilder::create<kir::Allocate>(
+      buffer_tv, buffer_tv->getMemoryType(), nullptr, zero_init);
+}
+
+BasicAllocInfo getAllocInformation(
+    const TensorView* tv,
+    const std::vector<kir::ForLoop*>& for_loops,
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map,
+    bool use_id_map) {
+  BasicAllocInfo info;
+  auto gpu_lower = GpuLower::current();
+
+  bool outer_alloc_found = false;
+
+  for (auto fl : for_loops) {
+    if (info.alloc_pos == tv->getComputeAtPosition()) {
+      break;
+    }
+
+    if (tv->axis(info.alloc_pos)->isReduction()) {
+      const auto outputs = FusionGuard::getCurFusion()->getTerminatingOutputs();
+      TORCH_INTERNAL_ASSERT(
+          std::find(outputs.begin(), outputs.end(), tv) != outputs.end(),
+          "Invalid computeAt of T",
+          tv->name(),
+          ". A reducation axis is detected outside computeAt point even though it is not an output tensor.");
+      break;
+    }
+
+    auto fl_id = fl->iter_domain();
+
+    if (fl_id->getParallelType() == ParallelType::Unroll) {
+      break;
+    }
+
+    // Shared memory must be allocated outside of unswitched
+    // domains. See issue #1133.
+    if (fl_id->getParallelType() == ParallelType::Unswitch &&
+        tv->getMemoryType() == MemoryType::Shared) {
+      outer_alloc_found = true;
+    }
+
+    // Assume global memory is allocated at outer most scope.
+    if (tv->getMemoryType() == MemoryType::Global) {
+      outer_alloc_found = true;
+    }
+
+    // Allocation of a double buffered tensor is placed outside its
+    // double buffer axis.
+    if ((tv->isDoubleBuffered() || tv->isCircularBuffered()) &&
+        tv->axis(info.alloc_pos) ==
+            gpu_lower->doubleBufferInfo().getDoubleBufferAxis(tv)) {
+      outer_alloc_found = true;
+    }
+
+    auto local_id = tv->axis(info.alloc_pos);
+
+    if (use_id_map) {
+      auto id_it = id_map.find(local_id);
+      if (id_it != id_map.end()) {
+        local_id = id_it->second;
+      }
+    }
+
+    if (GpuLower::current()->caMap()->areMapped(
+            local_id, fl_id, IdMappingMode::PERMISSIVE)) {
+      info.alloc_pos++;
+    }
+
+    info.init_for_loop = fl;
+
+    if (!outer_alloc_found) {
+      info.alloc_for_loop = fl;
+    }
+  }
+
+  return info;
+}
+
+} // namespace lower_utils
 
 } // namespace cuda
 } // namespace fuser

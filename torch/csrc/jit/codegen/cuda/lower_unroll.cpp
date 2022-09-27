@@ -98,7 +98,7 @@ void UnrollPass::handle(Expr* expr) {
 
     // For expr calling a device func with block sync, don't create
     // if-then-else but pass the predicate to the device func
-    if (ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
+    if (lower_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
       const auto pred = unswitched_loop_
           ? thread_pred_expr
           : IrBuilder::create<kir::Predicate>(
@@ -222,7 +222,7 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
     // If there's any expression that requires barrier
     // synchronization, the else part can't be omitted
     for (auto expr : loop->body().exprs()) {
-      if (ir_utils::hasBlockSync(expr, pred_map)) {
+      if (lower_utils::hasBlockSync(expr, pred_map)) {
         return false;
       }
     }

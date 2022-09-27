@@ -1076,7 +1076,7 @@ kir::Allocate* IndexLowering::allocateUniqueBuffer(
 
   // No existing allocation found. Create a new one
   auto new_buffer =
-      ir_utils::allocGlobalBufferForGridComm(buffer_size, dtype, zero_init);
+      lower_utils::allocGlobalBufferForGridComm(buffer_size, dtype, zero_init);
 
   // Keep track of the allocation
   alloc_map.emplace(out_tv, new_buffer);

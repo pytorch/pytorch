@@ -178,7 +178,8 @@ Val* getConcreteProducerOffsetWithGather(
   Val* window_idx = nullptr;
 
   if (use_concrete_map) {
-    window_idx = index_map.at(ir_utils::caMapExactConcreteId(window_id));
+    window_idx = index_map.at(GpuLower::current()->caMap()->getConcreteMappedID(
+        window_id, IdMappingMode::EXACT));
   } else {
     window_idx = index_map.at(window_id);
   }
@@ -703,7 +704,9 @@ void IndexCompute::collectIndexIntoPermissiveMap(
     auto id_outputs = ir_utils::filterByType<IterDomain>(expr->outputs());
     if (std::all_of(
             id_outputs.begin(), id_outputs.end(), [this](IterDomain* id) {
-              return index_map_.count(ir_utils::caMapExactConcreteId(id));
+              return index_map_.count(
+                  GpuLower::current()->caMap()->getConcreteMappedID(
+                      id, IdMappingMode::EXACT));
             })) {
       // Visit this expression:
       // LoopIndexingAnalysis::traverseFromDomainVals made sure that each
@@ -715,7 +718,9 @@ void IndexCompute::collectIndexIntoPermissiveMap(
       for (auto id : id_inputs) {
         // Collect backward pass results from this expression if they are
         //  made available in by this expression.
-        auto idx_it = index_map_.find(ir_utils::caMapExactConcreteId(id));
+        auto idx_it =
+            index_map_.find(GpuLower::current()->caMap()->getConcreteMappedID(
+                id, IdMappingMode::EXACT));
 
         if (idx_it != index_map_.end()) {
           permissive_index_map_
@@ -730,7 +735,8 @@ void IndexCompute::collectIndexIntoPermissiveMap(
 void IndexCompute::updateIndexMapFromPermissiveMap(const Expr* id_expr) {
   auto id_outputs = ir_utils::filterByType<IterDomain>(id_expr->outputs());
   for (auto id : id_outputs) {
-    auto concrete_id = ir_utils::caMapExactConcreteId(id);
+    auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        id, IdMappingMode::EXACT);
     // Only try to copy index val from permissive map when
     //  the index is missing.
     if (!index_map_.count(concrete_id)) {
@@ -1506,7 +1512,8 @@ std::vector<Val*> Index::getGlobalProducerStridedIndices(
   // effort which means some domains may be producer's original domains.
   std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
   for (auto entry : c2p_map) {
-    auto ref_id = ir_utils::caMapExactConcreteId(entry.first);
+    auto ref_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        entry.first, IdMappingMode::EXACT);
     auto p_id = entry.second;
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
       p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));
@@ -1745,7 +1752,8 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   // effort which means some domains may be the originals.
   std::vector<std::pair<IterDomain*, ParallelType>> p_id_backup;
   for (auto entry : c2p_index_map) {
-    auto ref_id = ir_utils::caMapExactConcreteId(entry.first);
+    auto ref_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        entry.first, IdMappingMode::EXACT);
     auto p_id = entry.second;
     if (ref_id->getParallelType() == ParallelType::Vectorize) {
       p_id_backup.emplace_back(std::make_pair(p_id, p_id->getParallelType()));

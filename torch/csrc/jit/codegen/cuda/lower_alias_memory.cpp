@@ -18,6 +18,11 @@ namespace fuser {
 namespace cuda {
 
 namespace {
+// Alias used for std::transform
+IterDomain* exactConcreteId(IterDomain* id) {
+  return GpuLower::current()->caMap()->getConcreteMappedID(
+      id, IdMappingMode::EXACT);
+}
 
 //! Checks that the current loop nest is not realizing a serial
 //!  broadcast so that each index of producer buffer will only
@@ -83,7 +88,7 @@ bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
       std::inserter(
           producer_exact_concrete_root_ids,
           producer_exact_concrete_root_ids.begin()),
-      ir_utils::caMapExactConcreteId);
+      exactConcreteId);
 
   // Check if serial loop roots indexes any exact root id's that
   //  is not within the set of producer's root exact id's. These
@@ -92,7 +97,8 @@ bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
   for (auto serial_loop_root :
        ir_utils::filterByType<IterDomain>(serial_loop_roots)) {
     if (!producer_exact_concrete_root_ids.count(
-            ir_utils::caMapExactConcreteId(serial_loop_root))) {
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                serial_loop_root, IdMappingMode::EXACT))) {
       return true;
     }
   }

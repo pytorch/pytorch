@@ -90,8 +90,6 @@ TORCH_CUDA_CU_API TensorView* getTvOutput(const Expr*);
 // Returns the first input of Expr that is a TensorView
 TORCH_CUDA_CU_API TensorView* getTvInput(const Expr*);
 
-bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
-
 //! Returns the iterdomain that maps to the thread dimension grouped
 //!  to warps. Returns nullopt if the reduction is not to be lowered to
 //!  a warp reduction.
@@ -115,13 +113,6 @@ bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
 std::unordered_map<ParallelType, IterDomain*, TypeHash> getParallelDomains(
     const Val* val);
-
-// Allocate global buffer for a grid communication calls, i.e. grid reduce, grid
-// welford reduce, grid broadcast.
-kir::Allocate* allocGlobalBufferForGridComm(
-    Val* buffer_size,
-    DataType dtype,
-    bool zero_init);
 
 //! Returns true if the expression will be lowered to
 //!  a ldmatrix intrinsic.
@@ -158,48 +149,11 @@ bool isTensorScalarFillOp(const Expr* expr);
 TORCH_CUDA_CU_API std::vector<Expr*> flattenScopedExprs(
     const std::vector<Expr*>& loop_nests);
 
-//! Returns the concretized iterdomain according to
-//!  the exact compute at map.
-IterDomain* caMapExactConcreteId(IterDomain* id);
-
 //! Returns all swizzle ops between the set of iterdomains
 //!  in `from` and `to`.
 std::vector<Expr*> getAllSwizzlesBetween(
     std::vector<IterDomain*> from,
     std::vector<IterDomain*> to);
-
-} // namespace ir_utils
-
-namespace loop_utils {
-
-struct BasicAllocInfo {
-  // The for loop that the initialization of this allocation must be
-  // placed in, nullptr if not within a loop
-  kir::ForLoop* init_for_loop = nullptr;
-
-  // Keep track of the actual allocation loop. This can be different
-  // from init_for_loop only with unswitched shared memory allocations,
-  // which are moved outer loops to avoid duplicated allocations. This means
-  // that the alloc position may be outside what's expected. Most applications
-  // outside lower_allocation is likely looking for init_for_loop which is
-  // more directly related to how large an allocation is and how it's used.
-  // (see issue #1133).
-  kir::ForLoop* alloc_for_loop = nullptr;
-
-  // The allocation position relative to buffer IDs, it could be outside the
-  // compute at position if it's shared memory with a compute at inside an
-  // unswitch
-  size_t alloc_pos = 0;
-};
-
-// Fill the above allocation struct based on provided information. id_map is
-// used if we're looking at a producer tensor but loops on a consumer tensor.
-BasicAllocInfo getAllocInformation(
-    const TensorView* tv,
-    const std::vector<kir::ForLoop*>& loops,
-    const std::unordered_map<IterDomain*, IterDomain*>& id_map = {},
-    bool use_id_map = false);
-} // namespace loop_utils
 
 // Replace value pass on Kernel IR.
 //  Replace each use of any Val* that apears in the given `replacement_map`
@@ -210,9 +164,6 @@ BasicAllocInfo getAllocInformation(
 std::vector<Expr*> replaceInputsInExpr(
     const std::vector<Expr*>& exprs,
     const std::unordered_map<Val*, Val*>& replacement_map);
-
-// True if an IterDomain does not materialize a loop
-bool isTrivialIterDomain(IterDomain* id);
 
 // Go through all expressions and compute a local ordering of loops. operator<
 // is implemented based on the concrete_id_dependencies analysis done. If
@@ -271,6 +222,48 @@ struct TORCH_CUDA_CU_API IterDomainDependencySorter {
       concrete_id_dependencies_;
   const std::shared_ptr<const ComputeAtMap> compute_at_map_;
 };
+
+} // namespace ir_utils
+
+namespace lower_utils {
+
+bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
+
+// Allocate global buffer for a grid communication calls, i.e. grid reduce, grid
+// welford reduce, grid broadcast.
+kir::Allocate* allocGlobalBufferForGridComm(
+    Val* buffer_size,
+    DataType dtype,
+    bool zero_init);
+
+struct BasicAllocInfo {
+  // The for loop that the initialization of this allocation must be
+  // placed in, nullptr if not within a loop
+  kir::ForLoop* init_for_loop = nullptr;
+
+  // Keep track of the actual allocation loop. This can be different
+  // from init_for_loop only with unswitched shared memory allocations,
+  // which are moved outer loops to avoid duplicated allocations. This means
+  // that the alloc position may be outside what's expected. Most applications
+  // outside lower_allocation is likely looking for init_for_loop which is
+  // more directly related to how large an allocation is and how it's used.
+  // (see issue #1133).
+  kir::ForLoop* alloc_for_loop = nullptr;
+
+  // The allocation position relative to buffer IDs, it could be outside the
+  // compute at position if it's shared memory with a compute at inside an
+  // unswitch
+  size_t alloc_pos = 0;
+};
+
+// Fill the above allocation struct based on provided information. id_map is
+// used if we're looking at a producer tensor but loops on a consumer tensor.
+BasicAllocInfo getAllocInformation(
+    const TensorView* tv,
+    const std::vector<kir::ForLoop*>& loops,
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map = {},
+    bool use_id_map = false);
+} // namespace lower_utils
 
 } // namespace cuda
 } // namespace fuser

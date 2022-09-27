@@ -56,7 +56,7 @@ void ShiftPredicateInserter::insert(
   // If the expr involves a thread-block barrier, set the predicate of
   // the expr with shift_pred. Since the expr is not shift, the
   // padding is safe to omit.
-  if (ir_utils::hasBlockSync(expr, gpu_lower->threadPredMap())) {
+  if (lower_utils::hasBlockSync(expr, gpu_lower->threadPredMap())) {
     expr->setPredicate(shift_pred);
     return;
   }
@@ -738,7 +738,8 @@ std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
   // Setup root:
   for (auto consumer_root_id : loop_indexing.consumerTv()->getRootDomain()) {
     auto consumer_index_concrete_id =
-        ir_utils::caMapExactConcreteId(consumer_root_id);
+        GpuLower::current()->caMap()->getConcreteMappedID(
+            consumer_root_id, IdMappingMode::EXACT);
     local_halo_info.setRootAxisInfo(
         consumer_index_concrete_id,
         global_halo_info->getRootAxisInfo(consumer_root_id));
@@ -754,7 +755,8 @@ std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
           merged_shifted_ids.find(split->in()) == merged_shifted_ids.end(),
           "Splitting IterDomain that is a merged domain of halo-extended domains is not allowed");
 
-      auto in_id = ir_utils::caMapExactConcreteId(split->in());
+      auto in_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          split->in(), IdMappingMode::EXACT);
 
       // If no halo info is found, nothing needs to be done. This ID
       // must be an ancestor of a domain set by setRootAxisInfo.
@@ -766,32 +768,43 @@ std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
 
       if (halo_width == 0) {
         local_halo_info.setHaloWidth(
-            ir_utils::caMapExactConcreteId(split->outer()), 0);
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                split->outer(), IdMappingMode::EXACT),
+            0);
         local_halo_info.setHaloWidth(
-            ir_utils::caMapExactConcreteId(split->inner()), 0);
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                split->inner(), IdMappingMode::EXACT),
+            0);
         continue;
       }
 
       // propagate to inner domain
-      auto out_id = ir_utils::caMapExactConcreteId(split->inner());
+      auto out_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          split->inner(), IdMappingMode::EXACT);
 
       auto expanded_extent =
           SimplifyingIrBuilder::addExpr(out_id->extent(), halo_width);
       local_halo_info.extent_map_.insert({out_id, expanded_extent});
 
       local_halo_info.setHaloWidth(
-          ir_utils::caMapExactConcreteId(split->outer()), 0);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              split->outer(), IdMappingMode::EXACT),
+          0);
       local_halo_info.setHaloWidth(
-          ir_utils::caMapExactConcreteId(split->inner()), halo_width);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              split->inner(), IdMappingMode::EXACT),
+          halo_width);
 
       // TODO: add support for inheritance map
     } else if (auto merge = dynamic_cast<Merge*>(expr)) {
       // If either of the two inputs has halo extension, propagate it
       // to the merged output ID
       auto inner_extent = local_halo_info.getExtent(
-          ir_utils::caMapExactConcreteId(merge->inner()));
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              merge->inner(), IdMappingMode::EXACT));
       auto outer_extent = local_halo_info.getExtent(
-          ir_utils::caMapExactConcreteId(merge->outer()));
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              merge->outer(), IdMappingMode::EXACT));
       if (inner_extent != nullptr || outer_extent != nullptr) {
         if (inner_extent == nullptr) {
           inner_extent = merge->inner()->extent();
@@ -802,29 +815,41 @@ std::unordered_map<IterDomain*, Val*> HaloInfo::buildConcreteHaloExtentMap(
         auto expanded_extent =
             SimplifyingIrBuilder::mulExpr(outer_extent, inner_extent);
         local_halo_info.extent_map_.insert(
-            {ir_utils::caMapExactConcreteId(merge->out()), expanded_extent});
+            {GpuLower::current()->caMap()->getConcreteMappedID(
+                 merge->out(), IdMappingMode::EXACT),
+             expanded_extent});
         // Splitting the output of this merge is not allowed, so
         // remember it
-        merged_shifted_ids.insert(ir_utils::caMapExactConcreteId(merge->out()));
+        merged_shifted_ids.insert(
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                merge->out(), IdMappingMode::EXACT));
         // Note that halo_width_map_ is not updated
       } else {
         local_halo_info.setHaloWidth(
-            ir_utils::caMapExactConcreteId(merge->out()), 0);
+            GpuLower::current()->caMap()->getConcreteMappedID(
+                merge->out(), IdMappingMode::EXACT),
+            0);
       }
     } else if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(expr)) {
       // Swizzle with halo not yet supported, just set the width
       //  to zero at the moment.
       TORCH_INTERNAL_ASSERT(
           local_halo_info.getHaloWidth(
-              ir_utils::caMapExactConcreteId(swizzle_2d->inX())) == 0 &&
+              GpuLower::current()->caMap()->getConcreteMappedID(
+                  swizzle_2d->inX(), IdMappingMode::EXACT)) == 0 &&
               local_halo_info.getHaloWidth(
-                  ir_utils::caMapExactConcreteId(swizzle_2d->inY())) == 0,
+                  GpuLower::current()->caMap()->getConcreteMappedID(
+                      swizzle_2d->inY(), IdMappingMode::EXACT)) == 0,
           "Swizzle on ID with halo not yet supported.");
       TORCH_INTERNAL_ASSERT("Swizzle on ID with halo not yet supported.");
       local_halo_info.setHaloWidth(
-          ir_utils::caMapExactConcreteId(swizzle_2d->outX()), 0);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              swizzle_2d->outX(), IdMappingMode::EXACT),
+          0);
       local_halo_info.setHaloWidth(
-          ir_utils::caMapExactConcreteId(swizzle_2d->outY()), 0);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              swizzle_2d->outY(), IdMappingMode::EXACT),
+          0);
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported expr: ", expr);
     }
