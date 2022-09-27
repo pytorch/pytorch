@@ -99,7 +99,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #define AT_DISPATCH_CASE_QINT(enum_type, scalar_type, ...)            \
   case enum_type: {                                                   \
     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                      \
-    using scalar_t = scalar_type; 
+    using scalar_t = scalar_type;                                     \
     using underlying_t = typename scalar_t::underlying;               \
     using underlying_t C10_UNUSED = typename scalar_t::underlying;    \
     const auto& SCALAR_TYPE C10_UNUSED = enum_type;                   \
