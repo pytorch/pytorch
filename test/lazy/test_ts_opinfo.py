@@ -175,15 +175,20 @@ class TestLazyOpInfo(TestCase):
         torch._lazy.mark_step()
         torch._lazy.wait_device_ops()
         prefix = "aten" if op.name in FALLBACK_LIST else "lazy"
-        found = f"{prefix}::{op.name}" in remove_suffixes(torch._lazy.metrics.counter_names())
-        # check aliases
-        if not found:
-            for alias in op.aliases:
-                alias_found = f"{prefix}::{alias.name}" in remove_suffixes(torch._lazy.metrics.counter_names())
-                found = found or alias_found
-                if found:
-                    break
-        self.assertTrue(found)
+        cand_names = [
+            f"{prefix}::{op.name}",
+            f"{prefix}::{op.name}_symint",
+        ]
+        for alias in op.aliases:
+            cand_names.extend([
+                f"{prefix}::{alias.name}",
+                f"{prefix}::{alias.name}_symint",
+            ])
+        for name in cand_names:
+            if name in remove_suffixes(torch._lazy.metrics.counter_names()):
+                break
+        else:
+            self.fail("none of {cand_names} was not found in: {remove_suffixes(torch._lazy.metrics.counter_names())}")
 
 
     @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST], allowed_dtypes=(torch.float,))  # noqa: B950

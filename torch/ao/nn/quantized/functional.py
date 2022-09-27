@@ -5,8 +5,9 @@ import warnings
 import torch
 from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
-from torch.nn.quantized.modules.utils import _pair_from_first
 from torch.jit.annotations import BroadcastingList2
+
+from .modules.utils import _pair_from_first
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
 # we want to have them here for future changes.
@@ -20,7 +21,7 @@ def avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False,
 
     .. note:: The input quantization parameters propagate to the output.
 
-    See :class:`~torch.nn.quantized.AvgPool2d` for details and output shape.
+    See :class:`~torch.ao.nn.quantized.AvgPool2d` for details and output shape.
 
     Args:
         input: quantized input tensor :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -80,7 +81,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
 
     .. note:: The input quantization parameters propagate to the output.
 
-    See :class:`~torch.nn.quantized.AdaptiveAvgPool2d` for details and output shape.
+    See :class:`~torch.ao.nn.quantized.AdaptiveAvgPool2d` for details and output shape.
 
     Args:
         output_size: the target output size (single integer or
@@ -97,7 +98,7 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList2[int]) -> T
 
     .. note:: The input quantization parameters propagate to the output.
 
-    See :class:`~torch.nn.quantized.AdaptiveAvgPool3d` for details and output shape.
+    See :class:`~torch.ao.nn.quantized.AdaptiveAvgPool3d` for details and output shape.
 
     Args:
         output_size: the target output size (single integer or
@@ -117,7 +118,7 @@ def conv1d(input, weight, bias,
     Applies a 1D convolution over a quantized 1D input composed of several input
     planes.
 
-    See :class:`~torch.nn.quantized.Conv1d` for details and output shape.
+    See :class:`~torch.ao.nn.quantized.Conv1d` for details and output shape.
 
     Args:
         input: quantized input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
@@ -138,7 +139,7 @@ def conv1d(input, weight, bias,
 
     Examples::
 
-        >>> from torch.nn.quantized import functional as qF
+        >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(33, 16, 3, dtype=torch.float)
         >>> inputs = torch.randn(20, 16, 50, dtype=torch.float)
         >>> bias = torch.randn(33, dtype=torch.float)
@@ -176,7 +177,7 @@ def conv2d(input, weight, bias,
     Applies a 2D convolution over a quantized 2D input composed of several input
     planes.
 
-    See :class:`~torch.nn.quantized.Conv2d` for details and output shape.
+    See :class:`~torch.ao.nn.quantized.Conv2d` for details and output shape.
 
     Args:
         input: quantized input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
@@ -197,7 +198,7 @@ def conv2d(input, weight, bias,
 
     Examples::
 
-        >>> from torch.nn.quantized import functional as qF
+        >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, dtype=torch.float)
         >>> bias = torch.randn(8, dtype=torch.float)
@@ -232,7 +233,7 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
     Applies a 3D convolution over a quantized 3D input composed of several input
     planes.
 
-    See :class:`~torch.nn.quantized.Conv3d` for details and output shape.
+    See :class:`~torch.ao.nn.quantized.Conv3d` for details and output shape.
 
     Args:
         input: quantized input tensor of shape
@@ -257,7 +258,7 @@ def conv3d(input, weight, bias, stride=1, padding=0, dilation=1, groups=1,
 
     Examples::
 
-        >>> from torch.nn.quantized import functional as qF
+        >>> from torch.ao.nn.quantized import functional as qF
         >>> filters = torch.randn(8, 4, 3, 3, 3, dtype=torch.float)
         >>> inputs = torch.randn(1, 4, 5, 5, 5, dtype=torch.float)
         >>> bias = torch.randn(8, dtype=torch.float)
@@ -334,12 +335,12 @@ def linear(
     r"""
     Applies a linear transformation to the incoming quantized data:
     :math:`y = xA^T + b`.
-    See :class:`~torch.nn.quantized.Linear`
+    See :class:`~torch.ao.nn.quantized.Linear`
 
     .. note::
 
       Current implementation packs weights on every call, which has penalty on performance.
-      If you want to avoid the overhead, use :class:`~torch.nn.quantized.Linear`.
+      If you want to avoid the overhead, use :class:`~torch.ao.nn.quantized.Linear`.
 
     Args:
       input (Tensor): Quantized input of type `torch.quint8`
@@ -369,7 +370,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     .. note:: The input quantization parameters are propagated to the output.
 
-    See :class:`~torch.nn.quantized.MaxPool1d` for details.
+    See :class:`~torch.ao.nn.quantized.MaxPool1d` for details.
     """
     if return_indices:
         raise NotImplementedError("return_indices is not yet implemented!")
@@ -385,7 +386,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     .. note:: The input quantization parameters are propagated to the output.
 
-    See :class:`~torch.nn.quantized.MaxPool2d` for details.
+    See :class:`~torch.ao.nn.quantized.MaxPool2d` for details.
     """
     if return_indices:
         raise NotImplementedError("return_indices is not yet implemented!")
@@ -506,7 +507,7 @@ def clamp(input: Tensor, min_: float, max_: float) -> Tensor:
     r"""float(input, min\_, max\_) -> Tensor
 
     Applies the clamp function element-wise.
-    See :class:`~torch.nn.quantized.clamp` for more details.
+    See :class:`~torch.ao.nn.quantized.clamp` for more details.
 
     Args:
         input: quantized input

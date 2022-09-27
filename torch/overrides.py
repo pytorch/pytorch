@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _ModeInfo, _wrap_init, _restore_mode
+from torch.utils._mode_utils import _enable_mode, _ModeInfo, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -207,6 +207,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.init.kaiming_normal,
         torch.nn.init.orthogonal,
         torch.nn.init.sparse,
+        torch.nested.to_padded_tensor,
         has_torch_function,
         handle_torch_function,
         torch.set_autocast_enabled,
@@ -254,6 +255,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__subclasshook__,
         Tensor.__hash__,
         Tensor.as_subclass,
+        Tensor.eig,
         Tensor.reinforce,
         Tensor.new,
         Tensor.new_tensor,
@@ -411,6 +413,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cartesian_prod: lambda *tensors: -1,
         torch.cat: lambda tensors, dim=0, out=None: -1,
         torch.concat: lambda tensors, dim=0, out=None: -1,  # alias for torch.cat
+        torch.concatenate: lambda tensors, dim=0, out=None: -1,  # alias for torch.concatenate
         torch.cdist: lambda x1, x2, p=2.0, compute_mode='use_mm_for_euclid_dist_if_necessary': -1,
         torch.ceil: lambda input, out=None: -1,
         torch.celu: lambda input, alhpa=1., inplace=False: -1,
@@ -487,7 +490,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.hsmm: lambda mat1, mat2: -1,
         torch.dsplit: lambda input, indices_or_sections: -1,
         torch.dstack: lambda tensors, out=None: -1,
-        torch.eig: lambda input, eigenvectors=False, out=None: -1,
         torch.linalg.eig: lambda input, out=None: -1,
         torch.linalg.eigvals: lambda input, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
@@ -669,7 +671,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.matmul: lambda input, other, out=None: -1,  # alias for torch.matmul
         torch.matrix_power: lambda input, n: -1,
         torch.linalg.matrix_power: lambda input, n, out=None: -1,
-        torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,
         torch.linalg.matrix_rank: lambda input, tol=None, hermitian=False: -1,
         torch.linalg.multi_dot: lambda tensors, out=None: -1,
         torch.matrix_exp: lambda input: -1,
@@ -1806,8 +1807,6 @@ class TorchFunctionModeMeta(type):
     right thing (aka, this is why there is a metaclass).
     """
     def __new__(metacls, name, bases, dct):
-        if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_function__' in dct:
             dct['__torch_function__'] = _wrap_torch_function(dct['__torch_function__'])
         return super().__new__(metacls, name, bases, dct)
