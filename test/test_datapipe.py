@@ -2492,11 +2492,11 @@ class TestSerialization(TestCase):
 
     @skipIfNoDill
     def test_spawn_lambdas_map(self):
-        mdp = dp.map.SequenceWrapper(range(6)).map(lambda x: x + 1).shuffle()
+        mdp = dp.map.SequenceWrapper(range(3)).map(lambda x: x + 1).shuffle()
         dl = DataLoader(mdp, num_workers=2, shuffle=True,
                         multiprocessing_context='spawn', collate_fn=unbatch, batch_size=1)
         result = list(dl)
-        self.assertEqual([1, 2, 3, 4, 5, 6], sorted(result))
+        self.assertEqual([1, 1, 2, 2, 3, 3], sorted(result))
 
 
 class TestCircularSerialization(TestCase):
