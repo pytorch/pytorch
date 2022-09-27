@@ -14,7 +14,7 @@
 
 namespace at {
 namespace native {
-inline namespace CPU_CAPABILITY {
+namespace {
 
 template<typename T> using acc_t = vec::vec_scalar_t<T>;
 
