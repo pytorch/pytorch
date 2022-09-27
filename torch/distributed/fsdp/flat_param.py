@@ -1105,7 +1105,8 @@ class FlatParamHandle:
         views = (
             _tf_post_unflatten_transform(subtensor.view(shape), param_extension)
             for (subtensor, shape, param_extension) in zip(
-                torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes, flat_param._param_extensions  # type: ignore[arg-type]
+                torch.split(tensor, flat_param._numels, dim=0),  # type: ignore[arg-type]
+                flat_param._shapes, flat_param._param_extensions,
             )
         )
         return views

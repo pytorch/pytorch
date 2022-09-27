@@ -674,7 +674,7 @@ class TestSummonFullParams(FSDPTest):
                     torch.testing.assert_close(old_grad * WRITEBACK_FACTOR, new_grad)
                 else:
                     torch.testing.assert_close(old_grad, new_grad)
-                
+
 
 instantiate_parametrized_tests(TestSummonFullParams)
 instantiate_parametrized_tests(TestSummonFullParamsNoShard)
