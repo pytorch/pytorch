@@ -97,37 +97,38 @@ class TORCH_CUDA_CU_API IterDomainGraph {
       Expr* second,
       bool forward,
       const DisjointSets<IterDomain*>& id_map);
-}
 
   bool hasSelfMapping() const {
-  return self_mapping_info_.has_value();
-}
+    return self_mapping_info_.has_value();
+  }
 
-private:
-void build(Fusion* fusion);
+ private:
+  void build(Fusion* fusion);
 
-void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
+  void initializeId(IterDomain* id, bool is_view_rfactor_id, bool is_leaf_id);
 
-// Checks if exprsMap then if forward will map outputs else inputs in exact
-// and permissive map.
-void mapThroughExpr(Expr* first, Expr* second, bool forward);
+  // Checks if exprsMap then if forward will map outputs else inputs in exact
+  // and permissive map.
+  void mapThroughExpr(Expr* first, Expr* second, bool forward);
 
-DisjointSets<IterDomain*> permissive_nodes_;
-DisjointSets<IterDomain*> exact_nodes_;
-DisjointSets<IterDomain*> loop_nodes_;
+  DisjointSets<IterDomain*> permissive_nodes_;
+  DisjointSets<IterDomain*> exact_nodes_;
+  DisjointSets<IterDomain*> loop_nodes_;
 
-// Consumers and producers is not symmetric like the other sets
-std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>> consumers_;
-std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>> producers_;
+  // Consumers and producers is not symmetric like the other sets
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      consumers_;
+  std::unordered_map<IterDomain*, VectorOfUniqueEntries<IterDomain*>>
+      producers_;
 
-DisjointSets<IterDomain*> sibling_sets_;
+  DisjointSets<IterDomain*> sibling_sets_;
 
-VectorOfUniqueEntries<IterDomain*> all_ids_;
+  VectorOfUniqueEntries<IterDomain*> all_ids_;
 
-std::unordered_set<IterDomain*> view_rfactor_ids_;
+  std::unordered_set<IterDomain*> view_rfactor_ids_;
 
-c10::optional<std::tuple<TensorView*, IterDomain*, IterDomain*, std::string>>
-    self_mapping_info_ = c10::nullopt;
+  c10::optional<std::tuple<TensorView*, IterDomain*, IterDomain*, std::string>>
+      self_mapping_info_ = c10::nullopt;
 };
 
 class TrivialReductionInfo;
