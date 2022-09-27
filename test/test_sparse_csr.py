@@ -1492,15 +1492,19 @@ class TestSparseCSR(TestCase):
         out = torch.empty_like(c.mH if op_out and a.shape == b.shape else c)
         addmv_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
 
-        a_bsr = sp.bsr_matrix(
-            (
-                a.values().cpu().numpy(),
-                a.col_indices().cpu().numpy(),
-                a.crow_indices().cpu().numpy(),
-            ),
-            shape=a.shape,
-        )
-        expected = ref(c.cpu().numpy(), a_bsr, b.cpu().resolve_conj().numpy(), alpha, beta)
+        if dtype not in {torch.half, torch.bfloat16}:
+            a_bsr = sp.bsr_matrix(
+                (
+                    a.values().cpu().numpy(),
+                    a.col_indices().cpu().numpy(),
+                    a.crow_indices().cpu().numpy(),
+                ),
+                shape=a.shape,
+            )
+            expected = ref(c.cpu().numpy(), a_bsr, b.cpu().resolve_conj().numpy(), alpha, beta)
+        else:
+            expected = alpha * (a.to_dense() @ b) + beta * c
+
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
 
@@ -1510,8 +1514,11 @@ class TestSparseCSR(TestCase):
     @parametrize("noncontiguous", [True, False])
     @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-5, torch.complex128: 1e-5})
+    @dtypes(*floating_and_complex_types())
+    @dtypesIfCUDA(*floating_and_complex_types_and(torch.half, torch.bfloat16))
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-5, torch.complex128: 1e-5,
+                        torch.float16: 1e-1, torch.bfloat16: 1e-1})
     def test_block_addmm(self, device, dtype, index_dtype, block_size, noncontiguous):
 
         def make_transposed_addmm_op(f):
@@ -1538,19 +1545,11 @@ class TestSparseCSR(TestCase):
 
         for (m, n, k) in itertools.product([2, 5], repeat=3):
             nnz = random.randint(0, m * k)
-            if not noncontiguous:
-                a = self.genSparseCSRTensor((m * block_size, k * block_size),
-                                            nnz,
-                                            dtype=dtype,
-                                            device=device,
-                                            index_dtype=index_dtype)
-                a = a.to_sparse_bsr((block_size, block_size))
-            else:
-                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-                a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
-                a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
-                a = torch._sparse_bsr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data,
-                                                    (m * block_size, k * block_size))
+            a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+            a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device, low=0., high=1.)
+            a_data = a_data.mT if noncontiguous else a_data
+            a = torch._sparse_bsr_tensor_unsafe(a.crow_indices(), a.col_indices(),
+                                                a_data, (m * block_size, k * block_size))
             b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for op_b, op_out in itertools.product([True, False], repeat=2):

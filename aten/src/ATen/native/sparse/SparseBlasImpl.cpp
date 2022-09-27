@@ -179,7 +179,7 @@ Tensor& _compressed_row_strided_addmm_out(
       auto mm = at::empty_like(result);
       _compressed_row_strided_mm_out(mat1, mat2, mm);
       mm.mul_(alpha);
-      result.copy_(mm);
+      result.add_(mm);
     }
     else {
       _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
