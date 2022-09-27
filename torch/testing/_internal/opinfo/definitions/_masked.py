@@ -592,6 +592,12 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.bfloat16,),
                 device_type="cpu",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                "TestCompositeCompliance",
+                "test_backward",
+                device_type="cuda",
+            ),
         ),
         # Can reuse the same inputs; dim is required in both
         sample_inputs_func=sample_inputs_masked_cumops,
@@ -794,6 +800,12 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
                 "TestReductions",
                 "test_ref_small_input",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-03, rtol=2e-03)}),
+                "TestSparseCompressed",
+                "test_consistency",
+                device_type="cuda",
             ),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,

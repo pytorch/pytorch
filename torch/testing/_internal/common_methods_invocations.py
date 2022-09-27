@@ -10119,7 +10119,12 @@ op_db: List[OpInfo] = [
                # backward on CPU
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=0, rtol=1e-5)}),
                             'TestCommon', 'test_noncontiguous_samples',
-                            device_type='cpu'), ],
+                            device_type='cpu'),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                   "TestDecomp", "test_comprehensive", device_type="cuda",
+               ),
+           ],
            skips=(
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
