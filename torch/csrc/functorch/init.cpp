@@ -257,7 +257,11 @@ int64_t _jvp_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_fwd_grad_mode = get_fwd_grad_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Jvp, c10::nullopt, c10::nullopt, c10::nullopt, prev_fwd_grad_mode);
+      TransformType::Jvp,
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt,
+      prev_fwd_grad_mode);
 }
 
 int64_t _jvp_decrement_nesting() {
