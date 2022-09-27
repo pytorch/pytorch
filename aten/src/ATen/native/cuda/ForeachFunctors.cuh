@@ -48,6 +48,25 @@ __device__ bool init_args(
 }
 
 template<int depth, typename T>
+__device__ bool init_args(
+    T** args,
+    FusedOptimizerTensorListMetadata<depth>& tl,
+    int chunk_idx,
+    int chunk_size,
+    int tensor_loc) {
+        bool all_aligned = true;
+        for (int i = 0; i < depth; i++) {
+            args[i] =  (T*)tl.addresses[i][tensor_loc];
+            args[i] += chunk_idx * chunk_size;
+
+            if (!is_aligned(args[i])) {
+                all_aligned = false;
+            }
+        }
+        return all_aligned;
+}
+
+template<int depth, typename T>
 __device__ void load_args(T r_args[][kILP], T** args, int i_start, int chunk_size, int n) {
 #pragma unroll
     for(int ii = 0; ii < kILP; ii++) {
