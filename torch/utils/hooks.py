@@ -4,6 +4,7 @@ import weakref
 import warnings
 from typing import Any
 
+__all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
 class RemovableHandle(object):
     """A handle which provides the capability to remove a hook."""

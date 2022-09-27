@@ -16,9 +16,11 @@ struct TORCH_API SavedTensorDefaultHooksTLS {
   // PyObject is defined in c10/util/python_stub.h
   std::stack<std::pair<PyObject*, PyObject*>> stack;
 
-  // See NOTE: [Disabling SavedTensorDefaultHooks]
+  // See NOTE: [Disabling SavedTensorDefaultHooks] for context
+  // NOTE: [disabled_error_message invariant]
+  // disabled_error_message is nullopt IFF Saved Tensor hooks is enabled
+  // We did this for efficiency (so we didn't have to keep a separate bool around)
   c10::optional<std::string> disabled_error_message;
-  bool is_disabled = false;
 };
 
 } // namespace impl
@@ -27,7 +29,7 @@ struct TORCH_API SavedTensorDefaultHooks {
   static void push_hooks(PyObject* pack_hook, PyObject* unpack_hook);
   static void pop_hooks();
   static std::pair<PyObject*, PyObject*> get_hooks();
-  static void enable(); // NB: has nothing to do with disable() below.
+  static void lazy_initialize();
   static std::stack<std::pair<PyObject*, PyObject*>> get_stack();
   static void set_stack(std::stack<std::pair<PyObject*, PyObject*>>);
 
@@ -39,11 +41,11 @@ struct TORCH_API SavedTensorDefaultHooks {
   // hooks, especially if their feature does not work with it. If they are
   // disabled, then the following will raise an error:
   // - Attempting to push_hooks
-  // - calling set_disabled(true) with a non-zero stack (from get_stack) size
-  static void set_disabled(bool disabled);
-  static bool is_disabled();
+  // - calling disable(message) with a non-zero stack (from get_stack) size
+  static void disable(const std::string& error_message);
+  static void enable();
+  static bool is_enabled();
   static const optional<std::string>& get_disabled_error_message();
-  static void set_disabled_error_message(const optional<std::string>& message);
 };
 
 } // namespace at

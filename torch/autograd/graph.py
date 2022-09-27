@@ -136,13 +136,14 @@ class save_on_cpu(saved_tensors_hooks):
 
 
 @contextlib.contextmanager
-def _disable_saved_tensors_hooks(maybe_error_message=None):
+def _disable_saved_tensors_hooks(error_message):
     try:
-        prev_state = torch._C._autograd._saved_tensors_hooks_is_disabled()
-        prev_message = torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
-        torch._C._autograd._saved_tensors_hooks_set_disabled_error_message(maybe_error_message)
-        torch._C._autograd._saved_tensors_hooks_set_disabled(True)
+        maybe_prev_message = torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        torch._C._autograd._saved_tensors_hooks_disable(error_message)
         yield
     finally:
-        torch._C._autograd._saved_tensors_hooks_set_disabled_error_message(prev_message)
-        torch._C._autograd._saved_tensors_hooks_set_disabled(prev_state)
+        # See NOTE: [disabled_error_message invariant]
+        if maybe_prev_message is None:
+            torch._C._autograd._saved_tensors_hooks_enable()
+        else:
+            torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)

@@ -56,7 +56,7 @@ PySavedVariableHooks::~PySavedVariableHooks() {
 void PyDefaultSavedVariableHooks::push_hooks(
     py::function& pack_hook,
     py::function& unpack_hook) {
-  at::SavedTensorDefaultHooks::enable();
+  at::SavedTensorDefaultHooks::lazy_initialize();
   at::SavedTensorDefaultHooks::push_hooks(
       pack_hook.release().ptr(), unpack_hook.release().ptr());
 }
