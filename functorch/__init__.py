@@ -15,7 +15,7 @@ from . import _C
 # functorch transforms
 from ._src.vmap import vmap
 from ._src.eager_transforms import (
-    grad, grad_and_value, vjp, jacrev, jvp, jacfwd, hessian,
+    grad, grad_and_value, vjp, jacrev, jvp, jacfwd, hessian, functionalize
 )
 from ._src.python_key import make_fx
 
