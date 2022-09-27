@@ -18,8 +18,8 @@ def clip_grad_norm_(
     Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
-        max_norm (float or int): max norm of the gradients
-        norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for
+        max_norm (float): max norm of the gradients
+        norm_type (float): type of the used p-norm. Can be ``'inf'`` for
             infinity norm.
         error_if_nonfinite (bool): if True, an error is thrown if the total
             norm of the gradients from :attr:`parameters` is ``nan``,
@@ -79,7 +79,7 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float) -> None:
     Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
-        clip_value (float or int): maximum allowed value of the gradients.
+        clip_value (float): maximum allowed value of the gradients.
             The gradients are clipped in the range
             :math:`\left[\text{-clip\_value}, \text{clip\_value}\right]`
     """
