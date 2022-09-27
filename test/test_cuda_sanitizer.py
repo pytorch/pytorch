@@ -117,13 +117,14 @@ class TestArgumentHandler(TestCase):
         argument_handler.parse_outputs(out)
 
         self.assertEqual(
-            argument_handler.tensor_names,
+            argument_handler.tensor_aliases,
             {
                 M.data_ptr(): ["self"],
                 vec.data_ptr(): ["vec1", "vec2"],
-                out.data_ptr(): ["output"],
+                out.data_ptr(): [],
             },
         )
+        self.assertEqual({out.data_ptr()}, argument_handler.outputs)
 
 
 def tensor_id(i: int) -> DataPtr:
@@ -156,6 +157,7 @@ class TestEventHandler(TestCase):
             stream,
             read_only,
             read_write,
+            {},
             "",
             {k: [""] for k in read_only + read_write},
         )
@@ -335,6 +337,61 @@ class TestEventHandler(TestCase):
         self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
         self.assert_good_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
 
+    def test_device_synchronize(self):
+        # Tests that a device synchronization does correctly cause all streams
+        # to synchronize with each other.
+
+        iterations = 10
+        for i in range(1, iterations):
+            self.assert_good_kernel_launch(stream_id(i), read_write=[tensor_id(i)])
+
+        self.handler._handle_device_synchronization()
+        self.assert_good_kernel_launch(
+            stream_id(0), read_write=[tensor_id(i) for i in range(1, iterations)]
+        )
+
+    def test_device_synchronization_expired(self):
+        # Tests that a device synchronization is a one-time synchronization.
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
+        self.handler._handle_device_synchronization()
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
+
+        self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(1)])
+
+    def test_new_stream_is_synchronized(self):
+        # Tests that after synchronizing operations with the host, any newly created
+        # stream is guaranteed to be synchronized with them as well.
+
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
+        self.handler._handle_device_synchronization()
+        self.handler._handle_stream_creation(stream_id(2))
+        self.assert_good_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
+
+    def test_stream_synchronize(self):
+        # Tests that a stream synchronization does correctly cause all streams to wait
+        # for one specific stream, but does not synchronize all streams with each other.
+
+        self.assert_good_kernel_launch(stream_id(0), read_write=[tensor_id(1)])
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(2)])
+        self.handler._handle_stream_synchronization(stream_id(0))
+
+        self.assert_good_kernel_launch(stream_id(2), read_only=[tensor_id(1)])
+        self.assert_good_kernel_launch(stream_id(3), read_only=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(4), read_only=[tensor_id(2)])
+
+    def test_event_synchronize(self):
+        # Tests that an event synchronization does correctly cause all streams to wait
+        # for a recorded event, but does not guarantee synchronization with the current
+        # state of the stream that recorded the event.
+
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(1)])
+        self.handler._handle_event_record(event_id(1), stream_id(1))
+        self.assert_good_kernel_launch(stream_id(1), read_write=[tensor_id(2)])
+
+        self.handler._handle_event_synchronization(event_id(1))
+        self.assert_good_kernel_launch(stream_id(2), read_write=[tensor_id(1)])
+        self.assert_bad_kernel_launch(1, stream_id(2), read_write=[tensor_id(2)])
+
 
 class TestMessages(TestCase):
     def setUp(self):
@@ -391,7 +448,8 @@ class TestMessages(TestCase):
             seq_num=1,
             stream=stream_id(1),
             operator="schema",
-            names=["b"],
+            aliases=["b"],
+            is_output=True,
             stack_trace=traceback.StackSummary.from_list(
                 [("file", 0, "name", "trace a")]
             ),
@@ -401,7 +459,8 @@ class TestMessages(TestCase):
             seq_num=2,
             stream=stream_id(0),
             operator="schema",
-            names=["a"],
+            aliases=["a"],
+            is_output=False,
             stack_trace=traceback.StackSummary.from_list(
                 [("file", 0, "name", "trace b")]
             ),
@@ -422,14 +481,14 @@ class TestMessages(TestCase):
                 CSAN detected a possible data race on tensor with data pointer 1
                 Access by stream 1001 during kernel:
                 schema
-                writing to argument: b
+                writing to argument(s) b, and to the output
                 With stack trace:
                   File "file", line 0, in name
                     trace a
 
                 Previous access by stream 1000 during kernel:
                 schema
-                reading from argument: a
+                reading from argument(s) a
                 With stack trace:
                   File "file", line 0, in name
                     trace b
