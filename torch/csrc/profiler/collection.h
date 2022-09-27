@@ -7,7 +7,8 @@
 #include <utility>
 
 #include <ATen/Context.h>
-#include <c10/core/DeviceType.h>
+#include <c10/core/Device.h>
+#include <c10/core/TensorImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/strong_type.h>
@@ -32,6 +33,79 @@ enum class EventType : uint8_t {
   Kineto
 };
 
+// ============================================================================
+// == Value (Tensor, Scalar) summary ==========================================
+// ============================================================================
+
+// We use a Tensor's TensorImpl adress and StorageImpl data start to build the
+// data flow graph. We do not hold a reference so we wrap them in strong types
+// to prevent direct access.
+using TensorImplAddress = strong::type<
+    const c10::TensorImpl*,
+    struct TensorImplAddress_,
+    strong::regular,
+    strong::hashable,
+    strong::boolean>;
+
+using StorageImplData = strong::type<
+    void*,
+    struct StorageImplData_,
+    strong::regular,
+    strong::hashable,
+    strong::boolean>;
+
+struct RawTensorMetadata {
+  TensorImplAddress impl_;
+  StorageImplData data_;
+
+  // Device is separated into DeviceType and DeviceIndex as Device
+  // doesn't have a default initializer (which the std::array initializer needs)
+  c10::DeviceType device_type_;
+  c10::DeviceIndex device_index_;
+
+  c10::ScalarType dtype_;
+  c10::Layout layout_;
+  uint32_t dim_;
+};
+
+struct TensorMetadata : public RawTensorMetadata {
+  explicit TensorMetadata(const RawTensorMetadata& m) : RawTensorMetadata(m) {}
+
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  // Identity is a complex concept in PyTorch. A Tensor might not have a
+  // an associated storage, multiple Tensors might share the same underlying
+  // storage, the storage of a Tensor might change over time, etc.
+  //
+  // For the purpose of profiling we're mostly interested in data flow
+  // analysis. As a result, we can take an expansive view of identity:
+  // Tensors share an ID if they share a TensorImpl or storage data.
+  //
+  // This identity equality is transitive; If Tensors T0 and T1 share a storage
+  // S0 and T1 later points to a different storage S1 then all Tensors which
+  // point to either S0 or S1 are considered to have the same identity. (Since
+  // profiler cannot reason beyond that.)
+  //
+  // The profiler will handle lifetime analysis to ensure that identities do
+  // not run afoul of the ABA problem. This does, however, mean that identities
+  // can only be assigned when memory profiling is enabled. (And we cannot
+  // handle ABA for TensorImpl as those allocations are not instrumented.)
+  c10::optional<size_t> id_;
+};
+
+struct Inputs {
+  std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::vector<int64_t>> strides_;
+  std::vector<c10::IValue> ivalues_;
+  std::vector<std::string> dtypes_;
+  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
+};
+
+// ============================================================================
+// == ExtraFields =============================================================
+// ============================================================================
 template <EventType>
 struct ExtraFields;
 
@@ -47,25 +121,6 @@ struct TorchOpBasicFields {
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
-};
-
-struct TensorMetadata {
-  void* ptr_;
-  // Device is separated into DeviceType and DeviceIndex as Device
-  // doesn't have a default initializer (which the std::array initializer needs)
-  c10::DeviceType device_type_;
-  c10::DeviceIndex device_index_;
-  c10::ScalarType dtype_;
-  uint32_t dim_;
-  c10::Layout layout_;
-};
-
-struct Inputs {
-  std::vector<std::vector<int64_t>> shapes_;
-  std::vector<std::vector<int64_t>> strides_;
-  std::vector<c10::IValue> ivalues_;
-  std::vector<std::string> dtypes_;
-  std::vector<c10::optional<TensorMetadata>> tensor_metadata_;
 };
 
 using jit_stack_t = std::vector<std::string>;
@@ -359,7 +414,7 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
-  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+  AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
