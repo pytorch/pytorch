@@ -68,21 +68,37 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   TORCH_CHECK(chunks > 0,"chunk expects `chunks` to be greater than 0, got: ", chunks);
   TORCH_CHECK(self.is_contiguous(), "chunk expects `self` to be contiguous.");
   auto self_impl = get_nested_tensor_impl(self);
-  auto last_dim = get_consistent_last_dim_of_nested_tensor(*self_impl);
-  TORCH_CHECK(last_dim % chunks == 0,
+  const int64_t last_dim_size = get_consistent_last_dim_of_nested_tensor(*self_impl);
+    TORCH_CHECK(last_dim_size % chunks == 0,
            "Chunk for nested tensors is only supported for nested tensors with trailing dimension divisible by chunks, got: ",
-           last_dim, " % ", chunks, " != 0");
-  std::vector<Tensor> buffers = get_buffer(self).view({-1, last_dim}).chunk(chunks, -1);
-  int64_t new_last_size = buffers[0].size(-1);
-  for(auto& t : buffers) {
-    t = t.contiguous().view({-1});
+           last_dim_size, " % ", chunks, " != 0");
+  int64_t n_tensors = self.size(0);
+  int64_t split_size = last_dim_size / chunks;
+  std::vector<Tensor> splits(chunks);
+  const auto& sizes = self_impl->get_nested_size_tensor();
+  const auto& strides = self_impl->get_nested_stride_tensor();
+  const std::vector<int64_t>& offsets = self_impl->get_offsets();
+  // Account for the implicit batch dim
+  --dim;
+  int64_t tensor_width = sizes.size(1);
+  for (const auto split_idx : c10::irange(chunks)) {
+      auto new_sizes = sizes.clone() ;
+      auto new_strides = strides.clone();
+      // This clones offsets so we are safe to move
+      auto new_offsets = std::vector<int64_t>(offsets);
+      int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
+      int64_t *stride_ptr = new_strides.data_ptr<int64_t>();
+      // Get start val for each split
+      int64_t start_val = split_idx * split_size;
+      for (int64_t tensor_i : c10::irange(n_tensors)) {
+        const int64_t index = tensor_i * tensor_width + dim;
+        new_offsets[tensor_i] = offsets[tensor_i] + start_val * stride_ptr[index];
+        size_ptr[index] = split_size;
+        stride_ptr[index] *= 1;
+    }
+    splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, std::move(new_offsets));
   }
-  std::vector<Tensor> results;
-  for (auto& buffer : buffers) {
-    auto nt_chunk_size = self_impl->get_nested_size_tensor().clone().index_put_({at::indexing::Slice(), -1}, new_last_size);
-    results.push_back(wrap_buffer(buffer, nt_chunk_size));
-  }
-  return results;
+  return splits;
 }
 
 std::vector<IntArrayRef> NestedTensor_get_sizes(
