@@ -961,9 +961,9 @@ class FlatParamHandle:
             f"{tensor.numel()} numel",
         )
         views = (
-            subtensor.view(shape)
-            for (subtensor, shape) in zip(
-                torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes  # type: ignore[arg-type]
+            _tf_post_unflatten_transform(subtensor.view(shape), param_extension)
+            for (subtensor, shape, param_extension) in zip(
+                torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes, flat_param._param_extensions  # type: ignore[arg-type]
             )
         )
         return views
@@ -984,8 +984,6 @@ class FlatParamHandle:
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
-            param_extension = self.flat_param._param_extensions[i]
-            view = _tf_post_unflatten_transform(view, param_extension)
             if hasattr(module, param_name):
                 delattr(module, param_name)
             if as_params:
