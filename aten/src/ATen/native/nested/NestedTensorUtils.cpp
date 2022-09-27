@@ -80,19 +80,19 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   const std::vector<int64_t>& offsets = self_impl->get_offsets();
   // Account for the implicit batch dim
   --dim;
-  int64_t tensor_width = sizes.size(1);
+  int64_t tensor_dim = sizes.size(1);
   for (const auto split_idx : c10::irange(chunks)) {
       auto new_sizes = sizes.clone() ;
       auto new_strides = strides.clone();
-      // This clones offsets so we are safe to move
+      // This copys offsets so we are safe to move
       auto new_offsets = std::vector<int64_t>(offsets);
       int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
       int64_t *stride_ptr = new_strides.data_ptr<int64_t>();
       // Get start val for each split
       int64_t start_val = split_idx * split_size;
-      for (int64_t tensor_i : c10::irange(n_tensors)) {
-        const int64_t index = tensor_i * tensor_width + dim;
-        new_offsets[tensor_i] = offsets[tensor_i] + start_val * stride_ptr[index];
+      for (int64_t i : c10::irange(n_tensors)) {
+        const int64_t index = i * tensor_dim + dim;
+        new_offsets[i] = offsets[i] + start_val * stride_ptr[index];
         size_ptr[index] = split_size;
         stride_ptr[index] *= 1;
     }

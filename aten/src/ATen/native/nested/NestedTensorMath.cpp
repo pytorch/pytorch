@@ -86,7 +86,9 @@ std::vector<at::Tensor> NestedTensor_unbind(
 }
 
 Tensor& NestedTensor_relu_(Tensor& self) {
-  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
   at::relu_(buffer);
   return self;
 }
@@ -96,7 +98,9 @@ Tensor NestedTensor_relu(const Tensor& self) {
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, c10::string_view approximate) {
-  auto buffer = get_nested_tensor_impl(self)->get_buffer();
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
   at::gelu_(buffer, approximate);
   return self;
 }
@@ -676,6 +680,7 @@ Tensor clone_nested(
 
 std::tuple<Tensor,Tensor> native_dropout_nested(const Tensor& input, double p, c10::optional<bool> train) {
   auto input_ptr = get_nested_tensor_impl(input);
+  check_numel_equals_buffer_size(input_ptr);
   const Tensor& input_buffer = input_ptr->get_buffer(),
       & sizemat = input_ptr->get_nested_size_tensor(),
       & stridemat = input_ptr->get_nested_stride_tensor();
