@@ -6068,20 +6068,20 @@ class TestAdvancedIndexing(TestCase):
             self.assertEqual(x_cpu[[0, 2], :, :], x_mps[[0, 2], :, :])
             self.assertEqual(x_cpu[:, [1, 0], [1]], x_mps[:, [1, 0], [1]])
 
-        x_cpu = torch.tensor([[[ 0.1, 0.2, 0.3, 0.4],  # 16
-                               [ 0.5, 0.6, 0.7, 0.8],  # 32
-                               [ 0.9, 1.0, 1.1, 1.2],  # 48
-                               [ 1.3, 1.4, 1.5, 1.6]], # 64
+        x_cpu = torch.tensor([[[0.1, 0.2, 0.3, 0.4],
+                               [0.5, 0.6, 0.7, 0.8],
+                               [0.9, 1.0, 1.1, 1.2],
+                               [1.3, 1.4, 1.5, 1.6]],
 
-                              [[ 2.0, 2.1, 2.2, 2.3],  # 80
-                               [ 2.4, 2.5, 2.6, 2.7],  # 96
-                               [ 2.8, 2.9, 3.0, 3.1],  # 112
-                               [ 3.2, 3.3, 3.4, 3.5]], # 128
+                              [[2.0, 2.1, 2.2, 2.3],
+                               [2.4, 2.5, 2.6, 2.7],
+                               [2.8, 2.9, 3.0, 3.1],
+                               [3.2, 3.3, 3.4, 3.5]],
 
-                              [[ 4.0, 4.1, 4.2, 4.3], # 144
-                               [ 4.4, 4.5, 4.6, 4.7], # 160
-                               [ 4.8, 4.9, 5.0, 5.1], # 176
-                               [ 5.1, 5.2, 5.3, 5.4]]], device="cpu", dtype=torch.float32)
+                              [[4.0, 4.1, 4.2, 4.3],
+                               [4.4, 4.5, 4.6, 4.7],
+                               [4.8, 4.9, 5.0, 5.1],
+                               [5.1, 5.2, 5.3, 5.4]]], device="cpu", dtype=torch.float32)
         helper(x_cpu)
         for idx in range(len(self.supported_np_dtypes)):
             # torch.randn / torch.rand don't work with all dtypes
@@ -6096,11 +6096,11 @@ class TestAdvancedIndexing(TestCase):
             dtype = x_cpu.dtype
             x_mps = x_cpu.detach().clone().to("mps")
 
-            out_tensor_cpu = torch.tensor([88, 99] , dtype=dtype, device="cpu")
-            out_tensor_cpu_view = out_tensor_cpu[1:] # grab 99.0 from the list (Tensor with a storage offset of 1 on CPU)
+            out_tensor_cpu = torch.tensor([88, 99], dtype=dtype, device="cpu")
+            out_tensor_cpu_view = out_tensor_cpu[1:]
 
-            out_tensor_mps = torch.tensor([88, 99] , dtype=dtype, device="mps")
-            out_tensor_mps_view = out_tensor_mps[1:] # grab 99.0 from the list (Tensor with a storage offset of 1 on MPS)
+            out_tensor_mps = torch.tensor([88, 99], dtype=dtype, device="mps")
+            out_tensor_mps_view = out_tensor_mps[1:]
 
             x_cpu[[1, 2], 3, :] = out_tensor_cpu_view
             x_mps[[1, 2], 3, :] = out_tensor_mps_view
@@ -6114,20 +6114,20 @@ class TestAdvancedIndexing(TestCase):
             x_mps[:, [1, 0], [1]] = out_tensor_mps_view
             self.assertEqual(x_cpu, x_mps)
 
-        x_cpu = torch.tensor([[[ 0.1, 0.2, 0.3, 0.4],  # 16
-                               [ 0.5, 0.6, 0.7, 0.8],  # 32
-                               [ 0.9, 1.0, 1.1, 1.2],  # 48
-                               [ 1.3, 1.4, 1.5, 1.6]], # 64
+        x_cpu = torch.tensor([[[0.1, 0.2, 0.3, 0.4],
+                               [0.5, 0.6, 0.7, 0.8],
+                               [0.9, 1.0, 1.1, 1.2],
+                               [1.3, 1.4, 1.5, 1.6]],
 
-                              [[ 2.0, 2.1, 2.2, 2.3],  # 80
-                               [ 2.4, 2.5, 2.6, 2.7],  # 96
-                               [ 2.8, 2.9, 3.0, 3.1],  # 112
-                               [ 3.2, 3.3, 3.4, 3.5]], # 128
+                              [[2.0, 2.1, 2.2, 2.3],
+                               [2.4, 2.5, 2.6, 2.7],
+                               [2.8, 2.9, 3.0, 3.1],
+                               [3.2, 3.3, 3.4, 3.5]],
 
-                              [[ 4.0, 4.1, 4.2, 4.3], # 144
-                               [ 4.4, 4.5, 4.6, 4.7], # 160
-                               [ 4.8, 4.9, 5.0, 5.1], # 176
-                               [ 5.1, 5.2, 5.3, 5.4]]], device="cpu", dtype=torch.float32)
+                              [[4.0, 4.1, 4.2, 4.3],
+                               [4.4, 4.5, 4.6, 4.7],
+                               [4.8, 4.9, 5.0, 5.1],
+                               [5.1, 5.2, 5.3, 5.4]]], device="cpu", dtype=torch.float32)
         helper(x_cpu)
         for idx in range(len(self.supported_np_dtypes)):
             # torch.randn / torch.rand don't work with all dtypes

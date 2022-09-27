@@ -30,8 +30,11 @@ namespace at {
 namespace native {
 
 static
-bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride,
-                               bool index_select, bool accumulate) {
+bool dispatchIndexKernel(TensorIteratorBase& iter,
+                         IntArrayRef index_size,
+                         IntArrayRef index_stride,
+                         bool index_select,
+                         bool accumulate) {
   using namespace mps;
 
  if (iter.numel() == 0)
