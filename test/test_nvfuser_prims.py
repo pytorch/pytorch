@@ -26,8 +26,10 @@ from torch.utils._pytree import tree_flatten, tree_unflatten
 
 ref_nvprims_ops = tuple(
     filter(
-        lambda op: op.torch_opinfo_name in nvprim_names
-        or op.name == "ops.nvprims.var_mean",
+        lambda op: (
+            op.torch_opinfo_name in nvprim_names or op.name == "ops.nvprims.var_mean"
+        )
+        and op.torch_opinfo.supports_autograd,
         python_ref_db,
     )
 )
@@ -63,10 +65,6 @@ class TestNvPrims(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
-            # Check if result is boolean
-            if op.torch_opinfo_name in ["eq", "ne", "gt", "ge", "lt", "le", "isfinite"]:
-                self.skipTest("Skipped! Boolean result is not differentiable")
-
             all_args, _ = tree_flatten((sample.input, *sample.args, sample.kwargs))
             gradcheck_args = tuple(
                 x for x in all_args if (isinstance(x, torch.Tensor) and x.requires_grad)
@@ -141,10 +139,6 @@ class TestNvPrims(TestCase):
     @skipCUDAIfRocm
     @ops(ref_nvprims_ops, dtypes=OpDTypes.supported, allowed_dtypes=(torch.float64,))
     def test_nvprims_grad_trace_backward(self, device, dtype, op):
-        # Check if result is boolean
-        if op.torch_opinfo_name in ["eq", "ne", "gt", "ge", "lt", "le", "isfinite"]:
-            self.skipTest("Skipped! Boolean result is not differentiable")
-
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample in samples:
