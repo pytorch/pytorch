@@ -566,7 +566,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
 
     # Loop conditions
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
-    loop_condition = g.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
+    loop_condition = g.op("Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     loop_len = reps
 
     # Create an empty sequence to store final expansions
@@ -599,7 +599,9 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     final_splits = loop_context.op("SequenceInsert", final_splits, i_split)
 
     # Loop outputs
-    cond_out = loop_context.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
+    cond_out = loop_context.op(
+        "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
+    )
     utils._add_output_to_block(loop_block, cond_out)
     utils._add_output_to_block(loop_block, final_splits)
 
