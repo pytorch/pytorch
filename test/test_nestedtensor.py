@@ -819,7 +819,7 @@ class TestNestedTensorDeviceType(TestCase):
             torch.nn.functional.softmax(nt_noncontiguous, -1))
 
     # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.float16)
     def test_bmm(self, device, dtype):
         # error case: one is nested but the other is not
         nt = torch.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
@@ -906,7 +906,10 @@ class TestNestedTensorDeviceType(TestCase):
         nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
         actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
         expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(torch.nested.to_padded_tensor(nt1, 0.0))
-        self.assertEqual(actual, expect)
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
 
     # cannot test torch.float16 because: RuntimeError: "addmm_impl_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
