@@ -100,7 +100,7 @@ class Model(Module):
         self.outer = Linear(*OUTER_SHAPE)
         if register_buffers:
             self.outer.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
-            self.inner.register_buffer(
+            self.outer.register_buffer(
                 "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
             )
 
