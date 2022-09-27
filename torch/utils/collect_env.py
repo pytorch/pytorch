@@ -32,6 +32,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'python_platform',
     'is_cuda_available',
     'cuda_runtime_version',
+    'cuda_module_loading',
     'nvidia_driver_version',
     'nvidia_gpu_models',
     'cudnn_version',
@@ -307,6 +308,12 @@ def get_cachingallocator_config():
     ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
     return ca_config
 
+
+def get_cuda_module_loading_config():
+    config = os.environ.get('CUDA_MODULE_LOADING', '')
+    return config
+
+
 def is_xnnpack_available():
     if TORCH_AVAILABLE:
         import torch.backends.xnnpack
@@ -345,6 +352,7 @@ def get_env_info():
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
+        cuda_module_loading=get_cuda_module_loading_config(),
         nvidia_gpu_models=get_gpu_info(run_lambda),
         nvidia_driver_version=get_nvidia_driver_version(run_lambda),
         cudnn_version=get_cudnn_version(run_lambda),
