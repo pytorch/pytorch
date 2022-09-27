@@ -477,14 +477,6 @@ op_db: List[OpInfo] = [
             torch.bool, torch.float16, torch.bfloat16
         ),
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(
-                unittest.skip("Skipped!"), "TestCompositeCompliance", "test_forward_ad"
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestNormalizeOperators",
@@ -560,10 +552,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.expectedFailure,
@@ -573,6 +561,14 @@ op_db: List[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
+            ),
+            # RuntimeError: "prod_cpu" not implemented for 'BFloat16'
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestDecomp",
+                "test_comprehensive",
+                dtypes=(torch.bfloat16,),
+                device_type="cpu",
             ),
         ),
         # Can reuse the same inputs; dim is required in both
@@ -678,12 +674,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=(torch.bfloat16,),
-            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
@@ -708,12 +698,6 @@ op_db: List[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestNNCOpInfo",
-                "test_nnc_correctness",
-                dtypes=(torch.bfloat16,),
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -990,6 +974,7 @@ op_db: List[OpInfo] = [
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
@@ -1017,6 +1002,7 @@ op_db: List[OpInfo] = [
         ],
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(
@@ -1037,6 +1023,7 @@ op_db: List[OpInfo] = [
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ),
     OpInfo(

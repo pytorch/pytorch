@@ -195,10 +195,12 @@ Node* ONNXOptionalNode(OptionalTypePtr opt_type, Graph* g) {
 }
 
 // Replaces block output i with an onnx::Optional
-// with `type` taken from opt_type.
-// Needed when control flow has multiple branches, one of which
+// with `type` taken from opt_type. If and Loop Ops shares this function.
+// 1. If Op: Needed when control flow has multiple branches, one of which
 // is defined by `block` and returns a None and another branch
 // returns not-None. The passed-in opt_type should be from the other branch.
+// 2. Loop Op: insert Optional node before output, if input is Optional type
+// or output type is None.
 void ReplaceBlockOutputWithOptional(
     OptionalTypePtr opt_type,
     Block* block,
@@ -206,7 +208,9 @@ void ReplaceBlockOutputWithOptional(
   Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
   opt_node->insertBefore(block->return_node());
   Value* block_output = block->outputs().at(i);
-  block_output->replaceAllUsesWith(opt_node->output());
+  // replace only the last value as Optional type only affects
+  // the value right before output
+  block_output->replaceAllUsesAfterNodeWith(opt_node, opt_node->output());
   if (!block_output->type()->cast<NoneType>()) {
     opt_node->addInput(block_output);
     opt_node->copyMetadata(block_output->node());
@@ -265,7 +269,12 @@ void FixupONNXLoopBlockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
     // output 0 is continue_condition, never None.
     for (const auto i : c10::irange(1, block->outputs().size())) {
-      if (block->outputs().at(i)->type()->cast<NoneType>()) {
+      // Two conditions that we need to replace block output with optional
+      // 1. output is NoneType
+      // 2. input is optional but output type is not
+      if ((block->outputs().at(i)->type()->cast<NoneType>()) ||
+          (block->inputs().at(i + 1)->type()->cast<OptionalType>() &&
+           !block->outputs().at(i)->type()->cast<OptionalType>())) {
         ReplaceBlockOutputWithOptional(
             // Output 0 is continue_condition.
             // Inputs (0, 1) are (loop_counter, cond). So input i + 1
