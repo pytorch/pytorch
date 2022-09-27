@@ -33,7 +33,6 @@ def init_lists():
     with open(TS_NATIVE_FUNCTIONS_PATH) as f:
         yaml_ts = yaml.load(f, yaml.Loader)
     LAZY_OPS_LIST = set(remove_suffixes(itertools.chain(yaml_ts["full_codegen"], yaml_ts["supported"], yaml_ts["autograd"])))
-    HAS_SYMINT_SUFFIX = yaml_ts["symint"]
     FALLBACK_LIST = set(["clamp"])
     SKIP_RUNTIME_ERROR_LIST = set([
         'index_select',  # Empty output_sizes is not supported
@@ -71,19 +70,9 @@ def init_lists():
         'logsumexp',
     ])
 
-    return (LAZY_OPS_LIST,
-            FALLBACK_LIST,
-            SKIP_RUNTIME_ERROR_LIST,
-            SKIP_INCORRECT_RESULTS_LIST,
-            FUNCTIONAL_DECOMPOSE_LIST,
-            HAS_SYMINT_SUFFIX)
+    return (LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST, FUNCTIONAL_DECOMPOSE_LIST)
 
-(LAZY_OPS_LIST,
- FALLBACK_LIST,
- SKIP_RUNTIME_ERROR_LIST,
- SKIP_INCORRECT_RESULTS_LIST,
- FUNCTIONAL_DECOMPOSE_LIST,
- HAS_SYMINT_SUFFIX) = init_lists()
+(LAZY_OPS_LIST, FALLBACK_LIST, SKIP_RUNTIME_ERROR_LIST, SKIP_INCORRECT_RESULTS_LIST, FUNCTIONAL_DECOMPOSE_LIST) = init_lists()
 
 torch.manual_seed(42)
 
@@ -173,7 +162,7 @@ class TestLazyOpInfo(TestCase):
                 l.append(op.variant_test_name)
             return '.'.join(l)
 
-        global HAS_SYMINT_SUFFIX, FALLBACK_LIST
+        global FALLBACK_LIST
         samples = op.sample_inputs("lazy", dtype, requires_grad=False)
         sample = list(samples)[0]
         args = [sample.input] + list(sample.args)
@@ -186,16 +175,20 @@ class TestLazyOpInfo(TestCase):
         torch._lazy.mark_step()
         torch._lazy.wait_device_ops()
         prefix = "aten" if op.name in FALLBACK_LIST else "lazy"
-        symint_suffix = "_symint" if op.name in HAS_SYMINT_SUFFIX else ""
-        found = f"{prefix}::{op.name}{symint_suffix}" in remove_suffixes(torch._lazy.metrics.counter_names())
-        # check aliases
-        if not found:
-            for alias in op.aliases:
-                alias_found = f"{prefix}::{alias.name}{symint_suffix}" in remove_suffixes(torch._lazy.metrics.counter_names())
-                found = found or alias_found
-                if found:
-                    break
-        self.assertTrue(found)
+        cand_names = [
+            f"{prefix}::{op.name}",
+            f"{prefix}::{op.name}_symint",
+        ]
+        for alias in op.aliases:
+            cand_names.extend([
+                f"{prefix}::{alias.name}",
+                f"{prefix}::{alias.name}_symint",
+            ])
+        for name in cand_names:
+            if name in remove_suffixes(torch._lazy.metrics.counter_names()):
+                break
+        else:
+            self.fail("none of {cand_names} was not found in: {remove_suffixes(torch._lazy.metrics.counter_names())}")
 
 
     @ops([op for op in op_db if op.name in LAZY_OPS_LIST and op.name not in SKIP_RUNTIME_ERROR_LIST | SKIP_INCORRECT_RESULTS_LIST], allowed_dtypes=(torch.float,))  # noqa: B950
