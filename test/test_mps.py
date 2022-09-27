@@ -1597,6 +1597,19 @@ class TestMPS(TestCase):
         y = -x
         self.assertEqual(x, y)
 
+    # See https://github.com/pytorch/pytorch/issues/85675
+    def test_cat_non_contiguous(self):
+        def rotate_subset(data):
+            return torch.concat([data[:, :2], torch.rot90(data[:, 2:])])
+        for dtype in MPS_DTYPES:
+            if dtype == torch.bool:
+                continue
+            data = torch.arange(8, dtype=dtype).reshape(2, 4)
+            mps_data = data.to("mps")
+            cpu_result = rotate_subset(data)
+            mps_result = rotate_subset(mps_data)
+            self.assertEqual(cpu_result, mps_result.to("cpu"))
+
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
