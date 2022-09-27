@@ -671,6 +671,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 }
 
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
+    const KernelArgumentHolder& args,
     kir::ExpressionEvaluator& expr_eval,
     const std::unordered_set<int>& alias_indices) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocOutputs");
@@ -680,20 +681,22 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
   for (const auto out_i : c10::irange(kernel->outputs().size())) {
     // TODO: FIX this short-cut where we trivially forward inputs to outputs
     if (kernel->outputs()[out_i]->isFusionInput()) {
-      TORCH_INTERNAL_ASSERT(false, "trivial input forwarding NOT IMPLEMENTED");
-      // for (auto inp_i : c10::irange(kernel->inputs().size())) {
-      //   if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
-      //     TORCH_INTERNAL_ASSERT(
-      //         inp_i < inputs.size(),
-      //         "Issue with an input showing up as output, couldn't find
-      //         input.");
-      //     TORCH_INTERNAL_ASSERT(
-      //         inputs[inp_i].isTensor(),
-      //         "Cannot register a scalar as an output in a fusion.");
-      //     outputs.push_back(inputs[inp_i].toTensor());
-      //     break;
-      //   }
-      // }
+      for (auto inp_i : c10::irange(kernel->inputs().size())) {
+        if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
+          TORCH_INTERNAL_ASSERT(
+              inp_i < args.size(),
+              "Issue with an input showing up as output, couldn't find input.");
+          TORCH_INTERNAL_ASSERT(
+              args[inp_i]->isType(ArgType::Tensor),
+              "Cannot register a scalar as an output in a fusion.");
+          // pushing empty tensor for trivial forwarding. Since we handle this in integration
+          c10::Device device(c10::DeviceType::CUDA, args.getDeviceIndex());
+          const auto tensor_options =
+              at::TensorOptions().dtype(at::kFloat).device(device);
+	  outputs.emplace_back(at::empty({0}, tensor_options));
+          break;
+        }
+      }
     } else {
       TORCH_INTERNAL_ASSERT(
           kernel->outputs()[out_i]->isA<TensorView>(),
@@ -1046,7 +1049,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
       auto& output_alias_indices = output_alias_indices_entry.get();
 
-      allocated_outputs = allocOutputs(expr_eval, output_alias_indices);
+      allocated_outputs = allocOutputs(args, expr_eval, output_alias_indices);
 
       for (const auto& entry : alias_indices) {
         auto aliased_output_index = entry.first;
