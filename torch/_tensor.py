@@ -636,6 +636,11 @@ class Tensor(torch._C._TensorBase):
 
         return solve(self, other)
 
+    def lstsq(self, other):
+        from ._linalg_utils import lstsq
+
+        return lstsq(self, other)
+
     def eig(self, eigenvectors=False):
         from ._linalg_utils import eig
 
