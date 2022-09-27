@@ -24772,10 +24772,19 @@ TEST_F(NVFuserTest, FusionBoundedDirectionSelection1_CUDA) {
   scheduler_utils::BoundedDirectionalTransformPropagator::backward(
       tv3, -1, {tv0, tv2});
 
-  // Check that the splits are replayed on tv1, even though tv2
-  //  is part of the boundary.
+  // Check that the splits are replayed on tv2
   TORCH_INTERNAL_ASSERT(
-      tv2->nDims() == 4, "Propagator didn't propagate to tv2");
+      tv2->nDims() == tv3->nDims(),
+      "Propagator didn't propagate to tv2: ",
+      tv2->toString());
+
+  // Check that the splits are replayed on tv1 as well. Even though
+  //  one of its consumers, tv2, is part of the boundary, another
+  //  consumer is not a boundary, so tv1 should be transformed as well.
+  TORCH_INTERNAL_ASSERT(
+      tv1->nDims() == tv3->nDims(),
+      "Propagator didn't propagate to tv1: ",
+      tv1->toString());
 }
 
 TEST_F(NVFuserTest, FusionIssueRepro1844_CUDA) {
