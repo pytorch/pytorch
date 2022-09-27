@@ -7,9 +7,12 @@ static methods.
 `default_collate` and `default_convert` are exposed to users via 'dataloader.py'.
 """
 
+import functools
 import torch
 import re
 import collections
+
+from typing import Callable, Dict, Optional, Tuple, Type, Union
 from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
@@ -82,7 +85,110 @@ default_collate_err_msg_format = (
     "dicts or lists; found {}")
 
 
-def default_collate(batch):
+def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+    r"""
+    General collate function that handles collection type of element within each batch
+    and opens function registy to deal with specific element types.
+
+    Args:
+        batch: a single batch to be collated
+        collate_fn_map: Optional dictionary mapping from element type to the corresponding collate function.
+          If the element type isn't present in this dictionary,
+          collate function will go through each key from the dictionary in the insertion order
+          to invoke the collate function if the element type is a subclass of the key.
+    """
+    elem = batch[0]
+    elem_type = type(elem)
+
+    if collate_fn_map is not None:
+        if elem_type in collate_fn_map:
+            return collate_fn_map[elem_type](batch, collate_fn_map=collate_fn_map)
+
+        for collate_type in collate_fn_map:
+            if isinstance(elem, collate_type):
+                return collate_fn_map[collate_type](batch, collate_fn_map=collate_fn_map)
+
+    if isinstance(elem, collections.abc.Mapping):
+        try:
+            return elem_type({key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem})
+        except TypeError:
+            # The mapping type may not support `__init__(iterable)`.
+            return {key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem}
+    elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
+        return elem_type(*(collate(samples, collate_fn_map=collate_fn_map) for samples in zip(*batch)))
+    elif isinstance(elem, collections.abc.Sequence):
+        # check to make sure that the elements in batch have consistent size
+        it = iter(batch)
+        elem_size = len(next(it))
+        if not all(len(elem) == elem_size for elem in it):
+            raise RuntimeError('each element in list of batch should be of equal size')
+        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
+
+        if isinstance(elem, tuple):
+            return [collate(samples, collate_fn_map=collate_fn_map) for samples in transposed]  # Backwards compatibility.
+        else:
+            try:
+                return elem_type([collate(samples, collate_fn_map=collate_fn_map) for samples in transposed])
+            except TypeError:
+                # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+                return [collate(samples, collate_fn_map=collate_fn_map) for samples in transposed]
+
+    raise TypeError(default_collate_err_msg_format.format(elem_type))
+
+
+def _collate_tensor_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+    elem = batch[0]
+    out = None
+    if torch.utils.data.get_worker_info() is not None:
+        # If we're in a background process, concatenate directly into a
+        # shared memory tensor to avoid an extra copy
+        numel = sum(x.numel() for x in batch)
+        storage = elem.storage()._new_shared(numel, device=elem.device)
+        out = elem.new(storage).resize_(len(batch), *list(elem.size()))
+    return torch.stack(batch, 0, out=out)
+
+
+def _collate_numpy_array_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+    elem = batch[0]
+    # array of string classes and object
+    if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
+        raise TypeError(default_collate_err_msg_format.format(elem.dtype))
+
+    return collate([torch.as_tensor(b) for b in batch], collate_fn_map=collate_fn_map)
+
+
+def _collate_numpy_scalar_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+    return torch.as_tensor(batch)
+
+
+def _collate_float_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+    return torch.tensor(batch, dtype=torch.float64)
+
+
+def _collate_int_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+    return torch.tensor(batch)
+
+
+def _collate_str_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+    return batch
+
+
+_default_collate_fn_map = {torch.Tensor: _collate_tensor_fn}
+try:
+    import numpy as np
+    # For both ndarray and memmap (subclass of ndarray)
+    _default_collate_fn_map[np.ndarray] = _collate_numpy_array_fn
+    # See scalars hierarchy: https://numpy.org/doc/stable/reference/arrays.scalars.html
+    # Skip string scalars
+    _default_collate_fn_map[(np.bool_, np.number, np.object_)] = _collate_numpy_scalar_fn
+except ImportError:
+    pass
+_default_collate_fn_map[float] = _collate_float_fn
+_default_collate_fn_map[int] = _collate_int_fn
+_default_collate_fn_map[string_classes] = _collate_str_fn
+
+
+_default_collate_doc = \
     r"""
         Function that takes in a batch of data and puts the elements within the batch
         into a tensor with an additional outer dimension - batch size. The exact output type can be
@@ -130,56 +236,7 @@ def default_collate(batch):
             >>> default_collate([[0, 1], [2, 3]])
             [tensor([0, 2]), tensor([1, 3])]
     """
-    elem = batch[0]
-    elem_type = type(elem)
-    if isinstance(elem, torch.Tensor):
-        out = None
-        if torch.utils.data.get_worker_info() is not None:
-            # If we're in a background process, concatenate directly into a
-            # shared memory tensor to avoid an extra copy
-            numel = sum(x.numel() for x in batch)
-            storage = elem.storage()._new_shared(numel, device=elem.device)
-            out = elem.new(storage).resize_(len(batch), *list(elem.size()))
-        return torch.stack(batch, 0, out=out)
-    elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
-            and elem_type.__name__ != 'string_':
-        if elem_type.__name__ == 'ndarray' or elem_type.__name__ == 'memmap':
-            # array of string classes and object
-            if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
-                raise TypeError(default_collate_err_msg_format.format(elem.dtype))
 
-            return default_collate([torch.as_tensor(b) for b in batch])
-        elif elem.shape == ():  # scalars
-            return torch.as_tensor(batch)
-    elif isinstance(elem, float):
-        return torch.tensor(batch, dtype=torch.float64)
-    elif isinstance(elem, int):
-        return torch.tensor(batch)
-    elif isinstance(elem, string_classes):
-        return batch
-    elif isinstance(elem, collections.abc.Mapping):
-        try:
-            return elem_type({key: default_collate([d[key] for d in batch]) for key in elem})
-        except TypeError:
-            # The mapping type may not support `__init__(iterable)`.
-            return {key: default_collate([d[key] for d in batch]) for key in elem}
-    elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
-        return elem_type(*(default_collate(samples) for samples in zip(*batch)))
-    elif isinstance(elem, collections.abc.Sequence):
-        # check to make sure that the elements in batch have consistent size
-        it = iter(batch)
-        elem_size = len(next(it))
-        if not all(len(elem) == elem_size for elem in it):
-            raise RuntimeError('each element in list of batch should be of equal size')
-        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
-
-        if isinstance(elem, tuple):
-            return [default_collate(samples) for samples in transposed]  # Backwards compatibility.
-        else:
-            try:
-                return elem_type([default_collate(samples) for samples in transposed])
-            except TypeError:
-                # The sequence type may not support `__init__(iterable)` (e.g., `range`).
-                return [default_collate(samples) for samples in transposed]
-
-    raise TypeError(default_collate_err_msg_format.format(elem_type))
+default_collate = functools.partial(collate, collate_fn_map=_default_collate_fn_map)
+default_collate.__name__ = "default_collate"
+default_collate.__doc__ = _default_collate_doc
