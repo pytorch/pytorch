@@ -3,9 +3,10 @@
 # TODO(justinchuby): Move more of the symbolic helper functions here and expose
 # them to the user.
 
+import copy
 import dataclasses
 import re
-from typing import Any, Dict, Iterable, Sequence, Union
+from typing import Any, Dict, Iterable, Sequence, Tuple, Union
 
 from typing_extensions import Protocol, runtime_checkable
 
@@ -114,6 +115,55 @@ class GraphContext(_WithOp):
             overload_name_s=overload_name,
             **kwargs,
         )
+
+
+@_beartype.beartype
+def add_op_with_blocks(
+    graph_context: GraphContext,
+    opname: str,
+    *inputs: _C.Value,
+    outputs: int = 1,
+    n_blocks: int = 1,
+    **attributes,
+) -> Tuple[Any, Tuple[GraphContext, ...], _C.Node]:
+    """Creates an ONNX operator "opname", taking "args" as inputs and attributes "kwargs".
+
+    Args:
+        graph_context: The context for the current graph.
+        opname: The ONNX operator name, e.g., `Abs` or `Add`, or an operator qualified
+            with a namespace, e.g., `aten::add`.
+        inputs: The inputs to the operator.
+        outputs: The number of outputs this operator returns.
+            By default an operator is assumed to return a single output.
+            If `outputs` is greater than one, this functions returns a tuple
+            of output `Node`, representing each output of the ONNX operator
+            in positional.
+        n_blocks: The number of sub-blocks to create in the node.
+        attributes: The attributes of the ONNX operator.
+
+    Returns:
+        A tuple of (output_values, new_contexts, node) where:
+            output_values: The node representing the single output of this operator
+                (see the `outputs` keyword argument for multi-return nodes).
+            new_contexts: A tuple of new graph contexts for each sub-block.
+            node: The node representing the operator.
+    """
+
+    output_values = graph_context.op(opname, *inputs, outputs=outputs, **attributes)
+    if isinstance(output_values, Sequence):
+        node = output_values[0].node()
+    else:
+        node = output_values.node()
+
+    new_contexts = []
+    for _ in range(n_blocks):
+        new_block = node.addBlock()
+        # Create a shallow copy of the graph context and update the block
+        new_context = copy.copy(graph_context)
+        new_context.block = new_block
+        new_contexts.append(new_context)
+
+    return output_values, tuple(new_contexts), node
 
 
 @_beartype.beartype
