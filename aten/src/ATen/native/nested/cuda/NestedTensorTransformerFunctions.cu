@@ -672,7 +672,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
   at::Device device = output.device();
 
 #ifndef USE_ROCM
-  if (all_row_major) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
+  if (is_sm8x && all_row_major) {
     if (self.dtype() == at::kFloat) {
       std::vector<float*> aptr;
       std::vector<float*> bptr;
