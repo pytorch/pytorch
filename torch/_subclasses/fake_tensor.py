@@ -333,14 +333,6 @@ def to_copy(fake_mode, func, *args, **kwargs):
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
-@register_op_impl(aten.clone.default)
-def clone(fake_mode, func, input, memory_format=None):
-    out_device = input.device
-    with no_dispatch():
-        out = aten._to_copy(input.to("meta"), memory_format=memory_format)
-        return FakeTensor(fake_mode, out, out_device)
-
-
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
@@ -524,20 +516,6 @@ class FakeTensor(torch.Tensor):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-        # Need this to handle infinite recursion with sparse tensors.
-        # Sparse tensors have custom stride policy which means that
-        # they will dispatch here on dispatch, and we need to trigger
-        # the default behavior.
-        # TODO: when we get other tensor types online they will also
-        # need to get entries here.
-        elif func == torch.ops.aten.sym_size.default:
-            return None
-        elif func == torch.ops.aten.sym_stride.default:
-            return None
-        elif func == torch.ops.aten.size.default:
-            return None
-        elif func == torch.ops.aten.stride.default:
-            return None
 
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
