@@ -61,7 +61,9 @@ TORCH_API void ONNXAssignOutputShape(
     int opset_version);
 
 // Replace None in output with Optional node (opset > 15) if it's
-// script model. This helps align the output format in internal tests.
+// script model. This helps align the output format in ONNX internal tests
+// when comparing pytorch results with ONNX results, as they have different
+// process for None in output.
 void ReplaceGraphOutputNoneWithOptional(
     std::shared_ptr<Graph>& graph,
     size_t outputs_index);

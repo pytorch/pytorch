@@ -12,6 +12,7 @@ import torch.jit
 from torch import _utils_internal
 
 # Query `hasattr` only once.
+
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
 
@@ -29,6 +30,13 @@ def dl_open_guard():
         sys.setdlopenflags(old_flags)
 
 
+def has_key(op, k):
+    return (
+        torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), k)
+        or k in op.py_kernels
+    )
+
+
 # TODO(voz) We are missing an entire axis of registration - Modes for the python key
 class PyOperatorABC(ABC):
     def __call__(self, *args, **kwargs):
@@ -40,8 +48,62 @@ class PyOperatorABC(ABC):
     def name(self):
         pass
 
-    def dispatch(self, dispatch_key, *args, **kwargs):
-        pass
+
+is_included_in_alias = torch._C._dispatch_is_included_in_alias
+
+DispatchKey = torch._C.DispatchKey
+
+# Equivalent to computeDispatchTableEntryWithDebug
+def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
+    # 1. (Direct) operator registration
+    if has_key(op, k):
+        return k
+    # 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available
+    cand = DispatchKey.CompositeExplicitAutogradNonFunctional
+    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(
+        op, cand
+    ):
+        return cand
+    # 2.2 Use CompositeExplicitAutograd kernel if available
+    cand = DispatchKey.CompositeExplicitAutograd
+    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(
+        op, cand
+    ):
+        return cand
+    has_backend_kernel = torch._C._dispatch_has_kernel_for_any_dispatch_key(
+        op.name(), torch._C._dispatch_get_backend_keyset_from_autograd(k)
+    ) or has_key(op, DispatchKey.CompositeExplicitAutograd)
+    # 2.3. Use CompositeImplicitAutograd kernel if available
+    cand = DispatchKey.CompositeImplicitAutogradNestedTensor
+    if (
+        (k != DispatchKey.Undefined and is_included_in_alias(k, cand))
+        and has_key(op, cand)
+        and not has_backend_kernel
+    ):
+        return cand
+    cand = DispatchKey.CompositeImplicitAutograd
+    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and has_key(
+        op, cand
+    ):
+        if (
+            k == DispatchKey.AutogradOther
+            and torch._C._dispatch_has_kernel_for_any_dispatch_key(
+                op.name(), torch._C._dispatch_autogradother_backends
+            )
+        ):
+            raise RuntimeError("ambiguous autogradother kernel")
+        elif not has_backend_kernel:
+            return cand
+    # 2.4. For autograd backend keys, use kernel from DispatchKey::Autograd if available
+    cand = DispatchKey.Autograd
+    if is_included_in_alias(k, cand) and has_key(op, cand):
+        return cand
+    # Backend fallback
+    if torch._C._dispatch_has_backend_fallback(k):
+        # The dispatch key itself will implicitly route to backend fallback.
+        # This is probably not great for the pure Python implementation.
+        return k
+    raise RuntimeError("could not find kernel")
 
 
 pyop_namespace = {}
@@ -73,9 +135,9 @@ class PyOperator(PyOperatorABC):
 
             dispatch_key = dispatch_key_or_mode
             assert (
-                dispatch_key != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
+                dispatch_key != torch._C.DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
-            assert isinstance(dispatch_key, torch._C.DispatchKey)  # type: ignore[attr-defined]
+            assert isinstance(dispatch_key, torch._C.DispatchKey)
             assert dispatch_key not in self.table
             self.table[dispatch_key] = fn
             return fn
@@ -83,9 +145,11 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        if dispatch_key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
+        from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+        if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-            curr_mode = type(torch._C._get_torch_dispatch_mode())
+            curr_mode = type(_get_current_dispatch_mode())
             assert (
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
@@ -115,10 +179,10 @@ class PyOperator(PyOperatorABC):
     # as opposed to being this sort of explicit thing where ops are a little too key aware...
     def _fallthrough_fn(self, operator, dispatch_key):
         def inner(*args, **kwargs):
-            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)  # type: ignore[attr-defined]
+            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)
             all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
                 args, kwargs
-            )  # type: ignore[attr-defined]
+            )
             return self.dispatch(
                 all_keys_after_current_masked.highestPriorityTypeId(), *args, **kwargs
             )
@@ -147,10 +211,10 @@ def _get_tensors(args, kwargs):
 # Note - this should maintain identical impl to the C++ dispatcher key extraction logic
 # at ATen/core/dispatch/DispatchKeyExtractor.h
 def key_extractor(tensors):
-    key_set = torch._C._dispatch_tls_local_include_set()  # type: ignore[attr-defined]
+    key_set = torch._C._dispatch_tls_local_include_set()
     for tensor in tensors:
-        key_set = key_set | torch._C._dispatch_keys(tensor)  # type: ignore[attr-defined]
-    key_set = key_set - torch._C._dispatch_tls_local_exclude_set()  # type: ignore[attr-defined]
+        key_set = key_set | torch._C._dispatch_keys(tensor)
+    key_set = key_set - torch._C._dispatch_tls_local_exclude_set()
     return key_set
 
 
@@ -177,6 +241,8 @@ class OpOverload(PyOperatorABC):
         self.python_key_mode_table = {}
         self.__module__ = overloadpacket.__module__
         op.__module__ = overloadpacket.__module__
+        self.__qualname__ = self._name
+        self.__annotations__ = {}
 
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
@@ -190,9 +256,6 @@ class OpOverload(PyOperatorABC):
     def __call__(self, *args, **kwargs):
         return self._op(*args, **kwargs or {})
 
-    def __getattr__(self, key):
-        return getattr(self._op, key)
-
     def __hash__(self):
         return hash(self._op)
 
@@ -200,13 +263,20 @@ class OpOverload(PyOperatorABC):
     def __str__(self):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
+    @property
+    def namespace(self):
+        return self._schema.name.split("::")[0]
+
     def decompose(self, *args, **kwargs):
-        dk = torch._C.DispatchKey.CompositeImplicitAutograd  # type: ignore[attr-defined]
-        if (
-            torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk)
-            or dk in self.py_kernels
-        ):
-            return self.dispatch(dk, *args, **kwargs)
+        dk = torch._C.DispatchKey.CompositeImplicitAutograd
+        if dk in self.py_kernels:
+            # NB: This branch is not too necessary anymore, because we can
+            # apply Python CompositeImplicitAutograd *before* tracing
+            # using Python dispatcher (also taking advantage of the autograd
+            # formula).  But it's included for completeness
+            return self.py_kernels[dk](*args, **kwargs)
+        elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
+            return self._op_dk(dk, *args, **kwargs)
         else:
             return NotImplemented
 
@@ -221,9 +291,9 @@ class OpOverload(PyOperatorABC):
                 self.python_key_mode_table[mode] = fn
                 return fn
 
-            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)  # type: ignore[attr-defined]
+            assert isinstance(dispatch_key_or_mode, torch._C.DispatchKey)
             assert (
-                dispatch_key_or_mode != torch._C.DispatchKey.Python  # type: ignore[attr-defined]
+                dispatch_key_or_mode != torch._C.DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
 
             self.py_kernels[dispatch_key_or_mode] = fn
@@ -231,22 +301,44 @@ class OpOverload(PyOperatorABC):
 
         return inner
 
-    def dispatch(self, dispatch_key, *args, **kwargs):
-        if dispatch_key == torch._C.DispatchKey.Python:  # type: ignore[attr-defined]
-            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-            curr_mode = type(torch._C._get_torch_dispatch_mode())
-            assert (
-                curr_mode is not None
-            ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
-            if curr_mode not in self.python_key_mode_table:
-                return self._op_dk(dispatch_key, *args, **kwargs)
-            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-            return self.python_key_mode_table[curr_mode](*args, **kwargs)
+    # This implements the pre-computation logic for the Python dispatcher.
+    def __getattr__(self, attr):
+        if len(attr) == 0 or not attr[0].isupper():
+            raise AttributeError()
 
-        if dispatch_key in self.py_kernels:
-            return self.py_kernels[dispatch_key](*args, **kwargs)
-        else:
-            return self._op_dk(dispatch_key, *args, **kwargs)
+        try:
+            key = torch._C._dispatch_key_parse(attr)
+        except Exception as e:
+            raise AttributeError()
+
+        if key == torch._C.DispatchKey.Python:
+            if not self.python_key_mode_table:
+                setattr(self, attr, key)
+                return key
+
+            def handler(*args, **kwargs):
+                from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+                # TODO: We also need to handle tensor subclasses here
+                # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+                curr_mode = type(_get_current_dispatch_mode())
+                assert (
+                    curr_mode is not None
+                ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+                if curr_mode not in self.python_key_mode_table:
+                    # TODO: This path is slow, should generally encourage this
+                    # case to not happen
+                    return self._op_dk(key, *args, **kwargs)
+                # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
+                return self.python_key_mode_table[curr_mode](*args, **kwargs)
+
+            setattr(self, attr, handler)
+            return handler
+
+        key = resolve_key(self, key)
+        r = self.py_kernels.get(key, key)
+        setattr(self, attr, r)
+        return r
 
     def name(self):
         return self._name
