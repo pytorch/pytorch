@@ -151,4 +151,4 @@ struct Launch_params{
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-TORCH_API void run_fmha_fprop(Launch_params<FMHA_fprop_params> &launch_params, const bool configure);
+void run_fmha_fprop(Launch_params<FMHA_fprop_params> &launch_params, const bool configure);

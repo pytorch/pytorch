@@ -185,7 +185,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             if self.should_fallback_fn(self, func, args, kwargs):
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
-            with self:
+            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
                 return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
@@ -202,7 +202,9 @@ def _is_node_supported_nvfuser(node):
 
 
 def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
-    with torch_function_mode:
+    with torch.overrides.enable_torch_function_mode(
+        torch_function_mode, replace=torch_function_mode.inner
+    ):
         gm = get_isolated_graphmodule(func, args, kwargs)
 
     supported_ops = NvfuserPrimOperatorSupport()

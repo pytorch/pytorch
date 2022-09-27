@@ -610,7 +610,18 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
         torch._sync(tensor)
 
     value = torch._C._functorch.get_unwrapped(tensor)
-    value_repr = repr(value)
+    dl_enabled = torch._C._are_functorch_transforms_active()
+    try:
+        # Disable temporarily FuncTorchDynamicLayerFrontMode and
+        # FuncTorchDynamicLayerBackMode as included dispatch keys
+        if dl_enabled:
+            torch._C._functorch._set_dynamic_layer_keys_included(False)
+        value_repr = repr(value)
+    finally:
+        # Reenable FuncTorchDynamicLayerFrontMode and
+        # FuncTorchDynamicLayerBackMode as included dispatch keys
+        if dl_enabled:
+            torch._C._functorch._set_dynamic_layer_keys_included(True)
 
     indented_value_repr = textwrap.indent(value_repr, " " * 4)
     if torch._C._functorch.is_batchedtensor(tensor):
@@ -633,5 +644,4 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
 
 def _str(self, *, tensor_contents=None):
     with torch.no_grad():
-        guard = torch._C._DisableFuncTorch()
         return _str_intern(self, tensor_contents=tensor_contents)

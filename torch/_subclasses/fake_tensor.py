@@ -16,7 +16,7 @@ from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
@@ -211,7 +211,6 @@ class FakeTensorConverter(object):
                 existing_device,
                 constant=t if make_constant else None,
             )
-            out.requires_grad_(t.requires_grad)
             if make_constant:
                 self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
@@ -564,8 +563,7 @@ class FakeTensor(torch.Tensor):
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
-        assert fake_mode is not None
-        with fake_mode:  # type: ignore[attr-defined]
+        with enable_torch_dispatch_mode(fake_mode):
             return func(*args, **kwargs)
 
     @staticmethod
@@ -624,7 +622,7 @@ class FakeTensor(torch.Tensor):
 
 
 # We keep one instantiation of `fake_tensor_converter` active
-# for the duration of `with FakeTensorMode()`.
+# for the duration of `with torch_enable_mode(FakeTensorMode)`.
 # This allows accurate storage aliasing across invocation of
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
@@ -780,7 +778,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
                     return None
 
-            with self:
+            with self.restore():
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
                     return r
@@ -802,7 +800,7 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_fake_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
-            with self:
+            with self.restore():
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:

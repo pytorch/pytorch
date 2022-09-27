@@ -1,7 +1,7 @@
 import torch
 import inspect
 
-__all__ = ["pytree_register_structseq"]
+__all__ = []
 
 # error: Module has no attribute "_return_types"
 return_types = torch._C._return_types  # type: ignore[attr-defined]
@@ -19,8 +19,8 @@ for name in dir(return_types):
     if name.startswith('__'):
         continue
 
-    _attr = getattr(return_types, name)
-    globals()[name] = _attr
+    attr = getattr(return_types, name)
+    globals()[name] = attr
 
     if not name.startswith('_'):
         __all__.append(name)
@@ -30,5 +30,5 @@ for name in dir(return_types):
     # is no longer the case.
     # NB: I don't know how to check that something is a "structseq" so we do a fuzzy
     # check for tuple
-    if inspect.isclass(_attr) and issubclass(_attr, tuple):
-        pytree_register_structseq(_attr)
+    if inspect.isclass(attr) and issubclass(attr, tuple):
+        pytree_register_structseq(attr)
