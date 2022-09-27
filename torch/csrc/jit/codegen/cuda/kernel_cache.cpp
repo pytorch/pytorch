@@ -616,21 +616,29 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
   // reference to tensor
   std::unordered_map<Val*, at::Tensor> output_holder;
 
+  // This is a WAR.
+  // FusionSegmenter doesn't propagate trivial input forwarding to segmented kernel, we add all inputs to output_holder, so later we'll always find forwarded inputs.
+  for (const auto inp_index : c10::irange(segmented_fusion_->inputs().size())) {
+    if (auto tensor_arg_abstract =
+            dynamic_cast<const TensorArgAbstract*>(args[inp_index])) {
+      auto val = segmented_fusion_->inputs()[inp_index];
+      TORCH_INTERNAL_ASSERT(
+          val->isA<TensorView>(),
+         "argument is tensor, while kernel expects non-tensor");
+      output_holder[val] = tensor_arg_abstract->getTensor();
+    }
+  }
+
   if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     std::cout << "=================RUNNING FUSION SEGMENTS================="
               << std::endl;
   }
 
-  // group should share cache id.
-  auto group_cache_id = args.getCacheId();
   for (auto group_to_run : runtime_workspace_.group_run_order) {
     // TODO: index mode should be updated per segmented kernel
     // Prepare input vector
     KernelArgumentHolder group_runtime_inputs(args.getIndexMode());
     group_runtime_inputs.setDeviceIndex(args.getDeviceIndex());
-    if (group_cache_id.has_value()) {
-      group_runtime_inputs.setCacheId(group_cache_id.value());
-    }
     for (auto input : group_to_run->inputs()) {
       group_runtime_inputs.push(tensor_map.at(input));
     }
@@ -668,12 +676,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
     const auto iter = output_holder.find(output);
     if (iter != output_holder.end()) {
       fusion_outputs.push_back(iter->second);
-    } else if (output->isFusionInput()) {
-      const auto iter = tensor_map.find(output);
-      TORCH_INTERNAL_ASSERT(
-          iter != tensor_map.end(), "Can not find output as aliased intput");
-      auto arg = dynamic_cast<const TensorArgAbstract*>(iter->second);
-      fusion_outputs.push_back(arg->getTensor());
     } else {
       bool empty_type_check = output->getDataType().has_value() &&
           output->getDataType().value() == DataType::Float;
