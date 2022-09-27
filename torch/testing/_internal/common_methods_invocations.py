@@ -8419,12 +8419,13 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1.3e-05, rtol=1.3e-05),
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
-                   'TestCommon', 'test_numpy_refs')],
+                   'TestCommon', 'test_numpy_refs'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                    'TestConsistency',
                    'test_output_match',
                ),
+           ],
            skips=(
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
