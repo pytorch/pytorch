@@ -91,7 +91,7 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
     return self.reshape(size);
   } else {
     auto output = at::_ops::view::call(self, c10::fromIntArrayRef(size));
-    return output.clone();
+    return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 """
@@ -117,13 +117,14 @@ at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
 
     if g.view.func.returns[0].type == BaseType(BaseTy.Tensor):
         return_cloned_output = """\
-  return output.clone();"""
+  return output.clone(/*memory_format=*/at::MemoryFormat::Contiguous);"""
     else:
         # If the return type is a list, we need to clone each tensor in the list.
         return_cloned_output = f"""\
   {view_copy_sig.returns_type().cpp_type()} out_clone;
   for (const auto i : c10::irange(output.size())) {{
     out_clone.push_back(output[i].clone());
+    out_clone.push_back(output[i].clone(/*memory_format=*/at::MemoryFormat::Contiguous));
   }}
   return out_clone;"""
 
