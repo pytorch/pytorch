@@ -349,7 +349,7 @@ class TestMPS(TestCase):
 
         self.assertEqual(linear, linear_mps)
 
-        projected = torch.rand([1,8]).to(device)
+        projected = torch.rand([1, 8]).to(device)
         x = torch.rand([1, 2, 2, 8]).to(device)
         x_mps = x.to('mps')
         projected_mps = projected.to('mps')
