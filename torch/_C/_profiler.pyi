@@ -103,8 +103,7 @@ class _TensorMetadata:
     id: Optional[int]
 
     @property
-    def dtype(self) -> dtype:
-    ...
+    def dtype(self) -> dtype: ...
 
 class _ExtraFields_TorchOp:
     allow_tf32_cublas: bool
