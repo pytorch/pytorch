@@ -447,6 +447,10 @@ class TestEagerFusionOpInfo(AOTTestCase):
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
+    @opsToleranceOverride('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
+        tol1('linalg.householder_product',
+             {torch.float32: tol(atol=5e-4, rtol=5e-4)}, device_type='cpu'),
+    })
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         def f(args, kwargs):
             return op.op(*args, **kwargs)
