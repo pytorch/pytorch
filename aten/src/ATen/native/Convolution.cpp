@@ -132,27 +132,30 @@ auto ConvParams::view1d_as_2d() -> void {
 auto ConvParams::use_cpu_depthwise3x3_winograd(
     const at::Tensor& input,
     const at::Tensor& weight) const -> bool {
-#if defined(__ARM_NEON__)
-  // Currently only 3x3 depthwise convolutions on tensors of float are supported.
-  return (input.ndimension() == 4) &&
-         (input.size(1) == groups) &&
-         (weight.ndimension() == 4 ) &&
-         (weight.size(0) % input.size(1) == 0) &&
-         (weight.size(1) == 1) &&
-         (weight.size(2) == 3) &&
-         (weight.size(3) == 3) &&
-         (input.device().is_cpu()) &&
-         (input.scalar_type() == at::kFloat) &&
-         input.is_contiguous() &&
-         (weight.device().is_cpu()) &&
-         (weight.scalar_type() == at::kFloat) &&
-         weight.is_contiguous() &&
-         !is_strided() &&
-         !is_dilated() &&
-         !transposed;
-#else
+  // Disabling depthwise3x3_winograd because it has been producing incorrect results
+  // See: https://github.com/pytorch/pytorch/issues/85694
   return false;
-#endif
+// #if defined(__ARM_NEON__)
+//   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
+//   return (input.ndimension() == 4) &&
+//          (input.size(1) == groups) &&
+//          (weight.ndimension() == 4 ) &&
+//          (weight.size(0) % input.size(1) == 0) &&
+//          (weight.size(1) == 1) &&
+//          (weight.size(2) == 3) &&
+//          (weight.size(3) == 3) &&
+//          (input.device().is_cpu()) &&
+//          (input.scalar_type() == at::kFloat) &&
+//          input.is_contiguous() &&
+//          (weight.device().is_cpu()) &&
+//          (weight.scalar_type() == at::kFloat) &&
+//          weight.is_contiguous() &&
+//          !is_strided() &&
+//          !is_dilated() &&
+//          !transposed;
+// #else
+//   return false;
+// #endif
 }
 
 auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const -> bool {
@@ -1146,6 +1149,8 @@ ConvBackend select_conv_backend(
     return ConvBackend::Xnnpack2d;
   // 3x3 depthwith convolutions implementation is inference only
   } else if (!need_backward && params.use_cpu_depthwise3x3_winograd(input, weight)) {
+    // NB: this is actually always disabled at the moment (and we may want to completely
+    //     remove it in the future)
     return ConvBackend::Winograd3x3Depthwise;
   } else if (
       !params.transposed && (input.ndimension() == 5) &&
@@ -1432,6 +1437,9 @@ at::Tensor _convolution(
       output = at::slow_conv3d(input, weight, kernel_size, bias, params.stride, params.padding);
       break;
     case ConvBackend::Winograd3x3Depthwise:
+      // NB: this is actually always disabled at the moment (and we may want to completely
+      //     remove it in the future)
+      TORCH_INTERNAL_ASSERT(false);
       output = convolution_depthwise3x3_winograd_stub(
           input.device().type(), input, weight, bias, params.stride, params.padding, params.groups);
       break;
