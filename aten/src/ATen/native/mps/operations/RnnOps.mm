@@ -193,7 +193,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tensor& input
       Placeholder recurrentKernelWeight;
       Placeholder bias;
       Placeholder recurrentBias;
-      NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = [[NSMutableDictionary alloc] init];
+      NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = [[[NSMutableDictionary alloc] init] autorelease];
       for (size_t i = 0; i < num_layers; i+=1) {
           kernelWeight = Placeholder([kernelWeightsList objectAtIndex:i], kernel_weights[i]);
           recurrentKernelWeight = Placeholder([recurrentKernelWeightsList objectAtIndex:i], recurrent_kernel_weights[i]);
@@ -425,7 +425,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
         Placeholder gradientHyPlaceholder   = Placeholder(cachedGraph->inputTensors_[6], grad_hy);
         Placeholder gradientCyPlaceholder   = Placeholder(cachedGraph->inputTensors_[7], grad_cy);
 
-        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = [[NSMutableDictionary alloc] init];
+        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *feeds = [[[NSMutableDictionary alloc] init] autorelease];
         [feeds setObject:gradientPlaceholder.getMPSGraphTensorData() forKey:gradientPlaceholder.getMPSGraphTensor()];
         [feeds setObject:gradientHyPlaceholder.getMPSGraphTensorData() forKey:gradientHyPlaceholder.getMPSGraphTensor()];
         [feeds setObject:gradientCyPlaceholder.getMPSGraphTensorData() forKey:gradientCyPlaceholder.getMPSGraphTensor()];
@@ -469,7 +469,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
 
         std::vector<Tensor> grad_hx = {grad_state, grad_cell_state};
 
-        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [[NSMutableDictionary alloc] init];
+        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*> *results = [[[NSMutableDictionary alloc] init] autorelease];
         NSMutableArray<MPSGraphTensor*> *gradOutputArray = cachedGraph->gradOutput_;
         NSMutableArray<MPSGraphTensor*> *gradRecWeightsArray = cachedGraph->gradRecWeights_;
         NSMutableArray<MPSGraphTensor*> *gradWeightsArray = cachedGraph->gradWeights_;

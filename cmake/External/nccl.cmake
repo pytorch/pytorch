@@ -50,7 +50,6 @@ if(NOT __NCCL_INCLUDED)
         "BUILDDIR=${__NCCL_BUILD_DIR}"
         "VERBOSE=0"
       BUILD_BYPRODUCTS "${__NCCL_BUILD_DIR}/lib/libnccl_static.a"
-      PATCH_COMMAND "${CMAKE_CURRENT_LIST_DIR}/apply_nccl_patch.sh" "${PROJECT_SOURCE_DIR}"
       INSTALL_COMMAND ""
       )
 
