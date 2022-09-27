@@ -346,8 +346,6 @@ def _register_vjp(prim, vjp_impl):
             if vjp_impl is None:
                 raise RuntimeError(f"backwards not supported on prim {prim.name}")
 
-            # print(f"calling backward for prim {prim}")
-
             # TODO: use save for backward to save the args
             fw_tensorargs = iter(
                 ctx.saved_tensors[ctx.nout : ctx.nout + ctx.ntensorargs]
@@ -364,12 +362,7 @@ def _register_vjp(prim, vjp_impl):
                 (vjp_result,) if isinstance(vjp_result, torch.Tensor) else vjp_result
             )
 
-            # print(f"vjp_result: {vjp_result}")
-            # print(f"fw_args: {fw_args}")
-            # print len
             flat_args_kwargs, _ = tree_flatten((ctx.args, ctx.kwargs))
-            # print(f"len(vjp_result): {len(vjp_result)}")
-            # print(f"len(flat_args_kwargs): {len(flat_args_kwargs)}")
             assert len(vjp_result) == len(flat_args_kwargs)
 
             # Replace the output with None for each non-tensor argument
