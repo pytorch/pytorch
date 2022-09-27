@@ -225,6 +225,10 @@ std::vector<at::Tensor> cat_tensors_backward(
     const std::vector<std::vector<int64_t>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim);
+std::vector<at::Tensor> stack_tensors_backward(
+    const at::Tensor& grad,
+    int64_t dim,
+    const std::vector<ScalarType>& dtypes);
 std::vector<at::Tensor> block_diag_backward(
     const at::Tensor& grad,
     const std::vector<std::vector<int64_t>>& sizes,
@@ -731,16 +735,16 @@ Tensor gelu_double_backward(
 Tensor as_strided_backward(
     Tensor grad,
     TensorGeometry input_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset_);
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    optional<c10::SymInt> storage_offset_);
 Tensor as_strided_scatter_backward(
     Tensor grad,
     TensorGeometry input_geometry,
     TensorGeometry src_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset);
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    optional<c10::SymInt> storage_offset);
 std::tuple<Tensor, Tensor> atan2_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -951,7 +955,7 @@ Tensor convolution_backward_jvp_grad_bias(
     const Tensor& grad_out_t,
     const Tensor& grad_bias);
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim);
 Tensor block_diag_jvp(at::TensorList tensors);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
@@ -977,6 +981,17 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     bool transposed,
     int64_t groups,
     ::std::array<bool, 2> output_mask);
+
+Tensor scatter_reduce_jvp(
+    const Tensor& self_p,
+    const Tensor& self_t,
+    int dim,
+    const Tensor& index,
+    const Tensor& src_p,
+    const Tensor& src_t,
+    c10::string_view reduce,
+    bool include_self,
+    const Tensor& result);
 
 std::tuple<Tensor, Tensor> scatter_reduce_backward(
     const Tensor& grad,
