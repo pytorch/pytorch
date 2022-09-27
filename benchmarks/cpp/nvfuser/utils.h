@@ -36,8 +36,9 @@ TensorView* makeContigConcreteTensor(
     std::vector<int64_t> shape,
     DataType dtype = DataType::Float);
 
-std::string toString(ReductionParams rparams);
-std::string toString(PointwiseParams params);
+std::string toString(const ReductionParams& rparams);
+std::string toString(const PointwiseParams& params);
+std::string toString(const TransposeParams& params);
 std::string toString(const std::shared_ptr<HeuristicParams>& params);
 std::string toString(LaunchParams lparams);
 
