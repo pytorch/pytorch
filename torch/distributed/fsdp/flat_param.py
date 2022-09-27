@@ -857,12 +857,12 @@ class FlatParamHandle:
             device=self.device,
         )
         if flat_param.grad is None:
-            flat_param._saved_grad_shard = None
+            flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
             sharded_grad = torch.zeros_like(flat_param)  # type: ignore[attr-defined]
         else:
             self._check_sharded(flat_param.grad)
-            flat_param._saved_grad_shard = flat_param.grad
-            sharded_grad = flat_param._saved_grad_shard
+            flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
+            sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
         dist._all_gather_base(padded_unsharded_grad, sharded_grad, self.process_group)
         unsharded_size = self.flat_param._unpadded_unsharded_size
         flat_param.grad = padded_unsharded_grad[:unsharded_size.numel()].view(unsharded_size)
