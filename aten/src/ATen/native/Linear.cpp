@@ -228,7 +228,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   std::vector<std::vector<uint8_t>> op_labels(num_ops);
   bool ell_in_input = false;
   std::size_t curr_op = 0;
-  for (auto i = 0; i < lhs.length(); ++i) {
+  for (std::size_t i = 0; i < lhs.length(); ++i) {
     const unsigned char label = lhs[i];
     switch (label) {
       case ' ':
@@ -339,7 +339,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   } else {
     // Parse explicit output
     const auto rhs = equation.substr(arrow_pos + 2);
-    for (auto i = 0; i < rhs.length(); ++i) {
+    for (std::size_t i = 0; i < rhs.length(); ++i) {
       const unsigned char label = rhs[i];
       switch (label) {
         case ' ':
