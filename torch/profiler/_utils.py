@@ -1,11 +1,25 @@
 from collections import deque
 from dataclasses import dataclass
+import functools
 import re
 from typing import Dict, List
 
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent
+
+
+def _traverse(tree, next_fn, children_fn=lambda x: x.children, reverse: bool = False):
+    order = reversed if reverse else lambda x: x
+    remaining = deque(order(tree))
+    while remaining:
+        curr_event = next_fn(remaining)
+        yield curr_event
+        for child_event in order(children_fn(curr_event)):
+            remaining.append(child_event)
+
+traverse_dfs = functools.partial(_traverse, next_fn=lambda x: x.pop(), reverse=True)
+traverse_bfs = functools.partial(_traverse, next_fn=lambda x: x.popleft(), reverse=False)
 
 
 @dataclass

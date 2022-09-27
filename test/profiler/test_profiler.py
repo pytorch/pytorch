@@ -1569,8 +1569,46 @@ class MockProfilerEvent():
         object.__setattr__(self, "parent", parent)
         object.__setattr__(self, "children", children)
 
+class MockNode:
+    def __init__(self, name, children) -> None:
+        self.name = name
+        self.children = [MockNode(name, i) for name, i in children.items()]
+
 
 class TestExperimentalUtils(TestCase):
+
+    def make_tree(self) -> List[MockNode]:
+        tree = {
+            "root_0": {
+                "1": {
+                    "2": {}
+                },
+                "3": {
+                    "4": {},
+                    "5": {},
+                },
+            },
+            "root_1": {
+                "6": {},
+                "7": {},
+                "8": {
+                    "9": {
+                        "10": {}
+                    },
+                },
+            },
+        }
+        return [MockNode(name, i) for name, i in tree.items()]
+
+    def test_dfs(self) -> None:
+        self.assertEqual(
+            " ".join(i.name for i in _utils.traverse_dfs(self.make_tree())),
+            "root_0 1 2 3 4 5 root_1 6 7 8 9 10")
+
+    def test_bfs(self) -> None:
+        self.assertEqual(
+            " ".join(i.name for i in _utils.traverse_bfs(self.make_tree())),
+            "root_0 root_1 1 3 6 7 8 2 4 5 9 10")
 
     @staticmethod
     def generate_mock_profile():

@@ -8,7 +8,7 @@ from typing import Dict, List, Set
 import torch
 from torch.profiler import profile
 import torch.utils.benchmark as benchmark
-from torch.profiler._utils import index_of_first_match
+from torch.profiler._utils import index_of_first_match, traverse_bfs, traverse_dfs
 from torch._C._profiler import (_ProfilerEvent, _ExtraFields_TorchOp,
                                 _ExtraFields_PyCCall, _ExtraFields_PyCall,
                                 _EventType)
@@ -48,7 +48,7 @@ class Pattern:
         Traverse the event tree and yield all events.
         Override this method in subclass to customize the traversal.
         '''
-        yield from eventTreeDFS(self.event_tree)
+        yield from traverse_dfs(self.event_tree)
 
     def summary(self, events: List[_ProfilerEvent]):
         default_summary = f"{self.name}: {len(events)} events matched."
@@ -251,7 +251,7 @@ class ForLoopIndexingPattern(Pattern):
         '''
         We need to use BFS traversal order to avoid duplicate match.
         '''
-        yield from eventTreeBFS(self.event_tree)
+        yield from traverse_bfs(self.event_tree)
 
     def match(self, event: _ProfilerEvent):
         if event.name() != "aten::select":
@@ -461,7 +461,7 @@ class GradNotSetToNonePattern(Pattern):
         if not event.children:
             return False
 
-        for sub_event in eventTreeDFS(event.children):
+        for sub_event in traverse_dfs(event.children):
             if sub_event.name(
             ) == "aten::zero_" and sub_event.parent.name() != "aten::zeros":
                 return True
@@ -594,30 +594,6 @@ def input_shapes(event: _ProfilerEvent):
 def input_dtypes(event: _ProfilerEvent):
     assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
     return tuple(t for t in event.extra_fields.inputs.dtypes)
-
-
-def eventTreeDFS(event_tree: List[_ProfilerEvent]):
-    '''
-    Standard DFS traversal of the event tree.
-    '''
-    stack = deque(event_tree)
-    while stack:
-        curr_event = stack.pop()
-        yield curr_event
-        for child_event in curr_event.children:
-            stack.append(child_event)
-
-
-def eventTreeBFS(event_tree: List[_ProfilerEvent]):
-    '''
-    Standard BFS traversal of the event tree.
-    '''
-    stack = deque(event_tree)
-    while stack:
-        curr_event = stack.popleft()
-        yield curr_event
-        for child_event in curr_event.children:
-            stack.append(child_event)
 
 
 def report_all_anti_patterns(prof,
