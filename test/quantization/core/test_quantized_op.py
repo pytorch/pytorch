@@ -4759,7 +4759,7 @@ class TestQuantizedConv(TestCase):
             input_channels_per_group_list, output_channels_per_group_list,
             groups_list, kernel_list, stride_list, use_bias_list)
         for input_channels_per_group, output_channels_per_group, \
-            groups, kernel, stride, use_bias in test_cases:
+                groups, kernel, stride, use_bias in test_cases:
 
             input_channels = input_channels_per_group * groups
             output_channels = output_channels_per_group * groups
