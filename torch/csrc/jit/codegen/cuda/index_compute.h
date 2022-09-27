@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/reference_tensor.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <unordered_map>
@@ -135,9 +134,8 @@ class IndexCompute : public BackwardVisitor {
   // if there's an option
   std::unordered_set<IterDomain*> preferred_paths_;
 
-  // Map from IterDomains to halo-extended extents in corresponding
-  // reference tensor
-  std::unordered_map<IterDomain*, Val*> reference_halo_extent_map_;
+  // Map from IterDomains to halo-extended extents
+  std::unordered_map<IterDomain*, Val*> halo_extent_map_;
 
   // Temporary flag which tells IndexCompute to use concrete id's from the exact
   // map rather than the actual IDs used in the ID expressions.
@@ -189,7 +187,7 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_set<IterDomain*> zero_domains,
       std::unordered_set<IterDomain*> _zero_merged_in,
       std::unordered_set<IterDomain*> preferred_paths = {},
-      std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
+      std::unordered_map<IterDomain*, Val*> halo_extent_map = {});
 
   IndexCompute(
       const TensorDomain* _td,
@@ -199,7 +197,7 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_set<IterDomain*> _zero_merged_in,
       const ContigIDs& contig_finder,
       std::unordered_set<IterDomain*> preferred_paths = {},
-      std::unordered_map<IterDomain*, Val*> reference_halo_extent_map = {});
+      std::unordered_map<IterDomain*, Val*> halo_extent_map = {});
 
   // Entry point used for using concrete id based traversal. This traversal is
   // assumed to start at leaf IDs provided by initial_index_map.
@@ -214,9 +212,7 @@ class IndexCompute : public BackwardVisitor {
   IndexCompute updateIndexCompute(
       const TensorDomain* new_td,
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-      const ContigIDs& contig_finder,
-      const std::unordered_map<IterDomain*, Val*>& reference_halo_extent_map =
-          {}) const;
+      const ContigIDs& contig_finder) const;
 
   // Interface to run index traversal through loop indexing analysis result to
   // be used with the entry point for concrete id based traversal.
