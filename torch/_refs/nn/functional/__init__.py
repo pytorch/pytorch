@@ -428,7 +428,7 @@ def _nll_loss_nd(
     ignore_index: int,
 ) -> TensorLikeType:
     utils.check(
-        input.ndim < 4 and input.ndim != 3,
+        input.ndim <= 4 and input.ndim != 3,
         lambda: f"Expected input dimension to be either [1, 2, 4] but recieved {input.ndim}.",
     )
 
@@ -513,7 +513,7 @@ def nll_loss(
     # TODO Can input be zero or one dimension? If so, how do we interpret that?
     # The documentation for suggests that input should have at least two dimensions.
     # Why are inputs with three or four dimensions special?
-    if input.ndim < 4 and input.ndim != 3:
+    if input.ndim <= 4 and input.ndim != 3:
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
 
     # TODO Add comment for this case
@@ -523,7 +523,7 @@ def nll_loss(
     out_size = [batch_size] + list(input.shape[2:])
 
     utils.check(
-        target.shape[1:] != input.shape[2:],
+        target.shape[1:] == input.shape[2:],
         lambda: f"Expected target shape {out_size} but got {target.shape}",
     )
 
