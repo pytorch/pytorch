@@ -236,11 +236,11 @@ std::unique_ptr<Runtime> init_global_vulkan_runtime() {
 #endif /* USE_VULKAN_VOLK, USE_VULKAN_WRAPPER */
 
   const bool enableValidationMessages =
-#if defined(DEBUG)
+#if defined(VULKAN_DEBUG)
       true;
 #else
       false;
-#endif /* DEBUG */
+#endif /* VULKAN_DEBUG */
   const bool initDefaultDevice = true;
   const uint32_t numRequestedQueues = 1; // TODO: raise this value
 
