@@ -165,6 +165,11 @@ if HAS_SYMPY:
                 return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -392,6 +397,7 @@ class ShapeEnv(object):
         self.replacements[a] = self.replacements[a].xreplace(cur_replace)
         return self.replacements[a]
 
+    @lru_cache(256)
     def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
