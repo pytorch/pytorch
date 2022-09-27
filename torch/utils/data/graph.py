@@ -9,7 +9,7 @@ from torch.utils.data import IterDataPipe, MapDataPipe
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 
-__all__ = ["traverse"]
+__all__ = ["traverse", "traverse_dps"]
 
 DataPipe = Union[IterDataPipe, MapDataPipe]
 DataPipeGraph = Dict[int, Tuple[DataPipe, "DataPipeGraph"]]  # type: ignore[misc]
@@ -81,12 +81,33 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
     return captured_connections
 
 
+def traverse_dps(datapipe: DataPipe) -> DataPipeGraph:
+    r"""
+    Traverse the DataPipes and their attributes to extract the DataPipe graph.
+    This only looks into the attribute from each DataPipe that is either a
+    DataPipe and a Python collection object such as ``list``, ``tuple``,
+    ``set`` and ``dict``.
+
+    Args:
+        datapipe: the end DataPipe of the graph
+    Returns:
+        A graph represented as a nested dictionary, where keys are ids of DataPipe instances
+        and values are tuples of DataPipe instance and the sub-graph
+    """
+    cache: Set[int] = set()
+    return _traverse_helper(datapipe, only_datapipe=True, cache=cache)
+
+
 def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPipeGraph:
     r"""
-    Traverse the DataPipes and their attributes to extract the DataPipe graph. When
+    [Deprecated] Traverse the DataPipes and their attributes to extract the DataPipe graph. When
     ``only_dataPipe`` is specified as ``True``, it would only look into the attribute
     from each DataPipe that is either a DataPipe and a Python collection object such as
     ``list``, ``tuple``, ``set`` and ``dict``.
+
+    Note:
+        This function is deprecated. Please use `traverse_dps` instead.
+
     Args:
         datapipe: the end DataPipe of the graph
         only_datapipe: If ``False`` (default), all attributes of each DataPipe are traversed.
@@ -95,12 +116,12 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
         A graph represented as a nested dictionary, where keys are ids of DataPipe instances
         and values are tuples of DataPipe instance and the sub-graph
     """
-    if only_datapipe is not None:
-        msg = "`only_datapipe` is deprecated from `traverse` function and will be removed after 1.13."
-        if not only_datapipe:
-            msg += "And, default value will be changed to `only_datapipe=True`"
-        warnings.warn(msg, FutureWarning)
-    else:
+    msg = "`traverse` function and will be removed after 1.13. " \
+          "Please use `traverse_dps` instead."
+    if not only_datapipe:
+        msg += " And, the behavior will be changed to the equivalent of `only_datapipe=True`."
+    warnings.warn(msg, FutureWarning)
+    if only_datapipe is None:
         only_datapipe = False
     cache: Set[int] = set()
     return _traverse_helper(datapipe, only_datapipe, cache)
