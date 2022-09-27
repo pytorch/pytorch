@@ -434,6 +434,21 @@ def _lock():
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
             lf.close()
 
+@contextmanager
+def _rank_temp_file():
+    if dist.get_rank() == 0:
+        fd, name = tempfile.mkstemp()
+        os.close(fd)
+    else:
+        name = None
+    object_list = [name]
+    dist.broadcast_object_list(object_list)
+    name = object_list[0]
+    try:
+        yield name
+    finally:
+        if dist.get_rank() == 0:
+            os.remove(name)
 
 def _build_tensor(size, value=None, dtype=torch.float, device_id=None):
     if value is None:
@@ -5044,9 +5059,8 @@ class DistributedTest:
             loss.backward()
             optimizer.step()
 
-        def _test_post_localSGD_optimizer_step_reload(self, create_averager):
+        def _test_post_localSGD_optimizer_step_reload(self, create_averager, chkpt_file):
             learning_rate = 0.03
-            chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
 
             net_using_post_localSGD_opt = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(DDP_NET).cuda(),
@@ -5107,10 +5121,6 @@ class DistributedTest:
                 dummy_post_localSGD_opt.load_state_dict(checkpoint['optimizer_state_dict'])
 
             self.assertEqual(averager2.step, 0)
-
-            dist.barrier()
-            if self.rank == 0:
-                os.remove(chkpt_file)
 
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(
@@ -5175,9 +5185,11 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_step_reload(self):
             torch.cuda.set_device(self.rank)
-            self._test_post_localSGD_optimizer_step_reload(
-                self._create_periodic_model_averager
-            )
+            with _rank_temp_file() as tmp_file:
+                self._test_post_localSGD_optimizer_step_reload(
+                    self._create_periodic_model_averager,
+                    tmp_file
+                )
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
