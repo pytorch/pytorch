@@ -955,7 +955,7 @@ Tensor convolution_backward_jvp_grad_bias(
     const Tensor& grad_out_t,
     const Tensor& grad_bias);
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim);
 Tensor block_diag_jvp(at::TensorList tensors);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
