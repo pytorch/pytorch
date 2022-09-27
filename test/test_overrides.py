@@ -1300,6 +1300,30 @@ class TestTorchFunctionMode(TestCase):
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
 
+    def test_nested_modes_with_python_has_torch_function(self):
+        called = []
+
+        class A(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                called.append("A")
+                kwargs = {} if kwargs is None else kwargs
+                return func(*args, **kwargs)
+
+        class B(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                called.append("B")
+                kwargs = {} if kwargs is None else kwargs
+                return func(*args, **kwargs)
+
+        x = torch.randn(3, 4)
+        with A():
+            with B():
+                y = bar(x)
+
+        self.assertEqual(y, x)
+        self.assertEqual(called, ["B", "A"])
+
+
     def test_reentrant_mode_idiom(self):
         log = []
 
