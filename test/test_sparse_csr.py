@@ -577,10 +577,10 @@ class TestSparseCompressed(TestCase):
 
         # FIXME: remove in followup once integer support is landed for segment_reduce
         if (layout == torch.sparse_csr and not dtype.is_floating_point
-                and op.name in ('_masked.mean', '_masked.amax', '_masked.amin')):
+                and op.name in ('masked.mean', 'masked.amax', 'masked.amin')):
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
-        require_mask = isinstance(op, ReductionOpInfo) and '_masked.' in op.name
+        require_mask = isinstance(op, ReductionOpInfo) and 'masked.' in op.name
         if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
@@ -627,7 +627,7 @@ class TestSparseCompressed(TestCase):
             assert torch.is_tensor(output)
             strided_output = output.to_dense()
             if require_mask:
-                output_mask = torch._masked._output_mask(op.op, sample.input, **sample.kwargs)
+                output_mask = torch.masked._output_mask(op.op, sample.input, **sample.kwargs)
                 expected.masked_fill_(~output_mask, 0)
             self.assertEqual(strided_output, expected)
             count += 1
@@ -2018,7 +2018,11 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.to_dense(), out.to_dense())
             self.assertEqual(actual.to_dense(), expected)
 
-        mnk = itertools.product([2, 5], repeat=3)
+        mnk = list(itertools.product([2, 5], repeat=3))
+
+        # Add a test case for size 0 a and b tensors
+        mnk = mnk + [(5, 5, 0)]
+
         batch_shapes = [(), (2,), (2, 3)] if self.device_type == 'cuda' else [(), ]
         tf = [True, False]
         for index_dtype in [torch.int32, torch.int64]:
@@ -2627,29 +2631,49 @@ class TestSparseCSR(TestCase):
         that an exception is thrown for unsupported conversions.
         """
 
-        def _to_from_layout(layout_a, layout_b):
-            a = make_tensor((6, 10), dtype=torch.float, device=device)
-            expect_error = (layout_a in [torch.sparse_csc, torch.sparse_bsc]
-                            or layout_b in [torch.sparse_csc, torch.sparse_bsc])
-            expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_bsr)
-            expect_error = expect_error or (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr)
-            # CSC to CSR conversion is supported
-            if layout_a is torch.sparse_csc and layout_b is torch.sparse_csr:
+        allowed_pairwise_layouts_sets = {
+            frozenset({torch.sparse_csc}),
+            frozenset({torch.sparse_csr}),
+            frozenset({torch.sparse_csc, torch.sparse_csr}),
+            frozenset({torch.sparse_bsc}),
+            frozenset({torch.sparse_bsr}),
+            frozenset({torch.sparse_bsc, torch.sparse_bsr}),
+            frozenset({torch.sparse_csr, torch.sparse_bsr}),
+        }
+        block_layouts = (torch.sparse_bsr, torch.sparse_bsc)
+
+        def _to_from_layout(layout_a, layout_b, a):
+            expect_error = True
+            if {layout_a, layout_b} in allowed_pairwise_layouts_sets:
                 expect_error = False
-            # CSC to CSC conversion is supported
-            if layout_a is torch.sparse_csc and layout_b is torch.sparse_csc:
-                expect_error = False
+
+            # BSR -> CSR is not yet supported
+            if (layout_a, layout_b) == (torch.sparse_bsr, torch.sparse_csr):
+                expect_error = True
+            # CSR -> BSR only works for non-batched inputs
+            if (layout_a, layout_b) == (torch.sparse_csr, torch.sparse_bsr):
+                if a.dim() > 2:
+                    expect_error = True
+
+            b = self._convert_to_layout(a, layout_a)
             if expect_error:
                 with self.assertRaises(RuntimeError):
-                    b = self._convert_to_layout(a, layout_a)
                     self._convert_to_layout(b, layout_b)
             else:
-                b = self._convert_to_layout(a, layout_a)
                 c = self._convert_to_layout(b, layout_b)
-                if (layout_a is not torch.sparse_bsr and layout_b is not torch.sparse_bsr):
-                    self.assertEqual(a.to_dense(), c.to_dense())
+                self.assertEqual(a.to_dense(), c.to_dense())
 
-        _to_from_layout(from_layout, to_layout)
+                # change of blocksize upon conversion is not yet supported.
+                if b.layout in block_layouts:
+                    for block_layout in block_layouts:
+                        with self.assertRaisesRegex(RuntimeError, "blocksize does not match the blocksize"):
+                            self._convert_to_layout(b, block_layout, blocksize=3)
+
+        batch_dims = [(), (2,), (2, 2), (2, 2, 2)]
+        sparse_dims = (6, 12)
+        for batch_dim in batch_dims:
+            a = make_tensor(batch_dim + sparse_dims, dtype=torch.float, device=device)
+            _to_from_layout(from_layout, to_layout, a)
 
     @skipMeta
     @all_sparse_compressed_layouts()
