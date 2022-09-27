@@ -55,7 +55,7 @@ class EventKey:
         return self.event.id == other.event.id
 
     def __repr__(self):
-        return f"{self.event.name()}"
+        return f"{self.event.name}"
 
     def intervals_overlap(self, intervals: List[Interval]):
         overlap_time = 0
@@ -119,7 +119,7 @@ class BasicEvaluation:
                 stack.append(child_event)
             assert EventKey(
                 curr_event
-            ) not in self.metrics, f"Duplicate id: {curr_event.id}, {curr_event.name()}"
+            ) not in self.metrics, f"Duplicate id: {curr_event.id}, {curr_event.name}"
             self.metrics[EventKey(curr_event)] = EventMetrics(
                 self_time_ns=self_time)
             self.metrics[EventKey(
@@ -136,12 +136,11 @@ class BasicEvaluation:
 
         def is_cuda_launch_kernel(e):
             # TODO: find a better way to identify cudaLaunchKernel
-            return e.name() == "cudaLaunchKernel"
+            return e.name == "cudaLaunchKernel"
 
         def is_cuda_kernel(e):
             # TODO: find a better way to identify CUDA Kernel
-            return e.device_type() == DeviceType.CUDA and "mem" not in e.name(
-            ).lower()
+            return e.device_type() == DeviceType.CUDA and "mem" not in e.name.lower()
 
         cuda_launch_events = sorted(
             (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
@@ -340,9 +339,9 @@ def argmax(seq, key=lambda x: x, start=0, end=None):
 
 def source_code_location(event):
     while (event is not None):
-        match = re.search(r"\.py\(.*\)", event.name())
+        match = re.search(r"\.py\(.*\)", event.name)
         if (match is None):
             event = event.parent
             continue
-        return event.name()
+        return event.name
     return "No source code location found"

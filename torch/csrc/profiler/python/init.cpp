@@ -198,7 +198,7 @@ void initPythonBindings(PyObject* module) {
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
-      .def("name", &Result::name)
+      .def_property_readonly("name", &Result::name)
       .def_property_readonly("tag", &Result::tag)
       .def_readonly("extra_fields", &Result::extra_fields_)
       .def_property_readonly(

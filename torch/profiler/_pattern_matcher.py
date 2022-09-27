@@ -139,7 +139,7 @@ class NamePattern(Pattern):
         self.name = name
 
     def match(self, event: _ProfilerEvent):
-        return re.search(self.name, event.name()) is not None
+        return re.search(self.name, event.name) is not None
 
 
 class ExtraCUDACopyPattern(Pattern):
@@ -174,18 +174,18 @@ class ExtraCUDACopyPattern(Pattern):
 
     def match(self, event):
         # TODO: We should also check tensor identities
-        if event.name() != "aten::to":
+        if event.name != "aten::to":
             return False
         to_event = event
         if not event.children:
             return False
         event = event.children[-1]
-        if event.name() != "aten::_to_copy":
+        if event.name != "aten::_to_copy":
             return False
         if not event.children:
             return False
         event = event.children[-1]
-        if event.name() != "aten::copy_":
+        if event.name != "aten::copy_":
             return False
         # aten::copy_ should have the first 2 args dtype the same
         dtypes = input_dtypes(event)
@@ -205,9 +205,9 @@ class ExtraCUDACopyPattern(Pattern):
         while event.children:
             event = event.children[-1]
             # aten::zero_ is a special optimzation case where fill_ is not called
-            if event.name() in self.init_ops:
+            if event.name in self.init_ops:
                 return True
-        return event.name() in self.init_ops
+        return event.name in self.init_ops
         # TODO: Check if tensor is reused
 
     def benchmark(self, events: List[_ProfilerEvent]):
@@ -254,7 +254,7 @@ class ForLoopIndexingPattern(Pattern):
         yield from traverse_bfs(self.event_tree)
 
     def match(self, event: _ProfilerEvent):
-        if event.name() != "aten::select":
+        if event.name != "aten::select":
             return False
         if event.id in self.visited:
             return False
@@ -268,13 +268,13 @@ class ForLoopIndexingPattern(Pattern):
             if len(list1) != len(list2):
                 return False
             for op1, op2 in zip(list1, list2):
-                if op1.name() != op2.name():
+                if op1.name != op2.name:
                     return False
             return True
 
         # Record the ops between two aten::select
         next_select_idx = index_of_first_match(
-            next, lambda e: e.name() == "aten::select")
+            next, lambda e: e.name == "aten::select")
         if next_select_idx is None:
             return False
         indexing_ops = [event] + next[:next_select_idx]
@@ -311,7 +311,7 @@ class FP32MatMulPattern(Pattern):
         if event.tag != _EventType.TorchOp:
             return False
         assert isinstance(event.extra_fields, _ExtraFields_TorchOp)
-        if event.name() == "aten::mm":
+        if event.name == "aten::mm":
             if event.extra_fields.allow_tf32_cublas is False:
                 return True
         return False
@@ -370,7 +370,7 @@ class OptimizerSingleTensorPattern(Pattern):
 
     def match(self, event: _ProfilerEvent):
         for optimizer in self.optimizers_with_foreach:
-            if event.name().endswith(f"_single_tensor_{optimizer}"):
+            if event.name.endswith(f"_single_tensor_{optimizer}"):
                 return True
         return False
 
@@ -411,17 +411,17 @@ class SynchronizedDataLoaderPattern(Pattern):
                 os.path.join("torch", "utils", "data",
                              "dataloader.py")) and name.endswith(function_name)
 
-        if not is_dataloader_function(event.name(), "__iter__"):
+        if not is_dataloader_function(event.name, "__iter__"):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        if not is_dataloader_function(event.name(), "_get_iterator"):
+        if not is_dataloader_function(event.name, "_get_iterator"):
             return False
         if not event.children:
             return False
         event = event.children[0]
-        return not is_dataloader_function(event.name(),
+        return not is_dataloader_function(event.name,
                                           "check_worker_number_rationality")
         # TODO: We should also check if the loader is bottleneck.
 
@@ -456,14 +456,13 @@ class GradNotSetToNonePattern(Pattern):
             "#disable-gradient-calculation-for-validation-or-inference")
 
     def match(self, event: _ProfilerEvent):
-        if not event.name().endswith(": zero_grad"):
+        if not event.name.endswith(": zero_grad"):
             return False
         if not event.children:
             return False
 
         for sub_event in traverse_dfs(event.children):
-            if sub_event.name(
-            ) == "aten::zero_" and sub_event.parent.name() != "aten::zeros":
+            if sub_event.name == "aten::zero_" and sub_event.parent.name != "aten::zeros":
                 return True
         # TODO: We should also check if the optimizer's numerical behavior will change.
         return False
@@ -495,19 +494,19 @@ class Conv2dBiasFollowedByBatchNorm2dPattern(Pattern):
         return self.prof.record_shapes is False or super().skip
 
     def match(self, event: _ProfilerEvent):
-        if event.name() != "aten::conv2d":
+        if event.name != "aten::conv2d":
             return False
         if len(input_dtypes(event)) < 3 or input_dtypes(event)[2] == "":
             return False
         # This means bias=True
         event = self.go_up_until(
-            event, lambda e: e.name().startswith("nn.Module: Conv2d"))
+            event, lambda e: e.name.startswith("nn.Module: Conv2d"))
         if not event:
             return False
         event = self.next_of(event)
         if not event:
             return False
-        return event.name().startswith("nn.Module: BatchNorm2d")
+        return event.name.startswith("nn.Module: BatchNorm2d")
 
 
 class MatMulDimInFP16Pattern(Pattern):
@@ -528,7 +527,7 @@ class MatMulDimInFP16Pattern(Pattern):
             return all(dim % multiple == 0 for shape in shapes
                        for dim in shape[-2:])
 
-        if event.name() not in ("aten::mm", "aten::bmm", "aten::addmm"):
+        if event.name not in ("aten::mm", "aten::bmm", "aten::addmm"):
             return False
         if not input_dtypes(event):
             return False
