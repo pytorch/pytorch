@@ -445,10 +445,10 @@ class ShapeEnv(object):
         lhs = expr.lhs
         rhs = expr.rhs
         try:
-            solutions = sympy.solve(lhs - rhs, free[0])
-            if len(solutions) != 1 or not solutions[0] or "/" in str(solutions[0]):
+            solutions = sympy.solve(lhs - rhs, free[0], dict=True)
+            if len(solutions) != 1:
                 return
-            solution = solutions[0]
+            solution = solutions[0][free[0]]
             if all(t.is_integer for t in sympy.preorder_traversal(solution)):
                 new_var = self._find(solution)
                 self.replacements[cast(sympy.Symbol, free[0])] = new_var
