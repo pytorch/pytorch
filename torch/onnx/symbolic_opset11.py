@@ -952,15 +952,14 @@ def squeeze(g: torchscript.GraphContext, self, dim=None):
         const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
         cond = g.op("Equal", size, const_one)
         # create the "If" node and add the "then" and "else" blocks to it.
-        if_node_outputs = g.op("If", cond)
-        if_node = if_node_outputs.node()
-        if_block = utils._add_block(if_node)
-        squeeze_ = symbolic_helper._squeeze_helper(if_block, self, [dim])
-        utils._add_output_to_block(if_block, squeeze_)
-        else_block = utils._add_block(if_node)
-        identity_ = else_block.op("Identity", self)
-        utils._add_output_to_block(else_block, identity_)
-        return if_node_outputs
+        if_op, (if_context, else_context), _ = torchscript.add_op_with_blocks(
+            g, "If", cond, n_blocks=2
+        )
+        squeeze_ = symbolic_helper._squeeze_helper(if_context, self, [dim])
+        utils._add_output_to_block(if_context.block, squeeze_)
+        identity_ = else_context.op("Identity", self)
+        utils._add_output_to_block(else_context.block, identity_)
+        return if_op
 
     # For static input shape
     dim = adjusted_dim
@@ -1332,7 +1331,7 @@ def embedding_bag(
         raise RuntimeError("embedding_bag with padding_idx")
 
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
-    loop_condition = g.op("Cast", loop_condition, to_i=9)
+    loop_condition = g.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
     zero = g.op("Constant", value_t=torch.tensor([0]))
 
     indices_len = symbolic_helper._unsqueeze_helper(
@@ -1359,38 +1358,43 @@ def embedding_bag(
     loop_len = symbolic_helper._size_helper(
         g, offsets_ends, g.op("Constant", value_t=torch.tensor(0))
     )
-    loop = g.op("Loop", loop_len, loop_condition)
+
+    loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+        g, "Loop", loop_len, loop_condition, n_blocks=1
+    )
+    loop_block = loop_context.block
 
     # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
-    loop_block = utils._add_block(loop.node())
     block_input_iter = utils._add_input_to_block(loop_block)
     cond = utils._add_input_to_block(loop_block)
 
-    indices_start = loop_block.op("Gather", offsets_starts, block_input_iter, axis_i=0)
-    indices_end = loop_block.op("Gather", offsets_ends, block_input_iter, axis_i=0)
+    indices_start = loop_context.op(
+        "Gather", offsets_starts, block_input_iter, axis_i=0
+    )
+    indices_end = loop_context.op("Gather", offsets_ends, block_input_iter, axis_i=0)
     indices_start = symbolic_helper._unsqueeze_helper(loop_block, indices_start, [0])
     indices_end = symbolic_helper._unsqueeze_helper(loop_block, indices_end, [0])
 
-    indices_row = loop_block.op("Slice", indices, indices_start, indices_end, zero)
-    embeddings = loop_block.op("Gather", embedding_matrix, indices_row, axis_i=0)
+    indices_row = loop_context.op("Slice", indices, indices_start, indices_end, zero)
+    embeddings = loop_context.op("Gather", embedding_matrix, indices_row, axis_i=0)
     if not symbolic_helper._is_none(per_sample_weights):
-        per_sample_weights_row = loop_block.op(
+        per_sample_weights_row = loop_context.op(
             "Slice", per_sample_weights, indices_start, indices_end, zero
         )
         per_sample_weights_row = symbolic_helper._unsqueeze_helper(
             loop_block, per_sample_weights_row, [1]
         )
-        embeddings = loop_block.op("Mul", embeddings, per_sample_weights_row)
+        embeddings = loop_context.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
         embeddings = symbolic_helper._reducesum_helper(
             loop_block, embeddings, axes_i=[0], keepdims_i=0
         )
     elif mode == 1:
-        embeddings = loop_block.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
+        embeddings = loop_context.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
     else:
-        embeddings = loop_block.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
+        embeddings = loop_context.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-    cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+    cond_out = loop_context.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
     utils._add_output_to_block(loop_block, cond_out)
     utils._add_output_to_block(loop_block, embeddings)
 
