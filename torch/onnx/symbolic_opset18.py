@@ -48,12 +48,23 @@ def col2im(
     for pad in padding:
         for _ in range(2):
             adjusted_padding.append(pad)
+
+    num_dimensional_axis = symbolic_helper._get_tensor_sizes(output_size)[0]
+    if not adjusted_padding:
+        adjusted_padding = [0, 0] * num_dimensional_axis
+
+    if not dilation:
+        dilation = [1] * num_dimensional_axis
+
+    if not stride:
+        stride = [1] * num_dimensional_axis
+
     return g.op(
         "Col2Im",
         input,
         output_size,
         kernel_size,
         dilations_i=dilation,
-        padding_i=adjusted_padding,
+        pads_i=adjusted_padding,
         strides_i=stride,
     )

@@ -1186,8 +1186,9 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         self.assertEqual(onnx_model.graph.node[-1].domain, "")
         self.assertEqual(len(onnx_model.graph.node[-1].input), 3)
         self.assertEqual(onnx_model.graph.node[-1].attribute[0].name, "dilations")
-        self.assertEqual(onnx_model.graph.node[-1].attribute[1].name, "padding")
+        self.assertEqual(onnx_model.graph.node[-1].attribute[1].name, "pads")
         self.assertEqual(onnx_model.graph.node[-1].attribute[2].name, "strides")
+
 
 class TestQuantizeEagerONNXExport(common_utils.TestCase):
     def _test_lower_graph_impl(self, model, data):
@@ -1275,7 +1276,6 @@ class TestQuantizeEagerONNXExport(common_utils.TestCase):
                 if a.name == "value" and a.t.data_type == 11:
                     double_type_count += 1
         self.assertNotEqual(double_type_count, 0)
-
 
 
 if __name__ == "__main__":
