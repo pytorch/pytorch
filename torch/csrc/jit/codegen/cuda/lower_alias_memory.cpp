@@ -565,7 +565,7 @@ class BufferUseDefInfo {
             "Lower_alias_memory : dynamic sized register allocation");
         return;
       }
-      if (register_size.value() <= kRegisterSizeThreshold) {
+      if (register_size->as<int64_t>() <= kRegisterSizeThreshold) {
         should_try_alias = false;
       }
     }

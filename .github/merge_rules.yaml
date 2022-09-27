@@ -326,7 +326,17 @@
   - '*'
   approved_by:
   - pytorch/metamates
+  mandatory_checks_name:
+  - Facebook CLA Check
+  - Lint
+  - pull
+
+- name: Core Reviewers
+  patterns:
+  - '*'
+  approved_by:
   - mruberry
+  - lezcano
   mandatory_checks_name:
   - Facebook CLA Check
   - Lint
