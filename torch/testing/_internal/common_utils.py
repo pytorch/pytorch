@@ -1506,8 +1506,9 @@ class CudaMemoryLeakCheck():
                     driver_discrepancy = True
 
                 if not(caching_allocator_discrepancy or driver_discrepancy):
-                    # Leak was false positive
+                    # Leak was false positive, exit loop
                     discrepancy_detected = False
+                    break
 
             if not discrepancy_detected:
                 continue
