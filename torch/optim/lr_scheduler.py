@@ -1256,10 +1256,10 @@ class CyclicLR(_LRScheduler):
 
     def scale_fn(self, x):
         if self._scale_fn_custom is not None:
-           return self._scale_fn_custom(x)
+            return self._scale_fn_custom(x)
 
         else:
-           return self._scale_fn_ref()(x)
+            return self._scale_fn_ref()(x)
 
     def _triangular_scale_fn(self, x):
         return 1.
