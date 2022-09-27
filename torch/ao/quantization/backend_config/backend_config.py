@@ -73,10 +73,10 @@ class DTypeWithConstraints:
     ranges and scale value ranges, to be used in :class:`~torch.ao.quantization.backend_config.DTypeConfig`.
     """
     dtype: Optional[torch.dtype] = None
-    quant_min_lower_bound: Optional[Union[int, float]] = None
-    quant_max_upper_bound: Optional[Union[int, float]] = None
-    scale_min_lower_bound: Optional[Union[int, float]] = None
-    scale_max_upper_bound: Optional[Union[int, float]] = None
+    quant_min_lower_bound: Union[int, float, None] = None
+    quant_max_upper_bound: Union[int, float, None] = None
+    scale_min_lower_bound: Union[int, float, None] = None
+    scale_max_upper_bound: Union[int, float, None] = None
 
 
 @dataclass
