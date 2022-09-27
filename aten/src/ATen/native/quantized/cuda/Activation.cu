@@ -2,6 +2,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/cuda/CUDAContext.h>
 
 namespace at {
 namespace native {
