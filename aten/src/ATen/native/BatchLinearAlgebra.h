@@ -231,10 +231,6 @@ using cholesky_inverse_fn = Tensor& (*)(Tensor& /*result*/, Tensor& /*infos*/, b
 
 DECLARE_DISPATCH(cholesky_inverse_fn, cholesky_inverse_stub);
 
-using eig_fn = std::tuple<Tensor, Tensor> (*)(const Tensor&, bool&);
-
-DECLARE_DISPATCH(eig_fn, eig_stub);
-
 using linalg_eig_fn = void (*)(Tensor& /*eigenvalues*/, Tensor& /*eigenvectors*/, Tensor& /*infos*/, const Tensor& /*input*/, bool /*compute_eigenvectors*/);
 
 DECLARE_DISPATCH(linalg_eig_fn, linalg_eig_stub);
