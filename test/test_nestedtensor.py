@@ -603,6 +603,9 @@ class TestNestedTensorDeviceType(TestCase):
 
     @dtypes(*floating_types_and_half())
     def test_nested_tensor_chunk(self, device, dtype):
+        # These tests will fail for a build with debug=0 because
+        # the storage is not aliasing. We explicitly make new NestedTensors that do not share
+        # Storage with the the input self.
         # transformer case
         a = torch.randn(3, 3 * 4, device=device, dtype=dtype)
         b = torch.randn(2, 3 * 4, device=device, dtype=dtype)
