@@ -65,11 +65,7 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self.inner
 
 def has_symbolic_sizes_strides(elem):
-    return (
-        any([isinstance(i, torch.SymIntNode) for i in elem.shape])
-        or any([isinstance(i, torch.SymIntNode) for i in elem.stride()])
-        or isinstance(elem.storage_offset(), torch.SymIntNode)
-    )
+    return elem._has_symbolic_sizes_strides
 
 def create_contiguous(shape):
     strides = [1]
