@@ -2221,17 +2221,16 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
 
 def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
     """
-    All ranks gather tensors from all other ranks and put them into a single
-    output tensor.
+    Gather tensors from all ranks and put them in a single output tensor.
 
     Args:
         output_tensor (Tensor): Output tensor to accommodate tensor elements
-            from all ranks. It must be correctly sized and have one of the
+            from all ranks. It must be correctly sized to have one of the
             following forms:
             (i) a concatenation of all the input tensors along the primary
-            dimension, see ``torch.cat()``;
-            (ii) a stack of all the input tensors along the primary dimension,
-            see ``torch.stack()``.
+            dimension; for definition of "concatenation", see ``torch.cat()``;
+            (ii) a stack of all the input tensors along the primary dimension;
+            for definition of "stack", see ``torch.stack()``.
             Examples below may better explain the supported output forms.
         input_tensor (Tensor): Tensor to be gathered from current rank.
             Different from the ``all_gather`` API, the input tensors in this
