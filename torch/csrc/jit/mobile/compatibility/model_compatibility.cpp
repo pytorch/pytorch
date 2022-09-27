@@ -309,7 +309,7 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
     std::vector<std::string> type_name_list;
     for (const auto& type_definition : type_table) {
       std::unordered_set<std::string> type_tokens;
-      std::string type_name = type_definition.toString()->string();
+      std::string type_name = type_definition.toStringRef();
       type_name_list.emplace_back(type_name);
     }
     at::TypeParser parser(type_name_list);
