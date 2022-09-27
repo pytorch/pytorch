@@ -7922,6 +7922,9 @@ class TestConsistency(TestCase):
             'clamp': ['torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
             'clamp_max': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
             'clamp_min': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
+            'logical_and': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
+            'logical_or': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
+            'logical_xor': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
         }
 
     # These ops that are problematic. So never run them even when
@@ -8049,9 +8052,6 @@ class TestConsistency(TestCase):
         'log1p': ['torch.bool', 'torch.int16', 'torch.int32', 'torch.uint8'], 
         'log2': ['torch.bool'], 
         'log': ['torch.bool'], 
-        'logical_and': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
-        'logical_or': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
-        'logical_xor': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
         'logsumexp': ['torch.bool', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'], 
         'matmul': ['torch.uint8'], 
         'mean': ['torch.float16', 'torch.float32'], 

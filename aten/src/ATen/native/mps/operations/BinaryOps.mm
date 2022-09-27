@@ -28,10 +28,6 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
                     const Tensor& output_, std::string op_name, BinaryOpBlock binaryBlock)
 {
 
-  // it's possible to receive empty tensors here
-  if (self.numel() == 0 || other.numel() == 0) {
-    return;
-  }
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
@@ -40,6 +36,11 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
   auto new_size = at::infer_size(self.sizes(), other.sizes());
   if (!output_.sizes().equals(new_size)) {
       output_.resize_(new_size);
+  }
+
+  // it's possible to receive empty tensors here
+  if (self.numel() == 0 || other.numel() == 0) {
+    return;
   }
 
   Tensor output = output_;
