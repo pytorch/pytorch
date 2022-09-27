@@ -1,6 +1,7 @@
 #include <c10/util/Exception.h>
 #include <ATen/ATen.h>
 #include <ATen/Functions.h>
+#include <ATen/cuda/CUDAContext.h>
 
 namespace at {
 namespace native {
