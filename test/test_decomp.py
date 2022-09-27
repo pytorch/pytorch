@@ -516,13 +516,5 @@ class TestDecomp(TestCase):
 
 instantiate_device_type_tests(TestDecomp, globals())
 
-# input=torch.tensor([[[1,2,3],[4,5,6]],[[7,8,9],[10,11,12]]])
-# def slicer(input, dim=0, start=None, end=None, step=1):
-#     out = torch.ops.aten.slice(input, dim, start, end, step)
-#     print(f"slice dim={dim}, start={start}, end={end}, step={step}")
-#     print(f"input: size {list(input.size())}, stride {input.stride()}, offset {input.storage_offset()}")
-#     print(f"outpt: size {list(out.size())}, stride {out.stride()}, offset {out.storage_offset()}")
-
-
 if __name__ == "__main__":
     run_tests()
