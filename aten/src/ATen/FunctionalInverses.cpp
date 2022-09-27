@@ -172,9 +172,9 @@ Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Ten
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, step);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, step);
 }
 
 Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, int64_t split_size, int64_t dim) {

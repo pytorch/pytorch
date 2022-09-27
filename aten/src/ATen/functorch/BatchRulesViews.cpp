@@ -346,13 +346,13 @@ std::tuple<Tensor,optional<int64_t>> slice_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step) {
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
+    c10::SymInt step) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   dim = getPhysicalDim(self, self_bdim.has_value(), dim);
 
-  auto result = self_.slice(dim, start, end, step);
+  auto result = self_.slice_symint(dim, start, end, step);
   return std::make_tuple(result, 0);
 }
 
@@ -415,14 +415,14 @@ std::tuple<Tensor,optional<int64_t>> select_backward_batch_rule(
 
 std::tuple<Tensor,optional<int64_t>> slice_backward_batch_rule(
     const Tensor& grad_input, optional<int64_t> grad_input_bdim,
-    IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+    SymIntArrayRef input_sizes, int64_t dim, c10::SymInt start, c10::SymInt end, c10::SymInt step) {
   auto logical_rank = rankWithoutBatchDim(grad_input, grad_input_bdim);
   auto grad_input_ = moveBatchDimToFront(grad_input, grad_input_bdim);
   dim = maybe_wrap_dim(dim, logical_rank) + 1;
-  c10::SmallBuffer<int64_t, 5> input_sizes_(input_sizes.size() + 1);
+  c10::SymDimVector input_sizes_(input_sizes.size() + 1);
   input_sizes_[0] = grad_input_.size(0);
   std::copy(input_sizes.begin(), input_sizes.end(), input_sizes_.begin() + 1);
-  auto result = at::slice_backward(grad_input_, input_sizes_, dim, start, end, step);
+  auto result = at::slice_backward_symint(grad_input_, input_sizes_, dim, start, end, step);
   return std::make_tuple(std::move(result), 0);
 }
 
