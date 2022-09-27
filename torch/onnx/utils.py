@@ -1803,10 +1803,6 @@ def _run_symbolic_function(
             attrs = {
                 k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
             }
-            # PythonOp symbolic need access to the node to resolve the name conflict,
-            # this is inconsistent with regular op symbolic.
-            if op_name == "PythonOp":
-                inputs = (node, *inputs)
             return dispatch.symbolics(symbolic_function_name)(
                 graph_context, *inputs, **attrs
             )
