@@ -2421,7 +2421,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call strides on a tensor with symbolic shapes/strides");
@@ -2480,7 +2480,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call sizes on a tensor with symbolic shapes/strides");
@@ -2511,7 +2511,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_sizes_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`
@@ -2574,7 +2574,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call numel on a tensor with symbolic shapes/strides");
@@ -2600,7 +2600,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_storage_offset_default();
   }
   return torch::is_symint_node(out)
@@ -2624,7 +2624,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_strides_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`
