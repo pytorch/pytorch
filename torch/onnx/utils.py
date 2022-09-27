@@ -1717,7 +1717,7 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
         # TODO(justinchuby): Update the module name of GraphContext when it is public
         warnings.warn(
             "The first argument to symbolic functions is deprecated in 1.13 and will be "
-            "removed in 1.14. Please annotate the first argument as GraphContext "
+            "removed in the future. Please annotate treat the first argument (g) as GraphContext "
             "and use context information from the object instead.",
             category=FutureWarning,
         )
