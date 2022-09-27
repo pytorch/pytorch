@@ -209,9 +209,6 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     any_unsupported = any(
         not supported_ops.is_node_supported(None, node) for node in call_function_nodes
     )
-    print(func)
-    print(list(filter(lambda n: n.op == "call_function", gm.graph.nodes)))
-    print(any_unsupported)
     return any_unsupported
 
 
