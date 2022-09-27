@@ -742,7 +742,7 @@ class TestDecomp(TestCase):
         op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
 
         def fn0(*arg):
-            return _is_func_unsupported_nvfuser(mode, op, arg, {})
+            return _is_func_unsupported_nvfuser(TorchRefsNvfuserCapabilityMode(), op, arg, {})
 
         def fn1(x):
             x = x * 2
@@ -750,8 +750,8 @@ class TestDecomp(TestCase):
             x = x * 2
             return x
 
-        with TorchRefsNvfuserCapabilityMode() as mode:
-            self.assertFalse(fn0(x, y, 0.3, False))
+        self.assertFalse(fn0(x, y, 0.3, False))
+        with TorchRefsNvfuserCapabilityMode():
 
             # Autocast context has C++ level ATen calls that are hidden from
             # TorchRefsNvfuserCapabilityMode that works only on Python level.
