@@ -230,32 +230,6 @@ for method, func in magic_methods.items():
 del method
 del func
 
-for method, _func in magic_methods.items():
-    if method not in float_magic_methods:
-        continue
-
-    def _create_magic_impl(func):
-        method_name = method
-
-        def magic_impl(self, other):
-            if SYM_FUNCTION_MODE:
-                return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
-            if isinstance(other, PySymFloat):
-                other = other.expr
-            # TODO: consider constant prop here
-            expr = self.shape_env.replace(self.expr)
-            other = self.shape_env.replace(other)
-            out = func(expr, other)
-            out = sympy.expand(out)
-            return PySymFloat(out, self.shape_env)
-        return magic_impl
-
-    _func = lru_cache(256)(_func)
-    setattr(PySymFloat, method, _create_magic_impl(_func))
-    setattr(PySymFloat, f"__{method}__", _create_magic_impl(_func))
-    if method in reflectable_magic_methods:
-        setattr(PySymFloat, f"__r{method}__", _create_magic_impl(_func))
-
 def _lru_cache(fn, maxsize=None):
     """
     Wrapper around lru_cache that clears when new info about shapes has been
