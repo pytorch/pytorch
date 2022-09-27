@@ -486,7 +486,7 @@ void block_sparse_mm(
   // especially for not very sparse inputs.
   if (mat1.scalar_type() == ScalarType::Half || mat1.scalar_type() == ScalarType::BFloat16) {
     at::native::sparse::impl::_compressed_row_strided_addmm_out(
-        mat1, // ignored when beta == 0
+        at::empty({1}, result.options()), // ignored when beta == 0
         mat1,
         mat2,
         /*beta=*/0.,

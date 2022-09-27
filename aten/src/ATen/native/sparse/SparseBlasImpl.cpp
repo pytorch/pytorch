@@ -10,6 +10,7 @@
 #include <ATen/Operators.h>
 #else
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 namespace at {
@@ -161,18 +162,28 @@ Tensor& _compressed_row_strided_addmm_out(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // Process alpha
-  if (alpha.toComplexDouble() == 0.) {
-    // Assume that result is of correct shape already.
-    result.zero_();
-  }
-  else {
+  // If result is not the same as self, it could always be used as out argument to mm.
+  if (!result.is_same(self)) {
     _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
-  }
 
-  // Process beta
-  if (beta.toComplexDouble() != 0.) {
-    result.add_(self.mul(beta));
+    // Process beta
+    if (beta.toComplexDouble() != 0.) {
+      result.add_(self.mul(beta));
+    }
+  }
+  // Otherwise we need to allocate external memory for mm if beta != 0.
+  else {
+    // Process beta
+    if (beta.toComplexDouble() != 0.) {
+      result.mul_(beta);
+      auto mm = at::empty_like(result);
+      _compressed_row_strided_mm_out(mat1, mat2, mm);
+      mm.mul_(alpha);
+      result.copy_(mm);
+    }
+    else {
+      _compressed_row_strided_mm_out(mat1, mat2, result).mul_(alpha);
+    }
   }
 
   return result;
