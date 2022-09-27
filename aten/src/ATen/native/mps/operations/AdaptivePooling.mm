@@ -19,7 +19,7 @@ void set_kernel_params
    int64_t &strideH, int64_t &strideW,
    int64_t &kernel_sizeH, int64_t &kernel_sizeW) {
 
-  TORCH_CHECK((isizeH >= osizeH && isizeW >= osizeW) || (isizeH <= osizeH && isizeW <= osizeW), 
+  TORCH_CHECK((isizeH >= osizeH && isizeW >= osizeW) || (isizeH <= osizeH && isizeW <= osizeW),
               "Adaptive pool MPS: Input height and width must both be greather than or equal to, or lesser than, output height and width")
 
   TORCH_CHECK((!(isizeH <= osizeH && isizeW <= osizeW) || (osizeH % isizeH == 0 && osizeW % isizeW == 0)),
@@ -37,7 +37,7 @@ void set_kernel_params
     strideW = (int64_t) (osizeW / isizeW);
 
     kernel_sizeH = osizeH - (isizeH-1) * strideH;
-    kernel_sizeW = osizeW - (isizeW-1) * strideW; 
+    kernel_sizeW = osizeW - (isizeW-1) * strideW;
   }
 
 }
@@ -95,9 +95,7 @@ Tensor& adaptive_avg_pool2d_out_mps
                              false,
                              true,
                              c10::nullopt);
-  }
-
-  else {
+  }  else {
     Tensor phony_grad = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto num_input_dims = input.sizes().size();
     int64_t phony_shape[num_input_dims];
@@ -179,7 +177,6 @@ Tensor adaptive_avg_pool2d_backward_mps
                       kernel_sizeH, kernel_sizeW);
     auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     if (gradInput.numel() != 0) {
-
       if(isizeH >= osizeH) {
         gradInput = at::avg_pool2d_backward(gradOutput,
                                             input,
@@ -189,8 +186,7 @@ Tensor adaptive_avg_pool2d_backward_mps
                                             false,
                                             true,
                                             c10::nullopt);
-      }
-      else {
+      } else {
         gradInput = at::avg_pool2d(gradOutput,
                                    IntArrayRef({kernel_sizeH, kernel_sizeW}),
                                    IntArrayRef({strideH, strideW}),
@@ -200,7 +196,6 @@ Tensor adaptive_avg_pool2d_backward_mps
                                    c10::nullopt);
         gradInput = at::mul(gradInput, kernel_sizeH*kernel_sizeW);
       }
-
     }
 
     return gradInput;
