@@ -160,24 +160,33 @@ Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
 
 Tensor restore_reduced_dims(
     const Tensor& output,
-    IntArrayRef dims,
+    at::OptionalIntArrayRef opt_dims,
     bool keepdim) {
   if (keepdim) {
     return output;
   }
-  int64_t total_dims = output.dim() + dims.size();
-  std::vector<int64_t> target_shape(total_dims, 0);
-  for (int64_t i : dims) {
-    if (i < 0) {
-      i = total_dims + i;
-    }
-    target_shape[i] = 1;
+  int64_t total_dims;
+
+  if (opt_dims.has_value()) {
+    total_dims = output.dim() + opt_dims.value().size();
+  } else {
+    total_dims = 0;
   }
-  int64_t j = 0;
-  for (int64_t i : output.sizes()) {
-    while (target_shape[j] > 0)
-      j++;
-    target_shape[j++] = i;
+  std::vector<int64_t> target_shape(total_dims, 0);
+  if (opt_dims.has_value()) {
+    IntArrayRef dims = opt_dims.value();
+    for (int64_t i : dims) {
+      if (i < 0) {
+        i = total_dims + i;
+      }
+      target_shape[i] = 1;
+    }
+    int64_t j = 0;
+    for (int64_t i : output.sizes()) {
+      while (target_shape[j] > 0)
+        j++;
+      target_shape[j++] = i;
+    }
   }
   return output.reshape(target_shape);
 }
@@ -185,7 +194,7 @@ Tensor restore_reduced_dims(
 Tensor scale_grad_by_count(
     const Tensor& grad,
     const Tensor& mask,
-    IntArrayRef dims) {
+    at::OptionalIntArrayRef dims) {
   return (grad / mask.sum(dims, true)) * mask;
 }
 
@@ -193,7 +202,7 @@ Tensor amaxamin_jvp(
     const Tensor& x,
     const Tensor& dx,
     const Tensor& result,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim) {
   auto mask = x == restore_reduced_dims(result, dim, keepdim);
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
@@ -228,7 +237,7 @@ Tensor norm_backward(
     const Tensor& self,
     const optional<Scalar>& p_,
     Tensor norm,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim) {
   // NB: We mask fill the NaNs in the output to be zero but still do float
   // division
@@ -282,7 +291,7 @@ Tensor norm_jvp(
     const Tensor& self_t,
     const optional<Scalar>& p_,
     Tensor norm,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim) {
   // NB: currently norm_jvp is also reused for dist's jvp (which haas two
   // differentiable inputs)
