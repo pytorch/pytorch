@@ -132,6 +132,12 @@ def _unflatten_optim_state(
         if to_save or shard_state
         else []
     )
+    if to_save:
+        for optim_state in unflat_param_state:
+            for key in list(optim_state.keys()):
+                state = optim_state[key]
+                if isinstance(state, torch.Tensor):
+                    optim_state[key] = state.cpu()
     return unflat_param_state
 
 
@@ -170,7 +176,6 @@ def _communicate_optim_state(
     )
     group = fsdp_module.process_group
 
-    tensor_buffer = None  # initialize lazily in case it is not needed
     for state_name, value in sorted_items(flat_param_state):
         # Positive-dimension tensor state: communicate across ranks
         if torch.is_tensor(value) and value.dim() > 0:
@@ -181,25 +186,24 @@ def _communicate_optim_state(
                 fsdp_module.world_size == 1
                 or fsdp_module.sharding_strategy == FSDP.ShardingStrategy.NO_SHARD
             ):
-                tensor_state[state_name] = value.cpu()
+                tensor_state[state_name] = value
                 continue
             if not value.is_cuda:
                 value = value.to(fsdp_module.compute_device)
-            if tensor_buffer is None:
-                # Assume that positive-dimension tensor optimizer state
-                # has the same shape as the sharded flattened parameter
-                buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
-                tensor_buffer = value.new_zeros(*buffer_size)
+            # Assume that positive-dimension tensor optimizer state
+            # has the same shape as the sharded flattened parameter
+            buffer_size = flat_param._full_param_padded.size()  # type: ignore[attr-defined]
+            tensor_buffer = value.new_zeros(*buffer_size)
             dist._all_gather_base(tensor_buffer, value, group=group)
             torch.cuda.synchronize()
             if to_save:
                 unpadded_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
-                tensor_state[state_name] = tensor_buffer[:unpadded_numel].cpu()
+                tensor_state[state_name] = tensor_buffer[:unpadded_numel]
         # Zero-dimension tensor state and non-tensor state: take this rank's
         # value directly
         elif to_save:
             if _is_zero_dim_tensor(value):
-                zero_dim_tensor_state[state_name] = value.cpu()
+                zero_dim_tensor_state[state_name] = value
             else:
                 non_tensor_state[state_name] = value
     return state
