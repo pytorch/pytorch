@@ -10,15 +10,6 @@ import torch._prims_common as utils
 prims = torch.ops.prims
 
 
-# add dimensions in canonicalized, sorted order
-# so that the tensor has the appropriate rank.
-def _unsqueeze_dims(a, dims, rank):
-    dims = utils.canonicalize_dims(rank, dims)
-    for dim in sorted(dims):
-        a = torch._refs.unsqueeze(a, dim)
-    return a
-
-
 def _dim_size(a, dims):
     dims = utils.canonicalize_dims(a.ndim, dims)
     reduction_size = 1
@@ -31,7 +22,7 @@ def _dim_size(a, dims):
 def _restore_reduced_dims(a, dims, shape):
     if a.size() == shape:
         return a
-    unsqueezed_a = _unsqueeze_dims(a, dims, len(shape))
+    unsqueezed_a = torch._prims.expand_dims(a, dims, len(shape))
     return torch._refs.expand(unsqueezed_a, shape)
 
 
@@ -80,7 +71,7 @@ def _broadcast_in_dim_vjp(grad, result, self, shape, broadcast_dimensions):
 
 
 def _squeeze_vjp(grad, result, self, dims):
-    return _unsqueeze_dims(grad, dims, self.ndim), *(None,) * len(dims)
+    return torch._prims.expand_dims(grad, dims, self.ndim), *(None,) * len(dims)
 
 
 def _transpose_vjp(grad, result, self, permutation):
