@@ -39,7 +39,7 @@
 #include <type_traits>
 #include <utility>
 
-#include <c10/utils/C++17.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
