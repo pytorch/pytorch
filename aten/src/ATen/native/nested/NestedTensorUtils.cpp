@@ -57,6 +57,35 @@ int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
       nt.get_nested_size_tensor().select(1, -1));
   return *last_dim;
 }
+
+std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int64_t dim) {
+  int64_t ndim = self.dim();
+  if (ndim == 0) {
+    TORCH_CHECK_INDEX(false, "chunk() cannot be applied to a 0-dim tensor.");
+  }
+  dim = maybe_wrap_dim(dim, ndim);
+  TORCH_CHECK(self.dim() - 1 == dim,
+           "Chunk for nested tensors is currently only supported for the last dimension.");
+  TORCH_CHECK(chunks > 0,"chunk expects `chunks` to be greater than 0, got: ", chunks);
+  TORCH_CHECK(self.is_contiguous(), "chunk expects `self` to be contiguous.");
+  auto self_impl = get_nested_tensor_impl(self);
+  auto last_dim = get_consistent_last_dim_of_nested_tensor(*self_impl);
+  TORCH_CHECK(last_dim % chunks == 0,
+           "Chunk for nested tensors is only supported for nested tensors with trailing dimension divisible by chunks, got: ",
+           last_dim, " % ", chunks, " != 0");
+  std::vector<Tensor> buffers = get_buffer(self).view({-1, last_dim}).chunk(chunks, -1);
+  int64_t new_last_size = buffers[0].size(-1);
+  for(auto& t : buffers) {
+    t = t.contiguous().view({-1});
+  }
+  std::vector<Tensor> results;
+  for (auto& buffer : buffers) {
+    auto nt_chunk_size = self_impl->get_nested_size_tensor().clone().index_put_({at::indexing::Slice(), -1}, new_last_size);
+    results.push_back(wrap_buffer(buffer, nt_chunk_size));
+  }
+  return results;
+}
+
 std::vector<IntArrayRef> NestedTensor_get_sizes(
     const NestedTensorImpl* self_ptr) {
   int64_t ntensors = self_ptr->size(0);
