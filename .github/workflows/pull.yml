@@ -88,26 +88,6 @@ jobs:
       docker-image: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_7-clang7-asan-build.outputs.test-matrix }}
 
-  linux-focal-py3_7-clang7-tsan-build:
-    name: linux-focal-py3.7-clang7-tsan
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-focal-py3.7-clang7-tsan
-      docker-image-name: pytorch-linux-focal-py3-clang7-tsan
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-
-  linux-focal-py3_7-clang7-tsan-test:
-    name: linux-focal-py3.7-clang7-tsan
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-py3_7-clang7-tsan-build
-    with:
-      build-environment: linux-focal-py3.7-clang7-tsan
-      docker-image: ${{ needs.linux-focal-py3_7-clang7-tsan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_7-clang7-tsan-build.outputs.test-matrix }}
-
   linux-focal-py3_7-clang10-onnx-build:
     name: linux-focal-py3.7-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
