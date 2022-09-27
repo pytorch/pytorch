@@ -417,6 +417,8 @@ Collective functions
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_into_tensor
+
 .. autofunction:: all_gather_object
 
 .. autofunction:: gather
