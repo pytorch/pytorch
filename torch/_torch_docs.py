@@ -11927,14 +11927,14 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
     )
 
 Args:
-    input (Tensor): the input value(s), in ``torch.float32``.
-    scale (double or Tensor): quantization scale
-    zero_point (int64 or Tensor): quantization zero_point
+    input (Tensor): the input value(s), ``torch.float32`` tensor
+    scale (double scalar or ``float32`` Tensor): quantization scale
+    zero_point (int64 scalar or ``int32`` Tensor): quantization zero_point
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
 Returns:
-    Tensor: A newly fake_quantized tensor
+    Tensor: A newly fake_quantized ``torch.float32`` tensor
 
 Example::
 
@@ -11966,15 +11966,15 @@ Returns a new tensor with the data in :attr:`input` fake quantized per channel u
     )
 
 Args:
-    input (Tensor): the input value(s), in ``torch.float32``.
-    scale (Tensor): quantization scale, per channel
-    zero_point (Tensor): quantization zero_point, per channel
+    input (Tensor): the input value(s), in ``torch.float32``
+    scale (Tensor): quantization scale, per channel in ``torch.float32``
+    zero_point (Tensor): quantization zero_point, per channel in ``torch.int32`` or ``torch.half`` or ``torch.float32``
     axis (int32): channel axis
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
 Returns:
-    Tensor: A newly fake_quantized per channel tensor
+    Tensor: A newly fake_quantized per channel ``torch.float32`` tensor
 
 Example::
 
@@ -11988,7 +11988,7 @@ Example::
     >>> scales = (torch.randn(2) + 1) * 0.05
     >>> scales
     tensor([0.0475, 0.0486])
-    >>> zero_points = torch.zeros(2).to(torch.long)
+    >>> zero_points = torch.zeros(2).to(torch.int32)
     >>> zero_points
     tensor([0, 0])
     >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
