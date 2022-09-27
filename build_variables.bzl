@@ -1412,6 +1412,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseFactories.cpp",
     "aten/src/ATen/native/sparse/ValidateCompressedIndicesKernel.cpp",
+    "aten/src/ATen/native/sparse/SparseBinaryOpIntersectionKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
@@ -1460,6 +1461,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
+    "aten/src/ATen/native/transformers/cuda/flash_attn/fmha_api.cpp",
 ]
 
 # Files using thrust::sort_by_key need to be linked last
