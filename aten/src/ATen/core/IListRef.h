@@ -391,6 +391,9 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
       case IListRefTag::Unboxed:
         payload_.unboxed_iterator = iterator.payload_.unboxed_iterator;
         break;
+      case IListRefTag::Materialized:
+        payload_.materialized_iterator = iterator.payload_.materialized_iterator;
+        break;
       default:
         TORCH_INTERNAL_ASSERT(false, "invalid IListRef tag.");
     }
@@ -399,13 +402,16 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
 
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL == 2
   // See [Note: MSVC Iterator Debug]
-  ~IListRefIterator() {
+  ~IListRefIterator() noexcept(false) {
     switch (tag_) {
       case IListRefTag::Boxed:
         payload_.boxed_iterator.~boxed_iterator_type();
         break;
       case IListRefTag::Unboxed:
         payload_.unboxed_iterator.~unboxed_iterator_type();
+        break;
+      case IListRefTag::Materialized:
+        payload_.materialized_iterator.~materialized_iterator_type();
         break;
       default:
         TORCH_INTERNAL_ASSERT(false, "invalid IListRef tag.");
@@ -507,6 +513,7 @@ class IListRef {
 
   using iterator = IListRefIterator<T>;
   using const_iterator = IListRefIterator<T>;
+  using reverse_iterator = std::reverse_iterator<iterator>;
   using value_type = typename iterator::value_type;
 
   IListRef() : tag_(IListRefTag::None) {}

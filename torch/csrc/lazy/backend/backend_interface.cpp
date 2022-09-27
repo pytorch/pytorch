@@ -1,4 +1,5 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
@@ -15,6 +16,11 @@ const BackendImplInterface* getBackend() {
   auto* interface = backend_impl_registry.load();
   TORCH_CHECK(interface, "Lazy tensor backend not registered.");
   return interface;
+}
+
+// default implementation
+bool BackendImplInterface::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+  return tensor->GetIrValue()->op() != ltc_not_supported;
 }
 
 BackendRegistrar::BackendRegistrar(
