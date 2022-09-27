@@ -3,8 +3,10 @@ import re
 import torch
 import torch.nn as nn
 from torch.ao.quantization import QuantType
+from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.utils import is_per_tensor, is_per_channel
 from torch.ao.quantization.quantize import is_activation_post_process
+
 
 from torch.fx import GraphModule, map_arg
 
@@ -24,7 +26,6 @@ __all__ = [
     "all_node_args_except_first",
     "all_node_args_have_no_tensors",
     "assert_and_get_unique_device",
-    "BIAS_INDEX_DICT",
     "collect_producer_nodes",
     "create_getattr_from_value",
     "create_node_from_old_node_preserve_meta",
@@ -38,43 +39,40 @@ __all__ = [
     "get_qconv_op",
     "get_qconv_prepack_op",
     "get_quantize_node_info",
+    "get_skipped_module_name_and_classes",
     "graph_module_from_producer_nodes",
     "graph_pretty_str",
     "is_get_tensor_info_node",
     "maybe_get_next_module",
     "NodeInfo",
     "node_return_type_is_int",
+    "node_arg_is_bias",
+    "node_arg_is_weight",
     "NON_OBSERVABLE_ARG_DICT",
     "NON_QUANTIZABLE_WEIGHT_OPS",
     "quantize_node",
     "return_arg_list",
-    "WEIGHT_INDEX_DICT",
-    "get_skipped_module_name_and_classes",
 ]
-
-
-# A dictionary for querying the weight index for a given op
-WEIGHT_INDEX_DICT = {
-    torch.nn.functional.conv1d : [1],
-    torch.nn.functional.conv2d : [1],
-    torch.nn.functional.conv3d : [1],
-    torch.nn.functional.linear : [1],
-    torch.nn.functional.layer_norm : [2],
-    torch.nn.functional.group_norm : [2],
-    torch.nn.functional.instance_norm : [3],
-}
 
 NON_QUANTIZABLE_WEIGHT_OPS = {torch.nn.functional.layer_norm, torch.nn.functional.group_norm, torch.nn.functional.instance_norm}
 
-BIAS_INDEX_DICT = {
-    torch.nn.functional.conv1d : [2],
-    torch.nn.functional.conv2d : [2],
-    torch.nn.functional.conv3d : [2],
-    torch.nn.functional.linear : [2],
-    torch.nn.functional.layer_norm : [3],
-    torch.nn.functional.group_norm : [3],
-    torch.nn.functional.instance_norm : [4],
-}
+def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+    """Returns if node arg is weight"""
+    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
+        weight_index = backend_config.configs[node.target]._input_type_to_index.get("weight")
+        if weight_index is not None and weight_index < len(node.args) and node.args[weight_index] is arg:
+            return True
+        return node.kwargs.get("weight") is arg
+    return False
+
+def node_arg_is_bias(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
+    """Returns if node arg is bias"""
+    if isinstance(node, Node) and node.op == "call_function" and node.target in backend_config.configs:
+        bias_index = backend_config.configs[node.target]._input_type_to_index.get("bias")
+        if bias_index is not None and bias_index < len(node.args) and node.args[bias_index] is arg:
+            return True
+        return node.kwargs.get("bias") is arg
+    return False
 
 def graph_pretty_str(g, shorten=True) -> str:
     """Returns a printable representation of the ops in the graph of g.
@@ -160,7 +158,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
     if hasattr(activation_post_process, "compute_dtype"):
         compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
-    if dtype in [torch.quint8, torch.qint8]:
+    if dtype in [torch.quint8, torch.qint8] and \
+            not hasattr(activation_post_process, 'compute_dtype'):
         node_type = "call_function"
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
@@ -172,11 +171,8 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
             zero_point = int(zero_point)
             qparams = {"_scale_": scale, "_zero_point_": zero_point, "_dtype_": dtype}
             quantize_op = torch.quantize_per_tensor
-    elif dtype == torch.float16:
-        node_type = "call_method"
-        quantize_op = "to"
-        qparams = {"_dtype_": dtype}
-    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+    elif compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # TODO(future PR): switch compute_dtype to is_dynamic
         # dynamic quantization
         node_type = "call_function"
         quantize_op = torch.quantize_per_tensor_dynamic
@@ -184,6 +180,10 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         # reduce_range = activation_post_process.reduce_range
         reduce_range = torch.backends.quantized.engine == "fbgemm"
         qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
+    elif dtype == torch.float16:
+        node_type = "call_method"
+        quantize_op = "to"
+        qparams = {"_dtype_": dtype}
     else:
         warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
         return None

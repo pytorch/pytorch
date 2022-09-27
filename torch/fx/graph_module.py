@@ -378,6 +378,9 @@ class GraphModule(torch.nn.Module):
         if self.graph._tracer_extras:
             self._tracer_extras = self.graph._tracer_extras
 
+        # Dictionary to store metadata
+        self.meta : Dict[str, Any] = {}
+
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
@@ -707,11 +710,12 @@ class {module_name}(torch.nn.Module):
         return GraphModule(self, self.graph)
 
     @compatibility(is_backward_compatible=False)
-    def nested_str(self) -> str:
+    def print_readable(self):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
         """
-        module_code = self.code
+        verbose_python_code = self._graph.python_code(root_module='self', verbose=True)
+        module_code = verbose_python_code.src
         module_code = module_code.lstrip('\n')
         module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
         module_code = _addindent(module_code, 4)
@@ -723,11 +727,12 @@ class {module_name}(torch.nn.Module):
         submodule_code = "\n".join(submodule_code_list)
         submodule_code = _addindent(submodule_code, 4)
 
-        return module_code + submodule_code
+        print(module_code + submodule_code)
 
     def __str__(self) -> str:
         orig_str = super().__str__()
-        return '\n'.join([orig_str, self._code])
+        print_readable_reminder = "# To see more debug info, please use `graph_module.print_readable()`"
+        return '\n'.join([orig_str, self._code, print_readable_reminder])
 
     def _replicate_for_data_parallel(self):
         new_gm = self.__copy__()

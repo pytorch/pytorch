@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     run_tests,
     skipIfSlowGradcheckEnv,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
@@ -23,6 +24,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_methods_invocations import op_db
+from torch._dispatch.python import enable_python_dispatcher
 
 import itertools
 import functools
@@ -188,6 +190,11 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
             1e-3,
             1e-3,
         ),
+        (torch.float64, torch.ops.aten.native_layer_norm.default): (1e-6, 1e-6),
+        # This exceeds default tolerances only on CPU, on CUDA it's fine
+        (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
+        # Exceeds tolerances on CUDA, likely due to fma
+        (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -271,6 +278,8 @@ CROSS_REF_EXCLUDE_SET = {
     ("cuda", torch.float64, "nn.functional.dropout"),
     ("cuda", torch.float32, "nn.functional.dropout"),
     (None, None, "new_empty"),
+    (None, None, "empty_like"),
+    (None, None, "empty"),
     # decomp has problem even with opmath
     # doesn't work
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
@@ -353,6 +362,7 @@ class TestDecomp(TestCase):
     def test_comprehensive(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=True)
 
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
         if (torch.device(device).type, dtype, op.name) in CROSS_REF_EXCLUDE_SET or (
             None,
@@ -391,6 +401,8 @@ class TestDecomp(TestCase):
                 if func not in decomposition_table or func in [
                     torch.ops.aten.detach.default,
                     # non-deterministic ops
+                    torch.ops.aten.empty.memory_format,
+                    torch.ops.aten.empty_like.default,
                     torch.ops.aten.new_empty.default
                 ] or any_unsupported(args, kwargs):
                     return func(*args, **kwargs)
@@ -475,7 +487,7 @@ class TestDecomp(TestCase):
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
@@ -484,7 +496,7 @@ class TestDecomp(TestCase):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
-                    with enable_torch_dispatch_mode(DecompCrossRefMode):
+                    with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
@@ -493,7 +505,7 @@ class TestDecomp(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode):
+                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name)

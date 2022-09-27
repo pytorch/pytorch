@@ -37,8 +37,6 @@ except subprocess.CalledProcessError:
 except (FileNotFoundError, PermissionError):
     # Do not print warning. This is okay. This file can also be imported for non-ROCm builds.
     pass
-except PermissionError:
-    pass
 
 rocm_version = (0, 0, 0)
 rocm_version_h = f"{rocm_path}/include/rocm_version.h"
@@ -621,11 +619,11 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("curand_poisson.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_precalc.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_uniform.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
-        ("cusparse.h", ("hipsparse.h", CONV_INCLUDE, API_RAND)),
-        ("cufft.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
-        ("cufftXt.h", ("hipfft.h", CONV_INCLUDE, API_BLAS)),
+        ("cusparse.h", ("hipsparse.h" if rocm_version < (5, 2, 0) else "hipsparse/hipsparse.h", CONV_INCLUDE, API_RAND)),
+        ("cufft.h", ("hipfft.h" if rocm_version < (5, 2, 0) else "hipfft/hipfft.h", CONV_INCLUDE, API_BLAS)),
+        ("cufftXt.h", ("hipfftXt.h" if rocm_version < (5, 2, 0) else "hipfft/hipfftXt.h", CONV_INCLUDE, API_BLAS)),
         # PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
-        ("<nccl.h>", ("<rccl.h>", CONV_INCLUDE, API_RUNTIME)),
+        ("<nccl.h>", ("<rccl.h>" if rocm_version < (5, 2, 0) else "<rccl/rccl.h>", CONV_INCLUDE, API_RUNTIME)),
         ("nvrtc.h", ("hip/hiprtc.h", CONV_INCLUDE, API_RTC)),
         ("thrust/system/cuda", ("thrust/system/hip", CONV_INCLUDE, API_BLAS)),
         ("cub/util_allocator.cuh", ("hipcub/hipcub.hpp", CONV_INCLUDE, API_BLAS)),
@@ -6505,22 +6503,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("rocblas_zgetrf_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         (
-            "cublasSgetriBatched",
-            ("rocblas_sgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
-            "cublasDgetriBatched",
-            ("rocblas_dgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
-            "cublasCgetriBatched",
-            ("rocblas_cgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
-            "cublasZgetriBatched",
-            ("rocblas_zgetri_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
-        ),
-        (
             "cublasSgetrsBatched",
             ("rocblas_sgetrs_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
@@ -8286,6 +8268,9 @@ C10_MAPPINGS = collections.OrderedDict(
         ),
         ("C10_CUDA_CHECK", ("C10_HIP_CHECK", API_C10)),
         ("C10_CUDA_CHECK_WARN", ("C10_HIP_CHECK_WARN", API_C10)),
+        ("C10_CUDA_ERROR_HANDLED", ("C10_HIP_ERROR_HANDLED", API_C10)),
+        ("C10_CUDA_IGNORE_ERROR", ("C10_HIP_IGNORE_ERROR", API_C10)),
+        ("C10_CUDA_CLEAR_ERROR", ("C10_HIP_CLEAR_ERROR", API_C10)),
         ("c10::cuda", ("c10::hip", API_C10)),
         ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
         ("CUDAStream", ("HIPStream", API_C10)),
