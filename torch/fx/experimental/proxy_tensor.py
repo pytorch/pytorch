@@ -206,12 +206,12 @@ def proxy_call(proxy_mode, func, args, kwargs):
         return NotImplemented
 
     if func in CURRENT_DECOMPOSITION_TABLE:
-        with proxy_mode.restore():
+        with proxy_mode:
             r = CURRENT_DECOMPOSITION_TABLE[func](*args, **kwargs)
             if r is not NotImplemented:
                 return r
 
-    with proxy_mode.restore():
+    with proxy_mode:
         r = func.decompose(*args, **kwargs)
         if r is not NotImplemented:
             return r
@@ -424,16 +424,27 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.enable_tracing = True
         self.sym_mode = ProxySymDispatchMode(tracer)
         self.trace_state = {}
+        self._managers = []
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         with self.sym_mode.enable(False):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
-    @contextmanager
-    def restore(self):
-        with self.sym_mode.enable(True):
-            with self:
-                yield
+    def __enter__(self):
+        # sym mode first, then us...
+        m = self.sym_mode.enable(True)
+        self._managers.append(m)
+        m.__enter__()
+        return super().__enter__()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        m = self._managers.pop()
+        # ...exit us first, then sym mode
+        b = super().__exit__(exc_type, exc_value, traceback)
+        if not b:
+            return m.__exit__(exc_type, exc_value, traceback)
+        else:
+            return m.__exit__(None, None, None)
 
     def inner_torch_dispatch(self, func, types, args=(), kwargs=None):
         if not self.enable_tracing:
