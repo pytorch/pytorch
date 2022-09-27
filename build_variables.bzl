@@ -683,6 +683,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_alias_memory.cpp",
     "torch/csrc/jit/codegen/cuda/lower_allocation.cpp",
     "torch/csrc/jit/codegen/cuda/lower_double_buffer.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_divisible_split.cpp",
     "torch/csrc/jit/codegen/cuda/lower_expr_sort.cpp",
     "torch/csrc/jit/codegen/cuda/lower_fused_reduction.cpp",
     "torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.cpp",

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_alias_memory.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
+#include <torch/csrc/jit/codegen/cuda/lower_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/lower_double_buffer.h>
 #include <torch/csrc/jit/codegen/cuda/lower_expr_sort.h>
 #include <torch/csrc/jit/codegen/cuda/lower_fusion_simplifier.h>
@@ -255,6 +256,9 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   }
 
   compute_at_map_->validateAndPropagatePType();
+
+  // Uses compute_at_map, find all splits that are enforced to be divisible
+  divisible_splits_ = getAllDivisibleSplits(fusion_, compute_at_map_.get());
 
   // Used in parallel dimension map
   concretized_broadcast_domains_ =

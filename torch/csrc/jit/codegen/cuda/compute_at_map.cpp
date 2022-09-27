@@ -71,7 +71,11 @@ void mapMaybeSwizzleOp(
   }
 }
 
-bool IterDomainGraph::exprsMap(Expr* first, Expr* second, bool forward) {
+bool IterDomainGraph::exprsMap(
+    Expr* first,
+    Expr* second,
+    bool forward,
+    const DisjointSets<IterDomain*>& id_map) {
   if (first == nullptr || second == nullptr) {
     return false;
   }
@@ -117,8 +121,7 @@ bool IterDomainGraph::exprsMap(Expr* first, Expr* second, bool forward) {
             zipped_ids.begin(),
             zipped_ids.end(),
             [&](std::pair<IterDomain*, IterDomain*> id_pair) {
-              return !exact_nodes_.strictAreMapped(
-                  id_pair.first, id_pair.second);
+              return !id_map.strictAreMapped(id_pair.first, id_pair.second);
             })) {
       return false;
     }
@@ -167,7 +170,7 @@ void IterDomainGraph::mapThroughExpr(Expr* first, Expr* second, bool forward) {
     return;
   }
 
-  if (!exprsMap(first, second, forward)) {
+  if (!exprsMap(first, second, forward, exact_nodes_)) {
     return;
   }
 

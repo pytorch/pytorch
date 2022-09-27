@@ -129,6 +129,10 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
     return non_divisible_split_info_;
   }
 
+  const auto& divisbleSplitSet() const {
+    return divisible_splits_;
+  }
+
   DoubleBufferInfo& doubleBufferInfo() {
     return double_buffer_info_;
   }
@@ -212,6 +216,7 @@ class TORCH_CUDA_CU_API GpuLower : public NonCopyable {
   FusedReductionInfo fused_reduction_info_;
   SyncMap sync_map_;
   kir::KernelPerformanceProfile profile_;
+  std::unordered_set<Split*> divisible_splits_;
 
   // Track which tensor views are inputs or outputs of a vectorized operation
   // and their maximum vectorized access size

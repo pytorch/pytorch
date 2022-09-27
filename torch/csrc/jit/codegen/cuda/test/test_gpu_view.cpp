@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/lower_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/mutator.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
@@ -1780,6 +1781,81 @@ TEST_F(NVFuserTest, FusionViewMapping_CUDA) {
   auto cg_outputs = fe.runFusion({t0, t3});
 
   testValidate(&fusion, cg_outputs, {t0, t3}, {t6}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionLowerDivisibleSplits_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  int w = 15, x = 31, y = 49, z = 65;
+
+  auto tv0 = makeContigTensor(4);
+  fusion.addInput(tv0);
+  auto tv1 = sin(tv0);
+  auto tv2 = view(tv1, {w, x, y, z}, {z, y, x, w});
+
+  fusion.addOutput(tv2);
+
+  tv2->merge(0)->merge(0)->merge(0)->split(0, 4)->split(0, 8, false);
+
+  TransformPropagator propagator(tv2);
+  MaxRootDomainInfoSpanningTree spanning_tree(tv2);
+  spanning_tree.traverse(&propagator);
+  scheduler_utils::parallelizeAllLike(tv2);
+
+  // Inline the schedule
+  InlinePropagator inline_propagator(tv2, -1, ComputeAtMode::MostInlined);
+  spanning_tree.traverse(&inline_propagator);
+
+  auto divisible_splits = getAllDivisibleSplits(&fusion);
+
+  // Operations on all tensors are basically:
+  // [10] merge(0)          [9]->outer->definition
+  // [9] merge(0)           [8]->outer->definition
+  // [8] merge(0)           [7]->in->definition
+  // [7] split(0, z, false) [6]->in->definition
+  // [6] split(1, y, false) [5]->in->definition
+  // [5] split(2, x, false) [3]->inner->definition
+  // RFactor of tv2
+  // [4] merge(0)           [3]->outer->definition
+  // [3] merge(0)           [2]->outer->definition
+  // [2] merge(0)           [1]->in->definition
+  // [1] split(0, 4)        [0]->in->definition
+  // [0] split(0, 8, false) tv->axis(0)->definition
+
+  for (auto tv : std::vector<TensorView*>({tv2, tv1, tv0})) {
+    auto transform_0 = tv->axis(0)->definition()->as<Split>();
+    auto transform_1 = transform_0->in()->definition()->as<Split>();
+    auto transform_2 = transform_1->in()->definition()->as<Merge>();
+    auto transform_3 = transform_2->outer()->definition()->as<Merge>();
+
+    auto transform_5 = transform_3->inner()->definition()->as<Split>();
+    auto transform_6 = transform_5->in()->definition()->as<Split>();
+    auto transform_7 = transform_6->in()->definition()->as<Split>();
+
+    TORCH_CHECK(
+        divisible_splits.find(transform_5) != divisible_splits.end(),
+        "Expecting: ",
+        transform_5->toString(),
+        "\nFrom TV: ",
+        tv,
+        "\nTo be a divisible split.");
+    TORCH_CHECK(
+        divisible_splits.find(transform_6) != divisible_splits.end(),
+        "Expecting: ",
+        transform_6->toString(),
+        "\nFrom TV: ",
+        tv,
+        "\nTo be a divisible split.");
+    TORCH_CHECK(
+        divisible_splits.find(transform_7) != divisible_splits.end(),
+        "Expecting: ",
+        transform_7->toString(),
+        "\nFrom TV: ",
+        tv,
+        "\nTo be a divisible split.");
+  }
 }
 
 } // namespace jit
