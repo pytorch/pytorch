@@ -1428,17 +1428,17 @@
   self: grad * self.cosh().conj()
   result: auto_element_wise
 
-- name: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
-  self: slice_backward_wrapper(grad, self.sym_sizes(), dim, start, end, step)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
+  self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
   result: auto_linear
 
-- name: slice_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
-  grad_output: grad.slice_symint(dim, start, end, step)
+- name: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
+  grad_output: grad.slice(dim, start, end, step)
   result: auto_linear
 
-- name: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
-  self: slice_scatter_symint(grad, zeros_like(src), dim, start, end, step)
-  src: grad.slice_symint(dim, start, end, step)
+- name: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+  self: slice_scatter(grad, zeros_like(src), dim, start, end, step)
+  src: grad.slice(dim, start, end, step)
   result: auto_linear
 
 - name: select_scatter(Tensor self, Tensor src, int dim, int index) -> Tensor
