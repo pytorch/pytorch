@@ -264,9 +264,7 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
   return true;
 }
 
-// Generate the loop nest structure and place it in lowered_exprs
 UnrollPass::UnrollPass(const std::vector<Expr*>& exprs) {
-  FUSER_PERF_SCOPE("GpuLower::Lower::UnrollPass::computeMap");
   kir::ExprMutator::traverseAndInsert(exprs);
 }
 
