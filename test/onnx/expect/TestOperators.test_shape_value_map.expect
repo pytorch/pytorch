@@ -55,7 +55,7 @@ graph {
     op_type: "Unsqueeze"
   }
   node {
-    output: "onnx::Concat_26"
+    output: "onnx::Concat_25"
     name: "Constant_5"
     op_type: "Constant"
     attribute {
@@ -69,7 +69,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Concat_27"
+    output: "onnx::Concat_26"
     name: "Constant_6"
     op_type: "Constant"
     attribute {
@@ -83,7 +83,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Concat_28"
+    output: "onnx::Concat_27"
     name: "Constant_7"
     op_type: "Constant"
     attribute {
@@ -98,9 +98,9 @@ graph {
   }
   node {
     input: "onnx::Concat_8"
+    input: "onnx::Concat_25"
     input: "onnx::Concat_26"
     input: "onnx::Concat_27"
-    input: "onnx::Concat_28"
     output: "onnx::Reshape_15"
     name: "Concat_8"
     op_type: "Concat"
@@ -148,7 +148,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Unsqueeze_20"
+    output: "onnx::Unsqueeze_19"
     name: "Constant_12"
     op_type: "Constant"
     attribute {
@@ -163,13 +163,13 @@ graph {
   }
   node {
     input: "onnx::Unsqueeze_3"
-    input: "onnx::Unsqueeze_20"
-    output: "onnx::Concat_21"
+    input: "onnx::Unsqueeze_19"
+    output: "onnx::Concat_20"
     name: "Unsqueeze_13"
     op_type: "Unsqueeze"
   }
   node {
-    output: "onnx::Concat_29"
+    output: "onnx::Concat_28"
     name: "Constant_14"
     op_type: "Constant"
     attribute {
@@ -183,9 +183,9 @@ graph {
     }
   }
   node {
-    input: "onnx::Concat_21"
-    input: "onnx::Concat_29"
-    output: "onnx::Reshape_24"
+    input: "onnx::Concat_20"
+    input: "onnx::Concat_28"
+    output: "onnx::Reshape_23"
     name: "Concat_15"
     op_type: "Concat"
     attribute {
@@ -196,8 +196,8 @@ graph {
   }
   node {
     input: "onnx::Reshape_18"
-    input: "onnx::Reshape_24"
-    output: "25"
+    input: "onnx::Reshape_23"
+    output: "24"
     name: "Reshape_16"
     op_type: "Reshape"
     attribute {
@@ -230,7 +230,7 @@ graph {
     }
   }
   output {
-    name: "25"
+    name: "24"
     type {
       tensor_type {
         elem_type: 1
