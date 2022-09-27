@@ -1,17 +1,18 @@
 import io
 import pickle
+import warnings
+
+from collections.abc import Collection
+from typing import Dict, List, Optional, Set, Tuple, Type, Union
 
 from torch.utils.data import IterDataPipe, MapDataPipe
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
-from typing import Dict, List, Set, Tuple, Type, Union
 
 __all__ = ["traverse"]
 
 DataPipe = Union[IterDataPipe, MapDataPipe]
 DataPipeGraph = Dict[int, Tuple[DataPipe, "DataPipeGraph"]]  # type: ignore[misc]
-
-reduce_ex_hook = None
 
 
 def _stub_unpickler():
@@ -28,16 +29,22 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
     else:
         d = None
 
-    def stub_pickler(obj):
-        return _stub_unpickler, ()
-
     captured_connections = []
 
-    def getstate_hook(obj):
-        state = {}
-        for k, v in obj.__dict__.items():
-            if isinstance(v, (IterDataPipe, MapDataPipe, tuple)):
-                state[k] = v
+    def getstate_hook(ori_state):
+        state = None
+        if isinstance(ori_state, dict):
+            state = {}  # type: ignore[assignment]
+            for k, v in ori_state.items():
+                if isinstance(v, (IterDataPipe, MapDataPipe, Collection)):
+                    state[k] = v  # type: ignore[attr-defined]
+        elif isinstance(ori_state, (tuple, list)):
+            state = []  # type: ignore[assignment]
+            for v in ori_state:
+                if isinstance(v, (IterDataPipe, MapDataPipe, Collection)):
+                    state.append(v)  # type: ignore[attr-defined]
+        elif isinstance(ori_state, (IterDataPipe, MapDataPipe, Collection)):
+            state = ori_state  # type: ignore[assignment]
         return state
 
     def reduce_hook(obj):
@@ -45,6 +52,7 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
             raise NotImplementedError
         else:
             captured_connections.append(obj)
+            # Adding id to remove duplicate DataPipe serialized at the same level
             cache.add(id(obj))
             return _stub_unpickler, ()
 
@@ -73,7 +81,27 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
     return captured_connections
 
 
-def traverse(datapipe: DataPipe, only_datapipe: bool = False) -> DataPipeGraph:
+def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPipeGraph:
+    r"""
+    Traverse the DataPipes and their attributes to extract the DataPipe graph. When
+    ``only_dataPipe`` is specified as ``True``, it would only look into the attribute
+    from each DataPipe that is either a DataPipe and a Python collection object such as
+    ``list``, ``tuple``, ``set`` and ``dict``.
+    Args:
+        datapipe: the end DataPipe of the graph
+        only_datapipe: If ``False`` (default), all attributes of each DataPipe are traversed.
+          This argument is deprecating and will be removed after the next release.
+    Returns:
+        A graph represented as a nested dictionary, where keys are ids of DataPipe instances
+        and values are tuples of DataPipe instance and the sub-graph
+    """
+    if only_datapipe is not None:
+        msg = "`only_datapipe` is deprecated from `traverse` function and will be removed after 1.13."
+        if not only_datapipe:
+            msg += "And, default value will be changed to `only_datapipe=True`"
+        warnings.warn(msg, FutureWarning)
+    else:
+        only_datapipe = False
     cache: Set[int] = set()
     return _traverse_helper(datapipe, only_datapipe, cache)
 
@@ -87,6 +115,7 @@ def _traverse_helper(datapipe: DataPipe, only_datapipe: bool, cache: Set[int]) -
     if dp_id in cache:
         return {}
     cache.add(dp_id)
+    # Using cache.copy() here is to prevent the same DataPipe pollutes the cache on different paths
     items = _list_connected_datapipes(datapipe, only_datapipe, cache.copy())
     d: DataPipeGraph = {dp_id: (datapipe, {})}
     for item in items:
