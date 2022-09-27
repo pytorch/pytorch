@@ -17869,33 +17869,32 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
+    # Ref: https://github.com/pytorch/pytorch/issue/85005
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
     @largeTensorTest("45GB", "cuda")
-    def test_nll_loss_large_tensor(self, device):
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_nll_loss_large_tensor(self, device, reduction):
+        shape = [int(2 ** 16), int(2 ** 16) + 1]
 
-        def run_test(shape):
-            input = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
-            labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
+        input = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
+        labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
 
-            out = F.nll_loss(input, labels)
+        out = F.nll_loss(input, labels, reduction=reduction)
 
-            with torch.no_grad():
-                input_cpu = input.cpu().float().requires_grad_()
-                labels_cpu = labels.cpu()
-            out_cpu = F.nll_loss(input_cpu, labels_cpu)
-            # workaround to reduce memory usage vs. self.assertEqual, see #84944
-            rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
-            with torch.no_grad():
-                self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
+        with torch.no_grad():
+            input_cpu = input.cpu().float().requires_grad_()
+            labels_cpu = labels.cpu()
+        out_cpu = F.nll_loss(input_cpu, labels_cpu, reduction=reduction)
+        # workaround to reduce memory usage vs. self.assertEqual, see #84944
+        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        with torch.no_grad():
+            self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
 
-            out.backward()
-            out_cpu.backward()
-            with torch.no_grad():
-                self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
-
-        # Ref: https://github.com/pytorch/pytorch/issue/85005
-        run_test([int(2 ** 16), int(2 ** 16) + 1])
+        out.backward()
+        out_cpu.backward()
+        with torch.no_grad():
+            self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
@@ -18207,16 +18206,17 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
     @largeTensorTest("45GB", "cuda")
-    def test_cross_entropy_large_tensor(self, device):
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_cross_entropy_large_tensor(self, device, reduction):
         logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
         labels = torch.zeros(logits.size(0), dtype=torch.long, device='cuda')
-        loss = F.cross_entropy(logits, labels)
+        loss = F.cross_entropy(logits, labels, reduction=reduction)
         loss.backward()
 
         with torch.no_grad():
             logits_cpu = logits.cpu().detach().requires_grad_()
             labels_cpu = labels.cpu().detach()
-        loss_cpu = F.cross_entropy(logits_cpu, labels_cpu)
+        loss_cpu = F.cross_entropy(logits_cpu, labels_cpu, reduction=reduction)
         loss_cpu.backward()
 
         # workaround to reduce memory usage vs. self.assertEqual, see #84944
