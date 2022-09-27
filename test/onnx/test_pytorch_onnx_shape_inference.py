@@ -1,13 +1,11 @@
 # Owner(s): ["module: onnx"]
 
-import unittest
-
 import numpy as np
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 
 import torch
-from torch.onnx import _constants
-from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
+from torch.onnx import _constants, symbolic_helper
+from torch.testing._internal import common_utils
 
 
 def expect_tensor(scalar_type, shape=None):
@@ -21,12 +19,11 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 
-class TestONNXShapeInference(unittest.TestCase):
-    def __init__(self, *args, **kwargs):
-        unittest.TestCase.__init__(self, *args, **kwargs)
-        self.opset_version = _constants.onnx_main_opset
-        _set_onnx_shape_inference(True)
-        _set_opset_version(self.opset_version)
+class TestONNXShapeInference(common_utils.TestCase):
+    def setUp(self):
+        self.opset_version = _constants.ONNX_MAX_OPSET
+        symbolic_helper._set_onnx_shape_inference(True)
+        symbolic_helper._set_opset_version(self.opset_version)
 
     def run_test(self, g, n, type_assertion_funcs):
         if not isinstance(type_assertion_funcs, list):
@@ -205,8 +202,72 @@ class TestONNXShapeInference(unittest.TestCase):
         constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
         none = g.op("prim::Constant").setType(torch.NoneType.get())
         pad = g.op("Pad", input, constant, none, mode_s="constant")
+        self.run_test(g, pad.node(), expect_tensor("Float", shape=(5, 322, 102)))
+
+    def test_pad_with_dynamic_input_shape(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([3, None, None]))
+        constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        pad = g.op("Pad", input, constant, none, mode_s="constant")
+        self.run_test(g, pad.node(), expect_tensor("Float", shape=(5, None, None)))
+
+    def test_pad_with_dynamic_pad_size(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([3, 320, 100]))
+        pad_size = g.addInput()
+        pad_size.setType(pad_size.type().with_dtype(torch.long).with_sizes([6]))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        pad = g.op("Pad", input, pad_size, none, mode_s="constant")
         self.run_test(g, pad.node(), expect_tensor("Float", shape=(None, None, None)))
+
+    def test_resize(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([4, 32, 64, 64]))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        scales = self.insert_tensor_constant(
+            g, torch.tensor([1, 1, 2, 2], dtype=torch.float)
+        )
+        resize = g.op(
+            "Resize",
+            input,
+            none,
+            scales,
+            coordinate_transformation_mode_s="align_corners",
+            cubic_coeff_a_f=-0.75,
+            mode_s="linear",
+            nearest_mode_s="floor",
+        )
+        self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
+
+    def test_resize_after_concat(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.float).with_sizes([4, 32, 64, 64]))
+        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        scale_1 = self.insert_tensor_constant(
+            g, torch.tensor([1, 1], dtype=torch.float)
+        )
+        scale_2 = self.insert_tensor_constant(
+            g, torch.tensor([2, 2], dtype=torch.float)
+        )
+        # `scales` values should be statically known due to constant folding in shape inference.
+        scales = g.op("Concat", scale_1, scale_2, axis_i=0)
+        resize = g.op(
+            "Resize",
+            input,
+            none,
+            scales,
+            coordinate_transformation_mode_s="align_corners",
+            cubic_coeff_a_f=-0.75,
+            mode_s="linear",
+            nearest_mode_s="floor",
+        )
+        self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
 
 
 if __name__ == "__main__":
-    unittest.main()
+    common_utils.run_tests()

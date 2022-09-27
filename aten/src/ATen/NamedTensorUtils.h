@@ -2,8 +2,8 @@
 #include <ATen/NamedTensor.h>
 #include <ATen/TensorNames.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/core/DimVector.h>
+#include <ATen/core/Tensor.h>
 #include <functional>
 
 namespace at {
@@ -11,14 +11,17 @@ namespace at {
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
 inline bool has_names(ITensorListRef tensors) {
-  return std::any_of(
-      tensors.begin(), tensors.end(), [](const Tensor& t) { return t.has_names(); });
+  return std::any_of(tensors.begin(), tensors.end(), [](const Tensor& t) {
+    return t.has_names();
+  });
 }
 
 // Converts dim to an positional index. Errors if `dim` cannot be used to
 // refer to any dimension of tensor.
 TORCH_API int64_t dimname_to_position(const Tensor& tensor, Dimname dim);
-TORCH_API std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, DimnameList dims);
+TORCH_API std::vector<int64_t> dimnames_to_positions(
+    const Tensor& tensor,
+    DimnameList dims);
 
 // Unifies two DimnameList to produce a third. This is useful for implementing
 // the named inference rule for binary broadcasting operations like add.
@@ -27,14 +30,18 @@ TORCH_API std::vector<int64_t> dimnames_to_positions(const Tensor& tensor, Dimna
 // 1) Check matching: Names must match positionally from the right.
 // 2) Check misaligned: If a name `n` is in `names`, then it must appear at
 //    the same index from the right in other.
-// 3) The output names are obtained by unifying the names individually from the right.
-TORCH_API std::vector<Dimname>
-unify_from_right(DimnameList names, DimnameList other, const char* action = "broadcast");
+// 3) The output names are obtained by unifying the names individually from the
+// right.
+TORCH_API std::vector<Dimname> unify_from_right(
+    DimnameList names,
+    DimnameList other,
+    const char* action = "broadcast");
 
 [[noreturn]] inline void reportNYIDimnameOverload(const char* op_name) {
   TORCH_CHECK(
       false,
-      op_name, ": You passed a dimname (string) to this op in place of a dimension "
+      op_name,
+      ": You passed a dimname (string) to this op in place of a dimension "
       "index but it does not yet support this behavior. Please pass a dimension "
       "index to work around this.");
 }
@@ -63,15 +70,16 @@ unify_from_right(DimnameList names, DimnameList other, const char* action = "bro
 // - {} (if the inputs tensors are all unnamed)
 // - non-empty outnames.
 //
-// propagate_names_if_nonempty propagates the outnames if they exist to the result
-// tensors.
+// propagate_names_if_nonempty propagates the outnames if they exist to the
+// result tensors.
 //
 // The {} case is an optimization; if the user does not use named tensors they
 // pay no perf cost for it.
 
 namespace namedinference {
 
-const Tensor& propagate_names_if_present_and_nonempty(const Tensor& result,
+const Tensor& propagate_names_if_present_and_nonempty(
+    const Tensor& result,
     c10::optional<DimnameList> maybe_names,
     bool validate_names = false);
 // Propagates `names` to `result` if `names` is not empty.
@@ -83,8 +91,8 @@ TORCH_API const Tensor& propagate_names_if_nonempty(
     DimnameList maybe_names,
     bool validate_names = false);
 
-// Propagates `names` to `result`. Only use this if we are certain that there are
-// names to propagate (that names is not empty).
+// Propagates `names` to `result`. Only use this if we are certain that there
+// are names to propagate (that names is not empty).
 TORCH_API const Tensor& propagate_names(
     const Tensor& result,
     DimnameList names,
@@ -94,14 +102,24 @@ TORCH_API const Tensor& propagate_names(
 TORCH_API void propagate_names(const Tensor& result, const Tensor& src);
 
 // Propagates all names except for those at the excluded_idxs.
-TORCH_API void propagate_names_except(const Tensor& result, const Tensor& src, IntArrayRef excluded_idxs);
+TORCH_API void propagate_names_except(
+    const Tensor& result,
+    const Tensor& src,
+    IntArrayRef excluded_idxs);
 
 // Used for reduction ops that have a `keepdim` arg.
-TORCH_API void propagate_names_for_reduction(const Tensor& result, const Tensor& src, IntArrayRef excluded_idxs, bool keepdim);
+TORCH_API void propagate_names_for_reduction(
+    const Tensor& result,
+    const Tensor& src,
+    IntArrayRef excluded_idxs,
+    bool keepdim);
 
-TORCH_API void propagate_names_for_expand(const Tensor& result, const Tensor& self);
+TORCH_API void propagate_names_for_expand(
+    const Tensor& result,
+    const Tensor& self);
 
-TORCH_API std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors);
+TORCH_API std::vector<Dimname> compute_cat_outnames(
+    const MaterializedITensorListRef& tensors);
 
 TORCH_API std::vector<Dimname> compute_broadcast_outnames(
     const Tensor& self,
@@ -112,9 +130,13 @@ TORCH_API std::vector<Dimname> broadcast_to_outnames(
     const Tensor& reference_tensor,
     const char* op_name);
 
-TORCH_API std::vector<Dimname> compute_matmul_outnames(const Tensor& self, const Tensor& other);
+TORCH_API std::vector<Dimname> compute_matmul_outnames(
+    const Tensor& self,
+    const Tensor& other);
 
-TORCH_API std::vector<Dimname> compute_cdist_outnames(const Tensor& self, const Tensor& other);
+TORCH_API std::vector<Dimname> compute_cdist_outnames(
+    const Tensor& self,
+    const Tensor& other);
 
 TORCH_API std::vector<Dimname> compute_bmm_outnames(
     const Tensor& result,
@@ -140,7 +162,7 @@ TORCH_API TensorImpl* propagate_names(
     DimnameList names,
     bool validate_names = false);
 
-TORCH_API void propagate_names(TensorImpl* result, /*const */TensorImpl* src);
+TORCH_API void propagate_names(TensorImpl* result, /*const */ TensorImpl* src);
 
 TORCH_API inline void propagate_names(
     const TensorBase& result,
@@ -153,10 +175,13 @@ TORCH_API inline void propagate_names_if_nonempty(
     const TensorBase& result,
     DimnameList names,
     bool validate_names = false) {
-  propagate_names_if_nonempty(result.unsafeGetTensorImpl(), names, validate_names);
+  propagate_names_if_nonempty(
+      result.unsafeGetTensorImpl(), names, validate_names);
 }
 
-TORCH_API inline void propagate_names(const TensorBase& result, const TensorBase& src) {
+TORCH_API inline void propagate_names(
+    const TensorBase& result,
+    const TensorBase& src) {
   propagate_names(result.unsafeGetTensorImpl(), src.unsafeGetTensorImpl());
 }
 

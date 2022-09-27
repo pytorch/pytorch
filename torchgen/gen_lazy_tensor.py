@@ -1,45 +1,39 @@
-import pathlib
 import argparse
 import os
+import pathlib
 import re
-import yaml
-from collections import namedtuple, Counter
+from collections import Counter, namedtuple
 from typing import (
     Any,
-    List,
-    Dict,
-    Tuple,
-    Union,
-    Sequence,
-    Optional,
     Callable,
+    Dict,
     Iterable,
     Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
     Type,
+    Union,
 )
-from torchgen.api.types import BaseCppType
-from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
-from torchgen.gen import (
-    get_grouped_native_functions,
-    parse_native_yaml,
-    NamespaceHelper,
-)
+
+import yaml
+
+import torchgen.dest as dest
 
 from torchgen.api.lazy import setValueT
+from torchgen.api.types import BaseCppType
+from torchgen.dest.lazy_ir import GenLazyIR, GenTSLazyIR
+from torchgen.gen import get_grouped_native_functions, parse_native_yaml
 
-from torchgen.model import (
-    NativeFunction,
-    NativeFunctionsGroup,
-    OperatorName,
-)
+from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
-from torchgen.utils import concatMap, YamlLoader, FileManager
-import torchgen.dest as dest
+from torchgen.utils import concatMap, FileManager, NamespaceHelper, YamlLoader
 from .gen_backend_stubs import (
-    parse_backend_yaml,
     error_on_missing_kernels,
-    gen_dispatchkey_nativefunc_headers,
     gen_dispatcher_registrations,
+    gen_dispatchkey_nativefunc_headers,
+    parse_backend_yaml,
 )
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -111,7 +105,7 @@ ParsedExternalYaml = namedtuple(
 def parse_native_functions_keys(
     backend_yaml_path: str,
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
-) -> Tuple[List[OperatorName], List[Any]]:
+) -> Tuple[List[OperatorName], List[Any], List[OperatorName]]:
 
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
@@ -127,9 +121,13 @@ def parse_native_functions_keys(
 
     full_codegen = yaml_values.pop("full_codegen", [])
     non_native = yaml_values.pop("non_native", [])
+    ir_gen = yaml_values.pop("ir_gen", [])
     assert isinstance(full_codegen, list)
     assert isinstance(non_native, list)
-    return [OperatorName.parse(name) for name in full_codegen], non_native
+    assert isinstance(ir_gen, list)
+    full_codegen_opnames = [OperatorName.parse(name) for name in full_codegen]
+    ir_gen_opnames = [OperatorName.parse(name) for name in ir_gen]
+    return full_codegen_opnames, non_native, ir_gen_opnames
 
 
 def validate_shape_inference_header(
@@ -160,6 +158,39 @@ Please add declare this function in {shape_inference_hdr}:\n
 and implement it in the the corresponding shape_inference.cpp file.\n
 {os.linesep.join(missing_decls)}"""
         )
+
+
+# Some helper functions for the codegen.
+def get_ltc_helper_fns() -> str:
+    return """\
+at::Tensor to_meta(const at::Tensor& tensor) {
+  // undefined tensors can't be converted to the meta device, since they don't have sizes/strides
+  if (!tensor.defined()) return tensor;
+  auto out = at::native::empty_strided_meta_symint(tensor.sym_sizes(), tensor.sym_strides(), \
+/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
+/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  // needs to handle wrapped numbers, so dtype promotion works properly.
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    out.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+  return out;
+}
+c10::optional<at::Tensor> to_meta(const c10::optional<at::Tensor>& tensor) {
+  if (tensor.has_value()) {
+    return to_meta(*tensor);
+  }
+  return c10::nullopt;
+}
+
+std::vector<at::Tensor> to_meta(at::ITensorListRef t_list) {
+  std::vector<at::Tensor> outs;
+  outs.reserve(t_list.size());
+  for (const auto& tensor : t_list) {
+    outs.push_back(to_meta(tensor));
+  }
+  return outs;
+}
+"""
 
 
 class default_args:
@@ -320,6 +351,7 @@ def run_gen_lazy_tensor(
     grouped_native_functions = sorted(
         grouped_native_functions, key=sort_native_function
     )
+
     parsed_backend_yaml = parse_backend_yaml(
         source_yaml, grouped_native_functions, backend_indices
     )
@@ -327,13 +359,19 @@ def run_gen_lazy_tensor(
     autograd_key = parsed_backend_yaml.autograd_key
     cpp_namespace = parsed_backend_yaml.cpp_namespace
     backend_indices = parsed_backend_yaml.backend_indices
-    full_codegen, non_native = parse_native_functions_keys(
+    # the following 3 keys are all processed differently
+    # for full_codegen, we generate IR, kernels, etc
+    # for ir_gen, we generate only IR
+    # non_native is used to register kernels not declared in
+    # native_functions.yaml
+    full_codegen, non_native, ir_gen = parse_native_functions_keys(
         source_yaml, grouped_native_functions
     )
 
     def concat_map_codegen(
         func: Callable[[NativeFunction], Sequence[str]],
         xs: Iterable[Union[NativeFunctionsGroup, NativeFunction]],
+        ops_list: List[OperatorName] = full_codegen,
     ) -> Iterator[str]:
         """
         We code-gen for the functional variant, which is all we need for IR classes/lowerings/shape inferences, but we
@@ -343,7 +381,7 @@ def run_gen_lazy_tensor(
         for x in xs:
             fs = list(x.functions()) if isinstance(x, NativeFunctionsGroup) else [x]
             for f in fs:
-                if f.func.name in full_codegen:
+                if f.func.name in ops_list:
                     for r in func(f):
                         yield r
 
@@ -413,7 +451,6 @@ def run_gen_lazy_tensor(
             fm,
             output_dir,
             class_name,
-            cpp_namespace,
             backend_indices,
             grouped_native_functions,
             backend_key,
@@ -437,6 +474,9 @@ def run_gen_lazy_tensor(
                     tensor_class_hdr,
                     shape_inference_hdr,
                     "ATen/Functions.h",
+                    "ATen/native/TensorConversions.h",
+                    "ATen/NativeFunctions.h",
+                    "ATen/CompositeExplicitAutogradNonFunctionalFunctions.h",
                     "ATen/MetaFunctions.h",
                     "ATen/Operators.h",
                     "ATen/native/CPUFallback.h",
@@ -453,6 +493,7 @@ def run_gen_lazy_tensor(
                     else []
                 )
             ],
+            "helper_fns": get_ltc_helper_fns(),
             "native_functions_include": "",
             "namespace_prologue": ns_helper.prologue,
             "namespace_epilogue": ns_helper.epilogue,
@@ -505,7 +546,9 @@ def run_gen_lazy_tensor(
             if node_base_hdr is not None
             else [],
             "ir_declarations": list(
-                concat_map_codegen(lazy_ir_obj, grouped_native_functions)
+                concat_map_codegen(
+                    lazy_ir_obj, grouped_native_functions, full_codegen + ir_gen
+                )
             ),
             "namespace_prologue": ns_helper.prologue,
             "namespace_epilogue": ns_helper.epilogue,

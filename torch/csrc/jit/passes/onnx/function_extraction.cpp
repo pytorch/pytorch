@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
+#include <torch/csrc/jit/passes/onnx/naming.h>
 
 namespace torch {
 namespace jit {
@@ -390,13 +391,15 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
   } else {
     scope_list scopes;
     std::copy_if(
-        input_scopes.begin(), input_scopes.end(), scopes.begin(), IsValidScope);
+        input_scopes.begin(),
+        input_scopes.end(),
+        std::back_inserter(scopes),
+        IsValidScope);
     std::copy_if(
         output_scopes.begin(),
         output_scopes.end(),
-        scopes.begin(),
+        std::back_inserter(scopes),
         IsValidScope);
-
     if (scopes.size() > 0) {
       auto common_ancestor = FindCommonAncestor(scopes);
       if (common_ancestor.has_value() &&
@@ -553,7 +556,6 @@ Node* FunctionExtractor::CreateFunctionNode(
     const std::string& domain_name,
     const std::string& func_name) {
   const auto& func_scope = func_ctx.scope_key_;
-  const auto& func_scope_ctx = func_ctx.scope_ctxs_[func_scope];
   GRAPH_DEBUG(
       "Create and insert local function for scope: ",
       func_scope->namesFromRoot());
@@ -652,7 +654,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   auto& func_ctx = *func_ctxs_[scope_key];
 
   const std::string module_class_name(
-      func_ctx.scope_key_->name().toUnqualString());
+      ONNXScopeName::className(func_ctx.scope_key_));
   auto pos = module_class_name.rfind('.');
   TORCH_INTERNAL_ASSERT(pos != std::string::npos);
 
@@ -671,8 +673,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   const auto func_name =
       construct_unique_module_name(module_class_name.substr(pos + 1));
 
-  auto func_def_n =
-      CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
+  CreateFunctionDefNode(func_ctx, graph, domain_name, func_name);
 
   // create and insert local function node to graph.
   for (const auto& it : func_ctx.scope_ctxs_) {
@@ -748,7 +749,8 @@ bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
   if (&other_ctx == this) {
     return true;
   }
-  if (this->scope_->name() != other_ctx.scope_->name()) {
+  if (ONNXScopeName::className(this->scope_) !=
+      ONNXScopeName::className(other_ctx.scope_)) {
     return false;
   }
   if (this->inputs_.size() != other_ctx.inputs_.size() ||
@@ -1046,7 +1048,7 @@ NodeAttrNameMap FunctionExtractor::run() {
   // Deepest scope comes first, guaranteeing no other scope can be its child.
   auto sorted_scope_keys = SortScopesByMaxDepth(identical_scope_map);
   for (const auto& scope_key : sorted_scope_keys) {
-    if (module_names_.find(scope_key->name().toUnqualString()) !=
+    if (module_names_.find(ONNXScopeName::className(scope_key)) !=
         module_names_.end()) {
       ConvertScopeToFunction(
           scope_key, identical_scope_map[scope_key], scope_ctxs, graph_);
@@ -1167,7 +1169,7 @@ void ONNXTrackScopeAttributes(
     } else if (v.isBool()) {
       attr_node->i_(k, v.toBool());
     } else if (v.isString()) {
-      attr_node->s_(k, v.toString()->string());
+      attr_node->s_(k, v.toStringRef());
     } else if (v.isIntList()) {
       attr_node->is_(k, v.toIntList().vec());
     } else if (v.isBoolList()) {

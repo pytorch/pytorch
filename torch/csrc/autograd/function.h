@@ -1,17 +1,18 @@
 #pragma once
 
+#include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/anomaly_mode.h>
-#include <torch/csrc/autograd/saved_variable.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/input_metadata.h>
+#include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/python_stub.h>
 #include <torch/csrc/utils/variadic.h>
 
+#include <ATen/SequenceNumber.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/record_function.h>
-#include <ATen/SequenceNumber.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -28,7 +29,8 @@ C10_CLANG_DIAGNOSTIC_PUSH()
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wshorten-64-to-32")
 #endif
 
-namespace torch { namespace autograd {
+namespace torch {
+namespace autograd {
 
 struct Edge;
 struct FunctionPostHook;
@@ -100,19 +102,16 @@ class NodeGuard {
 // sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
 // are created in one thread and `C` is created in a new thread, there are *no
 // guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
-// See NOTE [ Sequence Number] for more details on the usages of sequence number.
+// See NOTE [ Sequence Number] for more details on the usages of sequence
+// number.
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct TORCH_API Node : std::enable_shared_from_this<Node> {
  public:
   /// Construct a new `Node` with the given `next_edges`
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit Node(
-      uint64_t sequence_nr,
-      edge_list&& next_edges = edge_list())
-      : sequence_nr_(sequence_nr),
-      next_edges_(std::move(next_edges)) {
-
-    for (const Edge& edge: next_edges_) {
+  explicit Node(uint64_t sequence_nr, edge_list&& next_edges = edge_list())
+      : sequence_nr_(sequence_nr), next_edges_(std::move(next_edges)) {
+    for (const Edge& edge : next_edges_) {
       update_topological_nr(edge);
     }
 
@@ -133,8 +132,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit Node(edge_list&& next_edges = edge_list())
-    : Node(/*sequence_nr=*/at::sequence_number::get_and_increment(),
-    std::move(next_edges)) {}
+      : Node(
+            /*sequence_nr=*/at::sequence_number::get_and_increment(),
+            std::move(next_edges)) {}
 
   /// Nodes are neither copyable nor moveable.
   Node(const Node& other) = delete;
@@ -151,7 +151,13 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     // probably operate with names.
     at::NoNamesGuard no_names_guard;
 
-    auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
+#ifdef USE_ROCM
+    // Keep track of backward pass for rocblas.
+    at::ROCmBackwardPassGuard in_backward;
+#endif
+
+    auto step_callbacks =
+        at::getStepCallbacksUnlessEmpty(at::RecordScope::BACKWARD_FUNCTION);
     if (C10_UNLIKELY(step_callbacks.has_value())) {
       at::RecordFunction guard(std::move(*step_callbacks));
       // Using sequence number and thread id to correlate with
@@ -160,9 +166,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       if (guard.needsInputs()) {
         std::vector<c10::IValue> inputs_vec(inputs.begin(), inputs.end());
         guard.before(
-          name(),
-          c10::ArrayRef<const c10::IValue>(inputs_vec.data(), inputs_vec.size()),
-          sequence_nr());
+            name(),
+            c10::ArrayRef<const c10::IValue>(
+                inputs_vec.data(), inputs_vec.size()),
+            sequence_nr());
       } else {
         guard.before(name(), sequence_nr());
       }
@@ -184,12 +191,13 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Adds the type and shape metadata for a new input. Returns the index of
   /// of the new input.
   uint32_t add_input_metadata(
-    const at::TensorOptions& options,
-    at::IntArrayRef shape,
-    bool is_tensor_subclass) noexcept {
+      const at::TensorOptions& options,
+      c10::SymIntArrayRef shape,
+      bool is_tensor_subclass) noexcept {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     uint32_t input_nr = input_metadata_.size();
-    input_metadata_.emplace_back(options, shape, is_tensor_subclass);
+    auto meta_shape = MetadataShape{c10::in_place_type<SymIntSmallVec>, shape};
+    input_metadata_.emplace_back(options, meta_shape, is_tensor_subclass);
     return input_nr;
   }
 
@@ -227,7 +235,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
    */
   c10::optional<c10::Stream> stream(const c10::DeviceType device_type) {
     for (const auto& metadata : input_metadata_) {
-      if (metadata.device().type() == device_type) return metadata.stream();
+      if (metadata.device().type() == device_type)
+        return metadata.stream();
     }
 
     return c10::nullopt;
@@ -240,10 +249,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   // Outputs ("Next Edges")
 
   void update_topological_nr(const Edge& edge) {
-    TORCH_INTERNAL_ASSERT(!has_parent_,
-      "Cannot update a node's topological_nr after it already has a parent."
-      " If we allow this, we can no longer guarantee that a parent's"
-      " topo_nr is always greater than those of all its children")
+    TORCH_INTERNAL_ASSERT(
+        !has_parent_,
+        "Cannot update a node's topological_nr after it already has a parent."
+        " If we allow this, we can no longer guarantee that a parent's"
+        " topo_nr is always greater than those of all its children")
     Node* node = edge.function.get();
     if (node) {
       auto topo_nr = node->topological_nr();
@@ -265,7 +275,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   void set_next_edges(edge_list&& next_edges) {
     next_edges_ = std::move(next_edges);
-    for(const auto& next_edge : next_edges_) {
+    for (const auto& next_edge : next_edges_) {
       update_topological_nr(next_edge);
     }
   }
@@ -294,32 +304,35 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// The sequence_nr has two main usages in autograd:
   ///
   /// 1) Helps determine the node's execution priority in the engine.
-  ///    All else being equal, nodes with higher priority numbers are executed first.
-  ///    Thus, nodes corresponding to ops executed later are the first to be executed in
-  ///    the backward pass. One caveat is that we prioritize AccumulateGrad nodes by
-  ///    explicitly setting its sequence_nr to be UINT64_MAX.
-  /// 2) The sequence number of this `Node` is paired with with thread_id it was created in
+  ///    All else being equal, nodes with higher priority numbers are executed
+  ///    first. Thus, nodes corresponding to ops executed later are the first to
+  ///    be executed in the backward pass. One caveat is that we prioritize
+  ///    AccumulateGrad nodes by explicitly setting its sequence_nr to be
+  ///    UINT64_MAX.
+  /// 2) The sequence number of this `Node` is paired with with thread_id it was
+  /// created in
   ///    as a unique identifier by the profiler to annotate recorded events.
-  ///    The purpose of this is to help users (and possibly programs) interpreting the profiler's
-  ///    output to correlate backward nodes with its forward ops.
-  ///    We need both sequence_nr and thread_id to identify a node because sequence_nr is
-  ///    thread_local, i.e., starts counting up from zero in a new thread
+  ///    The purpose of this is to help users (and possibly programs)
+  ///    interpreting the profiler's output to correlate backward nodes with its
+  ///    forward ops. We need both sequence_nr and thread_id to identify a node
+  ///    because sequence_nr is thread_local, i.e., starts counting up from zero
+  ///    in a new thread
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
   }
 
   // NOTE [ Topological Number ]
   //
-  // topological_nr is used to prune branches in the DAG during autograd discovery as
-  // maintaining topological_nr helps us check in O(1) if there does NOT exist
-  // a directed path between two nodes.
+  // topological_nr is used to prune branches in the DAG during autograd
+  // discovery as maintaining topological_nr helps us check in O(1) if there
+  // does NOT exist a directed path between two nodes.
   //
   // The topological order number of this `Node` representing the length of the
-  // longest possible path from this Node to any leaf node. If you are leaf node,
-  // aka AccumulateGrad, this will be zero. This value has the property that
-  // For every pair of nodes X, Y in G, existence of a directed path from X to Y
-  // implies topo_nr(X) > topo_nr(Y). The converse is not true, however, so we
-  // cannot prove existence of a path from X to Y, only non-existence.
+  // longest possible path from this Node to any leaf node. If you are leaf
+  // node, aka AccumulateGrad, this will be zero. This value has the property
+  // that For every pair of nodes X, Y in G, existence of a directed path from X
+  // to Y implies topo_nr(X) > topo_nr(Y). The converse is not true, however, so
+  // we cannot prove existence of a path from X to Y, only non-existence.
   //
   // One assumption we make when using topo_nr is that once a node
   // has been used, i.e., has a parent node, its own topo_nr does not change
@@ -327,12 +340,15 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //
   // What NOT to do:
   //
-  //   1) 2 -> 1 -> 0               In this diagram we label nodes with their topo_nr.
-  //      2 -> 1 -> 0               We have two simple graphs that can each arise from
+  //   1) 2 -> 1 -> 0               In this diagram we label nodes with their
+  //   topo_nr.
+  //      2 -> 1 -> 0               We have two simple graphs that can each
+  //      arise from
   //                                `t.exp().exp()`, for example.
   //   2)        2 -> 1 -> 0
   //            /
-  //      2 -> 1 -> 0               We add 2 as a next edge to 1 even though 1 already
+  //      2 -> 1 -> 0               We add 2 as a next edge to 1 even though 1
+  //      already
   //                                has a parent.
   //   3)        2 -> 1 -> 0
   //            /
@@ -354,6 +370,18 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;
 
+  /// The difference between functions `should_compute_output` and
+  /// `task_should_compute_output`:
+  /// - `should_compute_output` should only be used during graph construction
+  /// and takes into account only requires_grad information
+  /// - `task_should_compute_output` should only be called during the backward
+  /// pass (unless called directly through grad_fn) and takes into account the
+  /// current graph task.  Specifically, the autograd engine trims unnecessary
+  /// edges when `inputs` are specified, and during backward untrimmed nodes
+  /// left on the graph can/should check `task_should_compute_output` to see if
+  /// any outgoing edges have been trimmed by the engine. If that is the case,
+  /// gradient computation wrt those edges can be omitted.
+  ///
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
@@ -366,6 +394,37 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
       for (const auto i : c10::irange(range.first, range.second)) {
         if (should_compute_output(i))
+          return true;
+      }
+      return false;
+    });
+  }
+
+  /// Same as the above `should_compute_output` function but will also
+  /// check whether this edge is needed within the current graph task.
+  bool task_should_compute_output(size_t output_edge_index) const {
+    TORCH_CHECK(output_edge_index < num_outputs(), "Index out of range");
+    const auto& next = next_edges_[output_edge_index];
+    if (next.is_valid()) {
+      const auto exec_info = get_current_graph_task_exec_info();
+      if (exec_info && !exec_info->empty()) {
+        auto it = exec_info->find(next.function.get());
+        if (it == exec_info->end() || !it->second.should_execute()) {
+          return false; // this edge is not needed for the current graph_task
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// Returns true if any of the output edges in any of the ranges are active
+  /// and should be computed in the current graph task.
+  bool task_should_compute_output(
+      std::initializer_list<IndexRange> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
+      for (const auto i : c10::irange(range.first, range.second)) {
+        if (task_should_compute_output(i))
           return true;
       }
       return false;
@@ -397,8 +456,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return reinterpret_cast<std::uintptr_t>(post_hooks_.back().get());
   }
 
-  const std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() const
-      noexcept {
+  const std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks()
+      const noexcept {
     return post_hooks_;
   }
 
@@ -421,8 +480,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     pre_hooks_.push_back(std::move(pre_hook));
   }
 
-  const std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() const
-      noexcept {
+  const std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks()
+      const noexcept {
     return pre_hooks_;
   }
 
@@ -478,8 +537,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   uint64_t topological_nr_ = 0;
 
   // Tracks whether this node has been added as the next_edge of another node
-  // via set_next_edge(s), which always calls topological_nr() of all its children
-  // See NOTE [ Topological Number ] for why we need this.
+  // via set_next_edge(s), which always calls topological_nr() of all its
+  // children See NOTE [ Topological Number ] for why we need this.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   mutable bool has_parent_ = false;
 
@@ -489,40 +548,46 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   // Note [Thread Safety on Autograd Node]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Autograd Engine let the owning thread which calls Engine::execute to drive the
-  // GraphTask execution, there might be cases that part of the GraphTask is shared
-  // across different `backward()` or `grad()` calls, i.e. fork new threads in the
-  // middle of the forward and call `backward()` separately from different threads.
-  // We need to protect the thread safety on NodeTask to prevent data racing on
-  // shared variables read/write.
+  // Autograd Engine let the owning thread which calls Engine::execute to drive
+  // the GraphTask execution, there might be cases that part of the GraphTask is
+  // shared across different `backward()` or `grad()` calls, i.e. fork new
+  // threads in the middle of the forward and call `backward()` separately from
+  // different threads. We need to protect the thread safety on NodeTask to
+  // prevent data racing on shared variables read/write.
   //
-  // NB: This is only needed for Autograd Nodes that runs on CPU, technically "CUDA",
-  // "XLA" nodes don't need locking because device threads are always single threaded.
+  // NB: This is only needed for Autograd Nodes that runs on CPU, technically
+  // "CUDA", "XLA" nodes don't need locking because device threads are always
+  // single threaded.
   //
-  // Here we add a thread mutex to help protect the Node's thread safety, so that
-  // different threads cannot race the shared data when executing the same NodeTask
-  // from multiple CPU threads. It IS the user/developer responsibility to take
-  // advantage of this mutex to protect the thread safety of their autograd Node.
-  // The general strategy of thread safety on autograd Node:
+  // Here we add a thread mutex to help protect the Node's thread safety, so
+  // that different threads cannot race the shared data when executing the same
+  // NodeTask from multiple CPU threads. It IS the user/developer responsibility
+  // to take advantage of this mutex to protect the thread safety of their
+  // autograd Node. The general strategy of thread safety on autograd Node:
   //
-  // 1. User should lock the mutex during Node::release_variables() if the Node needs
-  //    to release the variables on the fly, this serve the purpose that when we release
-  //    saved_variables from one thread, no other threads can release the saved variables
-  //    concurrently. call
-  //    the Node::apply(),
-  // 2. User should lock the mutex during Node::apply(), this is to ensure Node that
-  //    writing to the shared variable are not racing across threads (i.e. AccumulateGrad
-  //    and custom C++ Autograd Node if writing to shared variables )
-  // 3. item 2 and item 3 should work together so that when we release saved variables
-  //    from one thread, no other threads can call Node::apply(), this ensures the variable
-  //    references from other threads aren't dangling.
-  // 4. if the Node don't release any variables and no shared data read/write in the Node
+  // 1. User should lock the mutex during Node::release_variables() if the Node
+  // needs
+  //    to release the variables on the fly, this serve the purpose that when we
+  //    release saved_variables from one thread, no other threads can release
+  //    the saved variables concurrently. call the Node::apply(),
+  // 2. User should lock the mutex during Node::apply(), this is to ensure Node
+  // that
+  //    writing to the shared variable are not racing across threads (i.e.
+  //    AccumulateGrad and custom C++ Autograd Node if writing to shared
+  //    variables )
+  // 3. item 2 and item 3 should work together so that when we release saved
+  // variables
+  //    from one thread, no other threads can call Node::apply(), this ensures
+  //    the variable references from other threads aren't dangling.
+  // 4. if the Node don't release any variables and no shared data read/write in
+  // the Node
   //    i.e. purely functional, user don't need to lock the mutex
   //
-  // This way we could protect the thread safety on Autograd Node, but we could still
-  // not protect the thread safety on Node pre/post C++ hooks (python hooks are
-  // automatically thread safe), we rely on the user to write thread safe C++ hooks
-  // if they want the hook to be correctly applied in multithreading environment.
+  // This way we could protect the thread safety on Autograd Node, but we could
+  // still not protect the thread safety on Node pre/post C++ hooks (python
+  // hooks are automatically thread safe), we rely on the user to write thread
+  // safe C++ hooks if they want the hook to be correctly applied in
+  // multithreading environment.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::mutex mutex_;
 
@@ -619,6 +684,7 @@ edge_list collect_next_edges(Variables&&... variables) {
   make.apply(std::forward<Variables>(variables)...);
   return std::move(make.next_edges);
 }
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
 
 C10_CLANG_DIAGNOSTIC_POP()

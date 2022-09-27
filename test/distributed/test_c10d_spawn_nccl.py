@@ -157,6 +157,34 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_nccl()
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        def test_reduce_scatter_non_contiguous(self):
+            store = c10d.FileStore(self.file_name, self.world_size)
+            # This is required because these functions calls directly to the .dist and needs
+            # the world to be initialized
+            c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')
+            device = torch.device(f"cuda:{self.rank}")
+
+            class NonContiguousGrad(torch.autograd.Function):
+
+                @staticmethod
+                def forward(ctx, input):
+                    return input
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    # Make grad non-contiguous
+                    return grad_output.clone().transpose(0, 1)
+
+            x0 = torch.rand(5, 5, device=device, requires_grad=True)
+            x1 = torch.rand(5, 5, device=device, requires_grad=True)
+            y = torch.empty(5, 5, device=device)
+
+            y = torch.distributed.nn.reduce_scatter(y, [x0, x1])
+            NonContiguousGrad.apply(y).sum().backward()
+
+        @requires_nccl()
+        @skip_if_lt_x_gpu(2)
+        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_gather_base(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             c10d.init_process_group(store=store, rank=self.rank, world_size=self.world_size, backend='nccl')

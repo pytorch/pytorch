@@ -260,33 +260,6 @@ std::vector<Dimname> compute_diagonal_outnames(
   return outnames;
 }
 
-// tensor_dotted_dim and other_dotted_dim are the dimensions of the two
-// tensors that we contract together. Usually other_dotted_dim is 0
-// and tensor_dotted_dim is the last dim of tensor, but there are some special
-// cases like einsum and tensordot where one can contract arbitrary dims.
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static std::vector<Dimname> compute_dot_product_outnames(
-    DimnameList tensor_names,
-    int64_t tensor_dotted_dim,
-    DimnameList other_names,
-    int64_t other_dotted_dim) {
-  int64_t num_outnames = tensor_names.size() + other_names.size() - 2;
-  if (num_outnames == 0) {
-    return {};
-  }
-  std::vector<Dimname> outnames(num_outnames, Dimname::wildcard());
-  int64_t index = 0;
-  for (const auto j : c10::irange(static_cast<int64_t>(tensor_names.size()))) {
-    if (j == tensor_dotted_dim) continue;
-    outnames[index++] = tensor_names[j];
-  }
-  for (const auto j : c10::irange(static_cast<int64_t>(other_names.size()))) {
-    if (j == other_dotted_dim) continue;
-    outnames[index++] = other_names[j];
-  }
-  return outnames;
-}
-
 static void check_feature_names_are_distinct(
     DimnameList self_names,
     DimnameList other_names,
@@ -304,36 +277,6 @@ static void check_feature_names_are_distinct(
     " would produce output tensor with duplicate names ",
     outnames,
     ". Please rename the input tensors with `Tensor.rename` to prevent this.");
-}
-
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static DimnameList batch_dims(DimnameList names) {
-  if (names.size() <= 2) {
-    return {};
-  }
-  return DimnameList(names.begin(), names.end() - 2);
-}
-
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static DimnameList feature_dims(DimnameList names) {
-  if (names.size() <= 2) {
-    return names;
-  }
-  return DimnameList(names.end() - 2, 2);
-}
-
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
-static bool are_distinct(DimnameList batch_dims, DimnameList feature_dims) {
-  for (const auto& target : feature_dims) {
-    if (target.isWildcard()) {
-      continue;
-    }
-    if (std::any_of(batch_dims.begin(), batch_dims.end(),
-          [&](const Dimname& dim) { return target == dim; })) {
-      return false;
-    }
-  }
-  return true;
 }
 
 static int64_t num_batch_dims(DimnameList names) {
@@ -467,12 +410,12 @@ std::vector<Dimname> broadcast_to_outnames(
   return unify_from_right(reference_names, tensor_names);
 }
 
-std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors) {
+std::vector<Dimname> compute_cat_outnames(const MaterializedITensorListRef& tensors) {
   if (!at::has_names(tensors)) {
     return {};
   }
   std::vector<Dimname> result;
-  for (const auto& tensor : tensors) {
+  for (const Tensor& tensor : tensors) {
     const auto tensor_names = tensor.names();
     TORCH_CHECK(tensor_names.size() > 0, "zero-dimensional tensor cannot be concatenated");
     TORCH_CHECK(result.empty() || tensor_names.size() == result.size(),

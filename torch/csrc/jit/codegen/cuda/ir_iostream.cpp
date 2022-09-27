@@ -122,7 +122,11 @@ void IrPrinter::handle(const IterDomain* id) {
     print_inline(id->stop());
     os_ << " : ";
   }
-  print_inline(id->extent());
+  if (id->isBroadcast() && id->hasExpandedExtent()) {
+    print_inline(id->expandedExtent());
+  } else {
+    print_inline(id->extent());
+  }
   os_ << "}";
   if (id->isRFactorProduct())
     os_ << "rf";
@@ -242,6 +246,31 @@ void IrPrinter::handle(const ComplexDouble* c) {
 
 void IrPrinter::handle(const NamedScalar* ns) {
   os_ << ns->name();
+}
+
+void IrPrinter::handle(const ARangeOp* aop) {
+  if (!print_inline_) {
+    indent() << aop->output(0);
+    os_ << "\n";
+    indent_size_++;
+    indent();
+    os_ << " = ";
+  } else {
+    checkInlineable(aop);
+  }
+
+  os_ << "arange(";
+  handle(aop->start());
+  os_ << ", ";
+  handle(aop->end());
+  os_ << ", ";
+  handle(aop->step());
+  os_ << ")";
+
+  indent_size_--;
+
+  if (!print_inline_)
+    os_ << ";\n";
 }
 
 void IrPrinter::handle(const UnaryOp* uop) {
@@ -389,18 +418,47 @@ void IrPrinter::handle(const TernaryOp* top) {
     os_ << ";\n";
 }
 
+void IrPrinter::handle(const RNGOp* rop) {
+  if (!print_inline_) {
+    indent();
+    os_ << rop->output(0) << "\n";
+    indent_size_++;
+    indent();
+    os_ << " = ";
+  } else {
+    checkInlineable(rop);
+  }
+
+  os_ << rop->getRNGOpType() << "(";
+  bool first = true;
+  for (auto i : rop->inputs()) {
+    if (!first) {
+      os_ << ", ";
+    }
+    handle(i);
+    first = false;
+  }
+  os_ << ")";
+
+  indent_size_--;
+
+  if (!print_inline_)
+    os_ << ";\n";
+}
+
 void IrPrinter::handle(const ReductionOp* rop) {
   indent() << rop->out() << "\n";
   indent() << "   = reduction( " << rop->in()
            << ", op = " << rop->getReductionOpType()
            << ", initial value = " << rop->init()
-           << ", allreduce = " << rop->isAllreduce() << " )\n";
+           << ", allreduce = " << (rop->isAllreduce() ? "true" : "false")
+           << " )\n";
 }
 
 void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
-  indent() << "Grouped reduction(\n";
+  indent() << "GroupedReductionOp(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+  for (const auto i : c10::irange(grouped_rop->numExprs())) {
     indent() << grouped_rop->output(i) << " = reduction( "
              << grouped_rop->input(i)
              << ", op = " << grouped_rop->getReductionOpType(i)
@@ -426,8 +484,37 @@ void IrPrinter::handle(const WelfordOp* wop) {
     os_ << "\n  initial value = " << wop->initAvg() << "(Avg)\n  "
         << wop->initVar() << "(Var)\n  " << wop->initN() << "(N)";
   }
-  os_ << "\n  allreduce = " << wop->isAllreduce();
+  os_ << "\n  allreduce = " << (wop->isAllreduce() ? "true" : "false");
   os_ << " )\n";
+}
+
+void IrPrinter::handle(const GroupedWelfordOp* grouped_wop) {
+  indent() << "GroupedWelford(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(grouped_wop->numExprs())) {
+    indent() << grouped_wop->outAvg(i) << " (Avg),\n";
+    indent() << grouped_wop->outVar(i) << " (Var),\n";
+    indent() << grouped_wop->outN(i) << " (Count)\n";
+    indent() << " = Welford ( ";
+    ++indent_size_;
+    indent() << grouped_wop->inAvg(i) << " (Avg),\n";
+    indent() << grouped_wop->inVar(i) << " (Var),\n";
+    indent() << grouped_wop->inN(i) << " (Count)\n";
+    indent() << "initial value =\n";
+    ++indent_size_;
+    indent() << grouped_wop->initAvg(i) << " (Avg),\n";
+    indent() << grouped_wop->initVar(i) << " (Var),\n";
+    indent() << grouped_wop->initN(i) << " (Count) )\n";
+    indent_size_ -= 2;
+  }
+  indent() << "allreduce = " << (grouped_wop->isAllreduce() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
+}
+
+void IrPrinter::handle(const LoadStoreOp* ldst) {
+  indent() << ldst->out() << " = " << ldst->opType() << "( " << ldst->in()
+           << " )\n";
 }
 
 void IrPrinter::handle(const BroadcastOp* bop) {
@@ -463,8 +550,32 @@ void IrPrinter::handle(const Merge* m) {
   os_ << "\n";
 }
 
+void IrPrinter::handle(const Swizzle2D* s) {
+  os_ << s->swizzleType() << "(2D): ";
+  handle(s->inX());
+  os_ << " , ";
+  handle(s->inY());
+  os_ << " -> ";
+  handle(s->outX());
+  os_ << " , ";
+  handle(s->outY());
+  os_ << "\n";
+}
+
 void IrPrinter::handle(const TransposeOp* top) {
   indent() << top->out() << " = transpose( " << top->in() << " )\n";
+}
+
+void IrPrinter::handle(const ExpandOp* eop) {
+  indent() << eop->out() << " = expand( " << eop->in() << ", {";
+  std::stringstream ss;
+  for (auto expanded_extent : eop->expanded_extents()) {
+    if (ss.tellp()) {
+      ss << ", ";
+    }
+    ss << expanded_extent;
+  }
+  os_ << ss.str() << "} )\n";
 }
 
 void IrPrinter::handle(const ShiftOp* sop) {
@@ -565,6 +676,14 @@ void IrPrinter::handle(const kir::BlockSync* node) {
            << ")\n";
 }
 
+void IrPrinter::handle(const kir::CpAsyncWait* node) {
+  indent() << "CPASYNC_WAIT(" << node->keepStages() << ")\n";
+}
+
+void IrPrinter::handle(const kir::CpAsyncCommit* node) {
+  indent() << "CPASYNC_WAIT()\n";
+}
+
 void IrPrinter::handle(const kir::GridSync* node) {
   indent() << "GRIDSYNC(" << node->syncDims().toString() << ", ";
   handle(node->syncBuffer());
@@ -608,138 +727,171 @@ void IrPrinter::handle(const kir::GridBroadcast* node) {
 }
 
 void IrPrinter::handle(const kir::GridReduction* node) {
-  indent();
-  handle(node->out());
-  os_ << " = "
-      << "GRID_REDUCTION(op='" << node->getReductionOpType() << "'"
-      << ", in=";
-  handle(node->in());
-  os_ << ", init=";
-  handle(node->init());
-  os_ << ", read_pred=";
+  indent() << node->out() << " = reduction( " << node->in()
+           << ", op = " << node->getReductionOpType()
+           << ", initial value = " << node->init() << ",\n";
+  ++indent_size_;
+  indent() << "reduction buffer = " << node->reduction_buffer()->buffer()
+           << ",\n";
+  indent() << "sync buffer = " << node->sync_buffer()->buffer() << ",\n";
+  indent() << "read predicate = ";
   if (node->predicate() != nullptr) {
-    handle(node->predicate());
+    os_ << node->predicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << ")\n";
-  os_ << ", write_pred=";
+  os_ << ",\n";
+  indent() << "write predicate = ";
   if (node->writePredicate() != nullptr) {
-    handle(node->writePredicate());
+    os_ << node->writePredicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << ")\n";
-  indent() << kTab << ".reduction_buffer=";
-  handle(node->reduction_buffer()->buffer());
-  os_ << "\n";
-  indent() << kTab << ".sync_buffer=";
-  handle(node->sync_buffer()->buffer());
-  os_ << "\n";
+  os_ << ",\n";
+  indent() << "thread predicate = " << node->threadPredicate().toString()
+           << ",\n";
+  indent() << "allreduce = " << (node->isAllreduce() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
 }
 
 void IrPrinter::handle(const kir::GroupedGridReduction* node) {
-  indent() << "Grouped grid reduction(\n";
+  indent() << "GroupedGridReduction(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(node->numReductions())) {
-    indent();
-    handle(node->output(i));
-    os_ << " = "
-        << "reduction(op='" << node->getReductionOpType(i) << "'"
-        << ", in=";
-    handle(node->input(i));
-    os_ << ", init=";
-    handle(node->initVal(i));
-    os_ << "\n";
+  for (const auto i : c10::irange(node->numExprs())) {
+    indent() << node->output(i) << " = reduction( " << node->input(i)
+             << ", op = " << node->getReductionOpType(i)
+             << ", initial value = " << node->initVal(i)
+             << ", reduction buffer = "
+             << node->reduction_buffers().at(i)->buffer() << " )\n";
   }
-  indent() << kTab << ".read_pred=";
+  indent() << "sync buffer = " << node->sync_buffer()->buffer() << ",\n";
+  indent() << "read predicate = ";
   if (node->predicate() != nullptr) {
-    handle(node->predicate());
+    os_ << node->predicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << "\n";
-  indent() << kTab << ".write_pred=";
+  os_ << ",\n";
+  indent() << "write predicate = ";
   if (node->writePredicate() != nullptr) {
-    handle(node->writePredicate());
+    os_ << node->writePredicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << "\n";
-  for (const auto i : c10::irange(node->numReductions())) {
-    indent() << kTab << ".reduction_buffer=";
-    handle(node->reduction_buffers().at(i)->buffer());
-    os_ << "\n";
-  }
-  indent() << kTab << ".sync_buffer=";
-  handle(node->sync_buffer()->buffer());
-  os_ << "\n";
+  os_ << ",\n";
+  indent() << "thread predicate = " << node->threadPredicate().toString()
+           << ",\n";
+  indent() << "allreduce = " << (node->isAllreduce() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
 }
 
 void IrPrinter::handle(const kir::GridWelford* node) {
+  std::cerr << "current indent size: " << indent_size_ << std::endl;
   const auto* welford_op = node->welford_op();
-  indent();
-  handle(welford_op->outVar());
-  os_ << ",";
-  handle(welford_op->outAvg());
-  os_ << ",";
-  handle(welford_op->outN());
-  os_ << " = "
-      << "GRID_WELFORD("
-      << "inAvg=";
-  handle(welford_op->inAvg());
-  if (!welford_op->inN()->isOneInt()) {
-    indent() << ", inVar=";
-    handle(welford_op->inVar());
-  }
-  indent() << ", inN=";
-  handle(welford_op->inN());
-  if (!welford_op->initN()->isZeroInt()) {
-    indent() << ", initVar=";
-    handle(welford_op->initVar());
-    os_ << " initAvg=";
-    handle(welford_op->initAvg());
-    os_ << " initN=";
-    handle(welford_op->initN());
-  }
-  indent() << ", read_pred=";
+  indent() << welford_op->outAvg() << " (Avg),\n";
+  indent() << welford_op->outVar() << " (Var),\n";
+  indent() << welford_op->outN() << " (Count)\n";
+  indent() << " = Welford (\n";
+  ++indent_size_;
+  indent() << welford_op->inAvg() << " (Avg),\n";
+  indent() << welford_op->inVar() << " (Var),\n";
+  indent() << welford_op->inN() << " (Count)\n";
+  indent() << "initial value =\n";
+  ++indent_size_;
+  indent() << welford_op->initAvg() << " (Avg),\n";
+  indent() << welford_op->initVar() << " (Var),\n";
+  indent() << welford_op->initN() << " (Count),\n";
+  --indent_size_;
+  indent() << "reduction buffer =\n";
+  ++indent_size_;
+  indent() << node->avg_buffer()->buffer() << " (Avg),\n";
+  indent() << node->var_buffer()->buffer() << " (Var),\n";
+  indent() << node->N_buffer()->buffer() << " (Count),\n";
+  --indent_size_;
+  indent() << "sync buffer = " << node->sync_buffer()->buffer() << ",\n";
+  indent() << "read predicate = ";
   if (welford_op->predicate() != nullptr) {
-    handle(welford_op->predicate());
+    os_ << welford_op->predicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << ")\n";
-  indent() << ", write_pred=";
+  os_ << ",\n";
+  indent() << "write predicate = ";
   if (welford_op->writePredicate() != nullptr) {
-    handle(welford_op->writePredicate());
+    os_ << welford_op->writePredicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << ")\n";
-  indent() << kTab << ".var_buffer=";
-  handle(node->var_buffer()->buffer());
-  os_ << ".avg_buffer=";
-  handle(node->avg_buffer()->buffer());
-  os_ << ".n_buffer=";
-  handle(node->N_buffer()->buffer());
-  os_ << "\n";
-  indent() << kTab << ".sync_buffer=";
-  handle(node->sync_buffer()->buffer());
-  os_ << "\n";
-  indent() << kTab << ".grid_read_pred=";
+  os_ << ",\n";
+  indent() << "grid read predicate = ";
   if (node->predicate() != nullptr) {
-    handle(node->predicate());
+    os_ << node->predicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << "\n";
-  indent() << kTab << ".grid_write_pred=";
+  os_ << ",\n";
+  indent() << "grid write predicate = ";
   if (node->writePredicate() != nullptr) {
-    handle(node->writePredicate());
+    os_ << node->writePredicate();
   } else {
     os_ << "nullptr";
   }
-  os_ << "\n";
+  os_ << ",\n";
+  indent() << "thread predicate = " << node->threadPredicate().toString()
+           << ",\n";
+  indent() << "allreduce = " << (welford_op->isAllreduce() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
+  std::cerr << "Ending indent size: " << indent_size_ << std::endl;
+}
+
+void IrPrinter::handle(const kir::GroupedGridWelford* node) {
+  indent() << "GroupedGridWelford(\n";
+  ++indent_size_;
+  for (const auto i : c10::irange(node->numExprs())) {
+    indent() << node->outAvg(i) << " (Avg),\n";
+    indent() << node->outVar(i) << " (Var),\n";
+    indent() << node->outN(i) << " (Count)\n";
+    indent() << " = Welford (\n";
+    ++indent_size_;
+    indent() << node->inAvg(i) << " (Avg),\n";
+    indent() << node->inVar(i) << " (Var),\n";
+    indent() << node->inN(i) << " (Count)\n";
+    indent() << "initial value =\n";
+    ++indent_size_;
+    indent() << node->initAvg(i) << " (Avg),\n";
+    indent() << node->initVar(i) << " (Var),\n";
+    indent() << node->initN(i) << " (Count),\n";
+    --indent_size_;
+    indent() << "reduction buffer =\n";
+    ++indent_size_;
+    indent() << node->reduction_buffers()[0].at(i)->buffer() << " (Avg),\n";
+    indent() << node->reduction_buffers()[1].at(i)->buffer() << " (Var),\n";
+    indent() << node->reduction_buffers()[2].at(i)->buffer() << " (Count) )\n";
+    indent_size_ -= 2;
+  }
+  indent() << "sync buffer = " << node->sync_buffer()->buffer() << ",\n";
+  indent() << "read predicate = ";
+  if (node->predicate() != nullptr) {
+    os_ << node->predicate();
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ",\n";
+  indent() << "write predicate = ";
+  if (node->writePredicate() != nullptr) {
+    os_ << node->writePredicate();
+  } else {
+    os_ << "nullptr";
+  }
+  os_ << ",\n";
+  indent() << "thread predicate = " << node->threadPredicate().toString()
+           << ",\n";
+  indent() << "allreduce = " << (node->isAllreduce() ? "true" : "false")
+           << " )\n";
+  --indent_size_;
 }
 
 void IrPrinter::handle(const kir::InitMagicZero* node) {
@@ -756,6 +908,51 @@ void IrPrinter::handle(const kir::AllocateFusedReduction* node) {
   os_ << ")\n";
 }
 
+void IrPrinter::handle(const kir::IntPair* node) {
+  if (print_inline_) {
+    if (node->definition()) {
+      handle(node->definition());
+      return;
+    }
+  }
+  os_ << "iPair" << varName(node);
+}
+
+void IrPrinter::handle(const kir::Swizzle2DInt* node) {
+  if (!print_inline_) {
+    indent();
+    handle(node->out());
+    os_ << " = ";
+  }
+
+  os_ << node->swizzleType() << "2D(";
+  handle(node->inX());
+  os_ << ",";
+  handle(node->inY());
+  os_ << ")";
+}
+
+void IrPrinter::handle(const kir::PairSelect* node) {
+  if (!print_inline_) {
+    indent();
+    handle(node->out());
+    os_ << " = ";
+  }
+
+  handle(node->in());
+
+  switch (node->selection()) {
+    case kir::PairSelect::Selection::X:
+      os_ << ".x";
+      break;
+    case kir::PairSelect::Selection::Y:
+      os_ << ".y";
+      break;
+    default:
+      break;
+  }
+}
+
 void IrTransformPrinter::handle(Fusion* f) {
   auto all_vals = f->usedMathVals();
 
@@ -767,11 +964,7 @@ void IrTransformPrinter::handle(Fusion* f) {
 }
 
 void IrTransformPrinter::printTransforms(TensorView* tv) {
-  auto root_domain = tv->getMaybeRFactorDomain();
-  auto all_exp = DependencyCheck::getAllExprsBetween(
-      {root_domain.begin(), root_domain.end()},
-      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
-
+  auto root_domain = tv->domain()->getRootDomain();
   os() << " root domain : (";
   for (const auto root_idx : c10::irange(root_domain.size())) {
     IrPrinter::handle(root_domain[root_idx]);
@@ -780,6 +973,33 @@ void IrTransformPrinter::printTransforms(TensorView* tv) {
     }
   }
   os() << ")\n";
+
+  if (tv->hasRFactor()) {
+    auto rfactor_domain = tv->domain()->getRFactorDomain();
+
+    auto all_exp = DependencyCheck::getAllExprsBetween(
+        {root_domain.begin(), root_domain.end()},
+        {rfactor_domain.begin(), rfactor_domain.end()});
+
+    for (auto exp : all_exp) {
+      os() << "  ";
+      IrPrinter::handle(exp);
+    }
+
+    os() << " rfactor domain : (";
+    for (const auto root_idx : c10::irange(rfactor_domain.size())) {
+      IrPrinter::handle(rfactor_domain[root_idx]);
+      if (root_idx + 1 < rfactor_domain.size()) {
+        os() << ",";
+      }
+    }
+    os() << ")\n";
+  }
+
+  auto from = tv->getMaybeRFactorDomain();
+  auto all_exp = DependencyCheck::getAllExprsBetween(
+      {from.begin(), from.end()},
+      {tv->domain()->domain().begin(), tv->domain()->domain().end()});
 
   for (auto exp : all_exp) {
     os() << "  ";

@@ -82,5 +82,10 @@ TORCH_API void RemoveUnnecessaryEmbeddingBagOutputs(
 
 TORCH_API void FuseClampNaNToNum(std::shared_ptr<Graph>& graph);
 
+TORCH_API void UseInPlaceGetRealInputsFromOptionalInputsV2(
+    std::shared_ptr<Graph>& graph);
+
+TORCH_API void PrepackWeights(std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch

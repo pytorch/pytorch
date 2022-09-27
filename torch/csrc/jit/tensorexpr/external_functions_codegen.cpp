@@ -2882,7 +2882,7 @@ void nnc_aten_linalg_solve(
   const at::Tensor& input = tensors[1];
   const at::Tensor& other = tensors[2];
   try {
-    at::linalg_solve_out(r, input, other);
+    at::linalg_solve_out(r, input, other, true);
   } catch (...) {
   }
 }

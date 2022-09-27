@@ -62,6 +62,7 @@ Features described in this documentation are classified by release status:
    tensor_view
    torch.amp <amp>
    torch.autograd <autograd>
+   torch.library <library>
    cuda
    torch.backends <backends>
    torch.distributed <distributed>
@@ -90,7 +91,8 @@ Features described in this documentation are classified by release status:
    quantization
    rpc
    torch.random <random>
-   nested
+   masked
+   torch.nested <nested>
    sparse
    storage
    torch.testing <testing>

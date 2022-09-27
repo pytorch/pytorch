@@ -8,6 +8,8 @@ from .shape_prop import TensorMetadata
 from .tools_common import get_node_target, CALLABLE_NODE_OPS
 
 
+__all__ = ['OperatorSupportBase', 'OperatorSupport', 'create_op_support', 'chain', 'OpSupports']
+
 # fx.Node.target typename, as returned by `get_node_target()`
 TargetTypeName = str
 

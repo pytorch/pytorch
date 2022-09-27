@@ -1,3 +1,4 @@
+#include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
@@ -64,6 +65,16 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
   TORCH_CHECK(
       tls_edge_profiler == nullptr, "Edge profiler is already profiling.")
   tls_edge_profiler = this;
+}
+
+void KinetoEdgeCPUProfiler::recordBackendMemoryEvent(
+    void* ptr,
+    int64_t alloc_size,
+    int64_t total_allocated,
+    int64_t total_reserved,
+    c10::Device device) {
+  c10::reportMemoryUsageToProfiler(
+      ptr, alloc_size, total_allocated, total_reserved, device);
 }
 
 void KinetoEdgeCPUProfiler::recordBackendEvent(

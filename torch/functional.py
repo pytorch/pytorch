@@ -15,6 +15,14 @@ from ._jit_internal import _overload as overload
 Tensor = torch.Tensor
 from torch import _VF
 
+# Set a global declaring that we have opt_einsum
+from importlib.util import find_spec as _find_spec
+if _find_spec('opt_einsum') is not None:
+    import opt_einsum as _opt_einsum  # type: ignore[import]
+else:
+    _opt_einsum = None
+
+
 __all__ = [
     'atleast_1d',
     'atleast_2d',
@@ -136,7 +144,6 @@ def broadcast_shapes(*shapes):
             return tensors[0].shape
 
 
-
 def split(
     tensor: Tensor, split_size_or_sections: Union[int, List[int]], dim: int = 0
 ) -> List[Tensor]:
@@ -239,9 +246,10 @@ def einsum(*args: Any) -> Tensor:
 
     .. note::
 
-        This function does not optimize the given expression, so a different formula for the same computation may
-        run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-        can optimize the formula for you.
+        This function uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up computation or to
+        consume less memory by optimizing contraction order. Note that finding _the_ optimal path is an NP-hard problem,
+        thus, opt_einsum relies on different heuristics to achieve near-optimal results. If opt_einsum is not available,
+        the default order is to contract from left to right.
 
     .. note::
 
@@ -252,20 +260,23 @@ def einsum(*args: Any) -> Tensor:
         may be provided in a sublist to enable broadcasting as described in the Equation section above.
 
     Args:
-        equation (string): The subscripts for the Einstein summation.
+        equation (str): The subscripts for the Einstein summation.
         operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Examples::
 
-        # trace
+        >>> # trace
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> torch.einsum('ii', torch.randn(4, 4))
         tensor(-1.2104)
 
-        # diagonal
+        >>> # diagonal
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> torch.einsum('ii->i', torch.randn(4, 4))
         tensor([-0.1034,  0.7952, -0.2433,  0.4545])
 
-        # outer product
+        >>> # outer product
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> x = torch.randn(5)
         >>> y = torch.randn(4)
         >>> torch.einsum('i,j->ij', x, y)
@@ -275,7 +286,8 @@ def einsum(*args: Any) -> Tensor:
                 [ 0.1713, -0.4291, -0.5802,  0.7350],
                 [ 0.5704, -1.4290, -1.9323,  2.4480]])
 
-        # batch matrix multiplication
+        >>> # batch matrix multiplication
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> As = torch.randn(3,2,5)
         >>> Bs = torch.randn(3,5,4)
         >>> torch.einsum('bij,bjk->bik', As, Bs)
@@ -288,7 +300,8 @@ def einsum(*args: Any) -> Tensor:
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-        # with sublist format and ellipsis
+        >>> # with sublist format and ellipsis
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> torch.einsum(As, [..., 0, 1], Bs, [..., 1, 2], [..., 0, 2])
         tensor([[[-1.0564, -1.5904,  3.2023,  3.1271],
                 [-1.6706, -0.8097, -0.8025, -2.1183]],
@@ -299,12 +312,12 @@ def einsum(*args: Any) -> Tensor:
                 [[ 2.8153,  1.8787, -4.3839, -1.2112],
                 [ 0.3728, -2.1131,  0.0921,  0.8305]]])
 
-        # batch permute
+        >>> # batch permute
         >>> A = torch.randn(2, 3, 4, 5)
         >>> torch.einsum('...ij->...ji', A).shape
         torch.Size([2, 3, 5, 4])
 
-        # equivalent to torch.nn.functional.bilinear
+        >>> # equivalent to torch.nn.functional.bilinear
         >>> A = torch.randn(3,5,4)
         >>> l = torch.randn(2,5)
         >>> r = torch.randn(2,4)
@@ -357,7 +370,16 @@ def einsum(*args: Any) -> Tensor:
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
-    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+    if len(operands) <= 2:
+        # the path for contracting 0 or 1 time(s) is already optimized
+        return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+
+    path = None
+    if _opt_einsum is not None:
+        tupled_path = _opt_einsum.contract_path(equation, *operands)[0]
+        # flatten path for dispatching to C++
+        path = [item for pair in tupled_path for item in pair]
+    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.
@@ -446,6 +468,7 @@ else:
 
             `torch.meshgrid` is commonly used to produce a grid for
             plotting.
+            >>> # xdoctest: +REQUIRES(module:matplotlib)
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)
@@ -453,7 +476,6 @@ else:
             >>> z = torch.sin(torch.sqrt(x * x + y * y))
             >>> ax = plt.axes(projection='3d')
             >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
-            <mpl_toolkits.mplot3d.art3d.Poly3DCollection object at 0x7f8f30d40100>
             >>> plt.show()
 
         .. image:: ../_static/img/meshgrid.png
@@ -575,7 +597,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop\_length}`.
             Default: ``True``
-        pad_mode (string, optional): controls the padding method used when
+        pad_mode (str, optional): controls the padding method used when
             :attr:`center` is ``True``. Default: ``"reflect"``
         normalized (bool, optional): controls whether to return the normalized STFT results
              Default: ``False``
@@ -730,22 +752,22 @@ def _unique_impl(input: Tensor, sorted: bool = True,
 
         >>> output = torch.unique(torch.tensor([1, 3, 2, 3], dtype=torch.long))
         >>> output
-        tensor([ 2,  3,  1])
+        tensor([1, 2, 3])
 
         >>> output, inverse_indices = torch.unique(
         ...     torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3])
         >>> inverse_indices
-        tensor([ 0,  2,  1,  2])
+        tensor([0, 2, 1, 2])
 
         >>> output, inverse_indices = torch.unique(
         ...     torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
-        tensor([ 1,  2,  3])
+        tensor([1, 2, 3])
         >>> inverse_indices
-        tensor([[ 0,  2],
-                [ 1,  2]])
+        tensor([[0, 2],
+                [1, 2]])
 
     """
     if has_torch_function_unary(input):
@@ -976,6 +998,7 @@ else:
     def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
+
 def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     r"""Returns a contraction of a and b over multiple dimensions.
 
@@ -1012,6 +1035,7 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
                 [4796., 5162.],
                 [4928., 5306.]])
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> a = torch.randn(3, 4, 5, device='cuda')
         >>> b = torch.randn(4, 5, 6, device='cuda')
         >>> c = torch.tensordot(a, b, dims=2).cpu()
@@ -1065,7 +1089,8 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     else:
         return _VF.tensordot(a, b, dims_a, dims_b, out=out)  # type: ignore[attr-defined]
 
-def cartesian_prod(*tensors):
+
+def cartesian_prod(*tensors: Tensor) -> Tensor:
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
 
@@ -1079,6 +1104,7 @@ def cartesian_prod(*tensors):
 
     Example::
 
+        >>> import itertools
         >>> a = [1, 2, 3]
         >>> b = [4, 5]
         >>> list(itertools.product(a, b))
@@ -1097,6 +1123,7 @@ def cartesian_prod(*tensors):
     if has_torch_function(tensors):
         return handle_torch_function(cartesian_prod, tensors, *tensors)
     return _VF.cartesian_prod(tensors)  # type: ignore[attr-defined]
+
 
 def block_diag(*tensors):
     """Create a block diagonal matrix from provided tensors.
@@ -1188,6 +1215,7 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
     else:
         raise ValueError(f"{compute_mode} is not a valid value for compute_mode")
 
+
 def atleast_1d(*tensors):
     r"""
     Returns a 1-dimensional view of each input tensor with zero dimensions.
@@ -1201,11 +1229,11 @@ def atleast_1d(*tensors):
 
     Example::
 
-        >>> x = torch.randn(2)
+        >>> x = torch.arange(2)
         >>> x
-        tensor([1.4584, 0.7583])
+        tensor([0, 1])
         >>> torch.atleast_1d(x)
-        tensor([1.4584, 0.7583])
+        tensor([0, 1])
         >>> x = torch.tensor(1.)
         >>> x
         tensor(1.)
@@ -1222,6 +1250,7 @@ def atleast_1d(*tensors):
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_1d(tensors)  # type: ignore[attr-defined]
+
 
 def atleast_2d(*tensors):
     r"""
@@ -1241,13 +1270,13 @@ def atleast_2d(*tensors):
         tensor(1.)
         >>> torch.atleast_2d(x)
         tensor([[1.]])
-        >>> x = torch.randn(2,2)
+        >>> x = torch.arange(4).view(2,2)
         >>> x
-        tensor([[2.2086, 2.5165],
-                [0.1757, 0.5194]])
+        tensor([[0, 1],
+                [2, 3]])
         >>> torch.atleast_2d(x)
-        tensor([[2.2086, 2.5165],
-                [0.1757, 0.5194]])
+        tensor([[0, 1],
+                [2, 3]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
         >>> torch.atleast_2d((x,y))
@@ -1259,6 +1288,7 @@ def atleast_2d(*tensors):
     if len(tensors) == 1:
         tensors = tensors[0]
     return _VF.atleast_2d(tensors)  # type: ignore[attr-defined]
+
 
 def atleast_3d(*tensors):
     r"""
@@ -1278,21 +1308,21 @@ def atleast_3d(*tensors):
         tensor(0.5000)
         >>> torch.atleast_3d(x)
         tensor([[[0.5000]]])
-        >>> y = torch.randn(2,2)
+        >>> y = torch.arange(4).view(2,2)
         >>> y
-        tensor([[-0.8079,  0.7460],
-                [-1.1647,  1.4734]])
+        tensor([[0, 1],
+                [2, 3]])
         >>> torch.atleast_3d(y)
-        tensor([[[-0.8079],
-                [ 0.7460]],
+        tensor([[[0],
+                 [1]],
                 <BLANKLINE>
-                [[-1.1647],
-                [ 1.4734]]])
-        >>> x = torch.randn(1,1,1)
+                [[2],
+                 [3]]])
+        >>> x = torch.tensor(1).view(1, 1, 1)
         >>> x
-        tensor([[[-1.5689]]])
+        tensor([[[1]]])
         >>> torch.atleast_3d(x)
-        tensor([[[-1.5689]]])
+        tensor([[[1]]])
         >>> x = torch.tensor(0.5)
         >>> y = torch.tensor(1.)
         >>> torch.atleast_3d((x,y))
@@ -1501,6 +1531,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
             else:
                 return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore[attr-defined]
 
+
 def chain_matmul(*matrices, out=None):
     r"""Returns the matrix product of the :math:`N` 2-D tensors. This product is efficiently computed
     using the matrix chain order algorithm which selects the order in which incurs the lowest cost in terms
@@ -1524,10 +1555,12 @@ def chain_matmul(*matrices, out=None):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> a = torch.randn(3, 4)
         >>> b = torch.randn(4, 5)
         >>> c = torch.randn(5, 6)
         >>> d = torch.randn(6, 7)
+        >>> # will raise a deprecation warning
         >>> torch.chain_matmul(a, b, c, d)
         tensor([[ -2.3375,  -3.9790,  -4.1119,  -6.6577,   9.5609, -11.5095,  -3.2614],
                 [ 21.4038,   3.3378,  -8.4982,  -5.2457, -10.2561,  -2.4684,   2.7163],
@@ -1551,6 +1584,23 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     :attr:`A`. Returns a tuple containing the LU factorization and
     pivots of :attr:`A`.  Pivoting is done if :attr:`pivot` is set to
     ``True``.
+
+    .. warning::
+
+        :func:`torch.lu` is deprecated in favor of :func:`torch.linalg.lu_factor`
+        and :func:`torch.linalg.lu_factor_ex`. :func:`torch.lu` will be removed in a
+        future PyTorch release.
+        ``LU, pivots, info = torch.lu(A, compute_pivots)`` should be replaced with
+
+        .. code:: python
+
+            LU, pivots = torch.linalg.lu_factor(A, compute_pivots)
+
+        ``LU, pivots, info = torch.lu(A, compute_pivots, get_infos=True)`` should be replaced with
+
+        .. code:: python
+
+            LU, pivots, info = torch.linalg.lu_factor_ex(A, compute_pivots)
 
     .. note::
         * The returned permutation matrix for every matrix in the batch is
@@ -1604,6 +1654,8 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
+        >>> # xdoctest: +IGNORE_WANT("non-determenistic")
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.lu(A)
         >>> A_LU
@@ -1630,12 +1682,14 @@ if TYPE_CHECKING:
 else:
     _ListOrSeq = List[Tensor]
 
+
 def _check_list_size(out_len: int, get_infos: bool, out: _ListOrSeq) -> None:
     get_infos_int = 1 if get_infos else 0
     if out_len - get_infos_int != 2:
         raise TypeError(f"expected tuple of {2 + int(get_infos)} elements but got {out_len}")
     if not isinstance(out, (tuple, list)):
         raise TypeError(f"argument 'out' must be tuple of Tensors, not {type(out).__name__}")
+
 
 def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor, Tensor]]) -> Tuple[Tensor, Tensor, Tensor]
@@ -1650,6 +1704,7 @@ def _lu_with_infos(A, pivot=True, get_infos=False, out=None):
         return out
     else:
         return result  # A_LU, pivots, infos
+
 
 def _lu_no_infos(A, pivot=True, get_infos=False, out=None):
     # type: (Tensor, bool, bool, Optional[Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
@@ -1677,6 +1732,7 @@ lu = boolean_dispatch(
     module_name=__name__,
     func_name='lu')
 lu.__doc__ = _lu_impl.__doc__
+
 
 def align_tensors(*tensors):
     raise RuntimeError('`align_tensors` not yet implemented.')

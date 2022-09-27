@@ -21,13 +21,12 @@ DataType indexModeToDtype(KernelIndexMode index_mode) {
 
 bool isFloatingPointType(DataType dtype) {
   switch (dtype) {
-    case DataType::Bool:
-      return false;
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
     case DataType::BFloat16:
       return true;
+    case DataType::Bool:
     case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
@@ -78,10 +77,9 @@ bool isIntegralType(DataType dtype) {
     case DataType::Int32:
       return true;
     case DataType::Null:
-      TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPoint");
+      TORCH_CHECK(false, "Null type is not a valid argument to isIntegralType");
     default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+      TORCH_CHECK(false, "Type not supported in isIntegralType");
   }
 }
 
@@ -260,6 +258,8 @@ static const char* val_type2string(ValType t) {
       return "Predicate";
     case ValType::TensorIndex:
       return "TensorIndex";
+    case ValType::IntPair:
+      return "IntPair";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
   }
@@ -290,12 +290,16 @@ static const char* predicate_type2string(PredicateType t) {
 
 static const char* expr_type2string(ExprType t) {
   switch (t) {
+    case ExprType::ARangeOp:
+      return "ARangeOp";
     case ExprType::UnaryOp:
       return "UnaryOp";
     case ExprType::BinaryOp:
       return "BinaryOp";
     case ExprType::TernaryOp:
       return "TernaryOp";
+    case ExprType::RNGOp:
+      return "RNGOp";
     case ExprType::ReductionOp:
       return "ReductionOp";
     case ExprType::GroupedReductionOp:
@@ -304,10 +308,16 @@ static const char* expr_type2string(ExprType t) {
       return "BroadcastOp";
     case ExprType::WelfordOp:
       return "WelfordOp";
+    case ExprType::GroupedWelfordOp:
+      return "GroupedWelfordOp";
+    case ExprType::LoadStoreOp:
+      return "LoadStoreOp";
     case ExprType::MmaOp:
       return "MmaOp";
     case ExprType::TransposeOp:
       return "TransposeOp";
+    case ExprType::ExpandOp:
+      return "ExpandOp";
     case ExprType::ShiftOp:
       return "ShiftOp";
     case ExprType::GatherOp:
@@ -326,6 +336,10 @@ static const char* expr_type2string(ExprType t) {
       return "BlockSync";
     case ExprType::GridSync:
       return "GridSync";
+    case ExprType::CpAsyncWait:
+      return "CpAsyncWait";
+    case ExprType::CpAsyncCommit:
+      return "CpAsyncCommit";
     case ExprType::InitMagicZero:
       return "InitMagicZero";
     case ExprType::UpdateMagicZero:
@@ -336,10 +350,20 @@ static const char* expr_type2string(ExprType t) {
       return "IfThenElse";
     case ExprType::GridReduction:
       return "GridReduction";
+    case ExprType::GroupedGridReduction:
+      return "GroupedGridReduction";
     case ExprType::GridBroadcast:
       return "GridBroadcast";
     case ExprType::GridWelford:
       return "GridWelford";
+    case ExprType::GroupedGridWelford:
+      return "GroupedGridWelford";
+    case ExprType::Swizzle2D:
+      return "Swizzle2D";
+    case ExprType::Swizzle2DInt:
+      return "Swizzle2DInt";
+    case ExprType::PairSelect:
+      return "PairSelect";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }
@@ -364,10 +388,15 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::IsNegInf:
     case UnaryOpType::IsPosInf:
     case UnaryOpType::IsReal:
+    case UnaryOpType::Print:
       return false;
     default:
       return true;
   }
+}
+
+bool needFloatSuffix(RNGOpType t) {
+  return true;
 }
 
 static const char* unary_op_type2string(UnaryOpType t) {
@@ -420,8 +449,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "neg";
     case UnaryOpType::Not:
       return "not";
-    case UnaryOpType::RandLike:
-      return "randLike";
+    case UnaryOpType::Print:
+      return "print";
     case UnaryOpType::Reciprocal:
       return "reciprocal";
     case UnaryOpType::Relu:
@@ -458,6 +487,10 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "isposinf";
     case UnaryOpType::IsReal:
       return "isreal";
+    case UnaryOpType::Real:
+      return "std::real";
+    case UnaryOpType::Imag:
+      return "std::imag";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
@@ -619,6 +652,16 @@ static const char* binary_op_type_inline_op2string(BinaryOpType t) {
   return nullptr;
 }
 
+static const char* rng_op_type_inline_op2string(RNGOpType t) {
+  switch (t) {
+    case RNGOpType::Uniform:
+      return "rng_uniform";
+    default:
+      break;
+  }
+  return nullptr;
+}
+
 std::string stringifyBooleanOp(const BinaryOpType bopt) {
   switch (bopt) {
     case BinaryOpType::And:
@@ -647,6 +690,15 @@ static const char* ternary_op_type2string(TernaryOpType t) {
   }
 }
 
+static const char* rng_op_type2string(RNGOpType t) {
+  switch (t) {
+    case RNGOpType::Uniform:
+      return "rng_uniform";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unexpected RNGOpType");
+  }
+}
+
 static const char* parallel_type2string(ParallelType t) {
   switch (t) {
     case ParallelType::BIDz:
@@ -671,11 +723,35 @@ static const char* parallel_type2string(ParallelType t) {
       return "US";
     case ParallelType::Mma:
       return "MMA";
+    case ParallelType::Group:
+      return "G";
     case ParallelType::Serial:
       return "S";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unexpected ParallelType");
   }
+}
+
+std::unordered_set<ParallelType> allParallelTypesExcept(
+    const std::unordered_set<ParallelType>& except) {
+  std::unordered_set<ParallelType> result = {
+      ParallelType::BIDz,
+      ParallelType::BIDy,
+      ParallelType::BIDx,
+      ParallelType::TIDz,
+      ParallelType::TIDy,
+      ParallelType::TIDx,
+      ParallelType::Vectorize,
+      ParallelType::MisalignedVectorize,
+      ParallelType::Unroll,
+      ParallelType::Unswitch,
+      ParallelType::Mma,
+      ParallelType::Group,
+      ParallelType::Serial};
+  for (auto t : except) {
+    result.erase(t);
+  }
+  return result;
 }
 
 static const char* memory_type2string(MemoryType t) {
@@ -711,9 +787,7 @@ static const char* iter_type2string(IterType t) {
       return "i";
     case IterType::Reduction:
       return "r";
-    case IterType::BroadcastWithStride:
-      return "sb";
-    case IterType::BroadcastWithoutStride:
+    case IterType::Broadcast:
       return "b";
     case IterType::Gather:
       return "g";
@@ -746,6 +820,19 @@ static const char* thread_size2string(ParallelType t) {
   }
 }
 
+static const char* load_store_type2string(LoadStoreOpType t) {
+  switch (t) {
+    case LoadStoreOpType::LdMatrix:
+      return "LdMatrix";
+    case LoadStoreOpType::LdMatrixTranspose:
+      return "LdMatrixTranspose";
+    case LoadStoreOpType::CpAsync:
+      return "CpAsync";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
+  }
+}
+
 const unsigned int _WORD_SHIFT = 16;
 constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
@@ -760,34 +847,52 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Double, DataType::Float):
     case supported_switch_pair(DataType::Bool, DataType::Float):
       return "(float)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Float):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Float):
+      return "(float)std::real";
     case supported_switch_pair(DataType::Index, DataType::Int):
     case supported_switch_pair(DataType::Int32, DataType::Int):
     case supported_switch_pair(DataType::Float, DataType::Int):
     case supported_switch_pair(DataType::Double, DataType::Int):
     case supported_switch_pair(DataType::Bool, DataType::Int):
       return "(int64_t)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Int):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Int):
+      return "(int64_t)std::real";
     case supported_switch_pair(DataType::Index, DataType::Int32):
     case supported_switch_pair(DataType::Int, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
     case supported_switch_pair(DataType::Double, DataType::Int32):
     case supported_switch_pair(DataType::Bool, DataType::Int32):
       return "(int32_t)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Int32):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Int32):
+      return "(int32_t)std::real";
     case supported_switch_pair(DataType::Int, DataType::Index):
     case supported_switch_pair(DataType::Int32, DataType::Index):
     case supported_switch_pair(DataType::Float, DataType::Index):
     case supported_switch_pair(DataType::Double, DataType::Index):
       return "(nvfuser_index_t)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Index):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Index):
+      return "(nvfuser_index_t)std::real";
     case supported_switch_pair(DataType::Index, DataType::Double):
     case supported_switch_pair(DataType::Int, DataType::Double):
     case supported_switch_pair(DataType::Int32, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
     case supported_switch_pair(DataType::Bool, DataType::Double):
       return "(double)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Double):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Double):
+      return "(double)std::real";
     case supported_switch_pair(DataType::Float, DataType::Bool):
     case supported_switch_pair(DataType::Double, DataType::Bool):
     case supported_switch_pair(DataType::Int32, DataType::Bool):
     case supported_switch_pair(DataType::Int, DataType::Bool):
       return "(bool)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Bool):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Bool):
+      return "(bool)std::real";
     case supported_switch_pair(DataType::Index, DataType::ComplexDouble):
     case supported_switch_pair(DataType::Int, DataType::ComplexDouble):
     case supported_switch_pair(DataType::Int32, DataType::ComplexDouble):
@@ -906,6 +1011,10 @@ std::ostream& operator<<(std::ostream& out, const TernaryOpType totype) {
   return out << ternary_op_type2string(totype);
 }
 
+std::ostream& operator<<(std::ostream& out, const RNGOpType rngtype) {
+  return out << rng_op_type2string(rngtype);
+}
+
 std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   return out << stringifyThread(ptype);
 }
@@ -918,10 +1027,62 @@ std::ostream& operator<<(std::ostream& out, const IdMappingMode immtype) {
   return out << id_map_mode_type2string(immtype);
 }
 
+std::ostream& operator<<(
+    std::ostream& out,
+    const LoadStoreOpType load_store_type) {
+  return out << load_store_type2string(load_store_type);
+}
+
 TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& out,
     const IterType bt) {
   return out << iter_type2string(bt);
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const Swizzle2DType& swizzle) {
+  switch (swizzle) {
+    case Swizzle2DType::NoSwizzle:
+      os << "NoSwizzle";
+      break;
+    case Swizzle2DType::ZShape:
+      os << "ZShape";
+      break;
+    case Swizzle2DType::Transpose:
+      os << "Transpose";
+      break;
+    case Swizzle2DType::XOR:
+      os << "Xor";
+      break;
+    case Swizzle2DType::Scatter:
+      os << "Scatter";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");
+      break;
+  }
+  return os;
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const SwizzleMode& swizzle) {
+  switch (swizzle) {
+    case SwizzleMode::NoSwizzle:
+      os << "NoSwizzle";
+      break;
+    case SwizzleMode::Loop:
+      os << "Loop";
+      break;
+    case SwizzleMode::Data:
+      os << "Data";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "undefined 2D swizzle");
+      break;
+  }
+  return os;
 }
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(
@@ -933,6 +1094,12 @@ TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(
 
 c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
   const char* str = binary_op_type_inline_op2string(botype);
+  return str != nullptr ? c10::optional<std::string>(std::string(str))
+                        : c10::nullopt;
+}
+
+c10::optional<std::string> inline_op_str(const RNGOpType rngtype) {
+  const char* str = rng_op_type_inline_op2string(rngtype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
 }
@@ -1046,6 +1213,27 @@ size_t dataTypeSize(DataType type, DataType index_type) {
     return dataTypeSize(index_type);
   }
   return dataTypeSize(type);
+}
+
+TORCH_CUDA_CU_API std::ostream& operator<<(
+    std::ostream& os,
+    const DoubleBufferLoopStage loop_stage) {
+  switch (loop_stage) {
+    case DoubleBufferLoopStage::NotApplicable:
+      break;
+    case DoubleBufferLoopStage::Prolog:
+      os << "{DoubleBufferProlog}";
+      break;
+    case DoubleBufferLoopStage::Main:
+      os << "{DoubleBufferMainLoop}";
+      break;
+    case DoubleBufferLoopStage::Epilog:
+      os << "{DoubleBufferEpilog}";
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "unknown double buffer stage");
+  }
+  return os;
 }
 
 } // namespace cuda

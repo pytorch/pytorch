@@ -1,16 +1,17 @@
-from torchgen.utils import S, T, context
+import contextlib
+
+import functools
+from typing import Callable, Dict, Iterator, Optional, TypeVar, Union
+
+import torchgen.local as local
 from torchgen.model import (
+    BackendIndex,
+    DispatchKey,
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
-    BackendIndex,
-    DispatchKey,
 )
-import torchgen.local as local
-
-import functools
-from typing import TypeVar, Union, Iterator, Callable, Dict, Optional
-import contextlib
+from torchgen.utils import context, S, T
 
 # Helper functions for defining generators on things in the model
 
@@ -29,6 +30,7 @@ F2 = TypeVar(
     NativeFunctionsGroup,
     Optional[NativeFunction],
     bool,
+    str,
 )
 
 
@@ -49,7 +51,8 @@ def native_function_manager(
         f = g
     with context(lambda: f"in native_functions.yaml line {f.loc}:\n  {f.func}"):
         with local.parametrize(
-            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors
+            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
+            use_ilistref_for_tensor_lists=f.part_of_structured_group,
         ):
             yield
 

@@ -47,14 +47,14 @@ class Int8ConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
 
     const auto IC = X.t.size(3);
 
-    CHECK_EQ(IC, W.t.size(0));
+    TORCH_CHECK_EQ(IC, W.t.size(0));
     const auto KH = W.t.size(1);
     const auto KW = W.t.size(2);
     const auto OC = W.t.size(3);
 
     auto sizes = ConvTransposeUnpoolBase<CPUContext>::GetOutputSize(X.t, OC);
     ReinitializeTensor(&(Y->t), sizes, at::dtype<uint8_t>().device(CPU));
-    CHECK_EQ(OC, Y->t.size(3));
+    TORCH_CHECK_EQ(OC, Y->t.size(3));
 
     runWithSharedBuffer<CPUContext>(ws_, [&](Tensor* buffer) {
       initQNNPACK();

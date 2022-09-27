@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 import math
 import numbers
@@ -29,7 +29,6 @@ from torch.fx.experimental.partitioner_utils import (
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 import torch.fx.experimental.meta_tracer
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -39,7 +38,7 @@ from torch.fx.operator_schemas import (
     type_matches,
     create_type_hint,
 )
-from torch.fx.passes.shape_prop import _extract_tensor_metadata, ShapeProp
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.split_module import split_module
 from torch.testing._internal.common_device_type import (
     ops,
@@ -73,93 +72,6 @@ def symbolic_trace_with_rewrite(root: Union[torch.nn.Module, Callable]) -> Graph
 
 
 class TestFXExperimental(JitTestCase):
-    def test_serialize_graph(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.e = torch.rand(4)
-                self.conv = torch.nn.Conv2d(3, 3, 2, bias=False)
-
-            def forward(self, a, b, c):
-                add_1 = a + b
-                conv1 = self.conv(c)
-                linear = self.linear(add_1 + conv1)
-                add_2 = linear + self.e
-                return add_2
-
-        m = TestModule()
-        traced = symbolic_trace(m)
-        a = torch.rand(4)
-        b = torch.rand(4)
-        c = torch.rand(3, 3, 2, 2)
-        graph_manipulation.get_size_of_all_nodes(traced, [a, b, c])
-
-        partitioner = Partitioner()
-        devices = [Device("dev_0", 5000, 0), Device("dev_1", 125, 1)]
-        partitioner_config = PartitionerConfig(devices, PartitionMode.sparse_nn)
-        ret = partitioner.partition_graph(traced, m, partitioner_config)
-        module_with_submodules = ret.module_with_submodules
-        # Fix for now to add type/shape to output
-        for node in traced.graph.nodes:
-            if node.op == "output":
-                node.meta["tensor_meta"] = _extract_tensor_metadata(a)
-        for mod in module_with_submodules.modules():
-            if isinstance(mod, GraphModule):
-                for node in mod.graph.nodes:
-                    node.meta["tensor_meta"] = _extract_tensor_metadata(a)
-        for node in module_with_submodules.graph.nodes:
-            node.meta["tensor_meta"] = _extract_tensor_metadata(a)
-
-        weights1 = {}
-        weights2 = {}
-        serialized_graph1 = graph_manipulation.serialize_module(traced, weights1)
-        serialized_graph2 = graph_manipulation.serialize_module(
-            module_with_submodules, weights2
-        )
-        assert len(weights1) == 4
-        assert len(weights2) == 4
-        assert len(serialized_graph1["nodes"]) == 10
-        assert len(serialized_graph1["weights"]) == 4
-        assert len(serialized_graph1["modules"]) == 0
-        assert len(serialized_graph2["nodes"]) == 6
-        assert len(serialized_graph2["weights"]) == 1
-        assert len(serialized_graph2["modules"]) == 1
-        assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
-        assert serialized_graph1["weights"]["linear.weight"]["dtype"] == "torch.float32"
-        assert serialized_graph1["weights"]["linear.weight"]["is_quantized"] is False
-        assert serialized_graph1["nodes"][0]["shape"] == "[4]"
-        assert serialized_graph1["nodes"][0]["dtype"] == "torch.float32"
-        assert serialized_graph1["nodes"][0]["target"] == "a"
-        assert serialized_graph1["nodes"][0]["op_code"] == "placeholder"
-        assert serialized_graph1["nodes"][0]["name"] == "a"
-        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_1"
-        assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
-
-        # Test the users of the nodes. No users of the last/output node.
-        assert serialized_graph2["nodes"][0]["users"][0]["name"] == "submod_0"
-        assert serialized_graph2["nodes"][1]["users"][0]["name"] == "submod_0"
-        assert serialized_graph2["nodes"][4]["users"][0]["name"] == "output"
-        assert serialized_graph2["nodes"][5]["users"] == []
-
-        # Test quantization info serialization.
-        x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
-        q_tensor = torch.quantize_per_tensor(x, 1, 0, torch.qint32)
-        q_tensor_channel = torch.quantize_per_channel(
-            x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
-        )
-        result, _ = graph_manipulation.serialize_tensor_quantization(
-            q_tensor, weights={}, pcq_prefix="foo"
-        )
-        result2, per_channel_dict = graph_manipulation.serialize_tensor_quantization(
-            q_tensor_channel, weights={}, pcq_prefix="bar"
-        )
-        assert result["qscheme"] == "torch.per_tensor_affine"
-        assert result["q_scale"] == 1.0
-        assert result2["qscheme"] == "torch.per_channel_affine"
-        assert result2["q_per_channel_scales"] == "bar_per_channel_scales"
-        assert per_channel_dict["bar_per_channel_zero_points"]["shape"] == "[2]"
-
     def test_find_single_partition(self):
         class TestModule(torch.nn.Module):
             def forward(self, a, b):
@@ -701,46 +613,6 @@ class TestFXExperimental(JitTestCase):
 
                 torch.testing.assert_close(loaded(x), mttm(x))
 
-    def test_proxy_tensor(self):
-        def f_grad(x):
-            val = x.cos().cos().sum()
-            return torch.autograd.grad(val, x)
-
-        def f_backward(x):
-            val = x.cos().cos().sum()
-            val.backward()
-            return x.grad
-
-        for f in [f_grad, f_backward]:
-            traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
-            inp = torch.randn(3, requires_grad=True)
-            traced_graph_out = traced_graph(inp)
-            assert inp.grad is None
-            torch.testing.assert_close(traced_graph_out, f(inp))
-
-    def test_mode_tracing_factory_function(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-
-        traced = make_fx(f, trace_factory_functions=True)(torch.randn(3))
-        self.assertTrue(
-            any(
-                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
-                for node in traced.graph.nodes
-            )
-        )
-
-    def test_mode_tracing_factory_function_default_behavior(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-
-        traced = make_fx(f)(torch.randn(3))  # default behavior should not trace factory functions
-        self.assertFalse(
-            any(
-                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
-                for node in traced.graph.nodes
-            )
-        )
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
@@ -1141,6 +1013,19 @@ class {test_classname}(torch.nn.Module):
                 break
         else:
             self.fail("Didn't find call_function torch.add")
+
+    def test_normalize_args_perserve_type(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a: List[torch.Tensor]):
+                return torch.add(a[0], a[1])
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+        traced = NormalizeArgs(traced).transform()
+
+        for node in traced.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(node.type, List[torch.Tensor])
 
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
@@ -1596,6 +1481,8 @@ class TestNormalizeOperators(JitTestCase):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        if isinstance(op.op, torch._ops.OpOverload):
+            self.skipTest("normalize operator doesn't work on torch.ops")
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
             arg_values = [sample_input.input] + list(sample_input.args)

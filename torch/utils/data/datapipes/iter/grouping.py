@@ -2,7 +2,7 @@ from collections import defaultdict
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 __all__ = [
@@ -64,6 +64,7 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
             defaults to ``DataChunk``
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp = IterableWrapper(range(10))
         >>> dp = dp.batch(batch_size=3, drop_last=True)
@@ -124,6 +125,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
             it will flatten the top two levels, and ``-1`` will flatten the entire DataPipe.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper([[[0, 1], [2]], [[3, 4], [5]], [[6]]])
         >>> dp1 = source_dp.unbatch()
@@ -191,6 +193,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
 
     Example:
         >>> import os
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def group_fn(file):
         ...    return os.path.basename(file).split(".")[0]
@@ -215,7 +218,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                  group_size: Optional[int] = None,
                  guaranteed_group_size: Optional[int] = None,
                  drop_remaining: bool = False):
-        _check_lambda_fn(group_key_fn)
+        _check_unpickable_fn(group_key_fn)
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
 
@@ -280,8 +283,6 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.buffer_elements = defaultdict(list)
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
         state = (
             self.datapipe,
             self.group_key_fn,
@@ -290,7 +291,11 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.guaranteed_group_size,
             self.drop_remaining,
             self.wrapper_class,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):
@@ -302,6 +307,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.guaranteed_group_size,
             self.drop_remaining,
             self.wrapper_class,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self.curr_buffer_size = 0
         self.buffer_elements = defaultdict(list)

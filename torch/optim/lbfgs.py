@@ -2,6 +2,7 @@ import torch
 from functools import reduce
 from .optimizer import Optimizer
 
+__all__ = ['LBFGS']
 
 def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
     # ported from https://github.com/torch/optim/blob/master/polyinterp.lua
@@ -284,7 +285,7 @@ class LBFGS(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable): A closure that reevaluates the model
+            closure (Callable): A closure that reevaluates the model
                 and returns the loss.
         """
         assert len(self.param_groups) == 1

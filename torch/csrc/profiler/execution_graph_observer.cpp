@@ -3,16 +3,21 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+
 #include <processthreadsapi.h>
 #else
 #include <unistd.h>
 #endif // _WIN32
 
 #include <fmt/format.h>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include <stack>
 #include <stdexcept>
 #include <vector>
@@ -23,11 +28,13 @@
 #include <ATen/record_function.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/execution_graph_observer.h>
+#include <torch/csrc/profiler/util.h>
 
 using namespace at;
 
 namespace torch {
-namespace {
+namespace profiler {
+namespace impl {
 
 //******************************************************************************
 // JSON output utility functions. To be merged with PyTorch profiler.
@@ -37,10 +44,12 @@ inline std::string vectorToString(const std::vector<T>& v) {
   return fmt::format("[{}]", fmt::join(v, ","));
 }
 
+constexpr size_t maxNumElements = 4096;
+
 inline std::string getValueType(
     const c10::IValue& val,
     const bool baseType = true,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   std::string type = val.tagKind();
 
   if (val.isTensor()) {
@@ -72,7 +81,7 @@ inline std::string getValueType(
 
 inline std::string getValueShape(
     const c10::IValue& val,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
     if (tensor.defined()) {
@@ -104,14 +113,25 @@ inline std::string getValueShape(
 
 inline std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
-    return std::to_string(val.toDouble());
+    double d_val = val.toDouble();
+    if (std::isinf(d_val) || std::isnan(d_val)) {
+      return fmt::format("\"{}\"", std::to_string(d_val));
+    } else {
+      return std::to_string(d_val);
+    }
   } else if (val.isInt()) {
     return std::to_string(val.toInt());
   } else if (val.isBool()) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
-    constexpr int maxStringLen = 500;
-    return fmt::format("\"{}\"", val.toStringRef().substr(0, maxStringLen));
+    const std::string& str_val = val.toStringRef();
+    if (str_val.size() > maxNumElements) {
+      LOG(WARNING) << "string size=" << str_val.size()
+                   << " exceeded maxNumElements=" << maxNumElements;
+      return fmt::format("\"{}\"", str_val.substr(0, maxNumElements));
+    }
+
+    return fmt::format("\"{}\"", str_val);
   } else if (val.isDevice()) {
     return fmt::format("\"{}\"", val.toDevice().str());
   }
@@ -130,8 +150,6 @@ inline int32_t processId() {
 // Main ExecutionGraphObserver implementation.
 //******************************************************************************
 
-static CallbackHandle handle_{INVALID_CALLBACK_HANDLE};
-
 // ExecutionGraphObserver contains all the states of the observer. Some of them
 // are shared between the enter and exit RecordFunction call backs, some data
 // like the `op_stack` may be accessed across different threads. So we should be
@@ -139,7 +157,7 @@ static CallbackHandle handle_{INVALID_CALLBACK_HANDLE};
 // at the cost of performance in large number of threads situations. We may
 // optimize this further to thread local, fine-grained locking, or use thread
 // safe containers.
-struct ExecutionGraphObserver {
+struct TORCH_API ExecutionGraphObserver {
   using ID = size_t;
 
   // Mapping of each thread to its own operator stack
@@ -150,12 +168,6 @@ struct ExecutionGraphObserver {
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
- private:
-  // Must use accessors to change this so that we can keep the
-  // RecordFunction callback in sync with the state.
-  RunState state{RunState::uninitialized};
-
- public:
   // Mutex for multithreaded access to the shared containers.
   std::mutex g_mutex{};
   // Stream to write output JSON.
@@ -163,7 +175,11 @@ struct ExecutionGraphObserver {
 
   // Full path to the output file.
   std::string file_name{};
-  CallbackHandle op_observer_handle{};
+
+  // RecordFunction callback handle for this observer.
+  CallbackHandle cb_handle{INVALID_CALLBACK_HANDLE};
+
+  // Process ID.
   int32_t pid{-1};
   std::string record_time{};
 
@@ -175,25 +191,29 @@ struct ExecutionGraphObserver {
   }
 
   RunState getState() const {
-    return state;
+    return state_;
   }
 
   void setState(RunState newState) {
-    if (state == RunState::uninitialized ||
-        callbackShouldBeEnabled(state) != callbackShouldBeEnabled(newState)) {
+    if (state_ == RunState::uninitialized ||
+        callbackShouldBeEnabled(state_) != callbackShouldBeEnabled(newState)) {
       if (callbackShouldBeEnabled(newState)) {
-        reenableCallback(handle_);
+        reenableCallback(cb_handle);
       } else {
-        disableCallback(handle_);
+        disableCallback(cb_handle);
       }
     }
-    state = newState;
+    state_ = newState;
   }
 
  private:
   static bool callbackShouldBeEnabled(RunState run_state) {
     return run_state == ExecutionGraphObserver::RunState::enabled;
   }
+
+  // Must use accessors to change this so that we can keep the
+  // RecordFunction callback in sync with the state.
+  RunState state_{RunState::uninitialized};
 
   // All tensors and operators have an unique id assigned. Increment id for each
   // new tensor or operator node.
@@ -203,12 +223,8 @@ struct ExecutionGraphObserver {
   std::atomic<ID> id_{2};
 };
 
-// Using a singleton pattern here to avoid global static variable initialization
-// race.
-ExecutionGraphObserver& observer() {
-  static ExecutionGraphObserver _observer{};
-  return _observer;
-}
+// Using a singleton manager here to allow init and delete the observer object.
+using ObserverManager = GlobalStateManager<ExecutionGraphObserver>;
 
 // Uninitialized node has id = 0
 const ExecutionGraphObserver::ID uninitialized_id{0};
@@ -244,6 +260,7 @@ void writeJsonNode(
     const uint64_t rf_id,
     const uint64_t parent,
     const uint64_t fw_parent,
+    const int64_t seq_id,
     const uint64_t scope,
     const uint64_t tid,
     const uint64_t fw_tid,
@@ -257,7 +274,7 @@ void writeJsonNode(
   out << fmt::format(
       R"JSON(
     {{
-      "name": "{}", "id": {}, "rf_id": {}, "parent": {}, "fw_parent": {}, "scope": {}, "tid": {}, "fw_tid": {}, "op_schema": "{}",
+      "name": "{}", "id": {}, "rf_id": {}, "parent": {}, "fw_parent": {}, "seq_id": {}, "scope": {}, "tid": {}, "fw_tid": {}, "op_schema": "{}",
       "inputs": {}, "input_shapes": {}, "input_types": {},
       "outputs": {}, "output_shapes": {}, "output_types": {}
     }})JSON",
@@ -266,6 +283,7 @@ void writeJsonNode(
       rf_id,
       parent,
       fw_parent,
+      seq_id,
       scope,
       tid,
       fw_tid,
@@ -304,7 +322,7 @@ bool initExecutionGraphStart(ExecutionGraphObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.0", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.1", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -321,6 +339,7 @@ void finalizeExecutionGraphOutput(ExecutionGraphObserver& ob) {
       0, // rf_id
       root_id, // parent is self
       0, // fw_parent
+      -1, // seq_id
       static_cast<std::underlying_type_t<RecordScope>>(RecordScope::USER_SCOPE),
       0, // tid
       0); // fw_tid
@@ -357,7 +376,7 @@ inline ExecutionGraphObserver::ID getObjectID(
 inline std::string convertIValue(
     ExecutionGraphObserver& ob,
     const c10::IValue& val,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     const auto t = val.toTensor().unsafeGetTensorImpl();
     ExecutionGraphObserver::ID tensor_id = getObjectID(ob, t);
@@ -365,14 +384,23 @@ inline std::string convertIValue(
     size_t offset = 0;
     size_t numel = 0;
     size_t itemsize = 0;
+    std::string device_str = "";
     if (t->has_storage()) {
-      storage_id = getObjectID(ob, t->storage().data());
+      auto& t_storage = t->storage();
+      storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();
       numel = t->numel();
       itemsize = t->itemsize();
+      device_str = t->device().str();
     }
-    return vectorToString(
-        std::vector<size_t>{tensor_id, storage_id, offset, numel, itemsize});
+    return fmt::format(
+        "[{},{},{},{},{},\"{}\"]",
+        tensor_id,
+        storage_id,
+        offset,
+        numel,
+        itemsize,
+        device_str);
   } else if (val.isTuple()) {
     std::vector<std::string> str_array;
     const auto& val_tuple = val.toTupleRef().elements();
@@ -429,6 +457,7 @@ void recordOperatorStart(
           0, // rf_id
           root_id,
           0, // fw_parent
+          -1, // seq_id
           static_cast<std::underlying_type_t<RecordScope>>(
               RecordScope::USER_SCOPE),
           tid,
@@ -476,25 +505,50 @@ void recordOperatorStart(
 
 std::unique_ptr<ObserverContext> onFunctionEnter(const RecordFunction& fn) {
   using RunState = ExecutionGraphObserver::RunState;
-  auto& ob = observer();
-
-  if (ob.getState() == RunState::enabled) {
+  auto ob = ObserverManager::get();
+  if (ob != nullptr && ob->getState() == RunState::enabled) {
     // record op
     auto fc_ptr = std::make_unique<FunctionCallContext>();
-    recordOperatorStart(ob, *fc_ptr.get(), fn);
+    recordOperatorStart(*ob, *fc_ptr.get(), fn);
     return fc_ptr;
-  } else {
-    return nullptr;
   }
+  return nullptr;
+}
+
+inline std::string json_str_escape(const std::string& str) {
+  std::ostringstream ostream;
+  for (auto ch = str.cbegin(); ch != str.cend(); ch++) {
+    if (*ch == '"') {
+      ostream << "\\\"";
+    } else if (*ch == '\\') {
+      ostream << "\\\\";
+    } else if (*ch == '\b') {
+      ostream << "\\b";
+    } else if (*ch == '\f') {
+      ostream << "\\f";
+    } else if (*ch == '\n') {
+      ostream << "\\n";
+    } else if (*ch == '\r') {
+      ostream << "\\r";
+    } else if (*ch == '\t') {
+      ostream << "\\t";
+    } else if ('\x00' <= *ch && *ch <= '\x1f') {
+      ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+              << static_cast<int>(*ch);
+    } else {
+      ostream << *ch;
+    }
+  }
+  return ostream.str();
 }
 
 void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   using RunState = ExecutionGraphObserver::RunState;
-  auto& ob = observer();
-  if (ctx_ptr == nullptr) {
+  auto ob = ObserverManager::get();
+  if (ob == nullptr || ctx_ptr == nullptr) {
     return;
   }
-  if (ob.getState() == RunState::enabled) {
+  if (ob->getState() == RunState::enabled) {
     auto fc_ptr = dynamic_cast<FunctionCallContext*>(ctx_ptr);
     // TORCH_INTERNAL_ASSERT(fc_ptr != nullptr);
     if (fc_ptr == nullptr) {
@@ -523,28 +577,29 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
-      const std::lock_guard<std::mutex> lock(ob.g_mutex);
+      const std::lock_guard<std::mutex> lock(ob->g_mutex);
       // remove current op id from stack
 
-      ob.op_stack[fn.threadId()].pop();
+      ob->op_stack[fn.threadId()].pop();
       for (const auto i : c10::irange(output_start, outputs.size())) {
         appendValueInfo(
-            ob, outputs[i], output_values, output_types, output_shapes);
+            *ob, outputs[i], output_values, output_types, output_shapes);
       }
 
       std::string op_schema_str{};
       const auto op_schema = fn.operator_schema();
       if (op_schema.has_value()) {
-        op_schema_str = c10::toString(op_schema.value());
+        op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
       writeJsonNode(
-          ob.out,
+          ob->out,
           fc.name,
           fc.op_id,
           fn.handle(),
           fc.parent_id,
           fc.fw_parent_id,
+          fn.seqNr(),
           static_cast<std::underlying_type_t<RecordScope>>(fn.scope()),
           fn.threadId(),
           fn.forwardThreadId(),
@@ -555,7 +610,7 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
           vectorToString(output_shapes),
           vectorToString(output_types),
           op_schema_str);
-      ob.out << ",";
+      ob->out << ",";
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution graph observer: [" << fc.name
                    << " (" << fc.op_id << ")] " << e.what();
@@ -563,17 +618,13 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   }
 }
 
-} // namespace
-
-namespace profiler {
-namespace impl {
 // Add execution graph observer callback functions to the RecordFunction global
 // observers.
 bool addExecutionGraphObserver(const std::string& output_file_path) {
-  // Making this static local to ensure it's instantiated just once when it's
-  // called the first time.
-  if (handle_ == INVALID_CALLBACK_HANDLE) {
-    auto& ob = observer();
+  // Check if the observer is already initialized.
+  if (ObserverManager::get() == nullptr) {
+    ObserverManager::push(std::make_shared<ExecutionGraphObserver>());
+    auto& ob = *ObserverManager::get();
     ob.pid = processId();
     // Set output
     ob.file_name = output_file_path;
@@ -581,7 +632,7 @@ bool addExecutionGraphObserver(const std::string& output_file_path) {
       return false;
     }
 
-    handle_ = addGlobalCallback(
+    ob.cb_handle = addGlobalCallback(
         RecordFunctionCallback(&onFunctionEnter, &onFunctionExit)
             .needsInputs(true)
             .needsOutputs(true)
@@ -591,32 +642,39 @@ bool addExecutionGraphObserver(const std::string& output_file_path) {
 
     VLOG(1) << "Added PyTorch execution graph observer, output="
             << output_file_path;
-  } else {
+  } else if (ObserverManager::get()->cb_handle != INVALID_CALLBACK_HANDLE) {
     LOG(WARNING) << "Execution graph observer is already registered.";
   }
-  return handle_ != INVALID_CALLBACK_HANDLE;
+  return true;
 }
 
 void removeExecutionGraphObserver() {
-  auto& ob = observer();
-  if (ob.getState() != ExecutionGraphObserver::RunState::disabled) {
-    disableExecutionGraphObserver();
-  }
+  auto ob = ObserverManager::get();
+  if (ob != nullptr) {
+    if (ob->getState() != ExecutionGraphObserver::RunState::disabled) {
+      disableExecutionGraphObserver();
+    }
 
-  if (handle_ != INVALID_CALLBACK_HANDLE) {
-    finalizeExecutionGraphOutput(ob);
-    removeCallback(handle_);
-    handle_ = INVALID_CALLBACK_HANDLE;
-    ob.setState(ExecutionGraphObserver::RunState::uninitialized);
-    VLOG(1) << "Removed PyTorch execution graph observer";
+    if (ob->cb_handle != INVALID_CALLBACK_HANDLE) {
+      finalizeExecutionGraphOutput(*ob);
+      removeCallback(ob->cb_handle);
+      ob->cb_handle = INVALID_CALLBACK_HANDLE;
+      // Release the current EG observer object and reset.
+      TORCH_INTERNAL_ASSERT(
+          ObserverManager::pop() != nullptr,
+          "Global state ptr cannot be null before resetting");
+      VLOG(1) << "Removed PyTorch execution graph observer";
+    } else {
+      LOG(WARNING) << "Execution graph observer was not registered.";
+    }
   } else {
-    LOG(WARNING) << "Execution graph observer was not registered.";
+    LOG(WARNING) << "Execution graph observer was not initialized.";
   }
 }
 
 void enableExecutionGraphObserver() {
   VLOG(1) << "enableExecutionGraphObserver() ";
-  auto& ob = observer();
+  auto& ob = *ObserverManager::get();
   // Make sure we are not already enabled.
   if (ob.getState() == ExecutionGraphObserver::RunState::enabled) {
     LOG(WARNING)
@@ -628,7 +686,7 @@ void enableExecutionGraphObserver() {
 
 void disableExecutionGraphObserver() {
   VLOG(1) << "disableExecutionGraphObserver()";
-  auto& ob = observer();
+  auto& ob = *ObserverManager::get();
   if (ob.getState() != ExecutionGraphObserver::RunState::disabled) {
     ob.setState(ExecutionGraphObserver::RunState::disabled);
   } else {

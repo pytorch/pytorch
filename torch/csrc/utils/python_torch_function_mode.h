@@ -11,10 +11,15 @@ namespace overrides {
 // From C++ side, there is no such thing as compositional modes, there is one
 // mode and of course you should be able to clear it.
 struct StashTorchFunctionModeGuard {
-  StashTorchFunctionModeGuard() { at::impl::PythonTorchFunctionTLS::swap_mode(old_mode_); }
-  ~StashTorchFunctionModeGuard() { at::impl::PythonTorchFunctionTLS::set_mode(std::move(old_mode_)); }
-private:
-  std::shared_ptr<c10::SafePyObject> old_mode_ = nullptr;
+  StashTorchFunctionModeGuard() {
+    at::impl::PythonTorchFunctionTLS::swap_mode(old_mode_);
+  }
+  ~StashTorchFunctionModeGuard() {
+    at::impl::PythonTorchFunctionTLS::set_mode(std::move(old_mode_));
+  }
+
+ private:
+  std::shared_ptr<c10::SafePyObject> old_mode_;
 };
 
 } // namespace overrides

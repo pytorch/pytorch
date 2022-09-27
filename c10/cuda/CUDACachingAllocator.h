@@ -11,10 +11,6 @@
 
 namespace c10 {
 
-class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {
-  using Error::Error;
-};
-
 // Caching allocator will execute every registered callback if it unable to find
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
@@ -98,6 +94,20 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
+struct Context {
+  virtual ~Context() {}
+};
+
+typedef std::unique_ptr<Context> (*CreateContextFn)(void);
+
+struct History {
+  void* addr;
+  size_t real_size; // unrounded, actually requested size
+  std::unique_ptr<Context> context; // per-watcher context
+  std::unique_ptr<History> next; // when blocks are merged we keep records of
+                                 // what used to be in the block
+};
+
 // Struct containing info of an allocation block (i.e. a fractional part of a
 // cudaMalloc)..
 struct BlockInfo {
@@ -105,6 +115,8 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
+  History* history =
+      nullptr; // borrowed reference because it is owned by the allocator
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
@@ -114,6 +126,7 @@ struct SegmentInfo {
   int64_t total_size = 0;
   int64_t allocated_size = 0;
   int64_t active_size = 0;
+  cudaStream_t stream = 0;
   bool is_large = false;
   std::vector<BlockInfo> blocks;
 };
@@ -125,6 +138,7 @@ C10_CUDA_API void raw_delete(void* ptr);
 C10_CUDA_API Allocator* get();
 C10_CUDA_API void init(int device_count);
 C10_CUDA_API void setMemoryFraction(double fraction, int device);
+C10_CUDA_API void setAllocatorSettings(const std::string& env);
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(
     int dev_id,
@@ -146,6 +160,8 @@ C10_CUDA_API void notifyCaptureEnd(int device, CaptureId_t graph_id);
 C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 
 C10_CUDA_API std::mutex* getFreeMutex();
+
+C10_CUDA_API void setContextRecorder(CreateContextFn recorder);
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 } // namespace CUDACachingAllocator

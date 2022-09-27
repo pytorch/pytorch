@@ -56,8 +56,8 @@ if(NOT BUILD_CAFFE2 AND NOT BUILD_LITE_INTERPRETER)
   EXCLUDE(ATen_CORE_TEST_SRCS "${ATen_CORE_TEST_SRCS}" ${ATen_CORE_EXCLUDED_TEST_SRCS})
 endif()
 
-file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/*.h" "quantized/*.h")
-file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp")
+file(GLOB base_h "*.h" "detail/*.h" "cpu/*.h" "cpu/vec/vec512/*.h" "cpu/vec/vec256/*.h" "cpu/vec/*.h" "quantized/*.h" "functorch/*.h")
+file(GLOB base_cpp "*.cpp" "detail/*.cpp" "cpu/*.cpp" "functorch/*.cpp")
 file(GLOB cuda_h "cuda/*.h" "cuda/detail/*.h" "cuda/*.cuh" "cuda/detail/*.cuh")
 file(GLOB cuda_cpp "cuda/*.cpp" "cuda/detail/*.cpp")
 file(GLOB cuda_nvrtc_stub_h "cuda/nvrtc_stub/*.h")
@@ -121,7 +121,7 @@ file(GLOB native_ao_sparse_h
             "native/ao_sparse/cpu/*.h"
             "native/ao_sparse/quantized/*.h"
             "native/ao_sparse/quantized/cpu/*.h")
-file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h", "native/quantized/cudnn/*.h")
+file(GLOB native_quantized_h "native/quantized/*.h" "native/quantized/cpu/*.h" "native/quantized/cudnn/*.h")
 file(GLOB native_cpu_h "native/cpu/*.h")
 
 file(GLOB native_cuda_cu "native/cuda/*.cu")
@@ -130,15 +130,13 @@ file(GLOB native_cuda_h "native/cuda/*.h" "native/cuda/*.cuh")
 file(GLOB native_cuda_linalg_cpp "native/cuda/linalg/*.cpp")
 file(GLOB native_hip_h "native/hip/*.h" "native/hip/*.cuh")
 file(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
-file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
-file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
 file(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
 file(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 file(GLOB native_quantized_cuda_cu "native/quantized/cuda/*.cu")
 file(GLOB native_quantized_cuda_cpp "native/quantized/cuda/*.cpp")
 file(GLOB native_quantized_cudnn_cpp "native/quantized/cudnn/*.cpp")
-file(GLOB native_transformers_cuda_cu "native/transformers/cuda/*.cu")
-file(GLOB native_transformers_cuda_cpp "native/transformers/cuda/*.cpp")
+file(GLOB native_nested_cuda_cu "native/nested/cuda/*.cu")
+file(GLOB native_nested_cuda_cpp "native/nested/cuda/*.cpp")
 
 file(GLOB native_hip_hip "native/hip/*.hip")
 file(GLOB native_hip_cpp "native/hip/*.cpp")
@@ -151,10 +149,21 @@ file(GLOB native_sparse_hip_hip "native/sparse/hip/*.hip")
 file(GLOB native_sparse_hip_cpp "native/sparse/hip/*.cpp")
 file(GLOB native_quantized_hip_hip "native/quantized/hip/*.hip")
 file(GLOB native_quantized_hip_cpp "native/quantized/hip/*.cpp")
+file(GLOB native_transformers_cuda_cu "native/transformers/cuda/*.cu")
+file(GLOB native_transformers_cuda_cpp "native/transformers/cuda/*.cpp")
 file(GLOB native_transformers_hip_hip "native/transformers/hip/*.hip")
 file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
 file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
+
+# flash_attention sources
+file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
+file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
+
+if(USE_FLASH_ATTENTION)
+  list(APPEND native_transformers_cuda_cu ${flash_attention_cuda_cu})
+  list(APPEND native_transformers_cuda_cpp ${flash_attention_cuda_cpp})
+endif()
 
 # XNNPACK
 file(GLOB native_xnnpack "native/xnnpack/*.cpp")
@@ -415,12 +424,14 @@ if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)
 endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
+  if(USE_FLASH_ATTENTION)
+    list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
+  endif()
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       )
    if(NOT BUILD_LAZY_CUDA_LINALG)

@@ -15,22 +15,48 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
+  # This needs to be run right before the test starts so that it can gather the
+  # latest labels from the PR
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   test:
-    # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
+    needs: filter
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
-      # [see note: pytorch repo ref]
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
@@ -48,7 +74,7 @@ jobs:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
         with:
           timeout_minutes: 10
@@ -57,6 +83,15 @@ jobs:
             set -ex
             bash .github/scripts/install_nvidia_utils_linux.sh
             echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        run: |
+          python3 -m pip install psutil==5.9.1
+          python3 -m pip install pynvml==11.4.1
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "::set-output name=monitor-script-pid::${!}"
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
@@ -68,19 +103,21 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Test
+        id: test
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           PR_BODY: ${{ github.event.pull_request.body }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
@@ -98,7 +135,18 @@ jobs:
           fi
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          export COMMIT_MESSAGES
+
+          # sanitize the input commit message and PR body here:
+          #
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -108,24 +156,23 @@ jobs:
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
-            -e IN_CI \
-            -e IS_GHA \
+            -e BASE_SHA \
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
-            -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
             -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_S3_KEY_PREFIX \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
@@ -146,14 +193,23 @@ jobs:
 
       - name: Get workflow job id
         id: get-job-id
-        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        uses: ./.github/actions/get-workflow-job-id
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Stop monitoring script
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
@@ -172,11 +228,12 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}

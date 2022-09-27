@@ -23,6 +23,7 @@
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
 #include <ATen/ops/_sparse_bsr_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_compressed_tensor_unsafe_native.h>
 #include <ATen/ops/_sparse_csr_tensor_unsafe_native.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/abs.h>
@@ -162,7 +163,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
 
 template <typename F, typename... Args>
 Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "unary_op_inplace", [](){});
 
   auto self_values = self.values();
   (self_values.*op_inplace)(std::forward<Args>(args)...);
@@ -213,13 +214,22 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 
   // To handle type promotion for inputs to unary ops,
   // we first get the result from the underlined op, and use the result
-  // to create a sparse CSR tensor, which is used as the input to the out=
+  // to create a sparse compressed tensor, which is used as the input to the out=
   // variant
   auto result_values = op(values);
 
-  auto result = at::native::_sparse_csr_tensor_unsafe(
-      input.crow_indices().clone(),
-      input.col_indices().clone(),
+  auto compressed_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(input.layout(),
+                                                                      "get_result_tensor_for_unary_op",
+                                                                      [&]{ return input.crow_indices(); },
+                                                                      [&]{ return input.ccol_indices(); });
+  auto plain_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(input.layout(),
+                                                                 "get_result_tensor_for_unary_op",
+                                                                 [&]{ return input.col_indices(); },
+                                                                 [&]{ return input.row_indices(); });
+
+  auto result = at::native::_sparse_compressed_tensor_unsafe(
+      compressed_indices.clone(),
+      plain_indices.clone(),
       result_values,
       input.sizes(),
       result_values.scalar_type(),
@@ -289,6 +299,23 @@ Tensor mul_scalar_sparse_csr(const Tensor& self, const Scalar& other) {
       result_values.device());
 }
 
+Tensor& zero_sparse_csr_(Tensor& self) {
+  /*
+    csr.zero_() resets nnz to 0.
+
+    If the original sparsity pattern needs to be preserved, use
+    `csr.values().zero_()` instead.
+
+    The above behavior also implies that torch.zeros_like(csr) returns
+    a new tensor with nnz == 0. If one needs a zeros_like semantics
+    where the result has the same sparsity pattern as input, then use
+    `result = csr.clone(); result.values.zero_();`
+  */
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(self.layout(), "zero_sparse_csr_", [](){});
+  get_sparse_csr_impl(self)->resize_and_clear_(self.sparse_dim(), self.sizes());
+  return self;
+}
+
 /* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
  * Only simple funcs, with 0->0 correspondence are currently supported. */
 
@@ -316,7 +343,7 @@ Tensor mul_scalar_sparse_csr(const Tensor& self, const Scalar& other) {
   CREATE_UNARY_UFUNC_OUT(op_name);             \
   CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);
 
-// Exhaustive list of the unary ufuncs supported by sparse CSR
+// Exhaustive list of the unary ufuncs supported by sparse compressed
 CREATE_UNARY_UFUNC(abs);
 CREATE_UNARY_UFUNC(asin);
 CREATE_UNARY_UFUNC(asinh);
@@ -339,8 +366,6 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-
-CREATE_UNARY_UFUNC_INPLACE(zero);
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -680,7 +705,8 @@ void add_out_dense_sparse_csr_cpu(
   auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
   auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf,
       kHalf,
       kBool,
       kBFloat16,

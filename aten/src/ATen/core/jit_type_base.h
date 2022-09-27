@@ -7,6 +7,7 @@
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/SymFloat.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -52,6 +53,7 @@ namespace c10 {
   _(AnyTupleType)           \
   _(AnyClassType)           \
   _(SymIntType)             \
+  _(SymFloatType)           \
   _(UnionType)              \
   _(DynamicType)
 
@@ -247,7 +249,7 @@ struct TORCH_API Type {
     // nvcc; see comment in destroy() below.
     struct SharedPtrWrapper {
       SharedPtrWrapper(std::shared_ptr<T> &&x)
-          : repr_(x) {}
+          : repr_(std::move(x)) {}
       std::shared_ptr<T> repr_;
     };
     union Repr {

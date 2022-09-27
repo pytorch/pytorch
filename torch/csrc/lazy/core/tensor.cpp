@@ -3,26 +3,28 @@
 
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_impl.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
 
+#include <ATen/FunctionalTensorWrapper.h>
 
 namespace torch {
 namespace lazy {
 namespace {
-LazyTensorPtr GetOrCreateLtcTensor(const at::Tensor& tensor,
-                                const BackendDevice& device) {
+LazyTensorPtr GetOrCreateLtcTensor(
+    const at::Tensor& tensor,
+    const BackendDevice& device) {
   if (!tensor.defined()) {
     return torch::lazy::LazyTensorPtr();
   }
   auto lazy_tensor = TryGetLtcTensor(tensor);
   return lazy_tensor ? lazy_tensor : LazyTensor::Create(tensor, device);
 }
-}  // namespace
+} // namespace
 
 LazyTensor::Data::~Data() {
   LazyGraphExecutor::Get()->UnregisterTensor(this);
@@ -32,13 +34,15 @@ LazyTensorPtr LazyTensor::Create(
     const at::Tensor& tensor,
     const BackendDevice& device) {
   TORCH_CHECK(tensor.device().type() != at::kLazy);
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(tensor, device));
+  LazyTensorPtr lazy_tensor =
+      c10::make_intrusive<LazyTensor>(LazyTensor(tensor, device));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
 
 LazyTensorPtr LazyTensor::Create(Value ir_value, const BackendDevice& device) {
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(std::move(ir_value), device));
+  LazyTensorPtr lazy_tensor =
+      c10::make_intrusive<LazyTensor>(LazyTensor(std::move(ir_value), device));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
@@ -46,13 +50,15 @@ LazyTensorPtr LazyTensor::Create(Value ir_value, const BackendDevice& device) {
 LazyTensorPtr LazyTensor::Create(
     std::shared_ptr<LazyView> view,
     const BackendDevice& device) {
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(std::move(view), device));
+  LazyTensorPtr lazy_tensor =
+      c10::make_intrusive<LazyTensor>(LazyTensor(std::move(view), device));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
 
 LazyTensorPtr LazyTensor::Create(BackendDataPtr handle) {
-  LazyTensorPtr lazy_tensor = c10::make_intrusive<LazyTensor>(LazyTensor(std::move(handle)));
+  LazyTensorPtr lazy_tensor =
+      c10::make_intrusive<LazyTensor>(LazyTensor(std::move(handle)));
   LazyGraphExecutor::Get()->RegisterTensor(lazy_tensor->data_ptr());
   return lazy_tensor;
 }
@@ -78,8 +84,11 @@ LazyTensor::LazyTensor(
     : LazyTensor(std::make_shared<Data>(std::move(view), device)) {}
 
 LazyTensor::LazyTensor(std::shared_ptr<Data> data)
-  : data_(std::move(data))
-  , storage_(c10::Storage({}, 0, c10::DataPtr(nullptr, backendDeviceToAtenDevice(data_->device)))) {}
+    : data_(std::move(data)),
+      storage_(c10::Storage(
+          {},
+          0,
+          c10::DataPtr(nullptr, backendDeviceToAtenDevice(data_->device)))) {}
 
 LazyTensor::Data* LazyTensor::data() const {
   TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
@@ -200,9 +209,9 @@ void LazyTensor::SetIrValue(Value ir_value) {
 
 void LazyTensor::SetInPlaceIrValue(Value ir_value) {
   auto tensor_shape = shape();
-  if (tensor_shape.Get().scalar_type() !=
-      ir_value.shape().scalar_type()) {
-    ir_value = MakeCast(ir_value, tensor_shape.Get().scalar_type(), c10::nullopt);
+  if (tensor_shape.Get().scalar_type() != ir_value.shape().scalar_type()) {
+    ir_value =
+        MakeCast(ir_value, tensor_shape.Get().scalar_type(), c10::nullopt);
   }
   SetIrValue(std::move(ir_value));
 }
@@ -336,9 +345,7 @@ std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
   Value ir_value = GetIrValue();
   std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
   ViewInfo this_view_info(
-      ViewInfo::Type::kNoOp,
-      ir_value.shape(),
-      ir_value.shape());
+      ViewInfo::Type::kNoOp, ir_value.shape(), ir_value.shape());
   data()->view = std::make_shared<LazyView>(
       ir_value.shape(), alias, std::move(this_view_info));
   AssignIrValue(Value());
@@ -448,7 +455,8 @@ void LazyTensor::ApplyPendingGraph() {
   // This method is called to ensure that the tensor data is available on
   // device, so that a call to CurrentDataHandle() returns a valid pointer.
   if (CurrentDataHandle() == nullptr) {
-    std::vector<LazyTensorPtr> tensors({c10::make_intrusive<LazyTensor>(LazyTensor(*this))});
+    std::vector<LazyTensorPtr> tensors(
+        {c10::make_intrusive<LazyTensor>(LazyTensor(*this))});
     LazyGraphExecutor::Get()->SyncTensorsGraph(
         &tensors,
         {},
@@ -462,12 +470,13 @@ int64_t LazyTensor::GetNextTensorId() {
   return id_generator->fetch_add(1);
 }
 
-torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
+torch::lazy::Value GetTensorList(at::ITensorListRef tensors) {
   std::vector<Value> values;
-  for (const auto& t: tensors) {
+  for (const auto& t : tensors) {
     auto* impl = dynamic_cast<LTCTensorImpl*>(t.unsafeGetTensorImpl());
-    TORCH_INTERNAL_ASSERT(impl,
-      "GetTensorList only supports lists of valid tensors, but optional support could be added");
+    TORCH_INTERNAL_ASSERT(
+        impl,
+        "GetTensorList only supports lists of valid tensors, but optional support could be added");
     values.push_back(impl->tensor()->GetIrValue());
   }
 
@@ -475,7 +484,8 @@ torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors) {
 }
 
 LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
-  auto* impl = dynamic_cast<LTCTensorImpl*>(tensor.unsafeGetTensorImpl());
+  auto* impl = dynamic_cast<LTCTensorImpl*>(
+      maybe_unwrap_functional(tensor).unsafeGetTensorImpl());
   if (impl == nullptr) {
     // return c10::make_intrusive<LazyTensor>();
     return LazyTensorPtr();
@@ -485,7 +495,8 @@ LazyTensorPtr TryGetLtcTensor(const at::Tensor& tensor) {
 
 LazyTensorPtr GetLtcTensor(const at::Tensor& tensor) {
   auto lazy_tensor = TryGetLtcTensor(tensor);
-  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: " << tensor.toString();
+  CHECK(lazy_tensor) << "Input tensor is not a lazy tensor: "
+                     << tensor.toString();
   return lazy_tensor;
 }
 
@@ -498,18 +509,21 @@ std::vector<LazyTensorPtr> GetLtcTensors(c10::ArrayRef<at::Tensor> tensors) {
   return ltc_tensors;
 }
 
-LazyTensorPtr GetOrCreateLtcTensor(const c10::optional<at::Tensor>& tensor,
-                                const BackendDevice& device) {
+LazyTensorPtr GetOrCreateLtcTensor(
+    const c10::optional<at::Tensor>& tensor,
+    const BackendDevice& device) {
   return GetOrCreateLtcTensor(tensor.value_or(at::Tensor()), device);
 }
 
-LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const BackendDevice& device) {
+LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(
+    const at::Tensor& tensor,
+    const BackendDevice& device) {
   // TODO: There are places in core where a scalar is wrapped but not marked as
   // wrapped.
   return (tensor.unsafeGetTensorImpl()->is_wrapped_number() ||
           (tensor.dim() == 0 && tensor.numel() == 1))
-             ? GetOrCreateLtcTensor(tensor, device)
-             : GetLtcTensor(tensor);
+      ? GetOrCreateLtcTensor(tensor, device)
+      : GetLtcTensor(tensor);
 }
 
 at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor) {
@@ -519,6 +533,28 @@ at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor) {
 
 at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor) {
   return at::Tensor(c10::make_intrusive<LTCTensorImpl>(std::move(ltc_tensor)));
+}
+
+at::Tensor to_lazy_tensor(
+    const at::Tensor& self,
+    const c10::TensorOptions& options,
+    at::Device device,
+    bool non_blocking,
+    bool functionalize_output) {
+  TORCH_INTERNAL_ASSERT(self.device().type() != c10::kLazy);
+  TORCH_INTERNAL_ASSERT(device.type() == c10::kLazy);
+
+  auto eager_tensor =
+      self.to(options, /*non_blocking=*/non_blocking, /*copy=*/true);
+  auto lazy_self = torch::lazy::GetOrCreateLtcTensor(
+      eager_tensor, torch::lazy::atenDeviceToBackendDevice(device));
+  auto out = torch::lazy::CreateAtenFromLtcTensor(lazy_self);
+  if (functionalize_output) {
+    // See Note [Lazy Tensor Functionalization]
+    return at::functionalization::impl::to_functional_tensor(out);
+  } else {
+    return out;
+  }
 }
 
 } // namespace lazy

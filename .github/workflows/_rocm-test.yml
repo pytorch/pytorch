@@ -19,6 +19,13 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID:
@@ -29,8 +36,6 @@ on:
         description: secret acess key for test stats upload
 
 env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
@@ -57,6 +62,15 @@ jobs:
         with:
           docker-image: ${{ inputs.docker-image }}
 
+      - name: Start monitoring script
+        id: monitor-script
+        shell: bash
+        run: |
+          python3 -m pip install psutil==5.9.1
+          python3 -m pip install pynvml==11.4.1
+          python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          echo "::set-output name=monitor-script-pid::${!}"
+
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
@@ -67,14 +81,14 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Test
+        id: test
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -95,7 +109,18 @@ jobs:
           fi
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          export COMMIT_MESSAGES
+
+          # sanitize the input commit message and PR body here:
+          #
+          # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -105,22 +130,18 @@ jobs:
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e PR_NUMBER \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e GITHUB_ACTIONS \
-            -e IN_CI \
-            -e IS_GHA \
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
-            -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
             -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
-            -e PR_LABELS \
+            -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
@@ -150,14 +171,23 @@ jobs:
 
       - name: Get workflow job id
         id: get-job-id
-        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        uses: ./.github/actions/get-workflow-job-id
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Stop monitoring script
+        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        shell: bash
+        continue-on-error: true
+        env:
+          MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
+        run: |
+          kill "$MONITOR_SCRIPT_PID"
+
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -168,11 +198,12 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}
@@ -188,5 +219,21 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
         if: always()
+        shell: bash
+        run: |
+          # Only stop the docker container we started since there might be multiple runners on this host.
+          docker stop "${{ env.CONTAINER_NAME }}" || true
+          # Prune all of the docker containers.
+          # Might fail if a prune is already in progress by another runner.
+          docker container prune -f || true
+          # Prune everything docker if there are more than 10 images (~200GB).
+          # This is easier than using a time filter, e.g., "until=24h".
+          # Might fail if a prune is already in progress by another runner.
+          image_count=$(docker images | wc -l)
+          if [[ ${image_count} -gt 10 ]]; then
+              echo "Purging all docker caches"
+              docker system prune -af || true
+          else
+              echo "Will not purge docker, only ${image_count} images found"
+          fi

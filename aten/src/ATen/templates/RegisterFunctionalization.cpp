@@ -23,9 +23,22 @@ $ops_headers
 namespace at {
 namespace functionalization {
 
+// This keyset is used by functionalization when it calls into meta kernels
+// to accurately propagate stride metadata.
+// Exclude any modes: the purpose of calling into meta kernels is only as an implementation
+// detail to perform shape inference, and we don't want any modal keys to run.
+// Specifically, we want to prevent functionalization and Python modes from running.
+constexpr auto exclude_keys_for_meta_dispatch =
+    c10::functorch_transforms_ks |
+    c10::DispatchKeySet({
+        c10::DispatchKey::FuncTorchDynamicLayerBackMode,
+        c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
+        c10::DispatchKey::Python
+    });
+
 
 inline Tensor to_meta(const Tensor& t) {
-    return at::native::empty_strided_meta(t.sizes(), t.strides(),
+    return at::native::empty_strided_meta_symint(t.sym_sizes(), t.sym_strides(),
 /*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
 }
@@ -37,10 +50,11 @@ inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
   return c10::nullopt;
 }
 
-inline std::vector<Tensor> to_meta(const TensorList& t_list) {
-  std::vector<Tensor> outputs(t_list.size());
-  for (const auto i : c10::irange(t_list.size())) {
-    outputs[i] = to_meta(t_list[i]);
+inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto& tensor : t_list) {
+    outputs.push_back(to_meta(tensor));
   }
   return outputs;
 }

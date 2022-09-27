@@ -399,6 +399,8 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
     mapPointwiseOrReductionOp(top);
   }
 
+  void handle(RNGOp* top) override;
+
   void handle(ReductionOp* op) override {
     mapPointwiseOrReductionOp(op);
   }
@@ -409,6 +411,10 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
 
   void handle(WelfordOp* wop) override {
     mapPointwiseOrReductionOp(wop);
+  }
+
+  void handle(LoadStoreOp* ldst) override {
+    mapPointwiseOrReductionOp(ldst);
   }
 
   void handle(MmaOp* wop) override {
@@ -428,6 +434,10 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   void handle(BroadcastOp* op) override;
 
   void handle(TransposeOp* op) override;
+
+  void handle(ExpandOp* op) override {
+    mapPointwiseOrReductionOp(op);
+  }
 
   void handle(GatherOp* op) override;
 

@@ -5,7 +5,7 @@ export TZ=UTC
 tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
-  if [[ "$OSTYPE" == "msys" &&  -z "${IS_GHA:-}" ]]; then
+  if [[ "$OSTYPE" == "msys" &&  -z "${GITHUB_ACTIONS:-}" ]]; then
     GIT_DIR="${workdir}/p/.git"
   else
     GIT_DIR="${workdir}/pytorch/.git"
@@ -76,6 +76,11 @@ if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
 else
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
 fi
+
+if [[ -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
+  export PYTORCH_BUILD_VERSION="${PYTORCH_BUILD_VERSION}-with-pypi-cudnn"
+fi
+
 export PYTORCH_BUILD_NUMBER=1
 
 
@@ -124,7 +129,7 @@ if [[ "${OSTYPE}" == "msys" ]]; then
 else
   export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
 fi
-
+export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}"
 export DATE="$DATE"
 export NIGHTLIES_DATE_PREAMBLE=1.13.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
@@ -162,7 +167,7 @@ if [[ "$(uname)" != Darwin ]]; then
 EOL
 fi
 
-if [[ -z "${IS_GHA:-}" ]]; then
+if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
   cat >>"$envfile" <<EOL
   export workdir="$workdir"
   export MAC_PACKAGE_WORK_DIR="$workdir"

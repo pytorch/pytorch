@@ -8,4 +8,4 @@ sys.path.insert(0, root)
 
 import tools.jit.gen_unboxing
 
-tools.jit.gen_unboxing.main()
+tools.jit.gen_unboxing.main(sys.argv[1:])

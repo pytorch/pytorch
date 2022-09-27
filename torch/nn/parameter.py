@@ -2,7 +2,6 @@ import torch
 from torch._C import _disabled_torch_function_impl
 from collections import OrderedDict
 
-
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
@@ -177,6 +176,13 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
         data = torch.empty(0, **factory_kwargs)
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
+    def __deepcopy__(self, memo):
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            result = type(self)(self.requires_grad, self.data.device, self.data.dtype)
+            memo[id(self)] = result
+            return result
 
 class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.

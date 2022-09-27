@@ -1,14 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
-import sys
 import os
 import shutil
 import tempfile
-from typing import Dict, cast
+from typing import Dict
 
 import torch
 import torch.distributed as dist
-from torch import Tensor
 from torch.distributed._shard import sharded_tensor
 from torch.distributed._shard.sharded_tensor import ShardedTensor, state_dict_hook
 from torch.distributed._shard.sharding_spec import (
@@ -48,87 +46,6 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-def _sharded_tensor_gather(
-        self,
-        dst=0,
-        out=None,
-):
-    """
-    This is a reimplementation of ST:gather using gather instead of gather_object.
-    The later hangs on CI inside NCCL.
-    """
-
-    def shard_size(shard_md):
-        res = 1
-        for s in shard_md.shard_sizes:
-            res *= s
-        return res
-    rank = dist.get_rank(self._process_group)
-    full_size = self.metadata().size
-
-    world_size = dist.get_world_size(self._process_group)
-    rank_sizes = [0 for _ in range(world_size)]
-    max_rank_size = 0
-    shard_placement = dict()
-    local_shards_placement = []
-    # collect sizes
-    for shard_idx, shard_md in enumerate(self.metadata().shards_metadata):
-        shard_rank = shard_md.placement.rank()
-        shard_placement[shard_idx] = (shard_rank, rank_sizes[shard_rank])
-        if shard_rank == rank:
-            local_shards_placement.append((shard_md, rank_sizes[shard_rank],))
-
-        rank_sizes[shard_rank] += shard_size(shard_md)
-        max_rank_size = max(max_rank_size, rank_sizes[shard_rank])
-
-
-    if rank == dst:
-        gather_list = [torch.empty((max_rank_size,), device=out.device) for _ in range(world_size)]
-    else:
-        gather_list = None
-
-    # FIXME is a rank allowed to not have any data?
-    with torch.no_grad():
-        # XXX we can fastpath this to torch.cat if max_rank_size == rank_sizes[rank]
-        data = torch.empty(max_rank_size, device=self.local_shards()[0].tensor.device)
-        for shard in self.local_shards():
-            for placement in local_shards_placement:
-                if placement[0] == shard.metadata:
-                    src = shard.tensor.flatten()
-                    data[placement[1]: placement[1] + src.numel()].copy_(src)
-                    break
-
-    dist.gather(
-        tensor=data,
-        gather_list=gather_list,
-        dst=dst,
-        group=self._process_group,
-    )
-    if rank != dst:
-        return
-    if out is None:
-        raise ValueError("`out` Tensor must be provided on dst rank!")
-
-    full_size = self.metadata().size
-    dims = len(full_size)
-
-
-    for shard_idx, shard_md in enumerate(self.metadata().shards_metadata):
-        placement = shard_placement[shard_idx]
-        tensor = gather_list[placement[0]]
-        tensor = tensor[placement[1] : placement[1] + shard_size(shard_md)]
-        tensor = tensor.view(shard_md.shard_sizes)
-
-        out_narrow_view = out
-        for dim in range(dims):
-            out_narrow_view = out_narrow_view.narrow(
-                dim,
-                shard_md.shard_offsets[dim],
-                shard_md.shard_sizes[dim],
-            )
-
-        out_narrow_view.copy_(tensor)
-
 
 def assert_state_dict_equal(
     self: TestCase,
@@ -146,11 +63,7 @@ def assert_state_dict_equal(
 
     for key, value_1 in state_dict_1.items():
         value_2 = state_dict_2[key]
-        if isinstance(value_1, torch.Tensor):
-            self.assertTrue(
-                torch.equal(value_1, value_2), f"Key {key}'s tensor does not match"
-            )
-        elif isinstance(value_1, ShardedTensor):
+        if isinstance(value_1, ShardedTensor):
             for local_shard_1, local_shard_2 in zip(
                 value_1.local_shards(), value_2.local_shards()
             ):
@@ -158,6 +71,10 @@ def assert_state_dict_equal(
                     torch.equal(local_shard_1.tensor, local_shard_1.tensor),
                     f"Key {key}'s shard does not match",
                 )
+        elif isinstance(value_1, torch.Tensor):
+            self.assertTrue(
+                torch.equal(value_1, value_2), f"Key {key}'s tensor does not match"
+            )
 
     return True
 
@@ -188,6 +105,23 @@ class TestDistributedStateDictSaveLoad(TestCase):
             state_dict_to_save = MyTestModule().state_dict()
 
             fs_writer = FileSystemWriter(path=path)
+            save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+            # Load from file without any resharding
+            fs_reader = FileSystemReader(path=path)
+            load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader, no_dist=True)
+
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+
+            fs_writer = FileSystemWriter(path=path, single_file_per_rank=True)
             save_state_dict(state_dict=state_dict_to_save, storage_writer=fs_writer, no_dist=True)
 
             state_dict_to_load_to = MyTestModule().state_dict()
@@ -268,8 +202,8 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
     def load_tensor(self, tensor: ShardedTensor) -> torch.Tensor:
         res = torch.zeros(tensor.shape, device="cuda:0") if dist.get_rank() == 0 else None
-        _sharded_tensor_gather(tensor, out=res)
-        return cast(Tensor, res)
+        tensor.gather(out=res)
+        return res
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(2)
@@ -461,6 +395,93 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
         self.assertEqual([1], state_dict_to_load['bytes0'])
         self.assertEqual('string', state_dict_to_load['bytes1'])
+
+
+    @with_comms(init_rpc=False)
+    @skip_if_lt_x_gpu(2)
+    @requires_nccl()
+    def test_switch_between_sharded_tensor_to_tensor(self) -> None:
+        path = self.get_file_path()
+        tensor_size = 32
+
+        specs = [
+            ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                ],
+            ),
+            ChunkShardingSpec(
+                dim=0,
+                placements=[
+                    "rank:0/cuda:0",
+                    "rank:1/cuda:1",
+                    "rank:1/cuda:1",
+                    "rank:0/cuda:0",
+                ],
+            ),
+            EnumerableShardingSpec(
+                shards=[
+                    ShardMetadata(
+                        shard_offsets=[0],
+                        shard_sizes=[8],
+                        placement="rank:1/cuda:1",
+                    ),
+                    ShardMetadata(
+                        shard_offsets=[8],
+                        shard_sizes=[tensor_size - 8],
+                        placement="rank:0/cuda:0",
+                    ),
+                ]
+            ),
+            EnumerableShardingSpec(
+                shards=[
+                    ShardMetadata(
+                        shard_offsets=[0],
+                        shard_sizes=[10],
+                        placement="rank:0/cuda:0",
+                    ),
+                    ShardMetadata(
+                        shard_offsets=[10],
+                        shard_sizes=[tensor_size - 10],
+                        placement="rank:1/cuda:1",
+                    ),
+                ]
+            ),
+        ]
+
+        for save_spec in specs:
+            for load_spec in specs:
+                save_dict = {
+                    'sharded': sharded_tensor.rand(save_spec, tensor_size),
+                    'replicated': torch.rand(tensor_size, device=self.rank)
+                }
+
+                fs_writer = FileSystemWriter(path=path)
+                save_state_dict(state_dict=save_dict, storage_writer=fs_writer)
+
+                # Freaky Friday the tensors
+                load_dict = {
+                    'sharded': torch.zeros(tensor_size, device=self.rank),
+                    'replicated': sharded_tensor.zeros(load_spec, tensor_size)
+                }
+
+                fs_reader = FileSystemReader(path=path)
+                load_state_dict(state_dict=load_dict, storage_reader=fs_reader)
+
+                save_dict_sharded = self.load_tensor(save_dict['sharded'])
+                load_dict_replicated = self.load_tensor(load_dict['replicated'])
+
+                if dist.get_rank() == 0:
+                    self.assertTrue(
+                        torch.allclose(save_dict_sharded, load_dict['sharded']),
+                        f"save-spec {save_spec} load-spec {load_spec}"
+                    )
+                    self.assertTrue(
+                        torch.allclose(save_dict['replicated'], load_dict_replicated),
+                        f"save-spec {save_spec} load-spec {load_spec}"
+                    )
 
 if __name__ == "__main__":
     run_tests()

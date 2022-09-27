@@ -5,6 +5,7 @@
 #include <ATen/core/functional.h>
 #include <c10/util/irange.h>
 #include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
@@ -20,7 +21,7 @@ class BroadcastWork {
         flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}) {
     BroadcastOptions broadcastOptions;
     broadcastOptions.rootRank = root_rank;
-    work_ = process_group->broadcast(flat_tensor_, broadcastOptions);
+    work_ = ops::broadcast(process_group, flat_tensor_, broadcastOptions);
   }
 
   void finish() {
@@ -30,7 +31,7 @@ class BroadcastWork {
     auto output_tensors = torch::utils::unflatten_dense_tensors(
         flat_tensor_.front(), bucket_tensors_);
     TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
-    for(const auto i : c10::irange(output_tensors.size())) {
+    for (const auto i : c10::irange(output_tensors.size())) {
       bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
     }
   }
@@ -47,7 +48,7 @@ class BroadcastWork {
 
  private:
   // The broadcast work that is kicked off upon construction.
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
+  c10::intrusive_ptr<c10d::Work> work_;
 };
 
 } // namespace
@@ -98,5 +99,26 @@ std::vector<at::Tensor> GradBucket::getGradients() const {
   }
   return per_parameter_tensors;
 }
+namespace detail {
+
+at::Tensor parseCppCommHookResult(const c10::IValue& result) {
+  if (result.isPyObject()) {
+    std::vector<at::Tensor> tensors =
+        result.toPyObjectHolder()->extractTensors();
+    return tensors[0];
+  }
+  TORCH_INTERNAL_ASSERT(
+      result.isTensor() || result.isTensorList(),
+      "expected the hook result is either a Tensor or a TensorList found ",
+      result.tagKind());
+
+  if (result.isTensor()) {
+    return result.toTensor();
+  }
+
+  return result.toTensorVector()[0];
+}
+
+} // namespace detail
 
 } // namespace c10d

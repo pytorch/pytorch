@@ -1,8 +1,10 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_NO_OPERATORS
+#include <ATen/native/cpu/ChannelShuffleKernel.h>
+
+#include <ATen/core/TensorBase.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/utils.h>
-#include <ATen/native/cpu/ChannelShuffleKernel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
@@ -12,8 +14,8 @@ namespace {
 
 template <typename scalar_t>
 void cpu_channel_shuffle(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t groups) {
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
@@ -57,8 +59,8 @@ void cpu_channel_shuffle(
 
 template <typename scalar_t>
 void cpu_channel_shuffle_cl(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t groups) {
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
@@ -83,8 +85,8 @@ void cpu_channel_shuffle_cl(
 }
 
 void channel_shuffle_kernel_impl(
-    Tensor& output,
-    const Tensor& input,
+    TensorBase& output,
+    const TensorBase& input,
     int64_t groups) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {

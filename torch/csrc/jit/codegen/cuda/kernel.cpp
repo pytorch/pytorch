@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
+#include <ATen/cuda/CUDAContext.h>
+
 #include <iostream>
 #include <unordered_set>
 
@@ -78,11 +80,9 @@ class KernelIrScanner : private IrVisitor {
     }
   }
 
-  void handle(UnaryOp* unary_op) final {
-    if (unary_op->getUnaryOpType() == UnaryOpType::RandLike) {
-      // This kernel is using random numbers
-      summary_.is_stochastic = true;
-    }
+  void handle(RNGOp* rng_op) final {
+    summary_.max_rng_offsets =
+        std::max<int>(summary_.max_rng_offsets, rng_op->getRNGOffset());
   }
 
   void handle(TensorIndex* tensor_index) final {
@@ -130,8 +130,18 @@ class KernelIrScanner : private IrVisitor {
 
   void handle(GroupedGridReduction* grid_reduction) final {
     summary_.has_grid_reductions = true;
-    const auto dom = ir_utils::getTvOutput(grid_reduction)->domain();
-    updateGridReductionInLoop(dom);
+    if (grid_reduction->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
+  }
+
+  void handle(GroupedGridWelford* grid_welford) final {
+    summary_.has_welford = true;
+    summary_.has_grid_welford = true;
+    summary_.has_grid_reductions = true;
+    if (grid_welford->isAllreduce()) {
+      summary_.has_cooperative_grid_reduction = true;
+    }
   }
 
   void handle(GridBroadcast* grid_broadcast) final {
@@ -155,18 +165,6 @@ class KernelIrScanner : private IrVisitor {
  private:
   size_t max_smem_type_size_ = 0;
   KernelSummary summary_;
-
- private:
-  void updateGridReductionInLoop(TensorDomain* dom) {
-    for (const auto i : c10::irange(dom->nDims())) {
-      const auto id = GpuLower::current()->caMap()->getConcreteMappedID(
-          dom->domain()[i], IdMappingMode::LOOP);
-
-      summary_.has_cooperative_grid_reduction =
-          summary_.has_cooperative_grid_reduction ||
-          !(id->isThread() || id->extent()->isOneInt());
-    }
-  }
 };
 
 //! Make sure tensors have valid allocations even when parallelized
@@ -277,6 +275,7 @@ void Kernel::finalize(std::vector<Expr*> top_level_exprs) {
   TORCH_INTERNAL_ASSERT(top_level_exprs_.empty());
   top_level_exprs_ = std::move(top_level_exprs);
   warp_padded_parallel_info_ = GpuLower::current()->getWarpPaddedParallelInfo();
+  profile_ = GpuLower::current()->profile();
   ValidateAllocation::validate(this);
   analyze();
   // Make sure this is after analyze as it sets summary_
@@ -356,6 +355,70 @@ void Kernel::registerExpr(Expr* expr) {
 
 std::vector<Expr*>& KernelInternalProxy::topLevelExprs() {
   return kernel_->top_level_exprs_;
+}
+
+void KernelPerformanceProfile::registerExpr(const Expr* expr) {
+  if (expr_entry_map_.find(expr) != expr_entry_map_.end()) {
+    return;
+  }
+
+  auto slot = getNewIndex();
+  expr_entry_map_.emplace(expr, slot);
+}
+
+int KernelPerformanceProfile::getNewIndex() {
+  return num_profile_entries_++;
+}
+
+bool KernelPerformanceProfile::isProfiled(const Expr* expr) const {
+  return expr_entry_map_.find(expr) != expr_entry_map_.end();
+}
+
+c10::optional<int> KernelPerformanceProfile::getIndex(const Expr* expr) const {
+  auto it = expr_entry_map_.find(expr);
+  if (it == expr_entry_map_.end()) {
+    return c10::optional<int>();
+  } else {
+    return it->second;
+  }
+}
+
+std::array<int, 2> KernelPerformanceProfile::getIndicesInProfileBuffer(
+    const Expr* expr) const {
+  TORCH_INTERNAL_ASSERT(
+      isProfiled(expr), "Not a profiled expression: ", expr->toString());
+
+  int cycle_index = getIndex(expr).value() * 2;
+  int count_index = cycle_index + 1;
+
+  return {cycle_index, count_index};
+}
+
+std::string KernelPerformanceProfile::toString(const at::Tensor& buffer) const {
+  std::stringstream ss;
+  ss << "Kernel performance profile:\n";
+  if (!buffer.defined()) {
+    ss << "No profile found\n";
+    return ss.str();
+  }
+
+  double kilo_freq = at::cuda::getCurrentDeviceProperties()->clockRate;
+
+  ss << std::setprecision(3) << std::fixed;
+
+  for (const auto& kv : expr_entry_map_) {
+    auto expr = kv.first;
+    auto index = kv.second;
+    auto out_tv = ir_utils::getTvOutput(expr);
+    double cycles = static_cast<double>(buffer[index][0].item<int64_t>());
+    auto count = buffer[index][1].item<int64_t>();
+    auto cycles_per_call = count == 0 ? 0.0 : cycles / count;
+    auto us_per_call = cycles_per_call / kilo_freq * 1000.0;
+    ss << expr->getExprType().value() << ", T" << out_tv->name() << ", "
+       << us_per_call << " us, " << count << "\n";
+  }
+
+  return ss.str();
 }
 
 } // namespace kir

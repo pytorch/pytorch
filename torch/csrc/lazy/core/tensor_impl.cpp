@@ -5,22 +5,25 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 
 namespace torch {
 namespace lazy {
 namespace {
 
-// LTCGuardImpl is used by CompositeExplicitAutograd ops or eager fallbacks to make sure that some particular tensors
-// within the life scope of the guard are on the same device. For example, in RegisterCompositeExplicitAutograd.cpp,
-// outputs of each op are examined if they are on same device as the supplied TensorOptions. For more information,
-// see DeviceGuard.h.
-// For ops that have LTC native function implementations, this guard is omitted.
+// LTCGuardImpl is used by CompositeExplicitAutograd ops or eager fallbacks to
+// make sure that some particular tensors within the life scope of the guard are
+// on the same device. For example, in RegisterCompositeExplicitAutograd.cpp,
+// outputs of each op are examined if they are on same device as the supplied
+// TensorOptions. For more information, see DeviceGuard.h. For ops that have LTC
+// native function implementations, this guard is omitted.
 thread_local c10::Device g_device(c10::DeviceType::Lazy);
 
 struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
-  at::DeviceType type() const override { return at::DeviceType::Lazy; }
+  at::DeviceType type() const override {
+    return at::DeviceType::Lazy;
+  }
 
   c10::Device exchangeDevice(c10::Device device) const override {
     TORCH_INTERNAL_ASSERT(device.type() == c10::DeviceType::Lazy);
@@ -65,7 +68,7 @@ struct LTCGuardImpl : public c10::impl::DeviceGuardImplInterface {
 
 C10_REGISTER_GUARD_IMPL(Lazy, LTCGuardImpl);
 
-}  // namespace
+} // namespace
 
 // TODO(whc) when do we want to clone vs share?
 LTCTensorImpl::LTCTensorImpl(const LazyTensorPtr& tensor)
@@ -75,23 +78,17 @@ LTCTensorImpl::LTCTensorImpl(const LazyTensor& tensor)
     : LTCTensorImpl(LazyTensor(tensor)) {}
 
 LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
-    : c10::TensorImpl(c10::DispatchKeySet{c10::DispatchKey::Lazy,
-                                          c10::DispatchKey::AutogradLazy},
-                      c10::scalarTypeToTypeMeta(tensor.dtype()),
-                      backendDeviceToAtenDevice(tensor.GetDevice())),
+    : c10::TensorImpl(
+          c10::DispatchKeySet{
+              c10::DispatchKey::Lazy,
+              c10::DispatchKey::AutogradLazy},
+          c10::scalarTypeToTypeMeta(tensor.dtype()),
+          backendDeviceToAtenDevice(tensor.GetDevice())),
       tensor_(c10::make_intrusive<LazyTensor>(std::move(tensor))) {
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
-  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
-
-  auto rank = tensor_->shape().Get().sizes().size();
-  sym_sizes_.reserve(rank);
-  for (auto i: c10::irange(rank)) {
-    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(this->tensor_->GetIrValue(), i);
-    auto sn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
-    sym_sizes_.push_back(sn->toSymInt());
-  }
+  set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -136,8 +133,12 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
+c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
+  return c10::fromIntArrayRef(strides_custom());
+}
+
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
-  return c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size());
+  return c10::fromIntArrayRef(sizes_custom());
 }
 
 void LTCTensorImpl::setup_size_properties() {
@@ -149,7 +150,8 @@ void LTCTensorImpl::setup_size_properties() {
     // We can't call refresh_numel() given we override sizes() too.
     numel_ = shape.Get().numel();
     sizes_and_strides_.set_sizes(shape.Get().sizes());
-    // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
+    // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given
+    // we override sizes() too.
     std::vector<int64_t> updated_strides;
     updated_strides = ComputeArrayStrides(shape.Get().sizes());
     for (const auto i : c10::irange(updated_strides.size())) {
@@ -192,5 +194,5 @@ bool LTCTensorImpl::is_contiguous_custom(c10::MemoryFormat _unused) const {
   return true;
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

@@ -4,7 +4,6 @@ import torch
 import numpy as np
 
 import math
-from itertools import product, chain
 from numbers import Number
 import random
 import unittest
@@ -26,7 +25,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
     generate_elementwise_unary_tensors,
-    _NOTHING,
     generate_elementwise_unary_small_value_tensors,
     generate_elementwise_unary_large_value_tensors,
     generate_elementwise_unary_extremal_value_tensors,
@@ -60,7 +58,7 @@ if TEST_SCIPY:
 # Refer [scipy reference filter]
 # Filter operators for which the reference function
 # is available in the current environment (for reference_numerics tests).
-reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_ufuncs))
+reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs))
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -73,54 +71,6 @@ reference_filtered_ops = list(filter(lambda op: op.ref is not _NOTHING, unary_uf
 # See NumPy's universal function documentation
 # (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
 # about the concept of ufuncs.
-
-
-def generate_numeric_tensors_hard(device, dtype, *, domain=(None, None), filter_=None):
-    is_signed_integral = dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
-    if not (dtype.is_floating_point or dtype.is_complex or is_signed_integral):
-        return ()
-
-    if dtype.is_floating_point:
-        if dtype is torch.float16:
-            # float16 has smaller range.
-            vals = _large_float16_vals
-        else:
-            vals = _large_float_vals
-    elif dtype.is_complex:
-        vals = tuple(
-            complex(x, y)
-            for x, y in chain(
-                product(_large_float_vals, _large_float_vals),
-                product(_float_vals, _large_float_vals),
-                product(_large_float_vals, _float_vals),
-            )
-        )
-    else:
-        vals = _large_int_vals
-
-    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
-
-
-def generate_numeric_tensors_extremal(
-    device, dtype, *, domain=(None, None), filter_=None
-):
-    if not (dtype.is_floating_point or dtype.is_complex):
-        return ()
-
-    vals = []
-    if dtype.is_floating_point:
-        vals = _float_extremals
-    elif dtype.is_complex:
-        vals = tuple(
-            complex(x, y)
-            for x, y in chain(
-                product(_float_extremals, _float_extremals),
-                product(_float_vals, _float_extremals),
-                product(_float_extremals, _float_vals),
-            )
-        )
-
-    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 # TODO: port test_unary_out_op_mem_overlap
@@ -674,16 +624,6 @@ class TestUnaryUfuncs(TestCase):
                 ):
                     torch.frexp(input, out=(mantissa, exponent))
 
-    def test_mvlgamma_argcheck(self, device):
-        def run_test(d):
-            input = torch.linspace((d - 2) / 2, 10, 10, device=device)
-            torch.mvlgamma(input, d)
-
-        with self.assertRaisesRegex(
-            RuntimeError, r"All elements must be greater than \(p-1\)/2"
-        ):
-            run_test(3)
-
     def test_polygamma_neg(self, device):
         with self.assertRaisesRegex(
             RuntimeError, r"polygamma\(n, x\) does not support negative n\."
@@ -736,12 +676,9 @@ class TestUnaryUfuncs(TestCase):
                     torch.float32 if dtype is torch.complex64 else torch.float64
                 )
                 np_float_out = np_fn(a).astype(torch_to_numpy_dtype_dict[float_dtype])
-                float_out = torch.empty_like(t).float()
+                float_out = torch.empty_like(t, dtype=float_dtype)
                 torch_fn(t, out=float_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
-                    torch.from_numpy(np_float_out), float_out.cpu()
-                )
+                self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
 
                 # Tests float out (resized out)
                 float_out = torch.empty(1, device=device, dtype=float_dtype)
@@ -749,21 +686,15 @@ class TestUnaryUfuncs(TestCase):
                 self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
 
                 # Tests complex out
-                np_complex_out = np_fn(a)
+                np_complex_out = np_fn(a).astype(torch_to_numpy_dtype_dict[dtype])
                 complex_out = torch.empty_like(t)
                 torch_fn(t, out=complex_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
-                    torch.from_numpy(np_complex_out), complex_out.cpu()
-                )
+                self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests complex out (resized out)
                 complex_out = torch.empty(0, device=device, dtype=dtype)
                 torch_fn(t, out=complex_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
-                    torch.from_numpy(np_complex_out), complex_out.cpu()
-                )
+                self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests long out behavior (expected failure)
                 long_out = torch.empty(0, device=device, dtype=torch.long)

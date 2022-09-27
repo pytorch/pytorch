@@ -1,45 +1,45 @@
 import importlib
-from inspect import getmembers, isfunction
+import inspect
 
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
-from torch.onnx import symbolic_registry
+from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx._internal import registration
 
 
 def register_quantized_ops(domain: str, version: int):
-    # Register all the non-quantized ops
-    symbolic_registry.register_version("", version)
     # Register all quantized ops
     module = importlib.import_module("torch.onnx.symbolic_caffe2")
-    symbolic_registry._symbolic_versions["caffe2"] = module
-    quant_version_ops = getmembers(symbolic_registry._symbolic_versions["caffe2"])
-    for op in quant_version_ops:
-        if isfunction(op[1]) and not symbolic_registry.is_registered_op(
-            op[0], domain, version
+    quant_version_ops = inspect.getmembers(module)
+    aten_q_ops = {
+        "relu",
+        "_empty_affine_quantized",
+        "dequantize",
+        "quantize_per_tensor",
+        "upsample_nearest2d",
+        "avg_pool2d",
+        "reshape",
+        "slice",
+        "cat",
+        "max_pool2d",
+        "sigmoid",
+    }
+    for op, func in quant_version_ops:
+        name = f"{domain}::{op}"
+        if inspect.isfunction(func) and not registration.registry.is_registered_op(
+            name, version
         ):
-            aten_q_ops = [
-                "relu",
-                "_empty_affine_quantized",
-                "dequantize",
-                "quantize_per_tensor",
-                "upsample_nearest2d",
-                "avg_pool2d",
-                "reshape",
-                "slice",
-                "cat",
-                "max_pool2d",
-                "sigmoid",
-            ]
-            if op[0] in aten_q_ops:
-                symbolic_registry.register_op(op[0], op[1], "", version)
-            symbolic_registry.register_op(op[0], op[1], domain, version)
+            if op in aten_q_ops:
+                # Override the builtin aten ops
+                registration.registry.register(
+                    f"aten::{op}", version, func, custom=True
+                )
+            registration.registry.register(name, version, func)
 
 
 def _permute_helper(g, input, axes):
     quant_args = {
         "axes_i": axes,
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Transpose", input, **quant_args)
     symbolic_helper._quantized_ops.add(output)
@@ -141,8 +141,8 @@ def relu(g, input):
     if input not in symbolic_helper._quantized_ops:
         return opset9.relu(g, input)
     kwargs = {
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Relu", input, **kwargs)
     symbolic_helper._quantized_ops.add(output)
@@ -176,13 +176,13 @@ def upsample_nearest2d(
     g, input, output_size, align_corners=None, scales_h=None, scales_w=None
 ):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.upsample_nearest2d(g, input, output_size, align_corners)
+        return opset9.upsample_nearest2d(g, input, output_size, align_corners)  # type: ignore[attr-defined]
 
     output_size = symbolic_helper._parse_arg(output_size, "is")
     kwargs = {
         "output_size_i": output_size,
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8ResizeNearest", input, **kwargs)
@@ -194,7 +194,7 @@ def upsample_nearest2d(
 @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.max_pool2d(
+        return opset9.max_pool2d(  # type: ignore[attr-defined]
             g, input, kernel_size, stride, padding, dilation, ceil_mode
         )
     kwargs = {
@@ -202,8 +202,8 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         "pads_i": padding + padding,
         "kernel_i": kernel_size[0],
         "order_s": "NHWC",
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8MaxPool", input, **kwargs)
@@ -224,7 +224,7 @@ def avg_pool2d(
     divisor_override=None,
 ):
     if input not in symbolic_helper._quantized_ops:
-        return opset9.avg_pool2d(
+        return opset9.avg_pool2d(  # type: ignore[attr-defined]
             g,
             input,
             kernel_size,
@@ -239,8 +239,8 @@ def avg_pool2d(
         "pads_i": padding + padding,
         "kernel_i": kernel_size[0],
         "order_s": "NHWC",
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     input = nchw2nhwc(g, input)
     output = g.op("_caffe2::Int8AveragePool", input, **kwargs)
@@ -254,8 +254,8 @@ def reshape(g, input, shape):
         return opset9.reshape(g, input, shape)
 
     kwargs = {
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Reshape", input, shape, **kwargs)
     symbolic_helper._quantized_ops.add(output)
@@ -277,8 +277,8 @@ def slice(g, input, dim, start, end, step):
         "start_idx_i": start,
         "end_idx_i": end,
         "dim_i": dim,
-        "Y_scale_f": input.node()["Y_scale"],
-        "Y_zero_point_i": input.node()["Y_zero_point"],
+        "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
+        "Y_zero_point_i": symbolic_helper._node_get(input.node(), "Y_zero_point"),
     }
     output = g.op("_caffe2::Int8Slice", input, **kwargs)
     symbolic_helper._quantized_ops.add(output)

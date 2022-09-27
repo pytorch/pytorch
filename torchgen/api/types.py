@@ -1,20 +1,27 @@
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, Iterator, List, Optional, Sequence, Set, Tuple, TypeVar, Union
+
 from torchgen.model import (
     Argument,
+    BackendIndex,
+    BaseTy,
     FunctionSchema,
     NativeFunction,
-    BackendIndex,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
+    ScalarType,
     SelfArgument,
     TensorOptionsArguments,
-    BaseTy,
-    ScalarType,
 )
-from dataclasses import dataclass
-from typing import Optional, Union, Sequence, TypeVar, List, Set, Dict
-from enum import Enum
 
 _T = TypeVar("_T")
+
+TENSOR_LIST_LIKE_CTYPES = [
+    "at::TensorList",
+    "const c10::List<c10::optional<at::Tensor>> &",
+    "const at::ITensorListRef &",
+]
 
 # An ArgName is just the str name of the argument in schema;
 # but in some special circumstances, we may add a little extra
@@ -67,6 +74,7 @@ iTensorListRefT = BaseCppType("at", "ITensorListRef")
 iOptTensorListRefT = BaseCppType("at", "IOptTensorListRef")
 dimnameT = BaseCppType("at", "Dimname")
 dimnameListT = BaseCppType("at", "DimnameList")
+dimVectorT = BaseCppType("at", "DimVector")
 layoutT = BaseCppType("at", "Layout")
 deviceT = BaseCppType("at", "Device")
 scalarT = BaseCppType("at", "Scalar")
@@ -113,6 +121,7 @@ BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
     BaseTy.ScalarType: scalarTypeT,
     BaseTy.Tensor: tensorT,
     BaseTy.Dimname: dimnameT,
+    BaseTy.DimVector: dimVectorT,
     BaseTy.Layout: layoutT,
     BaseTy.Device: deviceT,
     BaseTy.Scalar: scalarT,
@@ -414,6 +423,11 @@ class CppSignature:
     # (i.e. with a potential TensorOptions argument and out arguments in the front)
     faithful: bool
 
+    # Is this a symint C++ signature.  For BC reasons, functions that take
+    # SymInts still present as int64_t in C++, and the SymInt variant is
+    # offered at a different overload name
+    symint: bool
+
     # The set of C++ arguments which should not have defaults applied to them
     cpp_no_default_args: Set[str]
 
@@ -430,12 +444,17 @@ class CppSignature:
         return cpp.arguments(
             self.func.arguments,
             faithful=self.faithful,
+            symint=self.symint,
             method=self.method,
             cpp_no_default_args=self.cpp_no_default_args,
         )
 
     def name(self) -> str:
-        n = cpp.name(self.func, faithful_name_for_out_overloads=self.faithful)
+        n = cpp.name(
+            self.func,
+            faithful_name_for_out_overloads=self.faithful,
+            symint_overload=self.symint,
+        )
         if self.fallback_binding:
             n = f"__dispatch_{n}"
         return n
@@ -448,7 +467,9 @@ class CppSignature:
         prefix: str = "",
         is_redispatching_fn: bool = False,
     ) -> str:
-        returns_type = cpp.returns_type(self.func.returns).cpp_type()
+        returns_type = cpp.returns_type(
+            self.func.returns, symint=self.symint
+        ).cpp_type()
         cpp_args = [a.decl() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ["c10::DispatchKeySet dispatchKeySet"] + cpp_args
@@ -466,7 +487,9 @@ class CppSignature:
         prefix: str = "",
         is_redispatching_fn: bool = False,
     ) -> str:
-        returns_type = cpp.returns_type(self.func.returns).cpp_type()
+        returns_type = cpp.returns_type(
+            self.func.returns, symint=self.symint
+        ).cpp_type()
         cpp_args = [a.defn() for a in self.arguments()]
         if is_redispatching_fn:
             cpp_args = ["c10::DispatchKeySet dispatchKeySet"] + cpp_args
@@ -477,12 +500,12 @@ class CppSignature:
 
     def ptr_type(self) -> str:
         args_types_str = ", ".join(a.type for a in self.arguments())
-        return f"{cpp.returns_type(self.func.returns).cpp_type()} (*)({args_types_str})"
+        return f"{cpp.returns_type(self.func.returns, symint=self.symint).cpp_type()} (*)({args_types_str})"
 
     # Return the C++ function type, e.g., something like int(bool)
     def type(self) -> str:
         args_types_str = ", ".join(a.type for a in self.arguments())
-        return f"{cpp.returns_type(self.func.returns).cpp_type()} ({args_types_str})"
+        return f"{cpp.returns_type(self.func.returns, symint=self.symint).cpp_type()} ({args_types_str})"
 
 
 # Represents group of all CppSignatures associated with a
@@ -494,6 +517,8 @@ class CppSignatureGroup:
     func: FunctionSchema
     signature: CppSignature
     faithful_signature: Optional[CppSignature]
+    symint_signature: Optional[CppSignature]
+    symint_faithful_signature: Optional[CppSignature]
 
     def most_faithful_signature(self) -> CppSignature:
         if self.faithful_signature:
@@ -501,33 +526,50 @@ class CppSignatureGroup:
         else:
             return self.signature
 
+    def signatures(self) -> Iterator[CppSignature]:
+        yield self.signature
+        if self.faithful_signature:
+            yield self.faithful_signature
+        if self.symint_signature:
+            yield self.symint_signature
+        if self.symint_faithful_signature:
+            yield self.symint_faithful_signature
+
     @staticmethod
     def from_native_function(
         f: NativeFunction, *, method: bool, fallback_binding: bool = False
     ) -> "CppSignatureGroup":
         func = f.func
-        faithful_signature: Optional[CppSignature]
-        if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
-            faithful_signature = CppSignature(
+
+        def make_sig(*, faithful: bool, symint: bool) -> CppSignature:
+            return CppSignature(
                 func=func,
-                faithful=True,
+                faithful=faithful,
+                symint=symint,
                 method=method,
                 fallback_binding=fallback_binding,
                 cpp_no_default_args=f.cpp_no_default_args,
             )
-        else:
-            faithful_signature = None
-        signature = CppSignature(
-            func=func,
-            faithful=False,
-            method=method,
-            fallback_binding=fallback_binding,
-            cpp_no_default_args=f.cpp_no_default_args,
-        )
+
+        def make_sigs(*, symint: bool) -> Tuple[CppSignature, Optional[CppSignature]]:
+            faithful_signature: Optional[CppSignature] = None
+            if func.arguments.tensor_options is not None or len(func.arguments.out) > 0:
+                faithful_signature = make_sig(faithful=True, symint=symint)
+            signature = make_sig(faithful=False, symint=symint)
+            return signature, faithful_signature
+
+        signature, faithful_signature = make_sigs(symint=False)
+        symint_signature: Optional[CppSignature] = None
+        symint_faithful_signature: Optional[CppSignature] = None
+        if func.has_symint():
+            symint_signature, symint_faithful_signature = make_sigs(symint=True)
+
         return CppSignatureGroup(
             func=func,
             signature=signature,
             faithful_signature=faithful_signature,
+            symint_signature=symint_signature,
+            symint_faithful_signature=symint_faithful_signature,
         )
 
 
@@ -541,8 +583,10 @@ class DispatcherSignature:
     # and need to avoid naming collisions.
     prefix: str = ""
 
+    symint: bool = True
+
     def arguments(self) -> List[Binding]:
-        return dispatcher.arguments(self.func)
+        return dispatcher.arguments(self.func, symint=self.symint)
 
     def name(self) -> str:
         return self.prefix + dispatcher.name(self.func)
@@ -568,7 +612,7 @@ class DispatcherSignature:
         return [Expr(a.name, a.nctype) for a in self.arguments()]
 
     def returns_type(self) -> CType:
-        return dispatcher.returns_type(self.func.returns)
+        return dispatcher.returns_type(self.func.returns, symint=self.symint)
 
     def ptr_type(self) -> str:
         dispatcher_args_types_str = ", ".join(a.type for a in self.arguments())
@@ -580,14 +624,18 @@ class DispatcherSignature:
         return f"{self.returns_type().cpp_type()} ({dispatcher_args_types_str})"
 
     @staticmethod
-    def from_schema(func: FunctionSchema, *, prefix: str = "") -> "DispatcherSignature":
-        return DispatcherSignature(func, prefix)
+    def from_schema(
+        func: FunctionSchema, *, prefix: str = "", symint: bool = True
+    ) -> "DispatcherSignature":
+        return DispatcherSignature(func, prefix, symint)
 
 
 @dataclass(frozen=True)
 class NativeSignature:
     # The schema this signature is derived from
     func: FunctionSchema
+
+    symint: bool
 
     prefix: str = ""
 
@@ -598,24 +646,24 @@ class NativeSignature:
         args_str = ", ".join(a.decl() for a in self.arguments())
         if name is None:
             name = self.name()
-        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
+        return f"{native.returns_type(self.func.returns, symint=self.symint).cpp_type()} {name}({args_str})"
 
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ", ".join(a.defn() for a in self.arguments())
         if name is None:
             name = self.name()
-        return f"{native.returns_type(self.func.returns).cpp_type()} {name}({args_str})"
+        return f"{native.returns_type(self.func.returns, symint=self.symint).cpp_type()} {name}({args_str})"
 
     def ptr_type(self) -> str:
         # don't include defaults in type signature!
         args_str = ", ".join(a.defn() for a in self.arguments())
-        return f"{native.returns_type(self.func.returns).cpp_type()} (*)({args_str})"
+        return f"{native.returns_type(self.func.returns, symint=self.symint).cpp_type()} (*)({args_str})"
 
     def arguments(self) -> List[Binding]:
-        return native.arguments(self.func)
+        return native.arguments(self.func, symint=self.symint)
 
     def returns_type(self) -> CType:
-        return native.returns_type(self.func.returns)
+        return native.returns_type(self.func.returns, symint=self.symint)
 
     def dispatcher_exprs(self) -> List[Expr]:
         return translate.translate(
@@ -740,18 +788,24 @@ def kernel_signature(
     # so we'd like to keep the differences as small as possible.
     # With external backends, we'd like to enforce that they write their kernels with schemas
     # that match the Dispatcher API directly, if they can.
+    meta = backend_index.get_kernel(f)
+    symint = meta is not None and meta.supports_symint()
+    if symint:
+        assert (
+            f.func.has_symint()
+        ), f"attempted to define symint kernel for {backend_index.dispatch_key} without SymInt in schema"
     if backend_index.external:
-        return DispatcherSignature.from_schema(f.func, prefix=prefix)
+        return DispatcherSignature.from_schema(f.func, prefix=prefix, symint=symint)
     else:
-        return NativeSignature(f.func, prefix)
+        return NativeSignature(f.func, prefix=prefix, symint=symint)
 
 
 # Functions only, no types
 from torchgen.api import (
     cpp,
     dispatcher,
-    native,
-    translate,
     functionalization,
+    native,
     structured,
+    translate,
 )

@@ -16,6 +16,10 @@ case ${CUDA_VERSION} in
         # Use cudnn8.3 with hard-coded cuda11.5 version
         cudnn_file_name="cudnn-windows-x86_64-8.3.2.44_cuda11.5-archive"
         ;;
+    11.7)
+        # Use cudnn8.3 with hard-coded cuda11.5 version
+        cudnn_file_name="cudnn-windows-x86_64-8.5.0.96_cuda11-archive"
+        ;;
     *)
         echo "CUDA_VERSION: ${CUDA_VERSION} not supported yet"
         exit 1

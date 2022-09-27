@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/mma_type.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -153,11 +154,14 @@ class TORCH_CUDA_CU_API ComplexDouble : public Val {
 //! the compute at position to maximum possible through traversal.
 enum class ComputeAtMode { Standard, BestEffort, MostInlined };
 
-class ComputeAt;
+class InlinePropagator;
+class MaxProducerPosUpdater;
 class TransformPropagator;
+struct MostInlinedTransformPropagator;
 class TransformIter;
 class TransformReplay;
 class OptOutMutator;
+class TensorDomain;
 
 namespace ir_utils {
 class TVDomainGuard;
@@ -375,6 +379,14 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //! \input axes Axes to swizzle
   TensorView* swizzle(SwizzleType type, const std::vector<int>& axes);
 
+  //! Swizzle the rectangular tile defined by the iterdomains corresponding
+  //!  to the 2 given indices.
+  TensorView* swizzle(
+      Swizzle2DType swizzle_type,
+      int x,
+      int y,
+      SwizzleMode swizzle_mode = SwizzleMode::Data);
+
   // WARNING: rFactor does not return this TensorView, ir returns a new
   //  tensorview consumed by this!
   //
@@ -402,14 +414,22 @@ class TORCH_CUDA_CU_API TensorView : public Val {
       const std::vector<int>& axes,
       const std::vector<TensorView*>& tvs);
 
-  // Create a TensorView before the original tensor. A common use case is to
-  // write results into shared memory or registers before moving to global
-  // memory. Analogous to TVM Cache_Write
-  TensorView* cacheBefore();
+  //! Create a TensorView before the original tensor. A common use case is to
+  //! write results into shared memory or registers before moving to global
+  //! memory. Analogous to TVM Cache_Write
+  //!
+  //! @param cache_op: memory operator to use for the inserted op between
+  //!   the the data tensor and the cache tensor
+  TensorView* cacheBefore(
+      c10::optional<LoadStoreOpType> cache_op = c10::nullopt);
 
-  // Create a TensorView after the original tensor. A common use case is to
-  // read tensor into shared memory or registers. Analogous to TVM Cache_Read
-  TensorView* cacheAfter();
+  //! Create a TensorView after the original tensor. A common use case is to
+  //! read tensor into shared memory or registers. Analogous to TVM Cache_Read
+  //!
+  //! @param cache_op: memory operator to use for the inserted op between
+  //!   the the data tensor and the cache tensor
+  TensorView* cacheAfter(
+      c10::optional<LoadStoreOpType> cache_op = c10::nullopt);
 
   // For a fusion output with other uses, we want to avoid writing to global
   // memory and then reading the output again. We write to global memory
@@ -434,20 +454,25 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   // Apply double buffering transformation
   void doubleBuffer();
 
+  // Apply circular buffering transformation
+  void circularBuffer(unsigned int number_of_stage);
+
+  // Returns true if this tensor is double buffered.
   bool isDoubleBuffered() const {
     return is_double_buffered_;
   }
 
-  //! Fill in mma options in scheduling time.
-  //!  Each mma op in Fusion IR must be configured once before lowering.
-  //!  Mma options are configuration parameters used in lowering to mma
-  //!  instrinsics, mainly the type of mma macro to use and input data layout
-  //!  etc.
-  //!
-  //! TODO: This step will very likely be removed in a follow up PR. All of
-  //!  the options configured here could actually be inferred from fusion IR
-  //!  once we are feature complete.
-  void configureMma(MmaOptions options);
+  // Returns true if this tensor is circular buffered.
+  bool isCircularBuffered() const {
+    return is_circular_buffered_;
+  }
+
+  // Returns the depth of circular buffering if applicable.
+  unsigned int circularBufferDepth() const {
+    TORCH_INTERNAL_ASSERT(
+        is_circular_buffered_, toString(), "not circular buffered");
+    return circular_buffer_stage_;
+  }
 
   //! Transforms the innermost iterdomains according to the given mma swizzle,
   //!  this should be used on the tvs that are either inputs/outputs of an
@@ -456,10 +481,19 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   //! More detail on usage see [WarpMmaSwizzler] in scheduler/mma_utils.h .
   void applyMmaSwizzle(MmaOptions options);
 
+  //! Returns if this tensor view has swizzle operator on its tensor domain.
+  //!  This is the temporary flag for indicating that the new swizzle
+  //!  implementation is used and will be removed in follow ups.
+  bool hasSwizzleOp() const {
+    return has_swizzle_op_;
+  }
+
   friend TORCH_CUDA_CU_API TransformPropagator;
+  friend TORCH_CUDA_CU_API MostInlinedTransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
-  friend ComputeAt;
+  friend TORCH_CUDA_CU_API InlinePropagator;
+  friend TORCH_CUDA_CU_API MaxProducerPosUpdater;
   friend class ir_utils::TVDomainGuard;
   friend TORCH_CUDA_CU_API void groupReductions(
       const std::vector<TensorView*>&);
@@ -495,6 +529,13 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> axes_to_swizzle_;
   bool is_double_buffered_ = false;
+
+  //! Indicates if the tensor is circular buffered.
+  bool is_circular_buffered_ = false;
+
+  //! Indicates the circular buffering stage depth if applicable.
+  unsigned int circular_buffer_stage_ = 0;
+
   // special handling for CPU based zero-dim tensors (i.e. CPU Tensors that only
   // have one value). This is only used if on an input value, otherwise ignored.
   // This is important as special handling because these "scalars" should be
@@ -502,6 +543,11 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   // data, so we want to pass the data value as a standard kernel argument
   // value.
   bool cpu_scalar_ = false;
+
+  //! Indicates if this tensor view has swizzle operator on its tensor domain.
+  //!  This is the temporary flag for indicating that the new swizzle
+  //!  implementation is used and will be removed in follow ups.
+  bool has_swizzle_op_ = false;
 };
 
 //! A simple TensorView builder
@@ -526,7 +572,8 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   TensorViewBuilder& contiguity(std::vector<bool> contiguity);
 
   //! Set the shape (default 0 dimensional, ie. scalar)
-  TensorViewBuilder& shape(std::vector<int64_t> shape);
+  TensorViewBuilder& shape(std::vector<Val*> shape);
+  TensorViewBuilder& shape(const std::vector<int64_t>& shape);
 
   //! Creates a new TensorView with the specified options
   TensorView* build() const;
@@ -535,7 +582,7 @@ class TORCH_CUDA_CU_API TensorViewBuilder {
   size_t ndims_ = 0;
   DataType dtype_ = DataType::Float;
   std::vector<bool> contiguity_;
-  std::vector<int64_t> shape_;
+  std::vector<Val*> shape_;
 };
 
 } // namespace cuda

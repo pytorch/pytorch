@@ -1,4 +1,5 @@
 #include <type_traits>
+#include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
@@ -9,8 +10,18 @@
 #include <ATen/ops/_nested_from_padded.h>
 #endif
 
+// TODO Consider moving all flash_attention code, nested tensor included to
+// Transformer library
+
+#ifdef USE_FLASH_ATTENTION
+#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
+#endif
+
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorUtils.h>
+
+#include <ATen/cuda/CUDAContext.h>
 
 namespace at {
 namespace native {
@@ -60,45 +71,46 @@ Tensor nested_from_padded_cuda(
     auto input_size_ptr = output_size_ptr + target_size_sizes.numel();
     auto offsets_ptr = input_size_ptr + padded_sizes_tensor.numel();
 
+    Tensor padded_contiguous = padded.contiguous();
     if (padded.dtype() == kFloat) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded.data_ptr<float>(),
+            padded_contiguous.data_ptr<float>(),
             output.data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 2,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 2,
+            padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded.data_ptr<float>(),
+            padded_contiguous.data_ptr<float>(),
             output.data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 1,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 1,
+            padded_contiguous.sizes()[0]);
       }
     } else if (padded.dtype() == kHalf) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded.data_ptr<c10::Half>(),
+            padded_contiguous.data_ptr<c10::Half>(),
             output.data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 2,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 2,
+            padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded.data_ptr<c10::Half>(),
+            padded_contiguous.data_ptr<c10::Half>(),
             output.data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 1,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 1,
+            padded_contiguous.sizes()[0]);
       }
     } else {
       AT_ERROR("Only support fp32/fp16 for padded input");
@@ -135,7 +147,9 @@ Tensor NestedTensor_to_padded_tensor_cuda(
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
        t.dtype() == at::kHalf)) {
     auto* nt_input = get_nested_tensor_impl(t);
-    TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
+    TORCH_CHECK(
+        nested_tensor_impl_is_contiguous(nt_input),
+        "for now to_padded_tensor only supports contiguous nested tensor");
     const auto& nt_buffer = nt_input->get_buffer();
 
     if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0) &&
@@ -202,5 +216,38 @@ Tensor NestedTensor_to_padded_tensor_cuda(
   }
   return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
 }
+
+Tensor flash_scaled_dot_product_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool causal) {
+#if defined(USE_FLASH_ATTENTION)
+  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  std::vector<Tensor> output = fmha::mha_fwd(
+      query,
+      key,
+      value,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_k,
+      max_seqlen_batch_q,
+      max_seqlen_batch_k,
+      dropout_p,
+      softmax_scale,
+      false,
+      causal,
+      false,
+      c10::nullopt);
+  return output[0];
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return Tensor{};
+}
+
 } // namespace native
 } // namespace at

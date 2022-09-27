@@ -19,10 +19,14 @@ namespace {
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 : name_(std::move(operator_name))
 , schema_()
+#ifndef C10_MOBILE
+, tags_()
+#endif
 , dispatchTable_()
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
 , kernels_()
 , cpp_signature_()
+, sym_cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
@@ -31,7 +35,10 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 }
 
 namespace {
-  void checkSchema(const OperatorName& name, const FunctionSchema& from_def, const std::string& from_def_debug, const FunctionSchema& inferred, const std::string& inferred_debug) {
+  void checkSchema(const OperatorName& name, const FunctionSchema& from_def_, const std::string& from_def_debug, const KernelFunction& kernel, const FunctionSchema& inferred_, const std::string& inferred_debug) {
+    // TODO: figure out if we can just directly save real schema at def time
+    FunctionSchema from_def = from_def_.cloneWithRealTypes(kernel.isValidSymUnboxed());
+    FunctionSchema inferred = inferred_.cloneWithRealTypes();
     c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
@@ -57,18 +64,33 @@ const AnnotatedKernel& OperatorEntry::ambiguousAutogradOtherKernel() const {
   return kernel;
 }
 
-void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug) {
+void OperatorEntry::assertSignatureIsCorrect(const CppSignature call_signature, bool has_symint) const {
+  if (has_symint) {
+    if (C10_UNLIKELY(sym_cpp_signature_.has_value() && (call_signature != sym_cpp_signature_->signature))) {
+      reportSignatureError(call_signature, *sym_cpp_signature_);
+    }
+  } else {
+    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
+      reportSignatureError(call_signature, *cpp_signature_);
+    }
+  }
+}
+
+void OperatorEntry::registerSchema(FunctionSchema&& schema, std::string&& debug, std::vector<at::Tag> tags) {
   TORCH_INTERNAL_ASSERT(!schema_.has_value());
   for (const auto& kernel : kernels_) {
     for (const auto &j : kernel.second) {
       if (j.inferred_function_schema != nullptr) {
-        checkSchema(name_, schema, debug, *j.inferred_function_schema, j.debug);
+        checkSchema(name_, schema, debug, j.kernel, *j.inferred_function_schema, j.debug);
       }
     }
   }
   // NB: don't register schema until after we've checked everything!
   dispatchKeyExtractor_.registerSchema(schema);
   schema_ = AnnotatedSchema(std::move(schema), std::move(debug));
+  #ifndef C10_MOBILE
+    tags_ = std::move(tags);
+  #endif
 }
 
 void OperatorEntry::deregisterSchema() {
@@ -93,25 +115,26 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   // which means if you could validly change the type of a cpp_signature, then
   // that would also invalidate the old TypedOperatorHandles.
   if (cpp_signature.has_value()) {
-    if (cpp_signature_.has_value()) {
-      TORCH_CHECK(*cpp_signature == cpp_signature_->signature,
+    auto& local_cpp_signature = kernel.isValidSymUnboxed() ? sym_cpp_signature_ : cpp_signature_;
+    if (local_cpp_signature.has_value()) {
+      TORCH_CHECK(*cpp_signature == local_cpp_signature->signature,
         "\nMismatch in kernel C++ signatures\n",
         "  operator: ", (this->schema_.has_value() ? toString(this->schema_->schema) : toString(name_)), "\n",
         "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
-        "  kernel 1: ", cpp_signature_->signature.name(), "\n",
-        "    dispatch key: ", toString(cpp_signature_->dispatch_key), "\n",
-        "    ", cpp_signature_->debug, "\n",
+        "  kernel 1: ", local_cpp_signature->signature.name(), "\n",
+        "    dispatch key: ", toString(local_cpp_signature->dispatch_key), "\n",
+        "    ", local_cpp_signature->debug, "\n",
         "  kernel 2: ", cpp_signature->name(), "\n",
         "    dispatch key: ", toString(dispatch_key), "\n",
         "    ", debug, "\n"
       );
     } else {
-      cpp_signature_ = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
+      local_cpp_signature = CppSignatureWithDebug { *cpp_signature, debug, dispatch_key };
     }
   }
 
   if (schema_ && inferred_function_schema) {
-    checkSchema(name_, schema_->schema, schema_->debug, *inferred_function_schema, debug);
+    checkSchema(name_, schema_->schema, schema_->debug, kernel, *inferred_function_schema, debug);
   }
 
   // Add the kernel to the kernels list,
@@ -128,7 +151,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
                "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
                "    ", (this->schema_.has_value() ? this->schema_->debug : "no debug info"), "\n",
                "  dispatch key: ", toString(dispatch_key), "\n",
-               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"), "\n",
+               "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : (sym_cpp_signature_.has_value() ? sym_cpp_signature_->debug : "no debug info")), "\n",
                "       new kernel: ", debug
     );
   }
@@ -192,10 +215,24 @@ bool OperatorEntry::hasKernelForAnyDispatchKey(DispatchKeySet ks) const {
 
 bool OperatorEntry::hasKernelForDispatchKey(DispatchKey k) const {
   TORCH_INTERNAL_ASSERT(kernels_.find(DispatchKey::Undefined) == kernels_.end());
-  for (auto& kv : kernels_) {
-    if (k == kv.first) return true;
-  }
-  return false;
+  auto it = kernels_.find(k);
+  if (it == kernels_.end()) return false;
+  return it->second.size() > 0;
+}
+
+const KernelFunction& OperatorEntry::kernelForDispatchKey(DispatchKey k) const {
+  auto it = kernels_.find(k);
+  TORCH_CHECK(it != kernels_.end() && it->second.size(), "no kernel for ", k, " on ", name_);
+  auto jt = it->second.begin();
+  TORCH_INTERNAL_ASSERT(jt->kernel.isValid())
+  return jt->kernel;
+}
+
+bool OperatorEntry::hasComputedKernelForDispatchKey(DispatchKey k) const {
+  TORCH_CHECK(!isAliasDispatchKey(k), "Alias keys do not have runtime kernel registrations.");
+  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
+  TORCH_INTERNAL_ASSERT(dispatch_ix >= 0 && dispatch_ix < c10::num_runtime_entries, toString(k), dispatch_ix);
+  return dispatchTable_[dispatch_ix].isValid();
 }
 
 const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispatch_key) const{
@@ -208,16 +245,27 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
   return nullptr;
 }
 
+const std::vector<at::Tag>& OperatorEntry::getTags() const {
+  #if defined C10_MOBILE
+    TORCH_CHECK(false, "tags are not saved for Mobile");
+  #else
+    return tags_;
+  #endif
+}
+
 std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTableEntryWithDebug(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const {
   // [Note] DispatchTable computation
   // dispatchTable contains entries for runtime dispatch keys.
   // For any dispatch key, it'll pick a kernel using the following order:
   //  (1) Use kernel if it's directly registered to this key
   //  (2) Handle runtime keys that have kernels available from alias keys
-  //    (2.1) Use kernel from DispatchKey::CompositeExplicitAutograd if available.
+  //    (2.1) Use kernel from DispatchKey::CompositeExplicitAutogradNonFunctional if available.
+  //          This is used to register a kernel that works for all backends in inference, except "functional" backends
+  //          like LazyTensor/XLA. But it requires separate registration for Autograd keys to support training.
+  //    (2.2) Use kernel from DispatchKey::CompositeExplicitAutograd if available.
   //          This is used to register a kernel that works for all backend in inference. But it requires
   //          separate registration for Autograd keys to support training.
-  //    (2.2) Use kernel from DispatchKey::CompositeImplicitAutograd if available.
+  //    (2.3) Use kernel from DispatchKey::CompositeImplicitAutograd if available.
   //          For autograd keys, we only use kernel from CompositeImplicitAutograd when there's no direct registration
   //          to its corresponding backend key or CompositeExplicitAutograd. See Note [CompositeExplicitAutograd and CompositeImplicitAutograd].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel() if there's registration to any of
@@ -226,13 +274,13 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          A CompositeExplicitAutograd kernel prevents CompositeImplicitAutograd kernel being used for Autograd keys, but it doesn't
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
   //          in this case.
-  //    (2.3) Use kernel from DispatchKey::Autograd if available
+  //    (2.4) Use kernel from DispatchKey::Autograd if available
   //    The implementation of (2.2) relies on the invariant that for a given backend,
   //    `computeDispatchTableEntryWithDebug()` will be called for that backend's autograd key after the
   //    backend key. See Note [Refresh Runtime Autograd entries in dispatchTable_]
   //  (3) Use fallthrough kernel that are registered as fallback.
   // Alias Key Precedence:
-  //   CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
+  //   CompositExplicitAutogradNonFunctional > CompositeExplicitAutograd > CompositeImplicitAutograd > Autograd
   // Note [CompositeExplicitAutograd and CompositeImplicitAutograd]
   //   When there're registrations to both CompositeExplicitAutograd & CompositeImplicitAutograd & Autograd, from (2.2) we know CompositeExplicitAutograd
   //   and Autograd kernels will be picked up and CompositeImplicitAutograd is overriden.
@@ -244,7 +292,15 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     return {*direct_registration, "kernel"};
   }
 
-  // 2.1 Use CompositeExplicitAutograd kernel if available.
+  // 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available.
+  //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+  if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutogradNonFunctional)) {
+    if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutogradNonFunctional)) {
+      return {*default_backend_registration, "default backend kernel"};
+    }
+  }
+
+  // 2.2 Use CompositeExplicitAutograd kernel if available.
   //     See Note [Undefined in dispatchTable_] for the special handling for Undefined.
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeExplicitAutograd)) {
     if (auto default_backend_registration = getKernelForDispatchKey(DispatchKey::CompositeExplicitAutograd)) {
@@ -259,11 +315,24 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     // See Note [No Alias Keys in DispatchKeySet]
     hasKernelForDispatchKey(DispatchKey::CompositeExplicitAutograd);
 
-  // 2.2. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
+  // 2.3. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
   //      when there's no direct registration to its corresponding backend key or CompositeExplicitAutograd.
   //      For AutogradOther, we return ambiguousAutogradOtherKernel() if there's registration
   //      to any of its backends.
   //      See Note [Undefined in dispatchTable_] for the special handling for Undefined.
+
+  // If the dispatch key is included in CompositeImplicitAutogradNestedTensor,
+  // then we register it to nested-tensor kernel rather than
+  // regular-tensor CompositeImplicitAutograd kernel.
+  // We have no intention to change the behavior of Undefined,
+  // so this nested-tensor branch requires `dispatch_key != DispatchKey::Undefined`
+  // to let the original CompositeImplicitAutograd handle Undefined
+  if (dispatch_key != DispatchKey::Undefined && isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutogradNestedTensor)) {
+    if (auto nested_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutogradNestedTensor)) {
+      return {*nested_registration, "nested kernel"};
+      }
+  }
+
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutograd)) {
       if (dispatch_key == DispatchKey::AutogradOther
@@ -275,7 +344,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
     }
   }
 
-  // 2.3. For autograd backend keys, use kernel from DispatchKey::Autograd if available
+  // 2.4. For autograd backend keys, use kernel from DispatchKey::Autograd if available
   if (isIncludedInAlias(dispatch_key, DispatchKey::Autograd)) {
     if (auto autograd_registration = getKernelForDispatchKey(DispatchKey::Autograd)) {
       return {*autograd_registration, "autograd kernel"};
@@ -325,9 +394,11 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }
-  // Registration to CompositeExplicitAutograd and CompositeImplicitAutograd should be populated to Undefined.
+  // Registration to CompositeExplicitAutogradNonFunctional, CompositeExplicitAutograd and CompositeImplicitAutograd should be populated to Undefined.
   // We cannot do this above since Undefined cannot be represented in DispatchKeySet.
-  if (dispatch_key == DispatchKey::CompositeImplicitAutograd || dispatch_key == DispatchKey::CompositeExplicitAutograd) {
+  if (dispatch_key == DispatchKey::CompositeImplicitAutograd
+   || dispatch_key == DispatchKey::CompositeExplicitAutograd
+   || dispatch_key == DispatchKey::CompositeExplicitAutogradNonFunctional) {
     updateDispatchTableEntry_(dispatcher, DispatchKey::Undefined);
   }
   // Note [Refresh Runtime Autograd entries in dispatchTable_]
@@ -361,7 +432,7 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   //     no dispatch keys are available we just slide into the undefined handler which would then raise
   //     the error message.
   // In the old world of catchAll, the only way to "register" a kernel to Undefined is by registering it to
-  // catchAll. After catchAllKernel_ is removed, Undefined now can get a kernel from either CompositeExplicitAutograd
+  // catchAll. After catchAllKernel_ is removed, Undefined now can get a kernel from either CompositeExplicitAutograd,
   // or CompositeImplicitAutograd alias key so that we don't break the support. Ideally isIncludedInAlias(Undefined, CompositeImplicitAutograd)
   // should return true, it returns false because Undefined cannot be represented in a DispatchKeySet.
   updateDispatchTable_(dispatcher, DispatchKey::Undefined);
@@ -404,20 +475,20 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     if (has_kernels) {
       str << ", ";
     }
-    str << static_cast<DispatchKey>(iter);
+    str << k;
     has_kernels = true;
   }
   str << "]";
   return str.str();
 }
 
-void OperatorEntry::reportSignatureError(const CppSignature call_signature) const {
+void OperatorEntry::reportSignatureError(const CppSignature& call_signature, const CppSignatureWithDebug& saved_signature) const {
   TORCH_CHECK(false,
         "\nTried to access or call an operator with a wrong signature.\n",
         "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
         "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
-        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
-        "    ", cpp_signature_->debug, "\n",
+        "  correct signature:  ", saved_signature.signature.name(), "\n",
+        "    ", saved_signature.debug, "\n",
         "  accessed/called as: ", call_signature.name(), "\n",
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."

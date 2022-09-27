@@ -1,11 +1,13 @@
 #pragma once
 
 #include <ATen/BatchedTensorImpl.h>
+#include <ATen/core/IListRef.h>
 
 namespace at {
 
-// This file contains abstractions used for transforming *logical* vmap arguments
-// into *physical* arguments. (Keep reading for definitions of these terms).
+// This file contains abstractions used for transforming *logical* vmap
+// arguments into *physical* arguments. (Keep reading for definitions of these
+// terms).
 
 // NOTE: [Logical vs physical args]
 // Consider the following vmap.
@@ -30,7 +32,8 @@ struct VmapPhysicalView;
 
 // Most PyTorch operators take 4 or fewer inputs.
 constexpr int64_t kVmapTransformStaticInputSize = 4;
-using VmapPhysicalViewVec = SmallVector<VmapPhysicalView, kVmapTransformStaticInputSize>;
+using VmapPhysicalViewVec =
+    SmallVector<VmapPhysicalView, kVmapTransformStaticInputSize>;
 
 // Pytorch generally advertises good performance for <= 5 dims.
 // (see ATen/core/DimVector.h). We add a few extra dims (~3) for vmap
@@ -53,7 +56,7 @@ using VmapDimVector = SmallVector<int64_t, kVmapStaticDimVecSize>;
 // and returns a VmapPhysicalView on the tensor(s).
 struct TORCH_API MultiBatchVmapTransform {
   static VmapPhysicalView logicalToPhysical(const Tensor& logical_tensor);
-  static VmapPhysicalViewVec logicalToPhysical(TensorList logical_tensors);
+  static VmapPhysicalViewVec logicalToPhysical(ITensorListRef logical_tensors);
 };
 
 // VmapTransform for operators that broadcast all inputs.
@@ -63,12 +66,12 @@ struct TORCH_API MultiBatchVmapTransform {
 //   If a tensor does not have a batch dim for a vmap level, then it receives
 //   a size-one dimension for said level.
 // - aligns the non-batch dims to have the same dimensionality, adding extra
-//   size-1 dimensions in between the batch dimensions and the non-batch dimensions
-//   so that the batch dimensions are lined up from the right.
+//   size-1 dimensions in between the batch dimensions and the non-batch
+//   dimensions so that the batch dimensions are lined up from the right.
 //
 // For example: given inputs of size (B, 2) and (B, 3, 2) where B is the batch
-// dimension, BroadcastingVmapTransform returns VmapPhysicalViews that wrap tensors
-// of size (B, 1, 2) and (B, 3, 2).
+// dimension, BroadcastingVmapTransform returns VmapPhysicalViews that wrap
+// tensors of size (B, 1, 2) and (B, 3, 2).
 //
 // Given inputs of size (B, 2) and (2,), BroadcastingVmapTransform returns
 // VmapPhysicalViews wrapping tensors of size (B, 2) and (1, 2). We don't
@@ -113,8 +116,12 @@ struct TORCH_API VmapPhysicalView {
     TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   }
 
-  Tensor& tensor() { return tensor_; }
-  const Tensor& tensor() const { return tensor_; }
+  Tensor& tensor() {
+    return tensor_;
+  }
+  const Tensor& tensor() const {
+    return tensor_;
+  }
 
   // Maps logical dim indices to physical dim indices. Also does dim wrapping.
   //
@@ -125,7 +132,7 @@ struct TORCH_API VmapPhysicalView {
   // This is because the size of levels tell us that the first two dimensions
   // of `tensor_` are batch dimensions, so a logical dim of `n` is actually
   // a physical dim of `n + 2`.
-  VmapDimVector getPhysicalDims(IntArrayRef logical_dims) const;
+  VmapDimVector getPhysicalDims(OptionalIntArrayRef logical_dims) const;
   int64_t getPhysicalDim(int64_t logical_dim) const;
 
   // Returns a VmapPhysicalToLogicalMap object. This can be used for
@@ -146,11 +153,12 @@ struct TORCH_API VmapPhysicalView {
 };
 
 // Convenience struct used for mapping a physical tensor (a non-BatchedTensor)
-// to a logical one (BatchedTensor). It holds some levels that are used to do the
-// mapping and assumes that the batch dimensions in the physical tensor all
+// to a logical one (BatchedTensor). It holds some levels that are used to do
+// the mapping and assumes that the batch dimensions in the physical tensor all
 // occur at the front of the tensor.
 struct TORCH_API VmapPhysicalToLogicalMap {
-  VmapPhysicalToLogicalMap(std::bitset<kVmapNumLevels> levels): levels_(levels) {}
+  VmapPhysicalToLogicalMap(std::bitset<kVmapNumLevels> levels)
+      : levels_(levels) {}
 
   // Maps a physical tensor to a new logical tensor (BatchedTensor).
   // Assumes that all of the "batch dimensions" are at the front
@@ -170,6 +178,5 @@ struct TORCH_API VmapPhysicalToLogicalMap {
 
   std::bitset<kVmapNumLevels> levels_;
 };
-
 
 } // namespace at

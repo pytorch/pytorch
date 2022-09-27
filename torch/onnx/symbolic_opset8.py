@@ -30,13 +30,16 @@ Updated operators:
     Scan
 """
 
+import functools
 import warnings
 
 import torch
-from torch.onnx import symbolic_helper
-from torch.onnx import symbolic_opset9 as opset9
+from torch.onnx import _type_utils, errors, symbolic_helper, symbolic_opset9 as opset9
+from torch.onnx._internal import registration
 
-block_listed_operators = [
+_onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=8)
+
+block_listed_operators = (
     "nonzero",
     "where",
     "scatter",
@@ -50,15 +53,49 @@ block_listed_operators = [
     "index_fill",
     "index_copy",
     "repeat_interleave",
-    "isnan",
     "any",
     "all",
-]
+)
 
 for block_listed_op in block_listed_operators:
-    vars()[block_listed_op] = symbolic_helper._block_list_in_opset(block_listed_op)
+    _onnx_symbolic(f"aten::{block_listed_op}")(
+        symbolic_helper._block_list_in_opset(block_listed_op)
+    )
 
 
+def _apply_params(*args, **kwargs):
+    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
+
+    def _apply(fn):
+        return fn(*args, **kwargs)
+
+    return _apply
+
+
+@_onnx_symbolic(
+    "aten::upsample_nearest1d",
+    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest2d",
+    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_nearest3d",
+    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+)
+@_onnx_symbolic(
+    "aten::upsample_linear1d",
+    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_bilinear2d",
+    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+)
+@_onnx_symbolic(
+    "aten::upsample_trilinear3d",
+    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+)
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
@@ -67,7 +104,7 @@ def _interpolate(name, dim, interpolate_mode):
         symbolic_helper._interpolate_warning(interpolate_mode)
         align_corners = symbolic_helper._maybe_get_scalar(align_corners)
         if align_corners:
-            return symbolic_helper._unimplemented(name, "align_corners == True")
+            return symbolic_helper._unimplemented(name, "align_corners == True", input)
         output_size = symbolic_helper._maybe_get_const(output_size, "is")
         if symbolic_helper._is_value(output_size):
             return symbolic_helper._unimplemented(
@@ -86,14 +123,7 @@ def _interpolate(name, dim, interpolate_mode):
     return symbolic_fn
 
 
-upsample_nearest1d = _interpolate("upsample_nearest1d", 3, "nearest")
-upsample_nearest2d = _interpolate("upsample_nearest2d", 4, "nearest")
-upsample_nearest3d = _interpolate("upsample_nearest3d", 5, "nearest")
-upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
-upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
-upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
-
-
+@_onnx_symbolic("aten::__interpolate")
 def __interpolate(
     g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
@@ -121,7 +151,7 @@ def __interpolate(
 #       issue for "cast" operators. Some symbolic functions depend on shape information of input tensor, which
 #       is lost after casting.
 def _try_cast_integer_to_float(g, *args):
-    floating_scalar_types = ["Half", "Float", "Double"]
+    floating_scalar_types = {"Half", "Float", "Double"}
     old_type = None
     # Cast the input tensor to Float if its scalarType is known and is not floating number.
     # If casting is performed, return the old scalarType, otherwise return None.
@@ -160,14 +190,17 @@ def _comparison_operator(g, input, other, op_name):
 
 # NOTE: For symbolics {gt, lt, bmm, matmul, prelu, mm, addmm, view, flatten},
 #       integer input type not supported in opset8. Cast to float if possible.
+@_onnx_symbolic("aten::gt")
 def gt(g, input, other):
     return _comparison_operator(g, input, other, "Greater")
 
 
+@_onnx_symbolic("aten::lt")
 def lt(g, input, other):
     return _comparison_operator(g, input, other, "Less")
 
 
+@_onnx_symbolic("aten::bmm")
 def bmm(g, self, other):
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, other = _try_cast_integer_to_float(g, self, other)
@@ -176,14 +209,20 @@ def bmm(g, self, other):
         return g.op("MatMul", self, other)
 
 
+@_onnx_symbolic("aten::matmul")
 def matmul(g, self, other):
     return bmm(g, self, other)
 
 
+@_onnx_symbolic("aten::prelu")
 def prelu(g, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
+    weight_sizes = symbolic_helper._get_tensor_sizes(weight)
     if self_rank is not None and self_rank > 2:
         weight = g.op("Unsqueeze", weight, axes_i=list(range(1, self_rank - 1)))
+    elif self_rank == 0 and weight_sizes == [1]:
+        # self and weight are both scalar but weight has rank == 1, squeeze weight.
+        weight = symbolic_helper._squeeze_helper(g, weight, [0])
     if symbolic_helper._try_get_scalar_type(self):
         old_type, self, weight = _try_cast_integer_to_float(g, self, weight)
         return _cast_to_type(g, g.op("PRelu", self, weight), old_type)
@@ -191,20 +230,35 @@ def prelu(g, self, weight):
         return g.op("PRelu", self, weight)
 
 
+@_onnx_symbolic("aten::mm")
 def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
-    ty = symbolic_helper._try_get_scalar_type(self, other).lower()
-    C = g.constant(0, [1], ty)
-    if symbolic_helper._try_get_scalar_type(self):
-        old_type, self, other, C = _try_cast_integer_to_float(g, self, other, C)
-        return _cast_to_type(
-            g, g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0), old_type
+    scalar_type = symbolic_helper._try_get_scalar_type(self, other)
+    if scalar_type is None:
+        raise errors.SymbolicValueError(
+            "mm can only operate on tensors with known types", self
         )
-    else:
-        return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
+    zero_constant = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            [0], dtype=_type_utils.JitScalarType.from_name(scalar_type).dtype()
+        ),
+    )
+
+    if symbolic_helper._try_get_scalar_type(self):
+        old_type, self, other, zero_constant = _try_cast_integer_to_float(
+            g, self, other, zero_constant
+        )
+        return _cast_to_type(
+            g,
+            g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0),
+            old_type,
+        )
+    return g.op("Gemm", self, other, zero_constant, beta_f=0.0, alpha_f=1.0)
 
 
+@_onnx_symbolic("aten::addmm")
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
 def addmm(g, self, mat1, mat2, beta, alpha):
     if symbolic_helper._try_get_scalar_type(self):
@@ -232,6 +286,7 @@ def addmm(g, self, mat1, mat2, beta, alpha):
         )
 
 
+@_onnx_symbolic("aten::flatten")
 def flatten(g, input, start_dim, end_dim):
     start_dim_i = symbolic_helper._get_const(start_dim, "i", "start_dim")
     end_dim_i = symbolic_helper._get_const(end_dim, "i", "end_dim")
@@ -260,63 +315,70 @@ def flatten(g, input, start_dim, end_dim):
     return opset9.flatten(g, input, start_dim, end_dim)
 
 
-def _constant_fill(g, sizes, dtype, const_value):
+def _constant_fill(g, sizes, dtype: int, const_value):
     if dtype is None:
-        dtype = symbolic_helper.ScalarType.FLOAT
-    if not symbolic_helper.scalar_type_to_pytorch_type[dtype].is_floating_point:
+        scalar_type = _type_utils.JitScalarType.FLOAT
+    else:
+        scalar_type = _type_utils.JitScalarType(dtype)
+    if not scalar_type.dtype().is_floating_point:
         result = g.op(
             "ConstantFill",
             sizes,
-            dtype_i=symbolic_helper.cast_pytorch_to_onnx["Float"],
+            dtype_i=_type_utils.JitScalarType.FLOAT.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )
-        return symbolic_helper._cast_func_template(
-            symbolic_helper.scalar_type_to_onnx[dtype], g, result, None
-        )
+        return g.op("Cast", result, to_i=scalar_type.onnx_type())
     else:
         return g.op(
             "ConstantFill",
             sizes,
-            dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+            dtype_i=scalar_type.onnx_type(),
             input_as_shape_i=1,
             value_f=const_value,
         )
 
 
+@_onnx_symbolic("aten::empty")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
+@_onnx_symbolic("aten::empty_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def empty_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
+@_onnx_symbolic("aten::zeros")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device and layout in ONNX, so we ignore it
     return _constant_fill(g, sizes, dtype, 0)
 
 
+@_onnx_symbolic("aten::zeros_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def zeros_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 0)
 
 
+@_onnx_symbolic("aten::ones")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 def ones(g, sizes, dtype, layout, device, pin_memory=False):
     return _constant_fill(g, sizes, dtype, 1)
 
 
+@_onnx_symbolic("aten::ones_like")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 def ones_like(g, input, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, 1)
 
 
+@_onnx_symbolic("aten::full")
 def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
@@ -327,6 +389,7 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
         return _constant_fill(g, sizes, dtype, const_value)
 
 
+@_onnx_symbolic("aten::full_like")
 @symbolic_helper.parse_args("v", "f", "i", "v", "v", "v", "v")
 def full_like(
     g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None
@@ -335,6 +398,7 @@ def full_like(
     return _constant_fill(g, shape, dtype, fill_value)
 
 
+@_onnx_symbolic("aten::repeat")
 def repeat(g, self, repeats):
     if not symbolic_helper._is_value(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))

@@ -1,10 +1,10 @@
-#include <torch/csrc/profiler/util.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/profiler/util.h>
 
 #include <c10/util/ArrayRef.h>
-#include <fmt/format.h>
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -15,7 +15,7 @@ namespace profiler {
 namespace impl {
 
 ApproximateClockToUnixTimeConverter::ApproximateClockToUnixTimeConverter()
-  : start_times_(measurePairs()) {}
+    : start_times_(measurePairs()) {}
 
 ApproximateClockToUnixTimeConverter::UnixAndApproximateTimePair
 ApproximateClockToUnixTimeConverter::measurePair() {
@@ -33,7 +33,7 @@ ApproximateClockToUnixTimeConverter::measurePair() {
 }
 
 ApproximateClockToUnixTimeConverter::time_pairs
-    ApproximateClockToUnixTimeConverter::measurePairs() {
+ApproximateClockToUnixTimeConverter::measurePairs() {
   static constexpr auto n_warmup = 5;
   for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
     getApproximateTime();
@@ -47,8 +47,8 @@ ApproximateClockToUnixTimeConverter::time_pairs
   return out;
 }
 
-std::function<time_t(approx_time_t)>
-ApproximateClockToUnixTimeConverter::makeConverter() {
+std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
+    makeConverter() {
   auto end_times = measurePairs();
 
   // Compute the real time that passes for each tick of the approximate clock.
@@ -72,8 +72,9 @@ ApproximateClockToUnixTimeConverter::makeConverter() {
   auto t0_approx = start_times_[0].approx_t_;
   std::array<double, replicates> t0_correction{};
   for (const auto i : c10::irange(replicates)) {
-    auto dt = start_times_[i].t_  - t0;
-    auto dt_approx = (double)(start_times_[i].approx_t_ - t0_approx) * scale_factor;
+    auto dt = start_times_[i].t_ - t0;
+    auto dt_approx =
+        (double)(start_times_[i].approx_t_ - t0_approx) * scale_factor;
     t0_correction[i] = dt - (time_t)dt_approx;
   }
   t0 += t0_correction[t0_correction.size() / 2 + 1];
@@ -82,6 +83,24 @@ ApproximateClockToUnixTimeConverter::makeConverter() {
     // See above for why this is more stable than `A * t_approx + B`.
     return (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0;
   };
+}
+
+namespace {
+c10::optional<bool> soft_assert_raises_;
+} // namespace
+
+void setSoftAssertRaises(c10::optional<bool> value) {
+  soft_assert_raises_ = value;
+}
+
+bool softAssertRaises() {
+  return soft_assert_raises_.value_or(
+#ifdef NDEBUG
+      false
+#else
+      true
+#endif
+  );
 }
 
 // ----------------------------------------------------------------------------
@@ -114,7 +133,8 @@ std::string getNvtxStr(
     // Include the op ids of the input edges so
     // you can build the network graph
     if (input_op_ids.size() > 0) {
-      str = fmt::format("{}, input_op_ids = {}", str, inputOpIdsToStr(input_op_ids));
+      str = fmt::format(
+          "{}, input_op_ids = {}", str, inputOpIdsToStr(input_op_ids));
     }
     return str;
   } else {
@@ -174,7 +194,9 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-std::vector<std::vector<int64_t>> flattenList(c10::List<c10::IValue> list, std::string fn_name) {
+std::vector<std::vector<int64_t>> flattenList(
+    c10::List<c10::IValue> list,
+    std::string fn_name) {
   std::vector<std::vector<int64_t>> tensor_dims;
   for (const c10::IValue input : list) {
     if (input.isTensor()) {
@@ -187,7 +209,9 @@ std::vector<std::vector<int64_t>> flattenList(c10::List<c10::IValue> list, std::
   return tensor_dims;
 }
 
-std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn, bool flatten_list_enabled) {
+std::vector<std::vector<int64_t>> inputSizes(
+    const at::RecordFunction& fn,
+    bool flatten_list_enabled) {
   std::vector<std::vector<int64_t>> sizes;
   sizes.reserve(fn.inputs().size());
   for (const c10::IValue& input : fn.inputs()) {
@@ -235,7 +259,8 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   return str;
 }
 
-std::string inputOpIdsToStr(const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+std::string inputOpIdsToStr(
+    const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
   std::string str("[");
   int idx = 0;
 
@@ -244,7 +269,8 @@ std::string inputOpIdsToStr(const std::list<std::pair<at::RecordFunctionHandle, 
       str = fmt::format("{}, ", str);
     }
     // (OpId,OutputNr)
-    str = fmt::format("{}({},{})", str, op_id_info_pair.first, op_id_info_pair.second);
+    str = fmt::format(
+        "{}({},{})", str, op_id_info_pair.first, op_id_info_pair.second);
   }
   str = fmt::format("{}]", str);
   return str;
@@ -496,7 +522,8 @@ uint64_t computeFlops(
           "Failed to compute flops for op aten::conv2d because stride must be size 2 and cannot be 0.");
       return 0;
     }
-    // format of the input is defined in torch.nn.quantized.functional.conv2d()
+    // format of the input is defined in
+    // torch.ao.nn.quantized.functional.conv2d()
     uint64_t minibatch = 0, in_channels = 0, input_h = 0, input_w = 0;
     uint64_t out_channels = 0, kernel_h = 0, kernel_w = 0;
     const uint64_t conv2d_multiply_factor = 2;

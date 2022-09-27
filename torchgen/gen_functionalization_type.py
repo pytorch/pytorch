@@ -1,47 +1,47 @@
+from typing import Callable, List, Optional, Tuple, Union
+
 from torchgen.api import cpp, dispatcher
+from torchgen.api.translate import translate
 from torchgen.api.types import (
-    DispatcherSignature,
-    Binding,
-    FunctionalizationLambda,
-    ViewInverseSignature,
-    Expr,
-    NativeSignature,
-    CType,
     BaseCType,
-    VectorCType,
+    Binding,
+    CType,
+    DispatcherSignature,
+    FunctionalizationLambda,
+    iTensorListRefT,
+    NativeSignature,
     tensorListT,
     tensorT,
+    VectorCType,
+    ViewInverseSignature,
 )
-from torchgen.api.translate import translate
 from torchgen.context import (
+    native_function_manager,
     with_native_function,
     with_native_function_and,
-    native_function_manager,
 )
 from torchgen.model import (
     Argument,
-    Return,
+    BackendIndex,
+    BaseTy,
+    BaseType,
+    FunctionSchema,
+    ListType,
     NativeFunction,
     NativeFunctionsGroup,
-    BackendIndex,
-    FunctionSchema,
+    NativeFunctionsViewGroup,
+    Return,
     SchemaKind,
     SelfArgument,
     TensorOptionsArguments,
-    BaseType,
-    BaseTy,
-    NativeFunctionsViewGroup,
-    ListType,
 )
 from torchgen.native_function_generation import (
-    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
-    MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
     INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
+    MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT,
+    OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY,
 )
 
 from torchgen.selective_build.selector import SelectiveBuilder
-
-from typing import List, Optional, Union, Tuple, Callable
 
 
 # Note: [Mutable Ops Not Using Functionalization]
@@ -54,6 +54,8 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
         # It will be BC-breaking, but we should fix their schemas.
         # should be inplace?
         "record_stream",
+        # See Note [resize_ in Functionalization]
+        "resize_",
     ]
 )
 
@@ -76,8 +78,29 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
 
     if g.view_copy is None:
         return None
+
+    # We can make view_copy work in more cases by using reshape()
+    # when a normal view call would ordinarily fail.
+    # This also makes LTC more efficient, because they don't need to include
+    # clone() calls in their graph (which is normally needed by reshape).
+    if str(g.view_copy.func.name) == "view_copy":
+        return """\
+at::Tensor view_copy(const at::Tensor & self, at::IntArrayRef size) {
+  DimVector shape = infer_size_dv(size, self.numel());
+  if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
+    return self.reshape(size);
+  } else {
+    auto output = at::_ops::view::call(self, c10::fromIntArrayRef(size));
+    return output.clone();
+  }
+}
+"""
     # view_copy is a native signature, since we're generating an at::native:: kernel
-    view_copy_sig = NativeSignature(g.view_copy.func)
+    # Functionalization always operates on symints though
+    view_copy_sig = NativeSignature(
+        g.view_copy.func, symint=False
+    )  # TODO: flag day this True
+
     # view is a dispatcher signature, since we're calling into the at::_ops API
     view_sig = DispatcherSignature(g.view.func)
 
@@ -124,81 +147,6 @@ def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
         return f"return {dispatcher.returns_type(rets).cpp_type()}({', '.join(names)});"
 
 
-# Given a function, and the name of a variable correponding to the output of that function,
-# gather up all of the individual returns that are not aliased
-def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str]:
-    aliased_rets = func.aliased_return_names()
-    non_aliased_names = []
-    is_out_var_a_tuple = len(func.returns) > 1
-    for (i, r) in enumerate(aliased_rets):
-        if r is None:
-            non_aliased_names.append(
-                f"std::get<{i}>({out_var})" if is_out_var_a_tuple else out_var
-            )
-    return non_aliased_names
-
-
-@with_native_function
-def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
-    # We should only be generating these for code-generated NativeFunctions
-    if "generated" not in g.functional.tags:
-        return None
-    # And we always write the kernel for a generated op in terms of a non-generated op.
-    if g.inplace is not None and "generated" not in g.inplace.tags:
-        target_f = g.inplace
-    elif g.mutable is not None and "generated" not in g.mutable.tags:
-        target_f = g.mutable
-    else:
-        # We should be guaranteed to have a valid inplace/mutable variant to call into.
-        # See Note: [Mutable Ops Not Using Functionalization]
-        raise AssertionError(str(g.functional.func))
-
-    sig = DispatcherSignature(g.functional.func)
-    target_sig = DispatcherSignature(target_f.func)
-
-    context: List[Union[Binding, Expr]] = []
-    clone_mutable_inputs = []
-    cloned_return_names = []
-    # We can't just directly pass all of the arguments from the functional op into the mutating op.
-    # We need to check for which inputs to the mutating operator are mutable,
-    # and clone those inputs first.
-    for a_curr, a_tgt in zip(
-        dispatcher.jit_arguments(g.functional.func),
-        dispatcher.jit_arguments(target_f.func),
-    ):
-        if a_tgt.annotation is not None and a_tgt.annotation.is_write:
-            clone_mutable_inputs.append(
-                f"auto {a_curr.name}_clone = clone_arg({a_curr.name});"
-            )
-            context.append(
-                Expr(
-                    expr=f"{a_curr.name}_clone",
-                    type=dispatcher.argument_type(a_curr, binds=a_curr.name),
-                )
-            )
-            # Invariant: mutable arguments on the inner mutable op are always returns on the functional op.
-            cloned_return_names.append(f"{a_curr.name}_clone")
-        else:
-            context.append(dispatcher.argument(a_curr))
-    exprs = ", ".join([e.expr for e in translate(context, target_sig.arguments())])
-
-    out_name = "output"
-    maybe_assign = f"auto {out_name} = " if len(target_f.func.returns) > 0 else ""
-    inner_return_names = gather_nonaliased_inner_rets(target_f.func, out_name)
-    ret_str = return_str(
-        g.functional.func.returns, inner_return_names + cloned_return_names
-    )
-
-    clone_mutable_inputs_str = "\n".join(clone_mutable_inputs)
-    return f"""
-{sig.defn()} {{
-  {clone_mutable_inputs_str}
-  {maybe_assign}at::_ops::{target_f.func.name.unambiguous_name()}::call({exprs});
-  {ret_str}
-}}
-"""
-
-
 def modifies_arguments(f: NativeFunction) -> bool:
     return any(
         a.annotation is not None and a.annotation.is_write
@@ -226,6 +174,8 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
+    if t == BaseCType(iTensorListRefT):
+        return VectorCType(BaseCType(tensorT)), lambda x: f"{{{x}.begin(), {x}.end()}}"
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x
@@ -389,7 +339,8 @@ def emit_view_functionalization_body(
       );
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
@@ -417,12 +368,16 @@ def emit_view_functionalization_body(
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-      {return_type} tmp_output;
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+      }}
+      {return_type} tmp_output;
+      {{
+        at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
           tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
         }} else {{
@@ -629,8 +584,9 @@ def emit_inplace_functionalization_body(
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
+        at::AutoDispatchSkipFunctionalize func_guard;
+        c10::impl::ExcludeDispatchKeyGuard guard(exclude_keys_for_meta_dispatch);
         {meta_conversion_str}
-        at::AutoDispatchSkipFunctionalize guard;
         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}
@@ -688,7 +644,7 @@ def gen_functionalization_registration(
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
-            sig = DispatcherSignature.from_schema(f.func)
+            sig = NativeSignature(f.func, symint=metadata.supports_symint())
             # Note [Composite view ops in the functionalization pass]
             # We don't need to worry about implemententing functionalization kernels for views with
             # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
@@ -708,6 +664,9 @@ def gen_functionalization_registration(
 
     if isinstance(g, NativeFunctionsViewGroup):
         # functionalization needs to register kernels for view + view_inplace ops
+        # See Note [Functionalization <> torch.Tensor constructor]
+        if str(g.view.func.name) == "lift_fresh":
+            return []
         view_str = [emit_registration_helper(g.view)]
         if g.view_inplace is not None:
             assert g.view_inplace.is_view_op

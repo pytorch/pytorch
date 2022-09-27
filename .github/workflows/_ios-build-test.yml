@@ -15,24 +15,15 @@ on:
         required: true
         type: string
         description: Which iOS arch to build for.
-
-    secrets:
-      IOS_CERT_KEY_2022:
-        required: true
-        description: ios cert
-      IOS_CERT_SECRET:
-        required: true
-        description: ios cert
-      IOS_DEV_TEAM_ID:
-        required: true
-        description: ios cert
-      IOS_SIGN_KEY_2022:
-        required: true
-        description: ios cert
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
-  IN_CI: 1
-  IS_GHA: 1
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
   BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
   IOS_PLATFORM: ${{ inputs.ios-platform }}
@@ -40,18 +31,8 @@ env:
 
 jobs:
   build:
-    # NOTE: These builds will not run successfully without running on `pytorch/pytorch` due to the limitations
-    #       of accessing secrets from forked pull requests and IOS' dependency on secrets for their build/test
-    if: github.repository_owner == 'pytorch'
-    runs-on: macos-10.15
+    runs-on: macos-12
     timeout-minutes: 240
-    env:
-      JOB_BASE_NAME: ${{ inputs.build-environment }}-build
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET }}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
-      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -105,28 +86,15 @@ jobs:
             setuptools \
             typing_extensions
 
-      - name: Run Fastlane
+      - name: Setup Fastlane
         run: |
           set -x
           cd ios/TestApp
           # install fastlane
           sudo gem install bundler && bundle install
-          # install certificates
-          echo "${IOS_CERT_KEY_2022}" >> cert.txt
-          base64 --decode cert.txt -o Certificates.p12
-          rm cert.txt
-          bundle exec fastlane install_root_cert
-          bundle exec fastlane install_dev_cert
-          # install the provisioning profile
-          PROFILE=PyTorch_CI_2022.mobileprovision
-          PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
-          mkdir -pv "${PROVISIONING_PROFILES}"
-          cd "${PROVISIONING_PROFILES}"
-          echo "${IOS_SIGN_KEY_2022}" >> cert.txt
-          base64 --decode cert.txt -o ${PROFILE}
-          rm cert.txt
+          bundle update fastlane
 
-      - name: Build
+      - name: Build PyTorch Mobile Runtime
         run: |
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
@@ -135,25 +103,23 @@ jobs:
           export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}
           scripts/build_ios.sh
 
-      - name: Run Build Test
+      - name: Build TestApp
+        if: inputs.ios-platform == 'SIMULATOR'
+        timeout-minutes: 5
         run: |
-          PROFILE=PyTorch_CI_2022
           # run the ruby build script
           if ! [ -x "$(command -v xcodebuild)" ]; then
             echo 'Error: xcodebuild is not installed.'
             exit 1
           fi
-          if [ "${IOS_PLATFORM}" != "SIMULATOR" ]; then
-            ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}" -c "${PROFILE}" -t "${IOS_DEV_TEAM_ID}"
-          else
-            ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
-          fi
+          ruby scripts/xcode_build.rb -i build_ios/install -x ios/TestApp/TestApp.xcodeproj -p "${IOS_PLATFORM}"
 
       - name: Run Simulator Tests
         if: inputs.ios-platform == 'SIMULATOR'
         run: |
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
+          # use the pytorch nightly build to generate models
           pip3 install --pre torch torchvision torchaudio -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
           # generate models for differnet backends
           cd "${GITHUB_WORKSPACE}/ios/TestApp/benchmark"
@@ -175,13 +141,20 @@ jobs:
             ruby setup.rb
           fi
           cd "${GITHUB_WORKSPACE}/ios/TestApp"
-          instruments -s -devices
+          # instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
             else
-              fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
+              bundle exec fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
             fi
           else
-            fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
+
+      - name: Dump Simulator Tests On a Failure
+        if: |
+          failure() && inputs.ios-platform == 'SIMULATOR'
+        run: |
+          echo "Simulator Tests Logs:"
+          cat /Users/runner/Library/Logs/scan/*.log

@@ -1,5 +1,7 @@
 {%- set upload_artifact_s3_action = "seemethere/upload-artifact-s3@v5" -%}
 {%- set download_artifact_s3_action = "seemethere/download-artifact-s3@v4" -%}
+{%- set upload_artifact_action = "actions/upload-artifact@v3" -%}
+{%- set download_artifact_action = "actions/download-artifact@v3" -%}
 
 {# squid_proxy is an private ELB that only available for GHA custom runners #}
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
@@ -13,7 +15,7 @@
 
 {%- macro concurrency(build_environment) -%}
 concurrency:
-  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: !{{ build_environment }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 {%- endmacro -%}
 
@@ -91,7 +93,6 @@ on:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: !{{ build_environment }}-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -194,30 +195,8 @@ on:
           killall runsvc.sh
       - name: Preserve github env variables for use in docker
         run: |
-          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
-{%- endmacro -%}
-
-{%- macro teardown_ec2_linux(pytorch_directory="") -%}
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-{%- if pytorch_directory %}
-        working-directory: !{{ pytorch_directory }}
-{%- endif %}
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
 {%- macro teardown_rocm_linux() -%}

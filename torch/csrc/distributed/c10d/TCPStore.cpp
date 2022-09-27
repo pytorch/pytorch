@@ -872,9 +872,8 @@ std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
   auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
-  Socket socket = Socket::connect(addr.host,
-                                  addr.port,
-                                  SocketOptions{}.connect_timeout(timeout));
+  Socket socket = Socket::connect(
+      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -948,9 +947,8 @@ std::unique_ptr<TCPCallbackClient> TCPCallbackClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
   auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
-  Socket socket = Socket::connect(addr.host,
-                                  addr.port,
-                                  SocketOptions{}.connect_timeout(timeout));
+  Socket socket = Socket::connect(
+      addr.host, addr.port, SocketOptions{}.connect_timeout(timeout));
 
   int rawSocket = socket.handle();
 

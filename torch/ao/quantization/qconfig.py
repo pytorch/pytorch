@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Optional, Any
+from typing import Optional, Any, Union
 
 import torch
 import torch.nn as nn
@@ -21,6 +21,7 @@ from torch.ao.quantization.fake_quantize import (
 )
 
 from .observer import (
+    _PartialWrapper,
     HistogramObserver,
     MovingAverageMinMaxObserver,
     NoopObserver,
@@ -37,9 +38,48 @@ from .observer import (
     weight_observer_range_neg_127_to_127,
     per_channel_weight_observer_range_neg_127_to_127,
     default_reuse_input_observer,
+    ObserverBase,
 )
 import warnings
+import copy
 
+__all__ = [
+    "QConfig",
+    # TODO: deprecated, remove
+    "QConfigDynamic",
+    "default_qconfig",
+    "default_debug_qconfig",
+    "default_per_channel_qconfig",
+    "default_dynamic_qconfig",
+    "float16_dynamic_qconfig",
+    "float16_static_qconfig",
+    "per_channel_dynamic_qconfig",
+    "float_qparams_weight_only_qconfig",
+    "float_qparams_weight_only_qconfig_4bit",
+    "default_qat_qconfig",
+    "default_dynamic_qat_qconfig",
+    "default_weight_only_qconfig",
+    "default_activation_only_qconfig",
+    "default_qat_qconfig_v2",
+    "default_reuse_input_qconfig",
+    "default_symmetric_qnnpack_qconfig",
+    "default_per_channel_symmetric_qnnpack_qconfig",
+    "default_symmetric_qnnpack_qat_qconfig",
+    "default_per_channel_symmetric_qnnpack_qat_qconfig",
+    "default_embedding_qat_qconfig",
+    "default_embedding_qat_qconfig_4bit",
+    "get_default_qconfig",
+    "get_default_qat_qconfig",
+    "get_default_qconfig_dict",
+    "get_default_qat_qconfig_dict",
+    "assert_valid_qconfig",
+    "add_module_to_qconfig_obs_ctr",
+    "QConfigAny",
+    "obs_or_fq_ctr_equals",
+    "qconfig_equals",
+    "activation_is_memoryless",
+    "is_reuse_input_qconfig",
+]
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
@@ -117,7 +157,7 @@ default_dynamic_qconfig = QConfig(activation=default_dynamic_quant_observer,
 Default dynamic qconfig.
 """
 
-float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float32, compute_dtype=torch.float16),
+float16_dynamic_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float16, compute_dtype=torch.float16),
                                   weight=PlaceholderObserver.with_args(dtype=torch.float16))
 """
 Dynamic qconfig with weights quantized to `torch.float16`.
@@ -335,52 +375,17 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
-def _get_default_qconfig_dict_helper(qconfig, qconfig_transpose):
-    return {
-        "": qconfig,
-        "object_type": [("reshape", default_reuse_input_qconfig),
-                        (torch.nn.Conv1d, qconfig),
-                        (torch.nn.Conv2d, qconfig),
-                        (torch.nn.Conv3d, qconfig),
-                        (torch.nn.ConvTranspose1d, qconfig_transpose),
-                        (torch.nn.ConvTranspose2d, qconfig_transpose),
-                        (torch.nn.ConvTranspose3d, qconfig_transpose),
-                        (torch.nn.Linear, qconfig),
-                        (torch.nn.functional.conv1d, qconfig),
-                        (torch.nn.functional.conv2d, qconfig),
-                        (torch.nn.functional.conv3d, qconfig),
-                        (torch.nn.functional.conv_transpose1d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose2d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose3d, qconfig_transpose),
-                        (torch.nn.functional.linear, qconfig),
-                        (torch.nn.ReLU, qconfig),
-                        (torch.nn.functional.relu, qconfig),
-                        (torch.relu, qconfig),
-                        (torch.nn.BatchNorm1d, qconfig),
-                        (torch.nn.BatchNorm2d, qconfig),
-                        (torch.nn.BatchNorm3d, qconfig)]}
-
 def get_default_qconfig_dict(backend='fbgemm', version=0):
-    qconfig = get_default_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer.
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_observer)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
 def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
-    qconfig = get_default_qat_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_fake_quant)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
 def assert_valid_qconfig(qconfig: Optional[QConfig],
                          mod: torch.nn.Module) -> None:
@@ -450,16 +455,33 @@ def add_module_to_qconfig_obs_ctr(
 
     return QConfig(activation, weight)
 
+_ObserverOrFakeQuantizeConstructor = Union[_PartialWrapper, ObserverBase, FakeQuantizeBase]
+
+def obs_or_fq_ctr_equals(obs_or_fq1: _ObserverOrFakeQuantizeConstructor, obs_or_fq2: _ObserverOrFakeQuantizeConstructor):
+    if isinstance(obs_or_fq1, _PartialWrapper) and isinstance(obs_or_fq2, _PartialWrapper):
+        return _partial_wrapper_equals(obs_or_fq1, obs_or_fq2)
+    return obs_or_fq1 == obs_or_fq2
+
+def _partial_wrapper_equals(obs_or_fq1: _PartialWrapper, obs_or_fq2: _PartialWrapper):
+    """
+    Return whether the two partial wrappers are equal,
+    """
+    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
+    obs_or_fq1_keywords = copy.copy(obs_or_fq1.p.keywords)
+    obs_or_fq2_keywords = copy.copy(obs_or_fq2.p.keywords)
+    keywords_equal = True
+    # compare observer constructor with obs_or_fq_ctr_equals since direct compare would fail
+    if "observer" in obs_or_fq1_keywords and "observer" in obs_or_fq2_keywords:
+        keywords_equal = keywords_equal and obs_or_fq_ctr_equals(obs_or_fq1_keywords["observer"], obs_or_fq2_keywords["observer"])
+        obs_or_fq1_keywords.pop("observer")
+        obs_or_fq2_keywords.pop("observer")
+    keywords_equal = keywords_equal and obs_or_fq1_keywords == obs_or_fq2_keywords
+    return obs_or_fq1.p.func == obs_or_fq2.p.func and obs_or_fq1.p.args == obs_or_fq2.p.args and keywords_equal
+
 def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     """
     Returns `True` if `q1` equals `q2`, and `False` otherwise.
     """
-    # functools.partial has no __eq__ operator defined so '==' defaults to 'is'
-    def partial_equals(p1, p2):
-        same = p1.func == p2.func
-        same = same and p1.args == p2.args
-        return same and p1.keywords == p2.keywords
-
     if q1 is None or q2 is None:
         return q1 == q2
     else:
@@ -468,15 +490,8 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
             # Qconfig weight and activation can be either a partial wrapper,
             # or an observer class. Special handling is required (above) for
             # comparing partial wrappers.
-            if(isinstance(q1.activation, torch.ao.quantization.observer._PartialWrapper)):
-                activation_same = partial_equals(q1.activation.p, q2.activation.p)
-            else:
-                activation_same = q1.activation == q2.activation
-            if(isinstance(q1.weight, torch.ao.quantization.observer._PartialWrapper)):
-                weight_same = partial_equals(q1.weight.p, q2.weight.p)
-            else:
-                weight_same = q1.weight == q2.weight
-
+            activation_same = obs_or_fq_ctr_equals(q1.activation, q2.activation)
+            weight_same = obs_or_fq_ctr_equals(q1.weight, q2.weight)
             return activation_same and weight_same
         except AttributeError:
             return q1 == q2

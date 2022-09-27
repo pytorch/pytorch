@@ -132,12 +132,15 @@ SparseTensor new_sparse(
     c10::optional<bool> pin_memory) {
   AT_ASSERT(layout.has_value() && *layout == kSparse);
   DispatchKey dispatch_key;
-  if (device_or_default(device).is_cuda()) {
-    dispatch_key = DispatchKey::SparseCUDA;
-  } else if (device_or_default(device).is_xpu()) {
-    dispatch_key = DispatchKey::SparseXPU;
-  } else {
-    dispatch_key = DispatchKey::SparseCPU;
+  switch (device_or_default(device).type()) {
+#define DO_CASE(device, _) \
+    case DeviceType::device: \
+      dispatch_key = DispatchKey::Sparse##device; \
+      break;
+    C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+    default:
+      TORCH_CHECK(false, "device type not supported for sparse ", device_or_default(device))
   }
   return detail::make_tensor<SparseTensorImpl>(
       DispatchKeySet(dispatch_key),
@@ -510,7 +513,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
   Tensor nz = self.nonzero().transpose(0, 1);
   if (nz.size(1) == 0) {
-    return new_with_dims_sparse(
+    auto sparse = new_with_dims_sparse(
         sparse_dim,
         dims - sparse_dim,
         sizes,
@@ -518,6 +521,7 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
         sparse_options.layout_opt(),
         sparse_options.device_opt(),
         sparse_options.pinned_memory_opt());
+    return sparse._coalesced_(true);
   }
   Tensor indices;
   if (sparse_dim == dims) {
@@ -632,8 +636,9 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool, values.scalar_type(),
-                                         "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
@@ -646,7 +651,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
             0) { // if values is an empty tensor, there are no elements to copy
           at::native::cpublas::axpy<scalar_t>(
               blockSize,
-              1,
+              static_cast<scalar_t>(1),
               values_ptr + pos * blockSize,
               1,
               newValues_ptr + i * blockSize,

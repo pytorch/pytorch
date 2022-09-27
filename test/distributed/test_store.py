@@ -141,6 +141,19 @@ class HashStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
+class PrefixStoreTest(TestCase):
+    def setUp(self):
+        # delete is false as FileStore will automatically clean up the file
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+
+    def test_get_underlying_store(self):
+        tcp_store = dist.TCPStore(host_name=DEFAULT_HOSTNAME, port=0, world_size=1, is_master=True)
+        hash_store = dist.HashStore()
+        file_store = dist.FileStore(self.file.name, world_size=1)
+        for store in [tcp_store, hash_store, file_store]:
+            with self.subTest(f"Testing getting underlying_store for {type(store)}"):
+                prefix_store = dist.PrefixStore("prefix", store)
+                self.assertEqual(prefix_store.underlying_store, store)
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -290,7 +303,7 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
 class MyPythonStore(dist.Store):
     def __init__(self):
         super(MyPythonStore, self).__init__()
-        self.store = dict()
+        self.store = {}
 
     def set(self, key, value):
         if not isinstance(key, string_classes):
@@ -330,6 +343,10 @@ class RendezvousTest(TestCase):
     def test_unknown_handler(self):
         with self.assertRaisesRegex(RuntimeError, "^No rendezvous handler"):
             dist.rendezvous("invalid://")
+
+    def test_url_with_node_params(self):
+        with self.assertRaisesRegex(AssertionError, "has node-specific arguments"):
+            dist.rendezvous("file://foo?rank=12&world_size=16", 12, 16)
 
 
 class RendezvousEnvTest(TestCase):

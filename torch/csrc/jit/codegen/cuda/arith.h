@@ -107,8 +107,6 @@ class TORCH_CUDA_CU_API WelfordResult {
       TensorView* in_avg,
       TensorView* in_var_sum,
       TensorView* in_n);
-
-  WelfordResult rFactor(const std::vector<int>& axes);
 };
 
 //! Welford operator on specified axes. This is currently the only scan op with
@@ -122,6 +120,21 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     // Initializes to 0 in function definition, doing this so we don't have to
     // import IrBuilder just for this one interface.
     Int* init_N = nullptr);
+
+// TENSOR FACTORIES
+TORCH_CUDA_CU_API TensorView* rand(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* arange(Val* end, DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    Val* step,
+    DataType dtype = DataType::Int);
 
 // UNARY OPERATIONS
 // abs
@@ -190,6 +203,9 @@ TORCH_CUDA_CU_API TensorView* neg(TensorView*);
 // randlike
 TORCH_CUDA_CU_API Val* randlike(Val*);
 TORCH_CUDA_CU_API TensorView* randlike(TensorView*);
+// real
+TORCH_CUDA_CU_API Val* real(Val*);
+TORCH_CUDA_CU_API TensorView* real(TensorView*);
 // reciprocal
 TORCH_CUDA_CU_API Val* reciprocal(Val*);
 TORCH_CUDA_CU_API TensorView* reciprocal(TensorView*);
@@ -229,6 +245,9 @@ TORCH_CUDA_CU_API TensorView* trunc(TensorView*);
 // bitwise_not
 TORCH_CUDA_CU_API Val* bitwise_not(Val*);
 TORCH_CUDA_CU_API TensorView* bitwise_not(TensorView*);
+// imag
+TORCH_CUDA_CU_API Val* imag(Val*);
+TORCH_CUDA_CU_API TensorView* imag(TensorView*);
 // isfinite
 TORCH_CUDA_CU_API Val* isfinite(Val*);
 TORCH_CUDA_CU_API TensorView* isfinite(TensorView*);
@@ -247,8 +266,11 @@ TORCH_CUDA_CU_API TensorView* isposinf(TensorView*);
 // isreal
 TORCH_CUDA_CU_API Val* isreal(Val*);
 TORCH_CUDA_CU_API TensorView* isreal(TensorView*);
+// print
+TORCH_CUDA_CU_API Val* print(Val*);
+TORCH_CUDA_CU_API TensorView* print(TensorView*);
 
-// Broadcasts v1 based on bool vector. Size of broadcast bool vector should be
+// Broadcasts inp based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be
 // true if output dim should be a broadcasted dim, and false if it is not a
 // broadcasted dim. Number of false entires must match the number of input dims.
@@ -256,17 +278,22 @@ TORCH_CUDA_CU_API TensorView* broadcast(
     TensorView* inp,
     const std::vector<bool>& is_broadcast_dim);
 
-//! Transpose a tensor as specified by axis mappings.
-//!
-//! The transposition mapping is specified with a list of pairs from
-//! old to new positions. Positions are relative to the noReduction
-//! domain.
-//!
-//! \param inp Tensor to transpose
-//! \param old2new Pairs of mapping from old to new positions.
-TORCH_CUDA_CU_API TensorView* transpose(
+// Expands input based on provided sizes. expand_sizes should be larger than
+// the input's root domain (really rfactor) and will broadcast on inner
+// dimensions. expand_sizes should be -1 for any dimension that should remain a
+// symbolic size. For dimensions that remain broadcast after the expand should
+// be set to 1, any dimension being expanded must be marked as a broadcast in
+// the input and will be expanded to the provided constant size. Any dimension
+// that's symbolic in the input but specified as a non -1 value will be set to
+// that constant value.
+TORCH_CUDA_CU_API TensorView* expand(
     TensorView* inp,
-    const std::unordered_map<int, int>& old2new);
+    const std::vector<Val*>& expanded_sizes);
+
+// Expands input based on other. For dimensions in inp that are broadcast with a
+// matching entry in other that's either a broadcast with expanded extent or a
+// non broadcasted iter domain, inp will be expanded to other's size.
+TORCH_CUDA_CU_API TensorView* expand_as(TensorView* inp, TensorView* other);
 
 // BINARY OPERATIONS
 // add
@@ -392,12 +419,14 @@ TORCH_CUDA_CU_API TensorView* sum(
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 TORCH_CUDA_CU_API TensorView* min(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 // COMPOUND OPERATIONS
 // add_alpha
