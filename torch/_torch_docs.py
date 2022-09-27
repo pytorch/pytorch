@@ -11927,14 +11927,14 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
     )
 
 Args:
-    input (float32 Tensor): the input value(s)
-    scale (double scalar or float Tensor): quantization scale
-    zero_point (int64 scalar or int32 Tensor): quantization zero_point
+    input (Tensor): the input value(s), ``torch.float32`` tensor
+    scale (double scalar or ``float32`` Tensor): quantization scale
+    zero_point (int64 scalar or ``int32`` Tensor): quantization zero_point
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
 Returns:
-    Tensor: A newly fake_quantized float32 tensor
+    Tensor: A newly fake_quantized ``torch.float32`` tensor
 
 Example::
 
@@ -11966,15 +11966,15 @@ Returns a new tensor with the data in :attr:`input` fake quantized per channel u
     )
 
 Args:
-    input (float32 Tensor): the input value(s), in ``torch.float32``.
-    scale (float32 Tensor): quantization scale, per channel
-    zero_point (int32/half/float Tensor): quantization zero_point, per channel
+    input (Tensor): the input value(s), in ``torch.float32``
+    scale (Tensor): quantization scale, per channel in ``torch.float32``
+    zero_point (Tensor): quantization zero_point, per channel in ``torch.int32`` or ``torch.half`` or ``torch.float32``
     axis (int32): channel axis
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
 Returns:
-    Tensor: A newly fake_quantized per channel float32 tensor
+    Tensor: A newly fake_quantized per channel ``torch.float32`` tensor
 
 Example::
 
