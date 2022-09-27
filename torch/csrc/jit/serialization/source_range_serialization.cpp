@@ -85,7 +85,7 @@ std::shared_ptr<Source> SourceRangeDeserializer::deserialize_source(
 
     source = std::make_shared<Source>(str_cord, filename, starting_line_no_);
   } else {
-    std::string text_ = tup_elems[0].toString()->string();
+    std::string text_ = tup_elems[0].toStringRef();
     c10::optional<std::string> filename_ =
         tup_elems[1].toOptional<std::string>();
     int64_t starting_line_no_ = tup_elems[2].toInt();
