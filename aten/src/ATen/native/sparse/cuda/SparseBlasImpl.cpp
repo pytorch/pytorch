@@ -864,6 +864,16 @@ void addmm_out_sparse_csr(
             result.transpose(-2, -1));
       }
     }
+    if (mat2.layout() == kSparseBsc) {
+      if (result.layout() == kStrided) {
+        return block_sparse_mm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
   }
   if (mat1.layout() == kSparseCsr) {
     if (mat2.layout() == kStrided) {
