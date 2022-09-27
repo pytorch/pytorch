@@ -53,13 +53,12 @@ void check_min_max_dims(const OptionalTensorRef clamp_opt,
 
         for(int i = 0; i < num_clamp_dims; i++)
             // One of the indices is allowed to be 1; will be handled by broadcast
-            TORCH_CHECK(clamp_shape[num_clamp_dims-1-i] == input_shape[num_input_dims-1-i] || 
+            TORCH_CHECK(clamp_shape[num_clamp_dims-1-i] == input_shape[num_input_dims-1-i] ||
                         clamp_shape[num_clamp_dims-1-i] == 1 ||
                         input_shape[num_input_dims-1-i] == 1,
                         op_name + ": clamp tensor trailing shape must match input tensor")
 
     }
-    
 }
 
 void fill_new_shape(int64_t num_input_dims,
@@ -77,7 +76,6 @@ void fill_new_shape(int64_t num_input_dims,
             clamp_idx++;
         }
     }
-    
 }
 
 void clamp_tensor_out_mps(const Tensor& input_t,
@@ -122,15 +120,17 @@ void clamp_tensor_out_mps(const Tensor& input_t,
     Tensor min_opt_tensor;
     Tensor max_opt_tensor;
 
-    if(has_min)    
+    if(has_min) {
         min_opt_tensor = (num_min_dims < num_input_dims) ? (*min_opt).view(new_min_shape) : *min_opt;
-    if(has_max)
+    }
+    if(has_max) {
         max_opt_tensor = (num_max_dims < num_input_dims) ? (*max_opt).view(new_max_shape) : *max_opt;
+    }
 
     @autoreleasepool {
         // the optional min/max refs could affect how we build the cached graph
 
-        auto tensor_key = has_min ? (has_max ? getTensorsStringKey({input_t, min_opt_tensor, max_opt_tensor}) 
+        auto tensor_key = has_min ? (has_max ? getTensorsStringKey({input_t, min_opt_tensor, max_opt_tensor})
                                              : getTensorsStringKey({input_t, min_opt_tensor}))
                                   : (has_max ? getTensorsStringKey({input_t, max_opt_tensor})
                                              : getTensorsStringKey({input_t}));

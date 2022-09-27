@@ -6662,7 +6662,7 @@ class TestConsistency(TestCase):
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'clamp_max': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],}
+        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
 
 
     ALLOWLIST_OP_GRAD = {
