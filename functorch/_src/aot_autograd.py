@@ -261,6 +261,12 @@ def call_func_with_args(f, args, steal_args=False):
         out = normalize_as_list(f(*args))
     return out
 
+def assert_functional_graph(fx_g: torch.fx.Graph):
+    for n in fx_g.nodes:
+        if isinstance(n.target, torch._ops.OpOverload):
+            assert not n.target._schema.is_mutable, \
+                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+
 
 @dataclasses.dataclass
 class AOTConfig:
@@ -388,6 +394,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             if is_mutated:
                 original_inputs_needing_mutation.append(x)
 
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
         # Finally, run DCE *after* moving input mutations out of the graph.
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
