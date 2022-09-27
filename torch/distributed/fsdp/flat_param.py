@@ -849,6 +849,7 @@ class FlatParamHandle:
     @torch.no_grad()
     def unshard_grad(self):
         if not self.uses_sharded_strategy:
+            self._use_unsharded_grad_views()
             return
         flat_param = self.flat_param
         self._check_unsharded(flat_param)
@@ -869,12 +870,12 @@ class FlatParamHandle:
         self._use_unsharded_grad_views()
 
     def reshard_grad(self):
+        if self._use_orig_params:
+            self._use_sharded_grad_views()
         if not self.uses_sharded_strategy:
             return
         self.flat_param.grad = self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
         delattr(self.flat_param, "_saved_grad_shard")
-        if self._use_orig_params:
-            self._use_sharded_grad_views()
 
     def prepare_gradient_for_backward(self):
         """
@@ -1174,6 +1175,7 @@ class FlatParamHandle:
         Unflattens the unsharded flattened parameter's gradient by setting the
         original module parameter variables' gradients to be views into it.
         """
+        # Expects the gradient to be in `flat_param.grad`
         if self.flat_param.grad is None:
             return
         self._check_unsharded(self.flat_param.grad)
@@ -1287,16 +1289,7 @@ class FlatParamHandle:
         """
         flat_param = self.flat_param
         self._check_sharded(flat_param)
-        # Priority: `_cpu_grad` > `_saved_grad_shard` > `grad`
-        # - CPU offloading: `_cpu_grad`
-        # - No CPU offloading + sharded strategies: `_saved_grad_shard`
-        # - No CPU offloading + `NO_SHARD`: `grad`
-        if hasattr(flat_param, "_cpu_grad"):
-            grad = flat_param._cpu_grad  # type: ignore[attr-defined]
-        elif hasattr(flat_param, "_saved_grad_shard"):
-            grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-        else:
-            grad = flat_param.grad
+        grad = self.sharded_grad
         if grad is None:
             return  # no-op
         self._check_sharded(grad)
@@ -1537,6 +1530,26 @@ class FlatParamHandle:
             self.flat_param._param_infos, shared_param_infos
         ):
             yield (param_name, module_name)
+
+    @property
+    def sharded_grad(self) -> Optional[Tensor]:
+        """Returns the handle's sharded gradient."""
+        flat_param = self.flat_param
+        # Priority for non-`None`: `_cpu_grad` > `_saved_grad_shard` > `grad`
+        # - CPU offloading: `_cpu_grad`
+        # - No CPU offloading + sharded strategies: `_saved_grad_shard`
+        # - No CPU offloading + `NO_SHARD`: `grad`
+        if hasattr(flat_param, "_cpu_grad"):
+            grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+        elif hasattr(flat_param, "_saved_grad_shard"):
+            grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+        else:
+            p_assert(
+                flat_param.grad is None or not self.uses_sharded_strategy,
+                "Sharded strategies should use `_cpu_grad` or `_saved_grad_shard`",
+            )
+            grad = flat_param.grad
+        return grad
 
     #######################
     # CHECKS & INVARIANTS #

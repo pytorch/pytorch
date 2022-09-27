@@ -2925,6 +2925,11 @@ class FullyShardedDataParallel(nn.Module):
                 for world_size = 1 or ``NO_SHARD`` config). It is recommended
                 to use ``offload_to_cpu`` with ``rank0_only=True`` to avoid
                 redundant copies of model parameters being offloaded to the same CPU memory.
+            with_grads (bool, Optional): If ``True``, gradients are also
+                unsharded with the parameters. Currently, this is only
+                supported when passing ``use_orig_params=True`` to the FSDP
+                constructor and ``offload_to_cpu=False`` to this method.
+                (Default: ``False``)
         """
         # Note that we specify root_only as FSDP roots will handle summoning
         # child FSDP instances based on recurse argument.
@@ -2958,7 +2963,12 @@ class FullyShardedDataParallel(nn.Module):
         with_grads: bool = False,
     ):
         if with_grads and (offload_to_cpu or not self._use_orig_params):
-            raise NotImplementedError()
+            raise NotImplementedError(
+                f"with_grads={with_grads} "
+                f"use_orig_params={self._use_orig_params} "
+                f"offload_to_cpu={offload_to_cpu} "
+                f"is not supported yet"
+            )
         if writeback and rank0_only:
             raise ValueError(
                 "writeback=True and rank0_only=True is not supported, as model "
@@ -3060,12 +3070,14 @@ class FullyShardedDataParallel(nn.Module):
         """
         for handle in handles:
             # For `NO_SHARD`, `_local_shard` is the unsharded flattened
-            # parameter as well
+            # parameter and `grad` is the unsharded gradient, so there is no
+            # need to writeback for either
             if not handle.uses_sharded_strategy:
                 continue
             assert (
                 handle.flat_param.ndim == 1
             ), f"Expects `flat_param` to be flattened but got {handle.flat_param.shape}"
+
             # Get the unpadded shard instead of the padded shard to persist
             # user changes to the padding (though FSDP does not explicitly
             # support this)
@@ -3075,15 +3087,15 @@ class FullyShardedDataParallel(nn.Module):
                 handle.world_size,
             )
             handle.flat_param._local_shard[:param_shard.numel()].copy_(param_shard)
-            # Since we writeback before resharding, the sharded gradient is
-            # guaranteed to be in `_saved_grad_shard`
-            if writeback_grad and handle.flat_param._saved_grad_shard is not None:
-                grad_shard, _ = FlatParamHandle._get_unpadded_shard(
-                    handle.flat_param.grad,
-                    handle.rank,
-                    handle.world_size,
-                )
-                handle.flat_param._saved_grad_shard[:grad_shard.numel()].copy_(grad_shard)
+            if writeback_grad:
+                existing_grad = handle.sharded_grad
+                if existing_grad is not None:
+                    grad_shard, _ = FlatParamHandle._get_unpadded_shard(
+                        handle.flat_param.grad,
+                        handle.rank,
+                        handle.world_size,
+                    )
+                    existing_grad[:grad_shard.numel()].copy_(grad_shard)
 
     @contextlib.contextmanager
     def _deregister_orig_params_ctx(self):
