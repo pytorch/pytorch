@@ -481,6 +481,9 @@ void NodeToONNX(
               op->name());
           cloneNode(op);
         }
+      } else if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
+        // For ONNX_ATEN_FALLBACK mode, inline all autograd functions
+        inlineAutograd(op);
       } else {
         cloneNode(op);
       }
