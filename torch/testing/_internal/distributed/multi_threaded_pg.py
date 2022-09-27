@@ -163,7 +163,7 @@ class ThreadLocalWorld:
 
     def _get_world(self):
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = dist.World()
+            ThreadLocalWorld._world.world = dist.distributed_c10d._World()
         return ThreadLocalWorld._world.world
 
     @property

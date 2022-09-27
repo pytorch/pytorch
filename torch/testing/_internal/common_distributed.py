@@ -841,6 +841,13 @@ def tp_transports():
     return ["shm", "uv"] if has_efa() else None
 
 
+def _run_test_with_mt_pg(self, timeout, world_size, callback):
+    failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
+    for rank, exc_info in failed_ranks:
+        print(f"Rank {rank} raised:")
+        for line in traceback.format_exception(*exc_info):
+            sys.stdout.write(line)
+    self.assertEqual([], failed_ranks, "Some ranks failed")
 
 def spawn_threads_and_init_comms(func=None, timeout=TIMEOUT_DEFAULT, world_size=DEFAULT_WORLD_SIZE):
     """
@@ -851,12 +858,7 @@ def spawn_threads_and_init_comms(func=None, timeout=TIMEOUT_DEFAULT, world_size=
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        failed_ranks = run_with_threaded_pg(world_size, timeout, lambda: func(self, *args, **kwargs))
-        for rank, exc_info in failed_ranks:
-            print(f"Rank {rank} raised:")
-            for line in traceback.format_exception(*exc_info):
-                sys.stdout.write(line)
-        self.assertEqual([], failed_ranks, "Some ranks failed")
+        _run_test_with_mt_pg(self, timeout, world_size, lambda: func(self, *args, **kwargs))
 
 
     return wrapper
@@ -887,11 +889,12 @@ class MultiThreadedTestCase(TestCase):
     def threaded_run_test(self):
         self.perThreadSetUp()
         try:
-            spawn_threads_and_init_comms(
-                func=self._test_method,
+            _run_test_with_mt_pg(
+                self=self,
                 timeout=TIMEOUT_DEFAULT,
                 world_size=self.world_size,
-            )()
+                callback=self._test_method,
+            )
         finally:
             self.perThreadTearDown()
 
