@@ -11845,7 +11845,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.35p-3'),
                                                     'value': -9},
-                                                    {'threshold': float.fromhex('0x1.2ap-5'),
+                                                    {'threshold': float.fromhex('0x1.35p-3'),
                                                     'value': -9}),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
