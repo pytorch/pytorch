@@ -1331,7 +1331,7 @@ def embedding_bag(
         raise RuntimeError("embedding_bag with padding_idx")
 
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
-    loop_condition = g.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
+    loop_condition = g.op("Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
     zero = g.op("Constant", value_t=torch.tensor([0]))
 
     indices_len = symbolic_helper._unsqueeze_helper(
@@ -1394,7 +1394,9 @@ def embedding_bag(
     else:
         embeddings = loop_context.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-    cond_out = loop_context.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
+    cond_out = loop_context.op(
+        "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
+    )
     utils._add_output_to_block(loop_block, cond_out)
     utils._add_output_to_block(loop_block, embeddings)
 
