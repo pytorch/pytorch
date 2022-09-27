@@ -7,11 +7,11 @@ from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
-from torch.utils._mode_utils import no_dispatch, all_same_mode
+from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map, tree_map_only
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
+from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
 
 import logging
 
@@ -730,21 +730,33 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         res = x.index_put_(idxs, v)
         self.assertEqual(called_funcs, [torch.ops.aten.index_put_.default])
 
-    def test_torch_dispatch_mode_basic(self) -> None:
+    def test_enable_torch_dispatch_mode_error(self) -> None:
+        z = LoggingTensor(torch.empty([]))
+        with self.assertRaisesRegex(ValueError, "expected to get TorchDispatchMode, Tensor-like class, or None"):
+            with enable_torch_dispatch_mode(z):
+                pass
+
+    def test_enable_torch_dispatch_mode_basic(self) -> None:
         with capture_logs(is_mode=True) as logs:
-            with LoggingTensorMode():
+            with enable_torch_dispatch_mode(LoggingTensorMode()):
                 torch.empty([])
         self.assertExpectedInline('\n'.join(logs), """\
 $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
 
-    def test_torch_dispatch_mode_unrelated_tensors(self) -> None:
+    def test_enable_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
         y = torch.randn([])
         with capture_logs(is_mode=True) as logs:
-            with LoggingTensorMode():
+            with enable_torch_dispatch_mode(LoggingTensorMode()):
                 x + y
         self.assertExpectedInline('\n'.join(logs), """\
 $2 = torch._ops.aten.add.Tensor($0, $1)""")
+
+    def test_nested_push_regular(self):
+        with LoggingTensorMode.push() as mode:
+            # This previously errored
+            with LoggingTensorMode():
+                pass
 
     def test_nested_push_logging_tensor_mode(self):
         x = torch.randn([])
@@ -787,7 +799,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
         self.assertEqual(logs1, logs2)
 
-    def test_torch_dispatch_mode_subclass_priority(self) -> None:
+    def test_enable_torch_dispatch_mode_subclass_priority(self) -> None:
         class ErrorA(RuntimeError):
             pass
 
@@ -801,8 +813,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                with AMode():
-                    raise ErrorA
+                raise ErrorA
 
         class B(A):
             @staticmethod
@@ -811,15 +822,6 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                with BMode():
-                    func(*args, **kwargs)
-
-        class AMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                raise ErrorA
-
-        class BMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 raise ErrorB
 
         a = A(torch.empty(1))
@@ -832,40 +834,37 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
         # B has precedence over A due to the subclass relationship yet
         # modes take precedence over arguments
         with self.assertRaises(ErrorA):
-            with AMode():
+            with enable_torch_dispatch_mode(A):
                 b + b
         with self.assertRaises(ErrorB):
-            with BMode():
+            with enable_torch_dispatch_mode(B):
                 a + a
         with self.assertRaises(ErrorB):
-            with BMode():
+            with enable_torch_dispatch_mode(B):
                 a + b
 
-    def test_mode_with_make_subclass(self):
-        class SubTensor(torch.Tensor):
-            @staticmethod
-            def __new__(cls, elem):
-                return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
-
-        class BasicMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                return func(*args, **kwargs)
-
-        x = torch.randn(3)
-        with BasicMode():
-            y = SubTensor(x)
-        self.assertIsInstance(y, SubTensor)
-
-    def test_torch_dispatch_mode_respects_no_dispatch(self) -> None:
+    def test_enable_torch_dispatch_mode_respects_no_dispatch(self) -> None:
         with capture_logs(is_mode=True) as logs1:
-            with LoggingTensorMode():
+            with enable_torch_dispatch_mode(LoggingTensorMode()):
                 torch.ones([2, 3])
                 with no_dispatch():
                     torch.ones([2, 3])
         with capture_logs(is_mode=True) as logs2:
-            with LoggingTensorMode():
+            with enable_torch_dispatch_mode(LoggingTensorMode()):
                 torch.ones([2, 3])
         self.assertEqual(logs1, logs2)
+
+    def test_enable_torch_dispatch_mode_instance(self) -> None:
+        class TestMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        x = TestMode()
+        y = torch.tensor([2.])
+        with enable_torch_dispatch_mode(x):
+            y + y
 
     def test_shallow_copy_and_detach(self) -> None:
         seen = set()
@@ -885,24 +884,102 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             loss = (x * x).sum()
             loss.backward()
 
+    def test_nested_enable_torch_dispatch_mode(self) -> None:
+        class A(LoggingTensorMode):
+            pass
+
+        with self.assertRaisesRegex(ValueError, "there is already an active mode"):
+            with enable_torch_dispatch_mode(LoggingTensorMode()):
+                with enable_torch_dispatch_mode(A()):
+                    pass
+
+        # For nesting to be a noop, they need to be the same instance
+        with self.assertRaisesRegex(ValueError, "there is already an active mode"):
+            with enable_torch_dispatch_mode(LoggingTensorMode()):
+                with enable_torch_dispatch_mode(LoggingTensorMode()):
+                    pass
+
+    def test_nesting_with_same_enable_torch_dispatch_mode(self) -> None:
+        # "nested" enable_torch_dispatch_modes are allowed if they're the same mode (same instance).
+        # It's the equivalent of a noop, so it will only write once to the log
+        x = torch.tensor([3.])
+        mode = LoggingTensorMode()
+        with capture_logs(is_mode=True) as logs:
+            log_input("x", x)
+            with enable_torch_dispatch_mode(mode):
+                with enable_torch_dispatch_mode(mode):
+                    x + x
+        self.assertExpectedInline('\n'.join(logs), '''\
+$0 = input('x')
+$1 = torch._ops.aten.add.Tensor($0, $0)''')
+
+    def test_enable_torch_dispatch_mode_ignore_preexisting(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise AssertionError
+
+        x = torch.tensor([3.])
+        with capture_logs(is_mode=True) as logs:
+            with enable_torch_dispatch_mode(A()):
+                with enable_torch_dispatch_mode(LoggingTensorMode(), ignore_preexisting=True):
+                    x + x
+        self.assertExpectedInline('\n'.join(logs), """\
+$1 = torch._ops.aten.add.Tensor($0, $0)""")
+
+    def test_enable_torch_dispatch_mode_replace(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise AssertionError
+
+        x = torch.tensor([3.])
+        outer_mode = A()
+        with capture_logs(is_mode=True) as logs:
+            with enable_torch_dispatch_mode(outer_mode):
+                with enable_torch_dispatch_mode(LoggingTensorMode(), replace=outer_mode):
+                    x + x
+        self.assertExpectedInline('\n'.join(logs), """\
+$1 = torch._ops.aten.add.Tensor($0, $0)""")
+
     def test_exception_handling(self):
         class A(torch.Tensor):
             @staticmethod
             def __new__(cls, elem):
                 return torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
 
-        class AMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 if func.__name__ == 'randn.default':
                     raise RuntimeError()
-                return A(torch.zeros(()))
+                return cls(torch.zeros(()))
 
-        with AMode():
+        with enable_torch_dispatch_mode(A):
             try:
                 torch.randn(())
             except RuntimeError:
                 pass
             self.assertTrue(isinstance(torch.zeros(()), A))
+
+    def test_ctor_no_inner(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.zeros([])
+
+        with enable_torch_dispatch_mode(A()):
+            x = torch.randn((3, 4))
+
+        self.assertEqual(x, torch.zeros([]))
+
+    def test_with_mode(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA()
+
+        with self.assertRaises(ErrorA):
+            with A():
+                torch.empty([])
 
     def test_with_mode_created_separately(self):
         class ErrorA(RuntimeError):
@@ -944,7 +1021,10 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                raise NotImplementedError("Shouldn't be here")
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
+                    return func(*args, **kwargs)
 
         class Mode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1031,17 +1111,70 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
             with PoliteMode():
                 a.abs()
 
-    def test_nesting_same_mode(self):
-        # If the pushed mode is the same instance as the current mode, we allow pushing an already active mode.
+    def test_disable_mode(self):
+        class FailEverythingMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise RuntimeError("arf")
 
-        with capture_logs(is_mode=True) as logs:
-            with LoggingTensorMode() as reenabled:
-                with reenabled:
-                    torch.empty([])
-            self.assertExpectedInline('\n'.join(logs), """\
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)
-$0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memory=False)""")
+        with FailEverythingMode() as m:
+            self.assertRaises(RuntimeError, lambda: torch.ones([2, 3]))
+            with enable_torch_dispatch_mode(None, replace=m):
+                torch.ones([2, 3])
 
+    def test_make_wrapper_subclass_with_modes(self):
+        class ModeTensor(torch.Tensor):
+            def __new__(cls, elem, mode):
+                r = torch.Tensor._make_wrapper_subclass(cls, elem.shape)
+                r.elem = elem
+                r.mode = mode
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
+                    return func(*args, **kwargs)
+
+        class Mode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    if isinstance(e, ModeTensor):
+                        return e.elem
+                    else:
+                        return e
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor):
+                        return ModeTensor(t, self)
+                    else:
+                        return t
+
+                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+
+        x = torch.tensor(4.)
+        with Mode():
+            y = x + x
+            z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        with Mode():
+            with Mode():
+                y = x + x
+                z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+    def test_error_using_same_mode(self):
+        class A(TorchDispatchMode):
+            pass
+
+        x = A()
+        with x:
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+                with x:
+                    pass
 
     def test_error_using_class_method_on_mode(self):
         class A(TorchDispatchMode):
@@ -1054,33 +1187,74 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
             with A():
                 x + x
 
-    def test_get_cur_mode(self):
-        class A(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def test_error_with_ancestor(self):
+        x = LoggingTensorMode()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
                 pass
 
-        self.assertEqual(_get_current_dispatch_mode(), None)
-
-        with A() as mode1:
-            self.assertEqual(_get_current_dispatch_mode(), mode1)
-
-        with mode1:
-            with A() as mode2:
-                self.assertEqual(_get_current_dispatch_mode(), mode2)
-
-    def test_get_mode_stack(self):
-        class A(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def test_restore_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with LoggingTensorMode().restore():
                 pass
 
-        self.assertEqual(_get_current_dispatch_mode_stack(), [])
+        x = LoggingTensorMode()
+        with LoggingTensorMode():
+            with x:
+                pass
 
-        with A() as mode1:
-            self.assertEqual(_get_current_dispatch_mode_stack(), [mode1])
+        with LoggingTensorMode():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
 
-        with mode1:
-            with A() as mode2:
-                self.assertEqual(_get_current_dispatch_mode_stack(), [mode1, mode2])
+    def test_restore_ancestor_mode(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        z = LoggingTensorMode()
+        with y.restore():
+            with z:
+                pass
+
+        with x.restore():
+            with z.restore():
+                pass
+
+    def test_find_outermost_mode(self):
+        self.assertIsNone(find_outermost_mode([None, None]))
+
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        self.assertEqual(find_outermost_mode([x, y]), y)
+
+        z = LoggingTensorMode()
+        with y.restore():
+            with z:
+                pass
+
+        self.assertEqual(find_outermost_mode([z, x]), z)
+        i = LoggingTensorMode()
+
+        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
+            find_outermost_mode([i, x, y, z])
+
+        k = LoggingTensorMode()
+        with k:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "don't come from the same scope"):
+            find_outermost_mode([k, x, y, z])
 
     def test_all_same_mode(self):
         x = LoggingTensorMode()
@@ -1088,6 +1262,29 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         self.assertTrue(all_same_mode([x, x, x]))
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
+
+    def test_all_same_mode_scope(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        z = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        with x.restore():
+            with z:
+                pass
+
+        i = LoggingTensorMode()
+
+        self.assertTrue(all_same_mode_scope([x, y], y))
+        self.assertTrue(all_same_mode_scope([x, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, z], y))
+        self.assertFalse(all_same_mode_scope([x, y, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, i], y))
+
+        no_ancestor = LoggingTensorMode()
+        self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
@@ -1098,7 +1295,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
 
-    def test_subclass_autograd_device_check(self) -> None:
+    def test_enable_torch_dispatch_mode_subclass_autograd_device_check(self) -> None:
         class NonWrapperSubclass(torch.Tensor):
             elem: torch.Tensor
 

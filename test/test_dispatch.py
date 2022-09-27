@@ -1,7 +1,7 @@
 # Owner(s): ["module: dispatch"]
 
 import torch._C as C
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 from torch._python_dispatcher import PythonDispatcher
 
 from collections import namedtuple
@@ -763,6 +763,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
     # function but not a def() for it. This is usually a bug, e.g. someone
     # misspelled an operator name, or someone registered an impl for an op that
     # no longer exists
+    @skipIfTorchDynamo("Installing functorch reveals a dangling impl - aten::postive_")
     def test_find_dangling_impls(self):
         dangling_impls = C._dispatch_find_dangling_impls()
         self.assertEqual(
@@ -771,6 +772,7 @@ CompositeImplicitAutograd[alias] (inactive): fn1 :: (Tensor _0) -> Tensor _0 [ b
             msg=f"Expect zero dangling impls, but found: {dangling_impls}"
         )
 
+    @skipIfTorchDynamo("Installing functorch reveals a dangling impl - aten::positive_")
     def test_find_dangling_impls_ext(self):
         extension_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cpp_extensions', 'dangling_impl_extension.cpp')
         module = torch.utils.cpp_extension.load(

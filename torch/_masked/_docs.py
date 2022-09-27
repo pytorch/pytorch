@@ -75,7 +75,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.amax(input, 1, mask=mask)
+    >>> torch._masked.amax(input, 1, mask=mask)
     tensor([                  -1, -9223372036854775808])
 """
 
@@ -145,7 +145,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.amin(input, 1, mask=mask)
+    >>> torch._masked.amin(input, 1, mask=mask)
     tensor([                 -3, 9223372036854775807])
 """
 
@@ -210,7 +210,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.argmax(input, 1, mask=mask)
+    >>> torch._masked.argmax(input, 1, mask=mask)
     tensor([2, 0])
 """
 
@@ -275,7 +275,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.argmin(input, 1, mask=mask)
+    >>> torch._masked.argmin(input, 1, mask=mask)
     tensor([0, 0])
 """
 
@@ -331,7 +331,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.cumprod(input, 1, mask=mask)
+    >>> torch._masked.cumprod(input, 1, mask=mask)
     tensor([[-3., -3.,  3.],
             [ 1.,  1.,  1.]])
 """
@@ -388,7 +388,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.cumsum(input, 1, mask=mask)
+    >>> torch._masked.cumsum(input, 1, mask=mask)
     tensor([[-3., -3., -4.],
             [ 0.,  0.,  0.]])
 """
@@ -445,7 +445,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.log_softmax(input, 1, mask=mask)
+    >>> torch._masked.log_softmax(input, 1, mask=mask)
     tensor([[-2.1269,    -inf, -0.1269],
             [    nan,     nan,     nan]])
 """
@@ -514,7 +514,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.logsumexp(input, 1, mask=mask)
+    >>> torch._masked.logsumexp(input, 1, mask=mask)
     tensor([                   0, -9223372036854775808])
 """
 
@@ -587,7 +587,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.mean(input, 1, mask=mask)
+    >>> torch._masked.mean(input, 1, mask=mask)
     tensor([-2., nan])
 """
 
@@ -655,7 +655,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.median(input, 1, mask=mask)
+    >>> torch._masked.median(input, 1, mask=mask)
     tensor([-3., nan])
 """
 
@@ -727,7 +727,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.norm(input, 2.0, 1, mask=mask)
+    >>> torch._masked.norm(input, 2.0, 1, mask=mask)
     tensor([3.1623, 0.0000])
 """
 
@@ -786,7 +786,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.normalize(input, 2.0, 1, mask=mask)
+    >>> torch._masked.normalize(input, 2.0, 1, mask=mask)
     tensor([[-0.9487,  0.0000, -0.3162],
             [ 0.0000,  0.0000,  0.0000]])
 """
@@ -855,7 +855,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.prod(input, 1, mask=mask)
+    >>> torch._masked.prod(input, 1, mask=mask)
     tensor([3, 1])
 """
 
@@ -911,7 +911,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.softmax(input, 1, mask=mask)
+    >>> torch._masked.softmax(input, 1, mask=mask)
     tensor([[0.1192, 0.0000, 0.8808],
             [   nan,    nan,    nan]])
 """
@@ -968,7 +968,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.softmin(input, 1, mask=mask)
+    >>> torch._masked.softmin(input, 1, mask=mask)
     tensor([[0.8808, 0.0000, 0.1192],
             [   nan,    nan,    nan]])
 """
@@ -1037,7 +1037,7 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.std(input, 1, False, mask=mask)
+    >>> torch._masked.std(input, 1, False, mask=mask)
     tensor([1., nan])
 """
 
@@ -1105,18 +1105,21 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.sum(input, 1, mask=mask)
+    >>> torch._masked.sum(input, 1, mask=mask)
     tensor([-4,  0])
 """
 
 var_docstring = """var(input, dim, unbiased, *, keepdim=False, dtype=None, mask=None) -> Tensor
+
 Returns variance of all the elements in the :attr:`input`
 tensor along the given dimension(s) :attr:`dim` while the :attr:`input`
 elements are masked out according to the boolean tensor
 :attr:`mask`.
-The identity value of sample variance operation is undefined. The
+
+The identity value of sample variance operation is undefined.  The
 elements of output tensor with strided layout, that correspond to
 fully masked-out elements, have ``nan`` values.
+
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension(s) :attr:`dim` where it is of
 size 1. Otherwise, :attr:`dim` is squeezed (see
@@ -1163,6 +1166,7 @@ Keyword args:
       containing the binary mask of validity of input tensor
       elements.
       Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.
+
 Example::
 
     >>> input = tensor([[-3, -2, -1], [ 0, 1, 2]])
@@ -1173,6 +1177,6 @@ Example::
     >>> mask
     tensor([[ True, False,  True],
             [False, False, False]])
-    >>> torch.masked._ops.var(input, 1, False, mask=mask)
+    >>> torch._masked.var(input, 1, False, mask=mask)
     tensor([1., nan])
 """

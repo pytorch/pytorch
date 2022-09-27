@@ -108,9 +108,7 @@ struct ActivityTraceWrapper {
 
  private:
   std::unique_ptr<interface_trace_t> trace_;
-#ifdef USE_KINETO
   bool saved_ = false; // Kineto's save is destructive
-#endif
 };
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;

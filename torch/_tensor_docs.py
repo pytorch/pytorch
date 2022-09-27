@@ -28,18 +28,13 @@ new_common_args = parse_kwargs(
         returned tensor. Default: ``False``.
     pin_memory (bool, optional): If set, returned tensor would be allocated in
         the pinned memory. Works only for CPU tensors. Default: ``False``.
-    layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
-        Default: ``torch.strided``.
 """
 )
 
 add_docstr_all(
     "new_tensor",
-    """
-new_tensor(data, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
-pin_memory=False) -> Tensor
-"""
-    + r"""
+    r"""
+new_tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Returns a new Tensor with :attr:`data` as the tensor data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -62,13 +57,9 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     data (array_like): The returned Tensor copies :attr:`data`.
-
-Keyword args:
     {dtype}
     {device}
     {requires_grad}
-    {layout}
-    {pin_memory}
 
 Example::
 
@@ -85,11 +76,8 @@ Example::
 
 add_docstr_all(
     "new_full",
-    """
-new_full(size, fill_value, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
-pin_memory=False) -> Tensor
-"""
-    + r"""
+    r"""
+new_full(size, fill_value, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Returns a Tensor of size :attr:`size` filled with :attr:`fill_value`.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -97,13 +85,9 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 
 Args:
     fill_value (scalar): the number to fill the output tensor with.
-
-Keyword args:
     {dtype}
     {device}
     {requires_grad}
-    {layout}
-    {pin_memory}
 
 Example::
 
@@ -120,26 +104,17 @@ Example::
 
 add_docstr_all(
     "new_empty",
-    """
-new_empty(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
-pin_memory=False) -> Tensor
-"""
-    + r"""
+    r"""
+new_empty(size, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Returns a Tensor of size :attr:`size` filled with uninitialized data.
 By default, the returned Tensor has the same :class:`torch.dtype` and
 :class:`torch.device` as this tensor.
 
 Args:
-    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
-        shape of the output tensor.
-
-Keyword args:
     {dtype}
     {device}
     {requires_grad}
-    {layout}
-    {pin_memory}
 
 Example::
 
@@ -155,26 +130,17 @@ Example::
 
 add_docstr_all(
     "new_empty_strided",
-    """
-new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
-pin_memory=False) -> Tensor
-"""
-    + r"""
+    r"""
+new_empty_strided(size, stride, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Returns a Tensor of size :attr:`size` and strides :attr:`stride` filled with
 uninitialized data. By default, the returned Tensor has the same
 :class:`torch.dtype` and :class:`torch.device` as this tensor.
 
 Args:
-    size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
-        shape of the output tensor.
-
-Keyword args:
     {dtype}
     {device}
     {requires_grad}
-    {layout}
-    {pin_memory}
 
 Example::
 
@@ -190,11 +156,8 @@ Example::
 
 add_docstr_all(
     "new_ones",
-    """
-new_ones(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
-pin_memory=False) -> Tensor
-"""
-    + r"""
+    r"""
+new_ones(size, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Returns a Tensor of size :attr:`size` filled with ``1``.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -203,13 +166,9 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
-
-Keyword args:
     {dtype}
     {device}
     {requires_grad}
-    {layout}
-    {pin_memory}
 
 Example::
 
@@ -225,11 +184,8 @@ Example::
 
 add_docstr_all(
     "new_zeros",
-    """
-new_zeros(size, *, dtype=None, device=None, requires_grad=False, layout=torch.strided, \
-pin_memory=False) -> Tensor
-"""
-    + r"""
+    r"""
+new_zeros(size, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Returns a Tensor of size :attr:`size` filled with ``0``.
 By default, the returned Tensor has the same :class:`torch.dtype` and
@@ -238,13 +194,9 @@ By default, the returned Tensor has the same :class:`torch.dtype` and
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
-
-Keyword args:
     {dtype}
     {device}
     {requires_grad}
-    {layout}
-    {pin_memory}
 
 Example::
 

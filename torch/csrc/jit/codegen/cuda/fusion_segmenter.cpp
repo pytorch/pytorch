@@ -2598,39 +2598,9 @@ bool CombineReductions::shouldRun(
   return false;
 }
 
-namespace {
-
-//! Returns true if group1 and group2 are an immediate producer-consumer pair.
-bool areDirectlyConnected(SegmentedGroup* group1, SegmentedGroup* group2) {
-  // Check if group1 is a immediate consumer of group2
-  if (std::any_of(
-          group1->producer_edges.begin(),
-          group1->producer_edges.end(),
-          [group2](SegmentedEdge* edge) { return edge->from == group2; })) {
-    return true;
-  }
-
-  // Check if group1 is a immediate producer of group2
-  if (std::any_of(
-          group1->consumer_edges.begin(),
-          group1->consumer_edges.end(),
-          [group2](SegmentedEdge* edge) { return edge->to == group2; })) {
-    return true;
-  }
-
-  return false;
-}
-
-} // namespace
-
-bool SegmentCandidateFinder::codeGenSupportedMerge(
-    SegmentedGroup* group1,
-    SegmentedGroup* group2) {
-  TORCH_INTERNAL_ASSERT(
-      areDirectlyConnected(group1, group2),
-      "only support testing immediate producer-consumer groups");
+bool SegmentCandidateFinder::codeGenSupportedMerge(SegmentedEdge* edge) {
   Fusion* fusion = segmented_fusion_->completeFusion();
-  auto h = tryMerge(fusion, runtime_info_, group1, group2);
+  auto h = tryMerge(fusion, runtime_info_, edge->from, edge->to);
   return h.has_value();
 }
 
@@ -2857,7 +2827,7 @@ void SegmentCandidateFinder::findSegments() {
 
         auto candidate_it = candidates.begin();
         while (candidate_it != candidates.end() &&
-               !codeGenSupportedMerge(group, candidate_it->group)) {
+               !codeGenSupportedMerge(candidate_it->edge)) {
           candidate_it++;
         }
         if (candidate_it == candidates.end()) {
@@ -2926,7 +2896,7 @@ void SegmentCandidateFinder::finalMerge() {
       for (auto consumer : all_consumers_of_producer_group) {
         if (!producer_check->isConsumerOfAny(
                 consumer, all_consumers_of_producer_group) &&
-            codeGenSupportedMerge(producer_group, consumer)) {
+            codeGenSupportedMerge(consumer_edge_map.at(consumer))) {
           to_merge_.emplace_back(producer_group);
           to_merge_.emplace_back(consumer);
           producer_group->merged_ = true;

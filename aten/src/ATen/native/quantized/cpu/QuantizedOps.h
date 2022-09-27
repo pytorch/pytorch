@@ -143,7 +143,7 @@ using qupsample_bilinear2d_fn = void (*)(
     c10::optional<double> scales_w);
 
 using qcat_nhwc_fn = Tensor (*)(
-    const MaterializedITensorListRef& qxs,
+    const c10::List<Tensor>& qxs,
     int64_t dim,
     double scale,
     int64_t zero_point);

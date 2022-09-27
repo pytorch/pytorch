@@ -1214,19 +1214,17 @@ class CyclicLR(_LRScheduler):
         self.gamma = gamma
 
         if scale_fn is None:
-            self._scale_fn_custom = None
             if self.mode == 'triangular':
-                self._scale_fn_ref = weakref.WeakMethod(self._triangular_scale_fn)
+                self.scale_fn = self._triangular_scale_fn
                 self.scale_mode = 'cycle'
             elif self.mode == 'triangular2':
-                self._scale_fn_ref = weakref.WeakMethod(self._triangular2_scale_fn)
+                self.scale_fn = self._triangular2_scale_fn
                 self.scale_mode = 'cycle'
             elif self.mode == 'exp_range':
-                self._scale_fn_ref = weakref.WeakMethod(self._exp_range_scale_fn)
+                self.scale_fn = self._exp_range_scale_fn
                 self.scale_mode = 'iterations'
         else:
-            self._scale_fn_custom = scale_fn
-            self._scale_fn_ref = None
+            self.scale_fn = scale_fn
             self.scale_mode = scale_mode
 
         self.cycle_momentum = cycle_momentum
@@ -1253,13 +1251,6 @@ class CyclicLR(_LRScheduler):
             return param
         else:
             return [param] * len(optimizer.param_groups)
-
-    def scale_fn(self, x):
-        if self._scale_fn_custom is not None:
-            return self._scale_fn_custom(x)
-
-        else:
-            return self._scale_fn_ref()(x)
 
     def _triangular_scale_fn(self, x):
         return 1.
