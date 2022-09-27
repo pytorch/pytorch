@@ -4,7 +4,7 @@ import torch
 """
 Instructions:
 
-1. pytest -n 8 test/test_vmap.py test/test_ops.py test/test_pythonkey.py > result.txt
+1. pytest -n 8 test/test_vmap.py test/test_ops.py test/test_aotdispatch.py > result.txt
 2. python test/xfail_suggester.py
 """
 

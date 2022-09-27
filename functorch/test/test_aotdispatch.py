@@ -713,14 +713,14 @@ class TestAOTModuleSimplified(AOTTestCase):
             if node.op == 'output':
                 continue
             self.assertTrue(node.stack_trace is not None)
-            assert 'test_pythonkey.py' in node.stack_trace
+            assert 'test_aotdispatch.py' in node.stack_trace
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
             for node in gm.graph.nodes:
                 if node.op == 'output' or node.op == 'placeholder':
                     continue
                 self.assertTrue(node.stack_trace is not None)
-                assert 'test_pythonkey.py' in node.stack_trace
+                assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
         aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
