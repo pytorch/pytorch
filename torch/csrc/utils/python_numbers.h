@@ -139,15 +139,6 @@ inline bool THPUtils_checkDouble(PyObject* obj) {
   return PyFloat_Check(obj) || PyLong_Check(obj);
 }
 
-inline bool THPUtils_checkScalar(PyObject* obj) {
-#ifdef USE_NUMPY
-  if (torch::utils::is_numpy_scalar(obj)) {
-    return true;
-  }
-#endif
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj);
-}
-
 inline double THPUtils_unpackDouble(PyObject* obj) {
   if (PyFloat_Check(obj)) {
     return PyFloat_AS_DOUBLE(obj);
