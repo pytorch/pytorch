@@ -39,6 +39,7 @@
 #include <type_traits>
 #include <utility>
 
+#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -1238,7 +1239,7 @@ constexpr optional<X&> make_optional(std::reference_wrapper<X> v) {
 namespace std {
 template <typename T>
 struct hash<c10::optional<T>> {
-  typedef typename hash<T>::result_type result_type;
+  typedef c10::invoke_result_t<std::hash<T>, T> result_type;
   typedef c10::optional<T> argument_type;
 
   constexpr result_type operator()(argument_type const& arg) const {
