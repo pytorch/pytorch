@@ -74,7 +74,7 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   // NOTE: this function ALWAYS creates a view upon successful execution.
   const auto tile_tensor = [compressed_layout](
       const Tensor& t, Blocksize blocksize) -> Tensor {
-    if (compressed_layout == kSparseCsr || compressed_layout == kSparseCsc) {
+    if (compressed_layout == kSparseCsr) {
       return t.unsqueeze(-1).unsqueeze_(-1);
     }
     else {

@@ -1546,7 +1546,7 @@ class TestSparseCSR(TestCase):
         for (m, n, k) in itertools.product([2, 5], repeat=3):
             nnz = random.randint(0, m * k)
             a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
-            a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device, low=0., high=1.)
+            a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
             a_data = a_data.mT if noncontiguous else a_data
             a = torch._sparse_bsr_tensor_unsafe(a.crow_indices(), a.col_indices(),
                                                 a_data, (m * block_size, k * block_size))
