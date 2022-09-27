@@ -176,12 +176,12 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
 
 // Applies the following for-loop:
 // for i in range(begin, end):
-//   if i in relative_skips:
-//     continue
+//   if i in use_flag_relative:
+//     args[i] = func(args[i], i - begin, true)
 //   args[i] = func(args[i], i - begin)
 // NOTE: relative_skips must be sorted
-void foreachTensorInplaceSkips(std::vector<IValue>& args, int64_t begin, int64_t end, std::vector<int64_t> relative_skips,
-    std::function<Tensor(const Tensor&, bool)> func);
+void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
+    std::vector<int64_t> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func);
 
 std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begin, int64_t end);
 

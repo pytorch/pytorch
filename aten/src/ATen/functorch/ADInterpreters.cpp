@@ -14,7 +14,7 @@ static void checkForInvalidMutationOnCaptures(
   auto args = torch::jit::last(stack, op.schema().arguments().size());
   auto mutated_arg = unwrapIfDead(args[0].toTensor());
   auto* wrapper = maybeGetTensorWrapper(mutated_arg);
-  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !(wrapper->alias_of_unwrapped())) {
+  if (wrapper && wrapper->level().has_value() && wrapper->level().value() == cur_level && !(wrapper->is_immutable())) {
     return;
   }
   TORCH_CHECK(false,
@@ -26,22 +26,19 @@ static void checkForInvalidMutationOnCaptures(
 }
 
 static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_level) {
-  // we will only mark something as an alias of an unwrapped tensor if it's during user code in a transform.
-  // This state is saved by the during functorch transform context manager
-  const bool mark_as_alias_of_unwrapped = getDuringFunctorchTransform();
   if (!tensor.defined()) {
     return tensor;
   }
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
-    return makeTensorWrapper(tensor, current_level, mark_as_alias_of_unwrapped);
+    return makeTensorWrapper(tensor, current_level, true);
   }
   TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
   if (wrapper->level().value() == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }
-  return makeTensorWrapper(tensor, current_level, mark_as_alias_of_unwrapped);
+  return makeTensorWrapper(tensor, current_level, true);
 }
 
 static void autogradBasedTransformProcess(
@@ -94,14 +91,14 @@ static void autogradBasedTransformSendToNext(
     }
     return tensor;
   };
-  auto wrap = [&](const Tensor& tensor, bool alias_of_unwrapped) {
+  auto wrap = [&](const Tensor& tensor, bool is_immutable) {
     if (!tensor.defined()) {
       return tensor;
     }
     // if (c10::show_dispatch_trace_enabled()) {
     //   std::cout << "wrap " << current_level << std::endl;
     // }
-    return makeTensorWrapper(tensor, current_level, alias_of_unwrapped);
+    return makeTensorWrapper(tensor, current_level, is_immutable);
   };
 
   // TODO: we only need to do the following (marked with !) on in-place functions
@@ -122,7 +119,7 @@ static void autogradBasedTransformSendToNext(
     stack->push_back((*stack)[front + arg_idx]);
   }
 
-  std::vector<int64_t> unwrapped_inputs;  // all unwrapped inputs, sorted
+  std::vector<int64_t> immutable_inputs;  // all immutable inputs, sorted
   for (auto idx = stack->size() - args_size; idx < stack->size(); idx++) {
     const auto ivalue = (*stack)[idx];
     if (!ivalue.isTensor()) {
@@ -130,11 +127,11 @@ static void autogradBasedTransformSendToNext(
     }
     const auto tensor = ivalue.toTensor();
     auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
-    if (!maybe_tensor_wrapper || maybe_tensor_wrapper->alias_of_unwrapped()) {
-      // if the input is unwrapped, we note its relative position in schema, noting that
+    if (!maybe_tensor_wrapper || maybe_tensor_wrapper->is_immutable()) {
+      // if the input is immutable, we note its relative position in schema, noting that
       // args are in reverse order on stack, so the last arg is at the top of the stack
       const auto relative_pos = idx - (stack->size() - args_size);
-      unwrapped_inputs.push_back(relative_pos);
+      immutable_inputs.push_back(relative_pos);
     }
   }
 
@@ -162,23 +159,18 @@ static void autogradBasedTransformSendToNext(
 
   op.callBoxed(stack);
 
-  auto aliased_input_outputs = findAliasedInputs(op.schema());
-  std::vector<int64_t> unwrapped_outputs; // indexes of outputs that should remain unwrapped
-
   // lift_fresh: it's must be freshly allocated and should be wrapped. User shouldn't have access to input version
   // alias: this is needed for the CompositeImplicit instance norm (running_mean/var get set to be a wrapped value)
   //        It's not a user facing function, but is more prone to possible errors
   const bool always_wrap = op.schema().name() == "aten::lift_fresh" || op.schema().name() == "aten::alias";
+  std::vector<int64_t> outputs_aliasing_immutable;
   if (!always_wrap) {
-    for (auto idx : unwrapped_inputs) {
-      const auto aliased_output = aliased_input_outputs.find(idx);
-      if (aliased_output != aliased_input_outputs.end()) {
-        unwrapped_outputs.push_back(aliased_input_outputs[idx]);
-      }
-    }
+    outputs_aliasing_immutable = findAliasedOutputs(op.schema(), immutable_inputs);
+    // sorting (O(N logN)) lets us avoid an O(N) check for every immutable input (O(N^2))
+    std::sort(outputs_aliasing_immutable.begin(), outputs_aliasing_immutable.end());
   }
   // Step 4
-  foreachTensorInplaceSkips(*stack, stack->size() - ret_size, stack->size(), unwrapped_outputs, wrap);
+  foreachTensorInplaceWithFlag(*stack, stack->size() - ret_size, stack->size(), outputs_aliasing_immutable, wrap);
 
   // Step 5
   auto args_front = stack->size() - args_size - ret_size;

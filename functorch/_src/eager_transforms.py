@@ -31,9 +31,7 @@ from torch._C._functorch import (
     _assert_wrapped_functional,
     _propagate_functional_input_mutation,
     set_inplace_requires_grad_allowed,
-    get_inplace_requires_grad_allowed,
-    set_during_functorch_transform,
-    get_during_functorch_transform,
+    get_inplace_requires_grad_allowed
 )
 
 argnums_t = Union[int, Tuple[int, ...]]
@@ -47,15 +45,6 @@ def enable_inplace_requires_grad(enabled=True):
         yield
     finally:
         set_inplace_requires_grad_allowed(prev_state)
-
-@contextlib.contextmanager
-def during_functorch_transform():
-    prev_state = get_during_functorch_transform()
-    set_during_functorch_transform(True)
-    try:
-        yield
-    finally:
-        set_during_functorch_transform(prev_state)
 
 
 def _create_differentiable(inps, level=None):
@@ -296,8 +285,7 @@ def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = N
             else:
                 diff_primals = _slice_argnums(primals, argnums, as_tuple=False)
                 tree_map_(partial(_create_differentiable, level=level), diff_primals)
-            with during_functorch_transform():
-                primals_out = func(*primals)
+            primals_out = func(*primals)
 
             if has_aux:
                 if not (isinstance(primals_out, tuple) and len(primals_out) == 2):
@@ -846,8 +834,7 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                 if argnums is not None:
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
-                with during_functorch_transform():
-                    result_duals = func(*duals)
+                result_duals = func(*duals)
                 if has_aux:
                     if not (isinstance(result_duals, tuple) and len(result_duals) == 2):
                         raise RuntimeError(

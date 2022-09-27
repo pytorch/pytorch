@@ -434,12 +434,6 @@ void initFuncTorchBindings(PyObject* module) {
   m.def(
       "get_inplace_requires_grad_allowed",
       &at::functorch::getInplaceRequiresGradAllowed);
-  m.def(
-      "set_during_functorch_transform",
-      &at::functorch::setDuringFunctorchTransform);
-  m.def(
-      "get_during_functorch_transform",
-      &at::functorch::getDuringFunctorchTransform);
   m.def("dlevel", &dlevel, "dlevel");
   m.def("dump_tensor", &dump_tensor, "dump_tensor");
   m.def("reshape_dim_into", &at::functorch::reshape_dim_into);

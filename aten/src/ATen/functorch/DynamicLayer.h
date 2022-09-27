@@ -104,9 +104,8 @@ TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 // add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
 TORCH_API bool isInplaceOp(const c10::FunctionSchema& schema);
 
-// NOTE: This returns (input index) -> (res index) for each aliasing relationship
-// TODO: might be worth to memoize this
-TORCH_API std::map<int64_t, int64_t> findAliasedInputs(const FunctionSchema& schema);
+// Given the indices of unwrapped inputs and the schema, this returns the indices of any outputs that should remain unwrapped
+TORCH_API std::vector<int64_t> findAliasedOutputs(const FunctionSchema& schema, std::vector<int64_t> unwrapped_inputs);
 
 TORCH_API Tensor unwrapIfDead(const Tensor& tensor);
 
