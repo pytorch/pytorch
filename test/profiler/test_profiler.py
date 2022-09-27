@@ -1576,8 +1576,7 @@ class TestTorchTidyProfiler(TestCase):
         ptr = node.extra_fields.ptr
         self.assertGreater(ptr, 0)
         self.assertEqual(node.extra_fields.alloc_size, alloc_size)
-        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
-        self.assertEqual(node.extra_fields.device_index, -1)
+        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         total_allocated = node.extra_fields.total_allocated
 
         # total_reserved is only for CUDACachingAllocator
@@ -1593,8 +1592,7 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertEqual(node.extra_fields.ptr, ptr)
         self.assertEqual(node.extra_fields.alloc_size, -alloc_size)
-        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
-        self.assertEqual(node.extra_fields.device_index, -1)
+        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
 
 
