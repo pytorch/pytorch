@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 from collections import OrderedDict
-import os
 import contextlib
 import torch
 import torch.nn.functional as F
@@ -161,6 +160,7 @@ from torch.testing._internal.common_quantization import (
     test_only_eval_fn,
     test_only_train_fn,
     ModelForConvTransposeBNFusion,
+    get_supported_device_types,
 )
 
 from torch.testing._internal.common_quantization import (
@@ -188,13 +188,6 @@ import operator
 import unittest
 import io
 from typing import Callable, Optional, List
-
-
-
-TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
-
-def get_supported_device_types():
-    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -5005,37 +4998,38 @@ class TestQuantizeFx(QuantizationTestCase):
                 .set_root_module(torch.nn.Linear)
                 .set_reference_quantized_module(nnqr.Linear))
 
-        def validate_qconfig(qconfig: QConfig, error_message: Optional[str] = None):
+        def validate_qconfig(qconfig: QConfig, satisfies_constraints: bool):
             model = MyModel()
             qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
             example_inputs = (torch.rand((1, 30), dtype=torch.float),)
-            if error_message is not None:
-                with self.assertRaisesRegex(ValueError, error_message):
-                    prepare_fx(MyModel(), qconfig_mapping, example_inputs, backend_config=backend_config)
-            else:
-                prepare_fx(MyModel(), qconfig_mapping, example_inputs, backend_config=backend_config)
+            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+            model(*example_inputs)
+            model = convert_fx(model, backend_config=backend_config)
+            linear_module = torch.ao.nn.quantized.Linear if satisfies_constraints else torch.nn.Linear
+            expected_node_occurrence = {ns.call_module(linear_module) : 1}
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
 
         # Case 1: QConfig ranges fit within backend ranges, OK
         qconfig1 = QConfig(
             activation=MinMaxObserver.with_args(quant_min=0, quant_max=15, dtype=torch.quint8),
             weight=MinMaxObserver.with_args(quant_min=-32, quant_max=31, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
-        validate_qconfig(qconfig1)
+        validate_qconfig(qconfig1, satisfies_constraints=True)
 
         # Case 2: QConfig activation range falls outside backend range, should fail
         qconfig2 = QConfig(
             activation=MinMaxObserver.with_args(quant_min=0, quant_max=63, dtype=torch.quint8),
             weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
-        validate_qconfig(qconfig2, "Observer quantization range must fall within the backend's")
+        validate_qconfig(qconfig2, satisfies_constraints=False)
 
         # Case 3: QConfig weight range falls outside backend range, should fail
         qconfig3 = QConfig(
             activation=MinMaxObserver.with_args(dtype=torch.quint8),
             weight=MinMaxObserver.with_args(quant_min=-128, quant_max=127, dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
-        validate_qconfig(qconfig3, "Observer quantization range must fall within the backend's")
+        validate_qconfig(qconfig3, satisfies_constraints=False)
 
         # Case 4: QConfig doesn't specify range, should fail
         qconfig4 = QConfig(activation=ReuseInputObserver, weight=ReuseInputObserver)
-        validate_qconfig(qconfig4, "Observer must specify 'quant_min' and 'quant_max'")
+        validate_qconfig(qconfig4, satisfies_constraints=False)
 
     def test_backend_config_scale_min(self):
         """
@@ -5063,43 +5057,46 @@ class TestQuantizeFx(QuantizationTestCase):
                 .set_root_module(torch.nn.Linear)
                 .set_reference_quantized_module(nnqr.Linear))
 
-        def validate_qconfig(qconfig: QConfig, error_message: Optional[str] = None):
+        def validate_qconfig(qconfig: QConfig, satisfies_constraints: bool):
             model = MyModel()
             qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
             example_inputs = (torch.rand((1, 30), dtype=torch.float),)
-            if error_message is not None:
-                with self.assertRaisesRegex(ValueError, error_message):
-                    prepare_fx(MyModel(), qconfig_mapping, example_inputs, backend_config=backend_config)
-            else:
-                prepare_fx(MyModel(), qconfig_mapping, example_inputs, backend_config=backend_config)
+            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+            model(*example_inputs)
+            model = convert_fx(model, backend_config=backend_config)
+            linear_module = torch.ao.nn.quantized.Linear if satisfies_constraints else torch.nn.Linear
+            expected_node_occurrence = {ns.call_module(linear_module) : 1}
+            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
 
         # Case 1: QConfig min scale value == backend min scale value, OK
-        qconfig1 = default_symmetric_qnnpack_qconfig
-        validate_qconfig(qconfig1)
+        qconfig1 = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=2 ** -12),
+            weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=2 ** -12))
+        validate_qconfig(qconfig1, satisfies_constraints=True)
 
         # Case 2: QConfig min scale value > backend min scale value, OK
         qconfig2 = QConfig(
             activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=2 ** -10),
             weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=2 ** -10))
-        validate_qconfig(qconfig2)
+        validate_qconfig(qconfig2, satisfies_constraints=True)
 
         # Case 3: QConfig activation min scale value < backend min scale value, should fail
         qconfig3 = QConfig(
             activation=MinMaxObserver.with_args(dtype=torch.quint8, eps=2 ** -14),
             weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric))
-        validate_qconfig(qconfig3, "Observer eps .* must be greater than or equal to the backend's min scale value")
+        validate_qconfig(qconfig3, satisfies_constraints=False)
 
         # Case 3: QConfig weight min scale value < backend min scale value, should fail
         qconfig4 = QConfig(
             activation=MinMaxObserver.with_args(dtype=torch.quint8),
             weight=MinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, eps=2 ** -14))
-        validate_qconfig(qconfig4, "Observer eps .* must be greater than or equal to the backend's min scale value")
+        validate_qconfig(qconfig4, satisfies_constraints=False)
 
         # Case 5: QConfig doesn't specify eps, should fail
         qconfig5 = QConfig(
             activation=FixedQParamsObserver.with_args(scale=1.0, zero_point=0),
             weight=FixedQParamsObserver.with_args(scale=1.0, zero_point=0))
-        validate_qconfig(qconfig5, "Observer must specify 'eps'")
+        validate_qconfig(qconfig5, satisfies_constraints=False)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

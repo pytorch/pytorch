@@ -11,9 +11,6 @@ from torch.fx.graph import (
 )
 from torch.fx.node import Argument
 
-from ..fake_quantize import (
-    FakeQuantize,
-)
 from ..quantize import (
     propagate_qconfig_,
 )
@@ -75,7 +72,7 @@ from .utils import (
     _insert_dequant_stubs_for_custom_module_lstm_output,
     _is_custom_module_lstm,
     _maybe_get_custom_module_lstm_from_node_arg,
-    _maybe_validate_activation_post_process_dtype_constraints,
+    _qconfig_satisfies_dtype_config_constraints,
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
@@ -164,17 +161,16 @@ def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
     node: Node,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
-    activation_post_process: Union[ObserverBase, FakeQuantize, None],
+    qconfig: QConfigAny,
     dtype_config: DTypeConfig,
     backend_config: BackendConfig,
 ) -> bool:
     """ Check if the configured qconfig for the argument
     is supported by the backend or not
     """
-    _maybe_validate_activation_post_process_dtype_constraints(activation_post_process, dtype_config.input_dtype)
     if isinstance(arg, (list, tuple)):
         return all(is_input_arg_dtype_supported_by_backend(
-            a, node, node_name_to_target_dtype, activation_post_process,
+            a, node, node_name_to_target_dtype, qconfig,
             dtype_config, backend_config) for a in arg)
     if not isinstance(arg, Node):
         return True
@@ -191,13 +187,17 @@ def is_input_arg_dtype_supported_by_backend(
             qconfig_dtype, qconfig_is_dynamic = None, None
         # TODO(future PR): remove the cast to bool below after figuring
         # out why backend_config has is_dynamic set to None in some cases.
-        return (dtype_config.input_dtype.dtype is None) or \
-            (dtype_config.input_dtype.dtype == qconfig_dtype and
-             bool(dtype_config.is_dynamic) == bool(qconfig_is_dynamic))
+        return (dtype_config.input_dtype is None) or (
+            dtype_config.input_dtype == qconfig_dtype and
+            bool(dtype_config.is_dynamic) == bool(qconfig_is_dynamic) and
+            _qconfig_satisfies_dtype_config_constraints(qconfig, dtype_config.input_dtype_with_constraints)
+        )
     elif is_weight:
-        weight_dtype = dtype_config.weight_dtype.dtype
-        return weight_dtype is None or \
-            node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
+        weight_dtype = dtype_config.weight_dtype
+        dtype_matches = node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
+        qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
+            qconfig, dtype_config.weight_dtype_with_constraints, is_activation=False)
+        return weight_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
     else:  # bias
         bias_dtype = dtype_config.bias_dtype
         return bias_dtype is None or \
@@ -206,16 +206,17 @@ def is_input_arg_dtype_supported_by_backend(
 def is_output_dtype_supported_by_backend(
     node: Node,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
-    activation_post_process: Union[ObserverBase, FakeQuantize, None],
+    qconfig: QConfigAny,
     dtype_config: DTypeConfig,
 ) -> bool:
     """ Check if the configured qconfig for the output
     is supported by the backend or not
     """
-    _maybe_validate_activation_post_process_dtype_constraints(activation_post_process, dtype_config.output_dtype)
-    output_dtype = dtype_config.output_dtype.dtype
-    return output_dtype is None or \
-        output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"][0]  # type: ignore[index]
+    output_dtype = dtype_config.output_dtype
+    dtype_matches = node_name_to_target_dtype[node.name]["output_activation_dtype"][0] == output_dtype  # type: ignore[index]
+    qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
+        qconfig, dtype_config.output_dtype_with_constraints)
+    return output_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
 
 def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     """ Check if observer in same graph
@@ -246,17 +247,6 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs: List[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
 
-    # If observers/fake_quantizes are defined in the QConfig, validate them against
-    # the constraints specified in the DTypeConfig with matching dtype, if any
-    activation, weight = None, None
-    if qconfig is not None:
-        if qconfig.activation is not None:
-            activation = qconfig.activation()
-            assert isinstance(activation, (ObserverBase, FakeQuantize))
-        if qconfig.weight is not None:
-            weight = qconfig.weight()
-            assert isinstance(weight, (ObserverBase, FakeQuantize))
-
     # TODO: this only works for one input and one output patterns, need to generalize to multiple
     # inputs/output
     root_node = _default_root_node_getter(matched_node_pattern)
@@ -267,12 +257,11 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
         supported = True
         for arg in list(input_node.args) + list(input_node.kwargs.values()):
             supported = supported and is_input_arg_dtype_supported_by_backend(
-                arg, input_node, node_name_to_target_dtype, activation, dtype_config, backend_config)
+                arg, input_node, node_name_to_target_dtype, qconfig, dtype_config, backend_config)
         # check if output dtype is supported
         supported = supported and is_output_dtype_supported_by_backend(
-            output_node, node_name_to_target_dtype, activation, dtype_config)
+            output_node, node_name_to_target_dtype, qconfig, dtype_config)
         if supported:
-            _maybe_validate_activation_post_process_dtype_constraints(weight, dtype_config.weight_dtype)
             return True
     return False
 

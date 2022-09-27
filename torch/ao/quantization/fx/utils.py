@@ -3,7 +3,7 @@ import re
 import torch
 import torch.nn as nn
 from torch.ao.quantization import (
-    QConfig,
+    QConfigAny,
     QuantType,
 )
 from torch.ao.quantization.backend_config import (
@@ -658,7 +658,7 @@ def get_skipped_module_name_and_classes(
 def _is_custom_module_lstm(
         node: Node,
         named_modules: Dict[str, torch.nn.Module],
-        qconfig: Optional[QConfig] = None,
+        qconfig: QConfigAny = None,
         # QuantizeHandler, but we cannot include the type here due to circular imports
         qhandler: Optional[Any] = None,
 ) -> bool:
@@ -954,49 +954,68 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         for user in list(last_getitem.users.keys()):
             user.replace_input_with(last_getitem, new_input)
 
-def _maybe_validate_activation_post_process_dtype_constraints(
-        activation_post_process: Union[ObserverBase, FakeQuantize, None],
-        dtype_with_constraints: Optional[DTypeWithConstraints]):
+def _qconfig_satisfies_dtype_config_constraints(
+        qconfig: QConfigAny,
+        dtype_with_constraints: DTypeWithConstraints,
+        is_activation: bool = True) -> bool:
     """
-    Validate whether `activation_post_process` satisfies the following constraints from the backend,
-    specified through `dtype_with_constraints`:
+    Return whether `qconfig` satisfies the following constraints from the backend,
+    specified through the activation and weight DTypeWithConstraints.
 
-        1. Activation post process specified a quantization range that falls within the backend's, if any
-        2. Activation post process specified a min scale value that is >= the backend's, if any
+        1. QConfig specified a quantization range that falls within the backend's, if any
+        2. QConfig specified a min scale value that is >= the backend's, if any
 
-    If any of the above constraints are not satisfied, throw an error highlighting the offending values.
-
-    If either `activation_post_process` or `dtype_with_constraints` is None, or their dtypes do not match,
-    then do not validate.
+    If `is_activation` is True, we check `qconfig.activation`, else we check `qconfig.weight`.
+    If `qconfig` or `dtype_with_constraints.dtype` is None, or the dtypes do not match, return True.
     """
-    if activation_post_process is None or \
-            dtype_with_constraints is None or \
-            activation_post_process.dtype != dtype_with_constraints.dtype:
-        return
-    debug_string = "Observer" if isinstance(activation_post_process, ObserverBase) else "FakeQuantize"
-    app_quant_min = getattr(activation_post_process, "quant_min", None)
-    app_quant_max = getattr(activation_post_process, "quant_max", None)
-    # TODO: for now, just use the existing eps value as scale_min. In the future, we should
-    # resolve the differences between the two, either by renaming eps or some other way
-    app_scale_min = getattr(activation_post_process, "eps", None)
-    backend_quant_min = dtype_with_constraints.quant_min_lower_bound
-    backend_quant_max = dtype_with_constraints.quant_max_upper_bound
-    backend_scale_min = dtype_with_constraints.scale_min_lower_bound
-    # validate quantization ranges
-    if backend_quant_min is not None and backend_quant_max is not None:
-        if app_quant_min is None or app_quant_max is None:
-            raise ValueError("%s must specify 'quant_min' and 'quant_max':\n%s" %
-                             (debug_string, activation_post_process))
-        elif app_quant_min < backend_quant_min or app_quant_max > backend_quant_max:
-            raise ValueError(("%s quantization range must fall within the backend's:\n"
-                             "%s = (%s, %s), BackendConfig = (%s, %s)\n%s") %
-                             (debug_string, debug_string, app_quant_min, app_quant_max,
-                             backend_quant_min, backend_quant_max, activation_post_process))
-    # validate scale min
-    if backend_scale_min is not None:
-        if app_scale_min is None:
-            raise ValueError("%s must specify 'eps':\n%s" % (debug_string, activation_post_process))
-        elif app_scale_min < backend_scale_min:
-            raise ValueError(("%s eps (%s) must be greater than or equal to "
-                             "the backend's min scale value (%s):\n%s") %
-                             (debug_string, app_scale_min, backend_scale_min, activation_post_process))
+    def _activation_post_process_satisfies_dtype_config_constraints(
+            activation_post_process: Union[ObserverBase, FakeQuantize],
+            dtype_with_constraints: DTypeWithConstraints,
+            debug_string: str) -> bool:
+        app_quant_min = getattr(activation_post_process, "quant_min", None)
+        app_quant_max = getattr(activation_post_process, "quant_max", None)
+        # TODO: for now, just use the existing eps value as scale_min. In the future, we should
+        # resolve the differences between the two, either by renaming eps or some other way
+        app_scale_min = getattr(activation_post_process, "eps", None)
+        backend_quant_min = dtype_with_constraints.quant_min_lower_bound
+        backend_quant_max = dtype_with_constraints.quant_max_upper_bound
+        backend_scale_min = dtype_with_constraints.scale_min_lower_bound
+        # check quantization ranges
+        if backend_quant_min is not None and backend_quant_max is not None:
+            if app_quant_min is None or app_quant_max is None:
+                warnings.warn("QConfig %s must specify 'quant_min' and 'quant_max', ignoring %s" %
+                              (debug_string, qconfig))
+                return False
+            elif app_quant_min < backend_quant_min or app_quant_max > backend_quant_max:
+                warnings.warn(("QConfig %s quantization range must fall within the backend's:\n"
+                              "QConfig range = (%s, %s), BackendConfig range = (%s, %s), ignoring %s") %
+                              (debug_string, app_quant_min, app_quant_max,
+                              backend_quant_min, backend_quant_max, qconfig))
+                return False
+        # check scale min
+        if backend_scale_min is not None:
+            if app_scale_min is None:
+                warnings.warn("QConfig %s must specify 'eps', ignoring %s" % (debug_string, qconfig))
+                return False
+            elif app_scale_min < backend_scale_min:
+                warnings.warn(("QConfig %s eps (%s) must be greater than or equal to "
+                              "the backend's min scale value (%s), ignoring %s") %
+                              (debug_string, app_scale_min, backend_scale_min, qconfig))
+                return False
+        return True
+
+    if qconfig is None or dtype_with_constraints.dtype is None:
+        return True
+
+    activation_post_process_ctr = qconfig.activation if is_activation else qconfig.weight
+    debug_string = "activation" if is_activation else "weight"
+    satisfies_constraints = True
+    if activation_post_process_ctr is not None:
+        activation_post_process = activation_post_process_ctr()
+        assert isinstance(activation_post_process, (ObserverBase, FakeQuantize))
+        # If dtypes don't match, don't check the activation_post_process and return True early
+        if activation_post_process.dtype != dtype_with_constraints.dtype:
+            return True
+        satisfies_constraints = _activation_post_process_satisfies_dtype_config_constraints(
+            activation_post_process, dtype_with_constraints, debug_string)
+    return satisfies_constraints

@@ -81,7 +81,6 @@ class TestBackendConfig(QuantizationTestCase):
     dtype_config_dict2 = {
         "input_dtype": DTypeWithConstraints(dtype=torch.float16),
         "output_dtype": DTypeWithConstraints(dtype=torch.float),
-        "weight_dtype": DTypeWithConstraints(),
         "is_dynamic": True,
     }
 
