@@ -8374,7 +8374,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                    'TestConsistency',
-                   'test_output_match'
+                   'test_output_match',
                ),
            )),
     OpInfo('addmm',

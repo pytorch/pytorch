@@ -302,7 +302,7 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
-        tol1('_masked.cumprod',
+        tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
     ))
     def test_grad(self, device, dtype, op):
