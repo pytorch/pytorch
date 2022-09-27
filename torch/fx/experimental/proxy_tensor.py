@@ -597,7 +597,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
                 pass
 
             def restore_fake_tensor_mode():
-                return fake_tensor_mode.restore()
+                return fake_tensor_mode
         elif tracing_mode == "symbolic":
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
             # initialize the mode
@@ -605,7 +605,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
                 pass
 
             def restore_fake_tensor_mode():
-                return fake_tensor_mode.restore()
+                return fake_tensor_mode
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
