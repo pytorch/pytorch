@@ -285,7 +285,7 @@ class TestModule(TestCase):
             input_clone_version = input_arg_clone[0]._version
             with freeze_rng_state():
                 output_ip = m_inplace(*input_arg_clone, **input_kwargs)
-            self.assertNotEqual(input_arg_clone[0]._version, input_clone_version)
+            self.assertGreater(input_arg_clone[0]._version, input_clone_version)
             self.assertEqual(output_op, output_ip)
 
             # === Check that the gradients are the same ===
