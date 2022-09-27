@@ -1654,11 +1654,21 @@ class TestSparseCSR(TestCase):
                 y = torch.randn(dk, dj, dtype=dtype, device=device)
                 _test(t, x, y)
 
+                t = torch.randn(di, dj, dtype=dtype, device=device)
+                x = self.genSparseCSCTensor((di, dk), nnz0, device=device, dtype=dtype, index_dtype=index_dtype)
+                y = torch.randn(dk, dj, dtype=dtype, device=device)
+                _test(t, x, y)
+
                 if nnz1 is None:
                     nnz1 = random.randint(dk * dj // 2, dk * dj)
                 t = torch.randn(di, dj, dtype=dtype, device=device)
                 x = torch.randn(di, dk, dtype=dtype, device=device)
                 y = self.genSparseCSRTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
+                _test(t, x, y)
+
+                t = torch.randn(di, dj, dtype=dtype, device=device)
+                x = torch.randn(di, dk, dtype=dtype, device=device)
+                y = self.genSparseCSCTensor((dk, dj), nnz1, device=device, dtype=dtype, index_dtype=index_dtype)
                 _test(t, x, y)
 
                 x_shape, y_shape = x.shape, y.shape

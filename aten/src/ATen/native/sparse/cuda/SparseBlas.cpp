@@ -84,16 +84,6 @@ Tensor& addmm_out_sparse_compressed_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-
-  if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
-    // TODO: Add native CSC support to avoid costly conversion.
-    return addmm_out_sparse_compressed_cuda(self, mat1.to_sparse_csr(), mat2.to_sparse_csr(),
-        beta, alpha, result);
-  }
-  TORCH_CHECK(!(mat1.layout() == kSparseBsc || mat2.layout() == kSparseBsc),
-      "addmm_out_sparse_compressed_cuda currently does not support layout SparseBsc for input mat, but got ",
-      mat1.layout(), " for mat 1 and ", mat2.layout(), " for mat2.");
-
   sparse::impl::_check_is_cuda(self, "self");
   sparse::impl::_check_is_cuda(mat1, "mat1");
   sparse::impl::_check_is_cuda(mat2, "mat2");
