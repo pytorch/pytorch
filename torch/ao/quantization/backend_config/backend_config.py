@@ -118,8 +118,8 @@ class DTypeConfig:
     torch.quint8
 
     >>> dtype_config2.input_dtype_with_constraints
-    DTypeWithConstraints(dtype=torch.quint8, quant_min_lower_bound=0, quant_max_upper_bound=255,
-                         scale_min_lower_bound=None, scale_max_upper_bound=None)
+    DTypeWithConstraints(dtype=torch.quint8, quant_min_lower_bound=0, quant_max_upper_bound=255, \
+scale_min_lower_bound=None, scale_max_upper_bound=None)
     """
     input_dtype_with_constraints: DTypeWithConstraints
     output_dtype_with_constraints: DTypeWithConstraints
