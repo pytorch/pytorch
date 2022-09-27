@@ -512,7 +512,6 @@ class TestNestedTensorDeviceType(TestCase):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
         self.assertRaises(IndexError, lambda: nt0[0])
-        self.assertEqual(nt0, nt0[:])
         # normal case
         x0 = torch.randn((2, 5), device=device, dtype=dtype)
         x1 = torch.randn((3, 4), device=device, dtype=dtype)
@@ -531,7 +530,6 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[0, 1, :], x0[1, :])
         self.assertEqual(nt[1, ...], x1)
         self.assertRaises(IndexError, lambda: nt[1, 4, 2])
-        # select currently only supports dim=0
         self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
         # make sure indexing returns a view
         nt[0].fill_(100.0)
