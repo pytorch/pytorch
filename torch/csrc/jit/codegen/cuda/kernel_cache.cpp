@@ -616,19 +616,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
   // reference to tensor
   std::unordered_map<Val*, at::Tensor> output_holder;
 
-  // This is a WAR.
-  // FusionSegmenter doesn't propagate trivial input forwarding to segmented kernel, we add all inputs to output_holder, so later we'll always find forwarded inputs.
-  for (const auto inp_index : c10::irange(segmented_fusion_->inputs().size())) {
-    if (auto tensor_arg_abstract =
-            dynamic_cast<const TensorArgAbstract*>(args[inp_index])) {
-      auto val = segmented_fusion_->inputs()[inp_index];
-      TORCH_INTERNAL_ASSERT(
-          val->isA<TensorView>(),
-         "argument is tensor, while kernel expects non-tensor");
-      output_holder[val] = tensor_arg_abstract->getTensor();
-    }
-  }
-
   if (isDebugDumpEnabled(DebugDumpOption::PerfDebugVerbose)) {
     std::cout << "=================RUNNING FUSION SEGMENTS================="
               << std::endl;
@@ -657,11 +644,13 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
         group_outputs.size() == group_runtime_outputs.size(),
         "output size does not match");
     for (const size_t group_out_i : c10::irange(group_outputs.size())) {
-      output_holder[group_outputs[group_out_i]] =
-          group_runtime_outputs[group_out_i];
+      if (!group_outputs[group_out_i]->isFusionInput()) {
+        output_holder[group_outputs[group_out_i]] =
+            group_runtime_outputs[group_out_i];
 
-      args.push(group_runtime_outputs[group_out_i]);
-      tensor_map.emplace(group_outputs[group_out_i], args.back());
+        args.push(group_runtime_outputs[group_out_i]);
+        tensor_map.emplace(group_outputs[group_out_i], args.back());
+      }
     }
   }
 
@@ -676,6 +665,12 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
     const auto iter = output_holder.find(output);
     if (iter != output_holder.end()) {
       fusion_outputs.push_back(iter->second);
+    } else if (output->isFusionInput()) {
+      const auto iter = tensor_map.find(output);
+      TORCH_INTERNAL_ASSERT(
+          iter != tensor_map.end(), "Can not find output as aliased intput");
+      auto arg = dynamic_cast<const TensorArgAbstract*>(iter->second);
+      fusion_outputs.push_back(arg->getTensor());
     } else {
       bool empty_type_check = output->getDataType().has_value() &&
           output->getDataType().value() == DataType::Float;
