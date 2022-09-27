@@ -1995,7 +1995,7 @@
   dispatch:
     CompositeExplicitAutograd: vdot_out
 
-- func: einsum(str equation, Tensor[] tensors) -> Tensor
+- func: einsum(str equation, Tensor[] tensors, *, int[]? path=None) -> Tensor
 
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
@@ -4681,7 +4681,7 @@
   device_check: NoCheck
   device_guard: False
 
-- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4690,7 +4690,7 @@
 # NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
 # that if adding specific implementations here!
 
-- func: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
+- func: slice_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
@@ -4698,7 +4698,7 @@
     CompositeExplicitAutograd: slice_backward
   autogen: slice_backward.out
 
-- func: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+- func: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -12805,7 +12805,7 @@
     CompositeExplicitAutogradNonFunctional: detach_copy
   tags: view_copy
 
-- func: slice_copy.Tensor(Tensor self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+- func: slice_copy.Tensor(Tensor self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: slice_copy_Tensor
@@ -13017,7 +13017,7 @@
     CompositeExplicitAutograd: detach_copy_out
 
 
-- func: slice_copy.Tensor_out(Tensor self, int dim=0, int? start=None, int? end=None, int step=1, *, Tensor(a!) out) -> Tensor(a!)
+- func: slice_copy.Tensor_out(Tensor self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: slice_copy_Tensor_out
@@ -13801,3 +13801,11 @@
   dispatch:
     CPU: foobar
   autogen: _foobar.out
+
+# Fused Optimizer CUDA kernels.
+- func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
+  variants: function
+  dispatch:
+    CUDA: _fused_adam_kernel_cuda_
+  autogen: _fused_adam, _fused_adam.out
