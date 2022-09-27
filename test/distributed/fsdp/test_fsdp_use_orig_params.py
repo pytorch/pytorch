@@ -472,7 +472,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             optim_orig_params,
         ) = self._get_fsdp_models_and_optims(sharding_strategy, cpu_offload)
         device = torch.device("cuda")
-        for i in range(3):
+        for _ in range(3):
             optim.zero_grad()
             optim_orig_params.zero_grad()
 
