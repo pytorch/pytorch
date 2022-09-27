@@ -141,12 +141,6 @@ function checkout_install_torchdynamo() {
   popd
 }
 
-function install_functorch() {
-  pushd functorch
-  time python setup.py develop
-  popd
-}
-
 function test_functorch() {
   python test/run_test.py --functorch --verbose
 }
