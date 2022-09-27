@@ -4737,32 +4737,29 @@ class TestQuantizedConv(TestCase):
             return  # Currently only the QNNPACK is supported
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
-        # Run N loops with random parameters
-        # itertools.product will generate too many cases thus not used
-        iters = 10
-        for _ in range(iters):
-            batch_size = random.randint(1, 3)
-            input_channels_per_group = random.choice([2, 4, 5, 8, 16, 32])
-            width = random.randint(7, 14)
-            output_channels_per_group = random.choice([2, 4, 5, 8, 16, 32])
-            groups = random.randint(1, 3)
-            kernel = random.randint(1, 7)
-            stride = random.randint(1, 2)
-            pad = random.randint(0, 2)
-            o_pad = random.randint(0, 2)
-            dilation = random.randint(1, 2)
-            X_scale = random.uniform(1.2, 1.6)
-            X_zero_point = random.randint(0, 4)
-            W_scale = [random.uniform(0.2, 1.6) for _ in range(random.randint(1, 2))]
-            W_zero_point = [random.randint(-5, 5) for _ in range(random.randint(1, 2))]
-            Y_scale = random.uniform(4.2, 5.6)
-            Y_zero_point = random.randint(0, 4)
-            use_bias = random.choice([True, False])
+        batch_size = 2
+        input_channels_per_group_list = [2, 32]
+        width = 14
+        output_channels_per_group_list = [2, 8]
+        groups_list = [1, 3]
+        kernel_list = [1, 7]
+        stride_list = [1, 2]
+        pad = 2
+        o_pad = 0
+        dilation = 1
+        X_scale = 1.2
+        X_zero_point = 1
+        W_scale = [1.2]
+        W_zero_point = [1]
+        Y_scale = 4.2
+        Y_zero_point = 2
+        use_bias_list = [True, False]
 
-            if o_pad >= stride or o_pad >= dilation:
-                continue
-            if width + 2 * pad < dilation * (kernel - 1) + 1:
-                continue
+        test_cases = itertools.product(
+            input_channels_per_group_list, output_channels_per_group_list,
+            groups_list, kernel_list, stride_list, use_bias_list)
+        for input_channels_per_group, output_channels_per_group, \
+            groups, kernel, stride, use_bias in test_cases:
 
             input_channels = input_channels_per_group * groups
             output_channels = output_channels_per_group * groups
