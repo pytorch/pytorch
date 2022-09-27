@@ -308,13 +308,14 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
 def error_inputs_as_strided_scatter(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
 
-    input_t = make_arg([4,4])
-    input_src = make_arg([2,2])
+    input_t = make_arg([4, 4])
+    input_src = make_arg([2, 2])
     kwargs = dict(storage_offset=0)
     yield ErrorInput(
         SampleInput(input_t, args=(input_src, [2, 2], [200, 200]), kwargs=kwargs),
         error_regex="itemsize 4 requiring a storage size of 1604 are out of bounds for storage of size 64"
     )
+
 
 def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
     inputs = (
@@ -10527,6 +10528,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('Works for int64, fails for everything else'), 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
                DecorateInfo(unittest.skip('Fails in most cases, passes on LAZY for some reason'), 'TestCommon', 'test_variant_consistency_eager'),  # noqa: B950
                DecorateInfo(unittest.skip('Only fails for LAZY, passes on everything else'), 'TestCompositeCompliance', 'test_backward'),  # noqa: B950
+               DecorateInfo(unittest.skip('Passes on complex64 and float32 only'), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('Fails on cuda + rocm'), 'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
