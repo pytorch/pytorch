@@ -168,6 +168,12 @@ public:
   // See Note [Plumbing Keys Through The Dispatcher]
   void redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const;
 
+  bool hasBackendFallbackForDispatchKey(DispatchKey dk) {
+    auto dispatch_ix = getDispatchTableIndexForDispatchKey(dk);
+    if (dispatch_ix < 0) return false;
+    return backendFallbackKernels_[dispatch_ix].kernel.isValid();
+  }
+
 
   // ------------------------------------------------------------------------
   //
@@ -333,6 +339,10 @@ public:
     return operatorDef_->op.hasKernelForDispatchKey(k);
   }
 
+  bool hasKernelForAnyDispatchKey(DispatchKeySet k) const {
+    return operatorDef_->op.hasKernelForAnyDispatchKey(k);
+  }
+
   bool hasComputedKernelForDispatchKey(DispatchKey k) const {
     return operatorDef_->op.hasComputedKernelForDispatchKey(k);
   }
@@ -386,6 +396,11 @@ public:
 
   void redispatchBoxed(DispatchKeySet ks, Stack* stack) const {
     c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
+  }
+
+  template <typename F>
+  PyObject* getPythonOp(c10::impl::PyInterpreter* self_interpreter, F slow_accessor) const {
+    return operatorDef_->op.getPythonOp(self_interpreter, slow_accessor);
   }
 
 private:
@@ -635,10 +650,17 @@ inline void Dispatcher::callBoxedForDispatchKey(const OperatorHandle& op, Dispat
   // We still compute this as we're obligated to pass it on to the internal
   // kernel, if it is a boxed fallback
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
-  const auto& kernel = entry.kernelForDispatchKey(dk);
+  const auto& kernel = ([&]() {
+    if (op.hasKernelForDispatchKey(dk)) {
+      return entry.kernelForDispatchKey(dk);
+    } else {
+      auto idx = getDispatchTableIndexForDispatchKey(dk);
+      TORCH_INTERNAL_ASSERT(idx >= 0);
+      return backendFallbackKernels_[idx].kernel;
+    }
+  })();
   kernel.callBoxed(op, dispatchKeySet, stack);
 }
-
 
 inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.

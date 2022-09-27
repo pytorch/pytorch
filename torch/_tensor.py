@@ -28,8 +28,6 @@ from torch.overrides import (
 
 
 def _handle_torch_function_and_wrap_type_error_to_not_implemented(f):
-    # functools.wraps doesn't work well with methods in python 2
-    method_assignments = ("__name__", "__doc__")
     assigned = functools.WRAPPER_ASSIGNMENTS
 
     @functools.wraps(f, assigned=assigned)
@@ -638,6 +636,11 @@ class Tensor(torch._C._TensorBase):
 
         return solve(self, other)
 
+    def lstsq(self, other):
+        from ._linalg_utils import lstsq
+
+        return lstsq(self, other)
+
     def eig(self, eigenvectors=False):
         from ._linalg_utils import eig
 
@@ -1027,7 +1030,7 @@ class Tensor(torch._C._TensorBase):
             torch.int64: "<i8",
         }[self.dtype]
 
-        itemsize = self.storage().element_size()
+        itemsize = self.element_size()
 
         shape = tuple(self.shape)
         if self.is_contiguous():
@@ -1316,9 +1319,10 @@ class Tensor(torch._C._TensorBase):
             if self.device.type == "cuda":
                 stream = torch.cuda.ExternalStream(stream)
                 # Only synchronize on different streams
-                if stream != torch.cuda.current_stream:
+                sync_stream = torch.cuda.current_stream()
+                if stream != sync_stream:
                     event = torch.cuda.Event()
-                    event.record(torch.cuda.current_stream())
+                    event.record(sync_stream)
                     stream.wait_event(event)
         return torch.to_dlpack(self)
 

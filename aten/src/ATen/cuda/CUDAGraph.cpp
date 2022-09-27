@@ -65,9 +65,11 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
       c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
 
   auto options = TensorOptions().device(at::kCUDA).dtype(at::kLong);
+  seed_extragraph_ = at::empty({1}, options);
   offset_extragraph_ = at::empty({1}, options);
 
-  gen->capture_prologue(offset_extragraph_.data_ptr<int64_t>());
+  seed_extragraph_.fill_(int64_t(gen->current_seed()));
+  gen->capture_prologue(seed_extragraph_.data_ptr<int64_t>(), offset_extragraph_.data_ptr<int64_t>());
 
   auto stream = at::cuda::getCurrentCUDAStream();
 
@@ -175,6 +177,7 @@ void CUDAGraph::replay() {
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(wholegraph_increment_);
   }
+  seed_extragraph_.fill_(int64_t(gen->current_seed()));
   offset_extragraph_.fill_(int64_t(rng_engine_inputs.offset_.val));
 
   // graph_exec_ may be replayed in any stream.

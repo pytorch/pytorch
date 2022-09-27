@@ -7,6 +7,22 @@
 namespace c10d {
 namespace {
 
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  auto work = process_group->broadcast(
+      tensor_vec,
+      BroadcastOptions{
+          root_rank, root_tensor, std::chrono::milliseconds(timeout)});
+
+  return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+      std::move(tensor_vec), work);
+}
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -156,7 +172,8 @@ TORCH_LIBRARY(c10d, m) {
   // instead of the CompositeImplicitAutograd key to enable
   // __torch_dispatch__.
   m.def(
-      "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, int root_tensor, int timeout) -> (Tensor[], __torch__.torch.classes.c10d.Work)");
+      "broadcast_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, broadcast_));
   m.def(
       "allreduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, allreduce_));
