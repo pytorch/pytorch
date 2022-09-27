@@ -6207,14 +6207,6 @@ def error_inputs_sum_to_size(op_info, device, **kwargs):
     yield ErrorInput(si, error_regex=err_msg)
 
 
-
-def error_inputs_sum_to_size(op_info, device, **kwargs):
-    shape = (M, S, M)
-    err_msg = f"is not expandable to size"
-    si = SampleInput(make_tensor(shape, device=device, dtype=torch.float32), args=(M, M))
-    yield ErrorInput(si, error_regex=err_msg)
-
-
 def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
     cases = (((S, S, S), (S * S, S)),
