@@ -327,7 +327,9 @@ def unfold(g, input, dimension, size, step):
 
         unsqueeze_list = []
         loop_condition = g.op("Constant", value_t=torch.tensor(1))
-        loop_condition = g.op("Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL)
+        loop_condition = g.op(
+            "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
+        )
         loop_len = g.op("Min", low_size, hi_size)
 
         loop, (loop_context,), _ = torchscript.add_op_with_blocks(
