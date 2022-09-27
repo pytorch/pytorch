@@ -10,10 +10,6 @@
 #include <ctime>
 #include <fstream>
 
-#ifdef FBCODE_CAFFE2
-#include <c10d/UCCInternalUtils.hpp>
-#endif
-
 namespace c10d {
 
 void ProcessGroupUCCLogger::initCommsTracer() {
@@ -57,10 +53,6 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
     _outfile.flush();
     _outfile.close();
   }
-#ifdef FBCODE_CAFFE2
-  uploadTrace_internal(
-      trace_filename, dirname, c10::str("rank", rank, ".json"));
-#endif
 }
 
 /* unused */
