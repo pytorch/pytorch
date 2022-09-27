@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import List, Optional, Union
 
+from torch._C import dtype
+
 # defined in torch/csrc/profiler/python/init.cpp
 
 class RecordScope(Enum):
@@ -99,6 +101,10 @@ class _TensorMetadata:
     impl_ptr: Optional[int]
     storage_data_ptr: Optional[int]
     id: Optional[int]
+
+    @property
+    def dtype(self) -> dtype:
+    ...
 
 class _ExtraFields_TorchOp:
     allow_tf32_cublas: bool

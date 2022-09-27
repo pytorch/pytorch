@@ -1446,6 +1446,8 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
         device_info = [x.device if x else None for x in input_info.tensor_metadata]
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+        tensor_dtypes = [x.dtype if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(tensor_dtypes, [torch.float32, torch.float32, None])
         self.assertEqual(node.extra_fields.scope, torch.profiler.RecordScope.FUNCTION)
 
         mul_node = find_node_with_name(nodes, "aten::mul")
