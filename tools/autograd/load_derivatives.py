@@ -272,7 +272,7 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == "at::TensorList":
+            if arg.type in ("at::TensorList", "const at::ITensorListRef &"):
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -861,6 +861,15 @@ def saved_variables(
             {
                 "suffix": "_strides",
                 "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
+                "expr": stride_expr,
+            },
+        ),
+        # replace self.sym_strides() with self_sym_strides
+        (
+            r"{}.sym_strides\(\)",
+            {
+                "suffix": "_sym_strides",
+                "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
                 "expr": stride_expr,
             },
         ),
