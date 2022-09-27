@@ -23,7 +23,16 @@ const std::set<libkineto::ActivityType> cpuTypes{
     libkineto::ActivityType::USER_ANNOTATION,
     libkineto::ActivityType::EXTERNAL_CORRELATION,
     libkineto::ActivityType::CUDA_RUNTIME,
+    libkineto::ActivityType::XPU_RUNTIME,
     libkineto::ActivityType::PYTHON_FUNCTION,
+};
+
+const std::set<libkineto::ActivityType> xpuTypes = {
+    libkineto::ActivityType::GPU_MEMCPY,
+    libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::CONCURRENT_KERNEL,
+    // XPU_RUNTIME appears in both cpuTypes and xpuTypes.
+    libkineto::ActivityType::XPU_RUNTIME,
 };
 
 const std::set<libkineto::ActivityType> cudaTypes = {
@@ -207,12 +216,24 @@ void prepareTrace(
   }
 
   if (!libkineto::api().isProfilerInitialized()) {
-    libkineto::api().initProfilerIfRegistered();
+    // This path allows those extend backend like XPU could initialize kineto profiler like what they wish,
+    // these extensions should register their own `profiler_` instantiations for libkineto's ActivityProfilerController,
+    // and then initialize the profiler by passing the DeviceType to choose the corresponding `profiler_`.
+    if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
+      libkineto::api().initProfilerIfRegistered(libkineto::DeviceType::XPU);
+    } else if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
+      libkineto::api().initProfilerIfRegistered(libkineto::DeviceType::CUDA);
+    } else {
+      libkineto::api().initProfilerIfRegistered(libkineto::DeviceType::CPU);
+    }
   }
 
   std::set<libkineto::ActivityType> k_activities;
   if (activities.count(torch::autograd::profiler::ActivityType::CPU)) {
     k_activities.insert(cpuTypes.begin(), cpuTypes.end());
+  }
+  if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
+    k_activities.insert(xpuTypes.begin(), xpuTypes.end());
   }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
