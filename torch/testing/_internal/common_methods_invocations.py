@@ -3095,20 +3095,24 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
 
     # error inputs for input tensor
     error_msg = r'Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input'
-    yield ErrorInput(SampleInput(make_arg(()), kwargs={'kernel_size': 1}),
-                     error_regex=error_msg)
+    for requires_grad in (True, False):
+        yield ErrorInput(SampleInput(make_arg((), requires_grad=requires_grad), kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for empty input
-    yield ErrorInput(SampleInput(torch.tensor([], device=device), kwargs={'kernel_size': 1}),
-                     error_regex=error_msg)
+        # error inputs for empty input
+        yield ErrorInput(SampleInput(torch.tensor([], device=device, requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error: unbatched input with 0 sized non-batch dims.
-    yield ErrorInput(SampleInput(make_arg(0, 10), kwargs={'kernel_size': 1}),
-                     error_regex=error_msg)
+        # error: unbatched input with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((0, 10), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error: batched input with 0 sized non-batch dims.
-    yield ErrorInput(SampleInput(make_arg(1, 10, 0), kwargs={'kernel_size': 1}),
-                     error_regex=error_msg)
+        # error: batched input with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((1, 10, 0), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
     # error inputs for empty input with stride=0
     # NOTE: CPU and CUDA error messages are different
@@ -3166,14 +3170,17 @@ def error_inputs_max_pool2d(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
 
-    # error: unbatched input with 0 sized non-batch dims.
-    err_msg = r'Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input'
-    yield ErrorInput(SampleInput(make_arg(1, 0, 10), kwargs={'kernel_size': 1}),
-                     error_regex=err_msg)
+    for requires_grad in (True, False):
+        # error: unbatched input with 0 sized non-batch dims.
+        err_msg = r'Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input'
+        yield ErrorInput(SampleInput(make_arg((1, 0, 10), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=err_msg)
 
-    # error: batched input with 0 sized non-batch dims.
-    yield ErrorInput(SampleInput(make_arg(2, 1, 10, 0), kwargs={'kernel_size': 1}),
-                     error_regex=err_msg)
+        # error: batched input with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((2, 1, 10, 0), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=err_msg)
 
 
 def error_inputs_max_pool3d(op_info, device, **kwargs):
@@ -3196,14 +3203,17 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
                                             'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
 
-    # error: unbatched input with 0 sized non-batch dims.
-    err_msg = r'Expected input\'s non-batch dimensions to have positive length'
-    yield ErrorInput(SampleInput(make_arg(0, 1, 2, 10), kwargs={'kernel_size': 1}),
-                     error_regex=err_msg)
+    for requires_grad in (True, False):
+        # error: unbatched input with 0 sized non-batch dims.
+        err_msg = r'Expected input\'s non-batch dimensions to have positive length'
+        yield ErrorInput(SampleInput(make_arg((0, 1, 2, 10), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=err_msg)
 
-    # error: batched inputs with 0 sized non-batch dims.
-    yield ErrorInput(SampleInput(make_arg(2, 1, 0, 1, 2), kwargs={'kernel_size': 1}),
-                     error_regex=err_msg)
+        # error: batched inputs with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((2, 1, 0, 1, 2), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=err_msg)
 
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
