@@ -837,7 +837,7 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
     storage_id_t storage_id_;
 
     // Used to assign the result.
-    std::reference_wrapper<c10::optional<size_t>> id_ref_;
+    std::reference_wrapper<c10::optional<TensorID>> id_ref_;
   };
   std::vector<TensorStoragePair> tensors;
 
@@ -906,7 +906,7 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   // Step 4) Write back to metadata
   // --------------------------------------------------------------------------
   for (const auto& t : tensors) {
-    t.id_ref_.get() = id_map.at(t.storage_id_);
+    t.id_ref_.get() = TensorID(id_map.at(t.storage_id_));
   }
 }
 
