@@ -886,7 +886,7 @@ void ProcessReduceNode(Node* n) {
     if (!n->hasAttributeS("axes")) {
       std::iota(axes_vector.begin(), axes_vector.end(), 0);
     } else {
-      std::vector<int64_t> axes_vector = n->is(attr::axes);
+      axes_vector = n->is(attr::axes);
     }
     for (auto idx : c10::irange(axes_vector.size())) {
       if (axes_vector[idx] < 0) {
