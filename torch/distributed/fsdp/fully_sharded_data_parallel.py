@@ -182,7 +182,7 @@ class MixedPrecision:
         are checkpointed in their full precision (and then restored back to
         to their reduced precision) as expected. Note that this checkpoint
         support is currently limited to ``StateDictType.FULL_STATE_DICT``.
-        ``keep_casted_gradients``: Whether to upcast gradients back to the
+        ``keep_low_precision_grads``: Whether to upcast gradients back to the
         full parameter precision after backwards or not. This can be disabled
         to keep the gradients in the lower precision, which can potentially
         save memory if custom Optimizers are able to perform parameter updates
@@ -214,12 +214,7 @@ class MixedPrecision:
     # TODO: buffer + param are usually of the same type, if user specifies
     # param but not buffer, should we automatically make buffer be the same?
     buffer_dtype: Optional[torch.dtype] = None
-    # Whether to upcast gradients back to the full parameter precision after
-    # backwards or not. This can be disabled to keep the gradients in the
-    # lower precision, which can potentially save memory if custom Optimizers
-    # are able to perform parameter updates effectively with lower precision
-    # grads.
-    keep_casted_gradients: Optional[bool] = False
+    keep_low_precision_grads: Optional[bool] = False
 
 
 @dataclass
@@ -1065,7 +1060,7 @@ class FullyShardedDataParallel(nn.Module):
             self.cpu_offload.offload_params,
             self.mixed_precision.param_dtype,
             self.mixed_precision.reduce_dtype,
-            self.mixed_precision.keep_casted_gradients,
+            self.mixed_precision.keep_low_precision_grads,
         )
         self._fsdp_wrapped_module = FlattenParamsWrapper(
             module,
@@ -1688,7 +1683,7 @@ class FullyShardedDataParallel(nn.Module):
     def _mixed_precision_keep_low_precision_grads(self) -> bool:
         return (
             self.mixed_precision is not None
-            and self.mixed_precision.keep_casted_gradients
+            and self.mixed_precision.keep_low_precision_grads
         )
 
     def _low_precision_hook_enabled(self) -> bool:
@@ -3072,7 +3067,7 @@ class FullyShardedDataParallel(nn.Module):
             _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
             # Only run the pre-backward hook once per group of handles involved
             # in the same module forward computation
-            if _handles_key and self._ran_pre_backward_hook[_handles_key]:
+            if _handles_key and self._ran_pre_backward_hook.get(_handles_key, False):
                 return
 
             with torch.autograd.profiler.record_function(
@@ -3431,9 +3426,8 @@ class FullyShardedDataParallel(nn.Module):
                 p = handle.flat_param
                 if p.requires_grad:
                     if hasattr(p, "_post_backward_hook_state"):
-                        assert len(p._post_backward_hook_state) == 2 and len(  # type: ignore[attr-defined]
-                            p._post_backward_hook_state  # type: ignore[attr-defined]
-                        ), (  # type: ignore[attr-defined]
+                        p_assert(
+                            len(p._post_backward_hook_state) == 2,  # type: ignore[attr-defined]
                             "p._post_backward_hook_state fields are not valid."
                         )
                         p._post_backward_hook_state[1].remove()  # type: ignore[attr-defined]

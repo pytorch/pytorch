@@ -418,7 +418,7 @@ TEST(OperatorRegistrationTest, whenRegisteringMismatchingKernelsInSameOpCall_the
 }
 
 void backend_fallback_kernel(const c10::OperatorHandle& op, c10::Stack* stack) {
-  (*stack)[1] = (*stack)[1].toString()->string() + op.schema().name();
+  (*stack)[1] = (*stack)[1].toStringRef() + op.schema().name();
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCalled) {
@@ -428,7 +428,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernel_thenCanBeCal
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+  EXPECT_EQ("hello _test::dummy", stack[1].toStringRef());
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelForWrongBackend_thenCannotBeCalled) {
@@ -472,7 +472,7 @@ TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKer
   called = false;
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
   EXPECT_FALSE(called);
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+  EXPECT_EQ("hello _test::dummy", stack[1].toStringRef());
 }
 
 TEST(OperatorRegistrationTest, whenRegisteringBackendFallbackKernelAndRegularKernelForSameBackend_thenCallsRegularKernel) {
@@ -875,7 +875,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(bool a) -> bool");
   testArgTypes<std::string>::test(
     "string1", [] (const std::string& v) {EXPECT_EQ("string1", v);},
-    "string2", [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
+    "string2", [] (const IValue& v) {EXPECT_EQ("string2", v.toStringRef());},
     "(str a) -> str");
   testArgTypes<Tensor>::test(
     dummyTensor(c10::DispatchKey::CPU), [] (const Tensor& v) {EXPECT_EQ(c10::DispatchKey::CPU, extractDispatchKey(v));},
@@ -902,7 +902,7 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     "(bool? a) -> bool?");
   testArgTypes<c10::optional<std::string>>::test(
     c10::optional<std::string>("string1"), [] (const c10::optional<std::string>& v) {EXPECT_EQ("string1", v.value());},
-    c10::optional<std::string>("string2"), [] (const IValue& v) {EXPECT_EQ("string2", v.toString()->string());},
+    c10::optional<std::string>("string2"), [] (const IValue& v) {EXPECT_EQ("string2", v.toStringRef());},
     "(str? a) -> str?");
   testArgTypes<c10::optional<Tensor>>::test(
     c10::optional<Tensor>(dummyTensor(c10::DispatchKey::CPU)), [] (const c10::optional<Tensor>& v) {EXPECT_EQ(c10::DispatchKey::CPU, extractDispatchKey(v.value()));},
@@ -1939,7 +1939,7 @@ TEST(NewOperatorRegistrationTest, fallback) {
   auto op = Dispatcher::singleton().findSchema({"_test::dummy", ""});
   ASSERT_TRUE(op.has_value());
   auto stack = callOp(*op, dummyTensor(c10::DispatchKey::CPU), "hello ");
-  EXPECT_EQ("hello _test::dummy", stack[1].toString()->string());
+  EXPECT_EQ("hello _test::dummy", stack[1].toStringRef());
 }
 
 TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
