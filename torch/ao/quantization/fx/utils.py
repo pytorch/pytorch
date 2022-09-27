@@ -1012,7 +1012,7 @@ def _qconfig_satisfies_dtype_config_constraints(
     satisfies_constraints = True
     if activation_post_process_ctr is not None:
         activation_post_process = activation_post_process_ctr()
-        assert isinstance(activation_post_process, (ObserverBase, FakeQuantize))
+        assert is_activation_post_process(activation_post_process)
         # If dtypes don't match, don't check the activation_post_process and return True early
         if activation_post_process.dtype != dtype_with_constraints.dtype:
             return True

@@ -70,7 +70,6 @@ from torch.ao.quantization import (
     ReuseInputObserver,
     QConfig,
     default_embedding_qat_qconfig,
-    default_symmetric_qnnpack_qconfig,
 )
 
 from torch.ao.quantization.backend_config import (

@@ -193,6 +193,7 @@ def is_input_arg_dtype_supported_by_backend(
             _qconfig_satisfies_dtype_config_constraints(qconfig, dtype_config.input_dtype_with_constraints)
         )
     elif is_weight:
+        # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
         weight_dtype = dtype_config.weight_dtype
         dtype_matches = node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
         qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
@@ -237,9 +238,9 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     qconfig: QConfigAny,
     backend_config: BackendConfig,
 ) -> bool:
-    """ Check is the dtype configuration of a pattern is supported by
-    the backend or not. Also validate whether the qconfig satisfies
-    constraints in the supported dtype config, if any.
+    """ Check if the dtype configuration of a pattern is supported by
+    the backend or not, and whether the qconfig satisfies constraints
+    specified in the corresponding dtype config.
     """
     if backend_config is None or pattern is None:
         return True

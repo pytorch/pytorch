@@ -135,24 +135,21 @@ class DTypeConfig:
         bias_dtype: Optional[torch.dtype] = None,
         is_dynamic: Optional[bool] = None,
     ):
-        if input_dtype is None:
-            input_dtype = DTypeWithConstraints()
-        elif isinstance(input_dtype, torch.dtype):
-            input_dtype = DTypeWithConstraints(dtype=input_dtype)
+        if isinstance(input_dtype, DTypeWithConstraints):
+            self.input_dtype_with_constraints = input_dtype
+        else:
+            self.input_dtype_with_constraints = DTypeWithConstraints(dtype=input_dtype)
 
-        if output_dtype is None:
-            output_dtype = DTypeWithConstraints()
-        elif isinstance(output_dtype, torch.dtype):
-            output_dtype = DTypeWithConstraints(dtype=output_dtype)
+        if isinstance(output_dtype, DTypeWithConstraints):
+            self.output_dtype_with_constraints = output_dtype
+        else:
+            self.output_dtype_with_constraints = DTypeWithConstraints(dtype=output_dtype)
 
-        if weight_dtype is None:
-            weight_dtype = DTypeWithConstraints()
-        elif isinstance(weight_dtype, torch.dtype):
-            weight_dtype = DTypeWithConstraints(dtype=weight_dtype)
+        if isinstance(weight_dtype, DTypeWithConstraints):
+            self.weight_dtype_with_constraints = weight_dtype
+        else:
+            self.weight_dtype_with_constraints = DTypeWithConstraints(dtype=weight_dtype)
 
-        self.input_dtype_with_constraints = input_dtype
-        self.output_dtype_with_constraints = output_dtype
-        self.weight_dtype_with_constraints = weight_dtype
         self.bias_dtype = bias_dtype
         self.is_dynamic = is_dynamic
 
