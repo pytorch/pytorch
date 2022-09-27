@@ -426,6 +426,19 @@ PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  size_t frames_to_skip;
+  size_t maximum_number_of_frames;
+  if (!PyArg_ParseTuple(
+          args, "LL", &frames_to_skip, &maximum_number_of_frames)) {
+    return nullptr;
+  }
+  return THPUtils_packString(
+      c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setAllowTF32CuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -867,6 +880,7 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
+    {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
