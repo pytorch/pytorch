@@ -3861,7 +3861,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             if len(size) != dim:
                 raise ValueError(
                     "Input and output must have the same number of spatial dimensions, but got "
-                    f"input with with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
+                    f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
 
