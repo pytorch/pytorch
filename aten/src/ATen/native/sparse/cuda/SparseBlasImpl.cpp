@@ -912,6 +912,14 @@ void addmm_out_sparse_csr(
         return spgemm(
             mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
       }
+      if (result.layout() == kSparseCsc) {
+        return spgemm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
     }
   }
   if (mat1.layout() == kSparseBsr) {
