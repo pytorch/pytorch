@@ -47,7 +47,7 @@ from collections import namedtuple
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
-from functorch._C import reshape_dim_into, reshape_dim_outof
+from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
 
 FALLBACK_REGEX = 'There is a performance drop'
@@ -3194,8 +3194,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__'),  # dynamic mask
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
+        xfail('unique', ''),  # dynamic op
+        xfail('unique_consecutive', ''),  # dynamic op
         xfail('allclose'),  # returns a boolean
         xfail('uniform'),  # randomness is tested separately
         xfail('rand_like'),  # randomness is tested separately
@@ -3220,6 +3223,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
+        xfail('ones', ''),  # test runner can't handle factory functions
+        xfail('zeros', ''),  # test runner can't handle factory functions
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
@@ -3331,6 +3336,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('count_nonzero'),
         xfail('nanmean'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
