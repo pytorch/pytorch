@@ -968,8 +968,11 @@ def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
         'typing_extensions',
-        'opt-einsum>=3.3',
     ]
+
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1169,6 +1172,7 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,
