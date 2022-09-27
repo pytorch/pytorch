@@ -845,6 +845,7 @@ def _has_storage(x: Tensor) -> _bool: ...
 # https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
+def _get_cpp_backtrace(frames_to_skip: _int, maximum_number_of_frames: _int) -> str: ...  # THPModule_getCppBacktrace
 def set_flush_denormal(arg: _bool) -> _bool: ...  # THPModule_setFlushDenormal
 def get_default_dtype() -> _dtype: ...  # THPModule_getDefaultDtype
 def _get_default_device() -> str: ...  # THPModule_getDefaultDevice
