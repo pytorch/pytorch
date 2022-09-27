@@ -13,6 +13,7 @@ from torch._prims_common import (
     DimsSequenceType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
+    make_contiguous_strides_for,
     ShapeType,
     TensorLikeType,
 )
@@ -276,6 +277,10 @@ def _var_mean_nvfuser(
     return fd.ops.var_mean(a, dims, correction, keepdim)
 
 
+def _rand_like_nvfuser(fd: Any, a: TensorLikeType):
+    return fd.ops.rand_like(a)
+
+
 def _amax_nvfuser(
     fd: Any,
     a: TensorLikeType,
@@ -299,11 +304,69 @@ _nvfuser_impls["convert_element_type"] = _convert_element_type_nvfuser
 _nvfuser_impls["transpose"] = _transpose_nvfuser
 _nvfuser_impls["squeeze"] = _squeeze_nvfuser
 _nvfuser_impls["view_of"] = _view_of_nvfuser
+_nvfuser_impls["rand_like"] = _rand_like_nvfuser
 _nvfuser_impls["sum"] = _sum_nvfuser
 _nvfuser_impls["var"] = _var_nvfuser
 _nvfuser_impls["var_mean"] = _var_mean_nvfuser
 _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
+
+
+def register_rand_like():
+    name = "rand_like"
+
+    nvprim.define(
+        "rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, "
+        + "Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor"
+    )
+
+    def _meta_rand_like(
+        self,
+        *,
+        dtype=None,
+        layout=None,
+        device=None,
+        pin_memory=None,
+        memory_format=None,
+    ):
+        strides = make_contiguous_strides_for(self.shape)
+        return torch._prims.TensorMeta(
+            shape=self.shape,
+            strides=strides,
+            dtype=dtype,
+            device=device,
+        )
+
+    def _prim_impl(
+        self,
+        *,
+        dtype=None,
+        layout=None,
+        device=None,
+        pin_memory=None,
+        memory_format=None,
+    ):
+        return torch.rand_like(
+            self,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            memory_format=memory_format,
+        )
+
+    nvprim_impl.impl(name, _prim_impl)
+    nvprim_meta_impl.impl(name, _meta_rand_like)
+
+    prim_packet = getattr(torch.ops.nvprims, name)
+    prim = prim_packet.default
+
+    nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
+
+    for p in (prim_packet, prim):
+        p.__doc__ = "Computes rand_like"
+        p.impl_nvfuser = _nvfuser_impls["rand_like"]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
 
 
 def register_var_mean():
@@ -407,6 +470,8 @@ def register_var_mean():
 def register_nvprims():
     """Registers all nvFuser primitives in the torch.ops.nvprims module."""
     register_var_mean()
+    register_rand_like()
+
     for name in nvprim_names:
         main_prim = getattr(torch.ops.prims, name)
 

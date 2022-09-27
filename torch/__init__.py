@@ -911,7 +911,8 @@ from torch._classes import classes
 #         buffer = z
 #     return min - torch.log1p(z), buffer
 #     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
-if (os.environ.get("PYTORCH_JIT", "1") == "1" and
+# Currently broken for 3.11, see https://github.com/pytorch/pytorch/issues/85506
+if (os.environ.get("PYTORCH_JIT", "1" if sys.version_info < (3, 11) else "0") == "1" and
         __debug__ and
         not torch._C._is_deploy_enabled() and
         os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0"):
@@ -952,10 +953,15 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 # Import experimental masked operations support. See
 # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
 # information.
-from . import _masked
+from . import masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import eig, solve
+from ._linalg_utils import (  # type: ignore[misc]
+    matrix_rank,
+    eig,
+    solve,
+    lstsq,
+)
 
 
 def _register_device_module(device_type, module):
