@@ -245,8 +245,7 @@ def get_default_qconfig(backend='fbgemm', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
         elif backend == 'x86':
-            qconfig = QConfig(activation=HistogramObserver.with_args(quant_min=0,
-                                                                     quant_max=127),
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                               weight=default_per_channel_weight_observer)
         else:
             qconfig = default_qconfig
@@ -332,7 +331,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
         if backend == 'x86':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
-                                                                quant_max=127),
+                                                                quant_max=255,
+                                                                reduce_range=True),
                               weight=default_per_channel_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
@@ -358,7 +358,8 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
         elif backend == 'x86':
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
-                                                                                 quant_max=127),
+                                                                                 quant_max=255,
+                                                                                 reduce_range=True),
                               weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2
