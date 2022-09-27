@@ -186,6 +186,13 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *tsan* ]]; then
+    export PYTORCH_TEST_WITH_TSAN=1
+
+    # TODO: this is the same LD_PRELOAD trick as ASAN and also uses hardcoded path
+    export LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtsan.so.0
+fi
+
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
