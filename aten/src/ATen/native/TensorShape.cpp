@@ -2140,11 +2140,6 @@ Tensor slice(
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step) {
-  // // This function is called directly by split_with_sizes for performance.
-  // If self is nested we redispatch to slice in order to call the nested kernel
-  if (self.is_nested()){
-    return at::slice(self, dim, start, end, step);
-  }
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
@@ -2152,12 +2147,29 @@ Tensor slice(
   dim = maybe_wrap_dim(dim, ndim);
   DimVector sizes(self.sizes().begin(), self.sizes().end());
   DimVector strides(self.strides().begin(), self.strides().end());
+  // handle optional parameters
+  int64_t start_val = start.has_value() ? start.value() : 0;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
   // TODO: support negative strides
   TORCH_CHECK(step > 0, "slice step must be positive");
 
-  int64_t start_val = 0, end_val = 0;
-  std::tie(start_val, end_val) = get_slice_range(start, end, sizes[dim]);
+  if (start_val < 0) {
+    start_val += sizes[dim];
+  }
+  if (end_val < 0) {
+    end_val += sizes[dim];
+  }
+  if (start_val < 0) {
+    start_val = 0;
+  } else if (start_val >= sizes[dim]) {
+    start_val = sizes[dim];
+  }
+  if (end_val < start_val) {
+    end_val = start_val;
+  } else if (end_val >= sizes[dim]) {
+    end_val = sizes[dim];
+  }
   auto storage_offset = self.storage_offset() + start_val * strides[dim];
   auto len = end_val - start_val;
   sizes[dim] = (len + step - 1) / step; // round-up

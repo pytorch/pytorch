@@ -522,7 +522,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[-1], x1)
         self.assertRaises(IndexError, lambda: nt[2])
         self.assertRaises(IndexError, lambda: nt[-3])
-        self.assertEqual(nt, nt[:])
+        self.assertRaises(NotImplementedError, lambda: nt[:])
         self.assertRaises(NotImplementedError, lambda: nt[None])
         self.assertRaises(NotImplementedError, lambda: nt[...])
         # tuple of indices: only support integer in the batch dimension
@@ -532,8 +532,7 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(nt[1, ...], x1)
         self.assertRaises(IndexError, lambda: nt[1, 4, 2])
         # select currently only supports dim=0
-        self.assertRaisesRegex(RuntimeError, "NestedTensor can only be selected along dimension 0",
-                               lambda: nt[:, 1, 1])
+        self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
         # make sure indexing returns a view
         nt[0].fill_(100.0)
         answer = torch.tensor(100.0, device=device, dtype=dtype).expand((2, 5))
@@ -551,55 +550,6 @@ class TestNestedTensorDeviceType(TestCase):
         nt[0].backward(grad_x0)
         expected_grad = torch.nested_tensor([grad_x0, torch.zeros((3, 4), device=device, dtype=dtype)])
         self.assertEqual(nt.grad, expected_grad)
-
-    @dtypes(*floating_types_and_half())
-    def test_nested_tensor_slicing(self, device, dtype):
-        # Create NT with one regular dimension, one jagged dimension
-        x = torch.nested_tensor([
-            torch.randn(2, 8, device=device, dtype=dtype),
-            torch.randn(3, 8, device=device, dtype=dtype),
-            torch.randn(4, 8, device=device, dtype=dtype)
-        ])
-
-        # Success case: slicing NT components (dim=0)
-        output = x[1:]
-        for i in range(1, x.size(0)):
-            self.assertEqual(x[i], output[i - 1])
-
-        output = x[:2]
-        for i in range(0, 2):
-            self.assertEqual(x[i], output[i])
-
-        # Success case: slicing regular dimension
-        NUM_CHUNKS = 4
-        CHUNK_SIZE = x.size(-1) // NUM_CHUNKS
-        output = x.chunk(NUM_CHUNKS, dim=2)
-        self.assertEqual(len(output), NUM_CHUNKS)
-        for chunk_idx, nt_chunk in enumerate(output):
-            self.assertTrue(nt_chunk.is_nested)
-
-            # Ensure same number of underlying tensor components
-            self.assertEqual(nt_chunk.dim(), x.dim())
-            self.assertEqual(nt_chunk.dim(), x.dim())
-
-            for i, component in enumerate(nt_chunk):
-                # Compare to manual slicing
-                start = chunk_idx * CHUNK_SIZE
-                end = start + CHUNK_SIZE
-                expected = x[i][:, start:end]
-                self.assertEqual(component, expected)
-
-        # Error case: slicing jagged dimension
-        with self.assertRaisesRegex(RuntimeError, 'dimension 1 is irregular'):
-            x.narrow(1, 1, 2)
-
-        # Errors when calling slice.backwards()
-        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        nt_grad = torch.nested_tensor([a, b])
-        output = nt_grad[1:]
-        self.assertRaisesRegex(NotImplementedError, "the derivative for 'slice' is not implemented.",
-                               lambda: output.backward(output.clone()))
 
     @dtypes(*floating_types_and_half())
     def test_nested_tensor_chunk(self, device, dtype):
