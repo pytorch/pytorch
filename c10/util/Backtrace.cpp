@@ -97,13 +97,37 @@ namespace {
 
 #if !defined(C10_ANDROID) && !defined(__APPLE__)
 
+// Function pointer type for
+// int dladdr1(const void *address, Dl_info *info, void **extra_info, int flags)
+typedef int (*dladdr1_fptr)(const void*, Dl_info*, void**, int);
+
+dladdr1_fptr get_dladdr1() {
+  static dladdr1_fptr _dladdr1 = (dladdr1_fptr)dlsym(RTLD_DEFAULT, "dladdr1");
+  return _dladdr1;
+}
+
+bool use_addr2line() {
+  static bool _use_addr2line = []() {
+    return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES_WITH_LINENO") ==
+        true &&
+        (get_dladdr1() != nullptr);
+  }();
+  return _use_addr2line;
+}
+
 // converts a function's address in memory to its VMA address in the executable
 // file. VMA is what addr2line expects
-size_t ConvertToVMA(size_t addr) {
-  Dl_info info;
-  link_map* link_map;
-  dladdr1((void*)addr, &info, (void**)&link_map, RTLD_DL_LINKMAP);
-  return addr - link_map->l_addr;
+size_t ConvertToVMA(size_t addr, Dl_info* info) {
+  dladdr1_fptr _dladdr1 = get_dladdr1();
+
+  if (_dladdr1 != nullptr) {
+    link_map* link_map;
+    (*_dladdr1)((void*)addr, info, (void**)&link_map, RTLD_DL_LINKMAP);
+    return addr - link_map->l_addr;
+  }
+
+  // If the function dladdr1 is not found, 0 is returned.
+  return 0;
 }
 
 std::string exec(const char* cmd) {
@@ -123,14 +147,6 @@ std::string rstrip(const std::string& s) {
   const std::string WHITESPACE = " \n\r\t\f\v";
   size_t end = s.find_last_not_of(WHITESPACE);
   return (end == std::string::npos) ? "" : s.substr(0, end + 1);
-}
-
-bool use_addr2line() {
-  static bool _use_addr2line = []() {
-    return c10::utils::check_env("TORCH_SHOW_CPP_STACKTRACES_WITH_LINENO") ==
-        true;
-  }();
-  return _use_addr2line;
 }
 
 #endif // !defined(C10_ANDROID) && !defined(__APPLE__)
@@ -230,9 +246,9 @@ c10::optional<FrameInformation> parse_frame_information(
 
   if (use_addr2line() && !frame.is_python_frame) {
     Dl_info info;
-    if (dladdr(frame_pointer, &info)) {
+    size_t VMA_addr = ConvertToVMA((size_t)frame_pointer, &info);
+    if (VMA_addr) {
       char command[256];
-      size_t VMA_addr = ConvertToVMA((size_t)frame_pointer);
       // Need to decrease the VMA address by 1 to get the correct line number
       // https://stackoverflow.com/questions/11579509/wrong-line-numbers-from-addr2line/63841497#63841497
       VMA_addr -= 1;
