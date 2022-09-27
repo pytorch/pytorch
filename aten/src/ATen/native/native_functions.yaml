@@ -1995,7 +1995,7 @@
   dispatch:
     CompositeExplicitAutograd: vdot_out
 
-- func: einsum(str equation, Tensor[] tensors) -> Tensor
+- func: einsum(str equation, Tensor[] tensors, *, int[]? path=None) -> Tensor
 
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
@@ -3236,10 +3236,6 @@
   dispatch:
     CompositeImplicitAutograd: matmul_out
     NestedTensorCPU, NestedTensorCUDA: matmul_out_nested
-
-- func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
-
-- func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
 
 # Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
@@ -4685,7 +4681,7 @@
   device_check: NoCheck
   device_guard: False
 
-- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4694,7 +4690,7 @@
 # NOTE: The implementation of split_with_sizes bypasses the dispatcher to call this; undo
 # that if adding specific implementations here!
 
-- func: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
+- func: slice_backward(Tensor grad_output, SymInt[] input_sizes, int dim, SymInt start, SymInt end, SymInt step) -> Tensor
   variants: function
   device_check: NoCheck
   device_guard: False
@@ -4702,7 +4698,7 @@
     CompositeExplicitAutograd: slice_backward
   autogen: slice_backward.out
 
-- func: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+- func: slice_scatter(Tensor self, Tensor src, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -8122,17 +8118,6 @@
 
 - func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, float label_smoothing=0.0) -> Tensor
   python_module: nn
-
-- func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
-  dispatch:
-    CPU: legacy_lstsq_out
-    CUDA: legacy_lstsq_out_cuda
-
-- func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  variants: method, function
-  dispatch:
-    CPU: legacy_lstsq
-    CUDA: legacy_lstsq_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
@@ -12820,7 +12805,7 @@
     CompositeExplicitAutogradNonFunctional: detach_copy
   tags: view_copy
 
-- func: slice_copy.Tensor(Tensor self, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
+- func: slice_copy.Tensor(Tensor self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: slice_copy_Tensor
@@ -13032,7 +13017,7 @@
     CompositeExplicitAutograd: detach_copy_out
 
 
-- func: slice_copy.Tensor_out(Tensor self, int dim=0, int? start=None, int? end=None, int step=1, *, Tensor(a!) out) -> Tensor(a!)
+- func: slice_copy.Tensor_out(Tensor self, int dim=0, SymInt? start=None, SymInt? end=None, SymInt step=1, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: slice_copy_Tensor_out
@@ -13177,7 +13162,9 @@
   autogen: _native_multi_head_attention.out
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=True, bool is_causal=False) -> (Tensor, Tensor)
+  python_module: nn
   variants: function
+  autogen: _scaled_dot_product_attention.out
 
 - func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
   variants: function
