@@ -3,7 +3,6 @@
 # TODO(justinchuby): Move more of the symbolic helper functions here and expose
 # them to the user.
 
-import copy
 import dataclasses
 import re
 from typing import Any, Dict, Iterable, Sequence, Tuple, Union
@@ -158,8 +157,15 @@ def add_op_with_blocks(
     new_contexts = []
     for _ in range(n_blocks):
         new_block = node.addBlock()
-        # Create a shallow copy of the graph context and update the block
-        new_context = copy.copy(graph_context)
+        # Create new copy of the graph context and update the block
+        new_context = GraphContext(
+            graph_context.graph,
+            new_block,
+            graph_context.opset,
+            graph_context.original_node,
+            graph_context.params_dict,
+            graph_context.env,
+        )
         new_context.block = new_block
         new_contexts.append(new_context)
 
