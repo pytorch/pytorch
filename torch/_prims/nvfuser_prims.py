@@ -540,12 +540,7 @@ def register_nvprims():
         prim_packet = getattr(torch.ops.nvprims, name)
         prim = prim_packet.default
 
-        # if name=="abs":
-        #     vjp_impl = _vjp_impls["abs"]
-        # else:
-        #     vjp_impl = None
         vjp_impl = _vjp_impls.get(name, None)
-        # nvprim_autograd_impl.impl(name, backwards_not_supported(prim))
         nvprim_autograd_impl.impl(name, _register_vjp(prim, vjp_impl))
 
         for p in (prim_packet, prim):
