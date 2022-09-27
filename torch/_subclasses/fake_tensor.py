@@ -9,7 +9,6 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
-import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -438,7 +437,6 @@ def in_kernel_invocation_manager(fake_mode):
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
-    has_sym_ints: bool
     constant: Optional[torch.Tensor]
 
     # Note: [Fake Tensor Dispatch Keys]
@@ -486,10 +484,6 @@ class FakeTensor(torch.Tensor):
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.fake_device = device
         self.fake_mode = fake_mode
-        self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
-        assert not (
-            self.has_sym_ints and constant is not None
-        ), f"meta: {elem}, constant: {constant}"
         self.constant = constant
 
     @staticmethod
@@ -672,7 +666,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_fake_tensors])
+            any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
             or len(flat_symints) > 0
         )
 
