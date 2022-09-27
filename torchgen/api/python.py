@@ -964,7 +964,6 @@ def argument_type_str_pyi(t: Type) -> str:
     return ret
 
 
-
 def return_type_str_pyi(t: Type) -> str:
     # Where arguments are open to accepting Union, return types should return
     # concrete types
