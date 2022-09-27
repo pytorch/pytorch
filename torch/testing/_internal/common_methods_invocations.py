@@ -6953,22 +6953,16 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
     dim_4_kv_shape = (N, N_prime, S, E)
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape)]
-    shapes_and_kwargs = []
     for qkv_shapes, is_causal, need_attn_weights, dropout_p in product(
             qkv_shapes, [True, False], [True, False], [0.0, 0.5]):
-        shapes_and_kwargs.append((qkv_shapes[0], qkv_shapes[1],
-                                  dict(is_causal=is_causal,
-                                       need_attn_weights=need_attn_weights,
-                                       dropout_p=dropout_p)))
-
-    return [
-        SampleInput(make(shape_q), args=(
-            make(shape_kv),
-            make(shape_kv),
-        ),
-            kwargs=kwargs)
-        for shape_q, shape_kv, kwargs in shapes_and_kwargs
-    ]
+        shape_q, shape_kv = qkv_shapes
+        kwargs = dict(
+            is_causal=is_causal,
+            need_attn_weights=need_attn_weights,
+            dropout_p=dropout_p
+        )
+        yield SampleInput(
+            make(shape_q), args=(make(shape_kv), make(shape_kv),), kwargs=kwargs)
 
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)

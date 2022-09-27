@@ -29,12 +29,14 @@ from functorch.compile import (
 )
 from torch._decomp import decomposition_table
 
-from torch.testing._internal.common_device_type import ops
+from torch.testing._internal.common_device_type import ops, tol
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     xfail,
     skip,
     skipOps,
+    opsToleranceOverride,
+    tol1,
 )
 
 USE_TORCHVISION = False
@@ -447,10 +449,10 @@ class TestEagerFusionOpInfo(AOTTestCase):
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
-    @opsToleranceOverride('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
+    @opsToleranceOverride('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', (
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=5e-4, rtol=5e-4)}, device_type='cpu'),
-    })
+    ))
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         def f(args, kwargs):
             return op.op(*args, **kwargs)
