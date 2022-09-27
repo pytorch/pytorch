@@ -116,6 +116,10 @@ def _squeeze_vjp(grad, result, self, dims):
     return _unsqueeze_dims(grad, dims, self.ndim), *(None,) * len(dims)
 
 
+def _transpose_vjp(grad, result, self, permutation):
+    return prims.transpose(grad, permutation), *(None,) * len(permutation)
+
+
 def _var_mean_vjp(grad_var, grad_mean, var, mean, self, dims, correction):
     grad = _var_vjp(grad_var, var, self, dims, correction)[0] + _mean_vjp(
         grad_mean, self, dims
@@ -233,6 +237,7 @@ vjp_implementations: Dict[str, Callable] = {
     "tanh": lambda grad, result, self: prims.mul(
         grad, prims.sub(1, prims.pow(result, 2))
     ),
+    "transpose": _transpose_vjp,
     "trunc": lambda grad, result, self: prims.mul(grad, 0),
     "var": _var_vjp,
     "var_mean": _var_mean_vjp,
