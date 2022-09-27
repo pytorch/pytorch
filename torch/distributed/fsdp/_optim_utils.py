@@ -3,7 +3,6 @@ import copy
 import functools
 from typing import (
     Any,
-    cast,
     Dict,
     Iterable,
     Iterator,
@@ -13,13 +12,14 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 import torch
 import torch.distributed as dist
-
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
+import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp._shard_utils import (
     _create_chunk_sharded_tensor,
@@ -174,10 +174,13 @@ def _communicate_optim_state(
     for state_name, value in sorted_items(flat_param_state):
         # Positive-dimension tensor state: communicate across ranks
         if torch.is_tensor(value) and value.dim() > 0:
-            # If the parameter is not sharded (e.g. world size of 1), then
-            # neither is the positive-dimension tensor state, so no need to
-            # communicate it -- we take the target rank's value
-            if not flat_param._is_sharded:  # type: ignore[attr-defined]
+            # If the parameter is not sharded, then neither is the
+            # positive-dimension tensor state, so no need to communicate it --
+            # we take the target rank's value
+            if (
+                fsdp_module.world_size == 1
+                or fsdp_module.sharding_strategy == FSDP.ShardingStrategy.NO_SHARD
+            ):
                 tensor_state[state_name] = value.cpu()
                 continue
             if not value.is_cuda:
@@ -190,7 +193,7 @@ def _communicate_optim_state(
             dist._all_gather_base(tensor_buffer, value, group=group)
             torch.cuda.synchronize()
             if to_save:
-                unpadded_numel = flat_param._unsharded_size.numel()  # type: ignore[attr-defined]
+                unpadded_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
                 tensor_state[state_name] = tensor_buffer[:unpadded_numel].cpu()
         # Zero-dimension tensor state and non-tensor state: take this rank's
         # value directly
@@ -317,7 +320,7 @@ def _flatten_optim_state_dict(
             flat_osd_state[key] = copy.copy(unflat_osd_state[unflat_param_name])
 
     # Construct the "param_groups" part -- copy as is since it will be
-    # rekeyed later according to the target rank's `optim_input`
+    # rekeyed later according to the target rank's optimizer
     flat_osd_param_groups = copy.deepcopy(unflat_osd["param_groups"])
     return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
 
@@ -530,7 +533,7 @@ def _flatten_tensor_optim_state(
         for state_value, shape in zip(pos_dim_tensors, unflat_param_shapes)
     ]
     flat_tensor = torch.cat(tensors)
-    flat_param_shape = flat_param._unsharded_size  # type: ignore[attr-defined]
+    flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
     assert flat_tensor.shape == flat_param_shape, (
         f"tensor optim state: {flat_tensor.shape} "
         f"flattened parameter: {flat_param_shape}"
@@ -866,31 +869,37 @@ def _broadcast_unsharded_pos_dim_tensor_state(
 def _rekey_sharded_optim_state_dict(
     sharded_osd: Dict[str, Any],
     model: torch.nn.Module,
+    optim: torch.optim.Optimizer,
     optim_input: Optional[
         Union[
             List[Dict[str, Any]],
             Iterable[torch.nn.Parameter],
         ]
-    ] = None,
+    ],
+    using_optim_input: bool,
 ) -> Dict[str, Any]:
     """
     Rekeys the optimizer state dict from unflattened parameter names to
-    flattened parameter IDs according to the calling rank's ``optim_input``,
-    which may be different across ranks. In particular, the unflattened
-    parameter names are represented as :class:`_OptimStateKey` s.
+    flattened parameter IDs according to the calling rank's ``optim``, which
+    may be different across ranks. In particular, the unflattened parameter
+    names are represented as :class:`_OptimStateKey` s.
     """
-    param_to_flat_param_id = _get_param_to_param_id(model, optim_input)
+    param_to_flat_param_id = (
+        _get_param_to_param_id_from_optim_input(model, optim_input)
+        if using_optim_input
+        else _get_param_to_param_id(optim)
+    )
     param_to_unflat_param_names = FSDP._get_param_to_unflat_param_names(model)
     # All parameter keys in `param_to_flat_param_id` should be in
     # `param_to_unflat_param_names` -- strict inequality follows when not all
-    # parameters are passed to the optimizer via `optim_input`
+    # parameters are passed to the optimizer
     assert len(param_to_flat_param_id) <= len(param_to_unflat_param_names)
 
     unflat_param_names_to_flat_param_id: Dict[Tuple[str, ...], int] = {}  # for "state"
     unflat_param_name_to_flat_param_id: Dict[str, int] = {}  # for "param_groups"
     for param, unflat_param_names in param_to_unflat_param_names.items():
         if param not in param_to_flat_param_id:
-            # This parameter was not passed to the optimizer via `optim_input`
+            # This parameter was not passed to the optimizer
             continue
         flat_param_id = param_to_flat_param_id[param]
         unflat_param_names_to_flat_param_id[tuple(unflat_param_names)] = flat_param_id
@@ -941,6 +950,20 @@ def _get_flat_param_to_fsdp_module(model: torch.nn.Module):
 
 
 def _get_param_id_to_param(
+    optim: torch.optim.Optimizer,
+):
+    """
+    Constructs a mapping from parameter IDs to parameters. This may be used
+    both for models with ``FlatParameter`` s and without.
+    """
+    param_id_to_param: List[nn.Parameter] = []
+    for param_group in optim.param_groups:
+        for param in param_group["params"]:
+            param_id_to_param.append(param)
+    return param_id_to_param
+
+
+def _get_param_id_to_param_from_optim_input(
     model: torch.nn.Module,
     optim_input: Optional[
         Union[
@@ -952,6 +975,10 @@ def _get_param_id_to_param(
     """
     Constructs a mapping from parameter IDs to parameters. This may be used
     both for models with ``FlatParameter`` s and without.
+
+    NOTE: This method is only preserved for backward compatibility. The method
+    :meth:`_get_param_id_to_param` is the preferred code path that does not
+    rely on ``optim_input``.
 
     NOTE: We critically assume that, whether the optimizer input is a list of
     parameters or a list of parameter groups, :class:`torch.optim.Optimizer`
@@ -1013,6 +1040,14 @@ def _get_param_id_to_param(
 
 
 def _get_param_to_param_id(
+    optim: torch.optim.Optimizer,
+) -> Dict[torch.nn.Parameter, int]:
+    """Constructs the inverse mapping of :func:`_get_param_id_to_param`."""
+    param_id_to_param = _get_param_id_to_param(optim)
+    return {param: param_id for param_id, param in enumerate(param_id_to_param)}
+
+
+def _get_param_to_param_id_from_optim_input(
     model: torch.nn.Module,
     optim_input: Optional[
         Union[
@@ -1022,7 +1057,7 @@ def _get_param_to_param_id(
     ] = None,
 ) -> Dict[torch.nn.Parameter, int]:
     """Constructs the inverse mapping of :func:`_get_param_id_to_param`."""
-    param_id_to_param = _get_param_id_to_param(model, optim_input)
+    param_id_to_param = _get_param_id_to_param_from_optim_input(model, optim_input)
     return {param: param_id for param_id, param in enumerate(param_id_to_param)}
 
 
@@ -1081,10 +1116,11 @@ def _optim_state_dict(
             List[Dict[str, Any]],
             Iterable[torch.nn.Parameter],
         ]
-    ] = None,
-    rank0_only: bool = True,
-    shard_state: bool = False,
-    group: Optional[dist.ProcessGroup] = None,
+    ],
+    rank0_only: bool,
+    shard_state: bool,
+    group: Optional[dist.ProcessGroup],
+    using_optim_input: bool,
 ) -> Dict[str, Any]:
     """
     Consolidates the optimizer state and returns it as a :class:`dict`
@@ -1099,11 +1135,6 @@ def _optim_state_dict(
             were passed into the optimizer ``optim``.
         optim (torch.optim.Optimizer): Optimizer for ``model`` 's
             parameters.
-        optim_input (Optional[Union[List[Dict[str, Any]], Iterable[torch.nn.Parameter]]]):
-            Input passed into the optimizer ``optim`` representing either a
-            :class:`list` of parameter groups or an iterable of parameters;
-            if ``None``, then this method assumes the input was
-            ``model.parameters()``. (Default: ``None``)
         rank0_only (bool): If ``True``, saves the populated :class:`dict`
             only on rank 0; if ``False``, saves it on all ranks. (Default:
             ``True``)
@@ -1129,8 +1160,10 @@ def _optim_state_dict(
     param_to_unflat_param_names: Dict[
         torch.nn.Parameter, List[str]
     ] = FSDP._get_param_to_unflat_param_names(model)
-    flat_param_id_to_param: List[torch.nn.Parameter] = _get_param_id_to_param(
-        model, optim_input
+    flat_param_id_to_param: List[torch.nn.Parameter] = (
+        _get_param_id_to_param_from_optim_input(model, optim_input)
+        if using_optim_input
+        else _get_param_id_to_param(optim)
     )
     optim_state_key_to_flat_param_id: Dict[_OptimStateKey, int] = {}  # local
     r0_flat_param_id_to_optim_state_key: Dict[
