@@ -13,7 +13,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
 from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state, parametrize, gradcheck
-from torch.testing._internal.common_device_type import onlyCUDA, onlyCPU
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
