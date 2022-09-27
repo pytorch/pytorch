@@ -5,12 +5,10 @@
 # can be added in the future for the corresponding higher-level torch/aten
 # functions.
 
-import math
 from functools import wraps
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Dict, Optional
 
 import torch
-import torch._prims_common as utils
 
 from torch._prims.context import NvfuserPrimsMode, TorchRefsMode
 from torch._prims.vjp import vjp_implementations as _vjp_impls
