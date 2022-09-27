@@ -1513,11 +1513,8 @@ def handle_torch_function(
     if _is_torch_function_mode_enabled():
         # if we're here, the mode must be set to a TorchFunctionStackMode
         # this unsets it and calls directly into TorchFunctionStackMode's torch function
-        try:
-            _set_torch_function_mode(None)
+        with _no_torch_function_mode():
             result = _TorchFunctionStackMode().__torch_function__(public_api, types, args, kwargs)
-        finally:
-            _set_torch_function_mode(_TorchFunctionStackMode())
         if result is not NotImplemented:
             return result
 
