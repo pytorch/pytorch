@@ -272,8 +272,7 @@ SparseCsrTensor new_compressed_tensor(const TensorOptions& options) {
     dispatch_key = DispatchKey::SparseCsrCPU;
   }
 
-  return detail::make_tensor<SparseCsrTensorImpl>(
-      DispatchKeySet(dispatch_key), layout, options.dtype());
+  return detail::make_tensor<SparseCsrTensorImpl>(DispatchKeySet(dispatch_key), options.device(), layout, options.dtype());
 }
 
 
@@ -376,7 +375,7 @@ DimVector _estimate_sparse_compressed_tensor_size(
         size.push_back(compressed_dim_size * blocksize[1]);
       });
   for (int i=0; i<dense_ndim; i++) {
-    int64_t j = batch_ndim + 1 + base_ndim + i;
+    int64_t j = batch_ndim + 1 + block_ndim + i;
     size.push_back((j < values.dim() ? values.size(j) : 1));
   }
   TORCH_CHECK(
@@ -633,25 +632,24 @@ int64_t dense_dim_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->dense_dim();
 }
 
-bool _is_same_size_as_sparse_csr(
+bool _is_same_size_as_sparse_compressed(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
   return self.sizes().equals(src.sizes());
 }
 
-const SparseCsrTensor& resize_as_sparse_csr_(
+const SparseCsrTensor& resize_as_sparse_compressed_(
     const SparseCsrTensor& self,
     const SparseCsrTensor& src) {
-  TORCH_CHECK(
-      src.is_sparse_csr() && self.is_sparse_csr(),
-      "resize_as_sparse_csr_: layout for self and src must be sparse_csr but got ",
-      self.layout(),
-      " for self, and ",
-      src.layout(),
-      " for src");
-  if (!_is_same_size_as_sparse_csr(self, src)) {
-    get_sparse_csr_impl(self)->resize_as_sparse_csr_tensor_(src);
-  }
+  auto src_layout = src.layout();
+  auto self_layout = self.layout();
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      src_layout, "resize_as_sparse_compressed_: src ", []() {});
+  AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
+      self_layout, "resize_as_sparse_compressed_: self ", []() {});
+  // Note: The impl method does all required checking to see if resize/data copy
+  // on member tensors is required.
+  get_sparse_csr_impl(self)->resize_as_sparse_compressed_tensor_(src);
   return self;
 }
 
