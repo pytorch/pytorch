@@ -11,6 +11,7 @@
 #else
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at {
@@ -130,9 +131,14 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
   // Select block rows of the strided input that intersect with the block colums of the sparse input.
   auto strided_tiled_selected_rows = strided_tiled.index_select(-4, plain_indices);
 
+  // Promote to float if output is half or bfloat16 for better precision
+  const auto mm_dtype = (result.scalar_type() == kHalf || result.scalar_type() == kBFloat16)
+    ? kFloat : result.scalar_type();
   // Now that we know which block rows intersect with which block columns,
   // we can perform matrix products between pairs of blocks.
-  const auto pairwise_block_mm = values.unsqueeze(-3).matmul(strided_tiled_selected_rows);
+  // NOTE: .to is a no-op when result.scalar_type() == mm_dtype.
+  const auto pairwise_block_mm = values.unsqueeze(-3).to(mm_dtype)
+    .matmul(strided_tiled_selected_rows.to(mm_dtype));
 
   // Having pairwise block matrix products stored in pairwise_block_mm,
   // it is sufficient to sum all the block products that share the same row
@@ -145,12 +151,28 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
       compressed_indices.scalar_type() == kInt).select(0, 0);
 
   // Reduction step.
-  // Zero out and sum over the blocks that share the same row indices.
-  result_tiled.zero_();
-  result_tiled.index_add_(
-      /*dim=*/-4,
-      /*index=*/compressed_indices_coo,
-      /*source=*/pairwise_block_mm);
+  // If result is neither half nor bfloat16, do everyting in-place.
+  if (result.scalar_type() == mm_dtype) {
+    // Zero out and sum over the blocks that share the same row indices.
+    result_tiled.zero_();
+    result_tiled.index_add_(
+        /*dim=*/-4,
+        /*index=*/compressed_indices_coo,
+        /*source=*/pairwise_block_mm);
+  }
+  // Otherwise accumulate into a buffer and then copy.
+  else {
+    // No need to zero out, sum over the blocks goes into a buffer
+    // followed by a copy into result.
+    auto promoted_result_tiled = at::zeros(
+        result_tiled.sizes(),
+        result_tiled.options().dtype(mm_dtype));
+    promoted_result_tiled.index_add_(
+        /*dim=*/-4,
+        /*index=*/compressed_indices_coo,
+        /*source=*/pairwise_block_mm);
+    result_tiled.copy_(promoted_result_tiled);
+  }
 
   return result;
 }
