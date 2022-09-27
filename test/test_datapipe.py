@@ -44,7 +44,7 @@ from torch.utils.data import (
     runtime_validation,
     runtime_validation_disabled,
 )
-from torch.utils.data.graph import traverse, traverse_dps
+from torch.utils.data.graph import traverse_dps
 from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
@@ -2534,27 +2534,13 @@ class TestCircularSerialization(TestCase):
         src_1 = m1_1.datapipe
 
         res1 = traverse_dps(dp1)
-        res2 = traverse(dp1, only_datapipe=False)
-
         exp_res_1 = {id(dp1): (dp1, {
             id(src_1): (src_1, {}),
             id(child_1): (child_1, {id(dm_1): (dm_1, {
                 id(m2_1): (m2_1, {id(m1_1): (m1_1, {id(src_1): (src_1, {})})})
             })})
         })}
-        exp_res_2 = {id(dp1): (dp1, {
-            id(src_1): (src_1, {}),
-            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                id(m2_1): (m2_1, {
-                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                    id(src_1): (src_1, {})
-                })
-            })})
-        })}
-
         self.assertEqual(res1, exp_res_1)
-        self.assertEqual(res2, exp_res_2)
-
         dp2 = TestCircularSerialization.CustomIterDataPipe(fn=_fake_fn, source_dp=dp1)
         self.assertTrue(list(dp2) == list(pickle.loads(pickle.dumps(dp2))))
 
@@ -2563,9 +2549,8 @@ class TestCircularSerialization(TestCase):
         m2_2 = dm_2.main_datapipe
         m1_2 = m2_2.datapipe
 
-        res3 = traverse_dps(dp2)
-        res4 = traverse(dp2, only_datapipe=False)
-        exp_res_3 = {id(dp2): (dp2, {
+        res2 = traverse_dps(dp2)
+        exp_res_2 = {id(dp2): (dp2, {
             id(dp1): (dp1, {
                 id(src_1): (src_1, {}),
                 id(child_1): (child_1, {id(dm_1): (dm_1, {
@@ -2583,44 +2568,7 @@ class TestCircularSerialization(TestCase):
                 })})
             })})
         })}
-        exp_res_4 = {id(dp2): (dp2, {
-            id(dp1): (dp1, {
-                id(src_1): (src_1, {}),
-                id(child_1): (child_1, {id(dm_1): (dm_1, {
-                    id(m2_1): (m2_1, {
-                        id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                        id(src_1): (src_1, {})
-                    })
-                })})
-            }),
-            id(child_2): (child_2, {id(dm_2): (dm_2, {
-                id(m2_2): (m2_2, {
-                    id(m1_2): (m1_2, {
-                        id(dp1): (dp1, {
-                            id(src_1): (src_1, {}),
-                            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                                id(m2_1): (m2_1, {
-                                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                    id(src_1): (src_1, {})
-                                })
-                            })})
-                        })
-                    }),
-                    id(dp1): (dp1, {
-                        id(src_1): (src_1, {}),
-                        id(child_1): (child_1, {id(dm_1): (dm_1, {
-                            id(m2_1): (m2_1, {
-                                id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                id(src_1): (src_1, {})
-                            })
-                        })})
-                    })
-                })
-            })})
-        })}
-
-        self.assertEqual(res3, exp_res_3)
-        self.assertEqual(res4, exp_res_4)
+        self.assertEqual(res2, exp_res_2)
 
     class LambdaIterDataPipe(CustomIterDataPipe):
 
@@ -2644,7 +2592,6 @@ class TestCircularSerialization(TestCase):
         src_1 = m1_1.datapipe
 
         res1 = traverse_dps(dp1)
-        res2 = traverse(dp1, only_datapipe=False)
 
         exp_res_1 = {id(dp1): (dp1, {
             id(src_1): (src_1, {}),
@@ -2652,18 +2599,8 @@ class TestCircularSerialization(TestCase):
                 id(m2_1): (m2_1, {id(m1_1): (m1_1, {id(src_1): (src_1, {})})})
             })})
         })}
-        exp_res_2 = {id(dp1): (dp1, {
-            id(src_1): (src_1, {}),
-            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                id(m2_1): (m2_1, {
-                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                    id(src_1): (src_1, {})
-                })
-            })})
-        })}
 
         self.assertEqual(res1, exp_res_1)
-        self.assertEqual(res2, exp_res_2)
 
         dp2 = TestCircularSerialization.LambdaIterDataPipe(fn=_fake_fn, source_dp=dp1)
         self.assertTrue(list(dp2) == list(dill.loads(dill.dumps(dp2))))
@@ -2673,9 +2610,8 @@ class TestCircularSerialization(TestCase):
         m2_2 = dm_2.main_datapipe
         m1_2 = m2_2.datapipe
 
-        res3 = traverse_dps(dp2)
-        res4 = traverse(dp2, only_datapipe=False)
-        exp_res_3 = {id(dp2): (dp2, {
+        res2 = traverse_dps(dp2)
+        exp_res_2 = {id(dp2): (dp2, {
             id(dp1): (dp1, {
                 id(src_1): (src_1, {}),
                 id(child_1): (child_1, {id(dm_1): (dm_1, {
@@ -2693,45 +2629,7 @@ class TestCircularSerialization(TestCase):
                 })})
             })})
         })}
-        exp_res_4 = {id(dp2): (dp2, {
-            id(dp1): (dp1, {
-                id(src_1): (src_1, {}),
-                id(child_1): (child_1, {id(dm_1): (dm_1, {
-                    id(m2_1): (m2_1, {
-                        id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                        id(src_1): (src_1, {})
-                    })
-                })})
-            }),
-            id(child_2): (child_2, {id(dm_2): (dm_2, {
-                id(m2_2): (m2_2, {
-                    id(m1_2): (m1_2, {
-                        id(dp1): (dp1, {
-                            id(src_1): (src_1, {}),
-                            id(child_1): (child_1, {id(dm_1): (dm_1, {
-                                id(m2_1): (m2_1, {
-                                    id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                    id(src_1): (src_1, {})
-                                })
-                            })})
-                        })
-                    }),
-                    id(dp1): (dp1, {
-                        id(src_1): (src_1, {}),
-                        id(child_1): (child_1, {id(dm_1): (dm_1, {
-                            id(m2_1): (m2_1, {
-                                id(m1_1): (m1_1, {id(src_1): (src_1, {})}),
-                                id(src_1): (src_1, {})
-                            })
-                        })})
-                    })
-                })
-            })})
-        })}
-
-        self.assertEqual(res3, exp_res_3)
-        self.assertEqual(res4, exp_res_4)
-
+        self.assertEqual(res2, exp_res_2)
 
 class TestSharding(TestCase):
 
