@@ -46,8 +46,10 @@ if TEST_WITH_DEV_DBG_ASAN:
     sys.exit(0)
 
 params = "cpu_offload,sharding_strategy"
-cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-sharding_strategy_config = [None, ShardingStrategy.SHARD_GRAD_OP, ShardingStrategy.NO_SHARD]
+# cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
+# sharding_strategy_config = [None, ShardingStrategy.SHARD_GRAD_OP, ShardingStrategy.NO_SHARD]
+cpu_offload_config = [CPUOffload(offload_params=False)]
+sharding_strategy_config = [None]
 configs = list(itertools.product(cpu_offload_config, sharding_strategy_config))
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
@@ -86,11 +88,13 @@ class TestParityWithDDP(FSDPTest):
             "cuda_init_mode": self._get_cuda_init_modes(cpu_offload),
             "backward_prefetch": [
                 None,
-                BackwardPrefetch.BACKWARD_PRE,
-                BackwardPrefetch.BACKWARD_POST,
+                # BackwardPrefetch.BACKWARD_PRE,
+                # BackwardPrefetch.BACKWARD_POST,
             ],
-            "forward_prefetch": [False, True],
-            "use_orig_params": [False, True],
+            # "forward_prefetch": [False, True],
+            "forward_prefetch": [False],
+            # "use_orig_params": [False, True],
+            "use_orig_params": [True],
         }
 
     @skip_if_lt_x_gpu(2)
