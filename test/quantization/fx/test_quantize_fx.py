@@ -4959,6 +4959,32 @@ class TestQuantizeFx(QuantizationTestCase):
         _test(prepare_fx, get_default_qconfig_mapping())
         _test(prepare_qat_fx, get_default_qat_qconfig_mapping())
 
+    def _validate_qconfig_against_backend_config_constraints(
+            self,
+            model: torch.nn.Module,
+            qconfig: QConfig,
+            backend_config: BackendConfig,
+            satisfies_constraints: bool):
+        """
+        Helper method to validate whether `qconfig` satisfies the constraints specified in `backend_config`.
+        """
+        qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
+        example_inputs = (torch.rand((1, 30), dtype=torch.float),)
+        model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
+        model(*example_inputs)
+        model = convert_fx(model, backend_config=backend_config)
+        if satisfies_constraints:
+            expected_node_occurrence = {
+                ns.call_module(torch.ao.nn.quantized.Linear) : 1,
+                ns.call_module(torch.nn.Linear) : 0,
+            }
+        else:
+            expected_node_occurrence = {
+                ns.call_module(torch.ao.nn.quantized.Linear) : 0,
+                ns.call_module(torch.nn.Linear) : 1,
+            }
+        self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+
     def test_backend_config_quantization_range(self):
         """
         Check that quantization ranges specified through the BackendConfig are reflected in
@@ -4998,15 +5024,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 .set_reference_quantized_module(nnqr.Linear))
 
         def validate_qconfig(qconfig: QConfig, satisfies_constraints: bool):
-            model = MyModel()
-            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
-            example_inputs = (torch.rand((1, 30), dtype=torch.float),)
-            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
-            model(*example_inputs)
-            model = convert_fx(model, backend_config=backend_config)
-            linear_module = torch.ao.nn.quantized.Linear if satisfies_constraints else torch.nn.Linear
-            expected_node_occurrence = {ns.call_module(linear_module) : 1}
-            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+            self._validate_qconfig_against_backend_config_constraints(
+                MyModel(), qconfig, backend_config, satisfies_constraints)
 
         # Case 1: QConfig ranges fit within backend ranges, OK
         qconfig1 = QConfig(
@@ -5057,15 +5076,8 @@ class TestQuantizeFx(QuantizationTestCase):
                 .set_reference_quantized_module(nnqr.Linear))
 
         def validate_qconfig(qconfig: QConfig, satisfies_constraints: bool):
-            model = MyModel()
-            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Linear, qconfig)
-            example_inputs = (torch.rand((1, 30), dtype=torch.float),)
-            model = prepare_fx(model, qconfig_mapping, example_inputs, backend_config=backend_config)
-            model(*example_inputs)
-            model = convert_fx(model, backend_config=backend_config)
-            linear_module = torch.ao.nn.quantized.Linear if satisfies_constraints else torch.nn.Linear
-            expected_node_occurrence = {ns.call_module(linear_module) : 1}
-            self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
+            self._validate_qconfig_against_backend_config_constraints(
+                MyModel(), qconfig, backend_config, satisfies_constraints)
 
         # Case 1: QConfig min scale value == backend min scale value, OK
         qconfig1 = QConfig(
