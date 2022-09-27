@@ -14,9 +14,25 @@ class Operator {
   Operator(const Node* node, dnnl::graph::op::kind kind)
       : n(node), o(getId(node), kind, node->kind().toQualString()), k(kind) {}
 
+  // Returns output (index + 1) if the Value is a graph output.
+  // Otherwise returns 0
+  int32_t isGraphOutput(Value* v) {
+    int32_t i = 1;
+    for (const Value* output : v->owningGraph()->outputs()) {
+      if (v == output) {
+        return i;
+      }
+      i++;
+    }
+    return 0;
+  }
+
   Operator& setInputValue(Value* v) {
-    if (v->mustNotBeNone())
-      o.add_input(createLogicalTensor(v));
+    if (v->mustNotBeNone()) {
+      if (v->type()->kind() == c10::TensorType::Kind) {
+        o.add_input(createLogicalTensor(v));
+      }
+    }
     return *this;
   }
 
@@ -31,9 +47,36 @@ class Operator {
   }
 
   Operator& setOutputValue(Value* v) {
-    if (v->mustNotBeNone())
+    if (v->mustNotBeNone()) {
       o.add_output(createLogicalTensor(v));
+    }
     return *this;
+  }
+
+  // setOutputValue & setOutput require a pointer to the LLGA graph, as output
+  // logical tensors that are graph outputs should be connected to an End LLGA
+  // op. A value of NULL can be provided for the graph pointer in order to
+  // maintain their legacy functionality.
+  Operator& setOutputValue(Value* v, std::unique_ptr<dnnl::graph::graph>& g) {
+    if (v->mustNotBeNone()) {
+      auto output_tensor = createLogicalTensor(v);
+      o.add_output(output_tensor);
+      if (g) {
+        if (auto outputIndex = isGraphOutput(v)) {
+          dnnl::graph::op newEndNode(
+              LONG_MAX - outputIndex,
+              dnnl::graph::op::kind::End,
+              "EndNodeForGraphOutput");
+          newEndNode.add_input(output_tensor);
+          g->add_op(newEndNode);
+        }
+      }
+    }
+    return *this;
+  }
+
+  Operator& setOutput(std::unique_ptr<dnnl::graph::graph>& g, size_t offset) {
+    return setOutputValue(n->output(offset), g);
   }
 
   Operator& setOutput(size_t offset) {
@@ -41,9 +84,12 @@ class Operator {
   }
 
   template <typename... Ts>
-  Operator& setOutput(size_t offset, Ts... other) {
-    setOutput(offset);
-    return setOutput(other...);
+  Operator& setOutput(
+      std::unique_ptr<dnnl::graph::graph>& g,
+      size_t offset,
+      Ts... other) {
+    setOutput(g, offset);
+    return setOutput(g, other...);
   }
 
   template <typename Attr>
@@ -55,6 +101,10 @@ class Operator {
   template <typename F>
   Operator& setAttr(std::string name, const F& fn, size_t offset) {
     return setAttr(name, fn(n, offset));
+  }
+
+  static float ScalarToFloat(const Node* node, size_t offset) {
+    return toIValue(node->input(offset))->toScalar().to<float>();
   }
 
   static std::vector<int64_t> Ints(const Node* node, size_t offset) {
