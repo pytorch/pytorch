@@ -114,6 +114,9 @@ add_executable(test_jit
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${JIT_TEST_SRCS}
 )
+target_compile_options(test_jit PRIVATE "-fsanitize=undefined")
+target_link_libraries(test_jit PRIVATE "-fsanitize=undefined")
+
 
 target_link_libraries(
   test_jit PRIVATE flatbuffers)
