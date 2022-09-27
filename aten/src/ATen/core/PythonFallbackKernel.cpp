@@ -52,7 +52,7 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 
 
   // If Torch Dispatch Mode is active, use its PyInterpreter for dispatch
-  const auto& maybe_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_state();
+  const auto& maybe_torch_dispatch_mode_state = c10::impl::TorchDispatchModeTLS::get_mode();
   if (maybe_torch_dispatch_mode_state) {
     maybe_torch_dispatch_mode_state->pyinterpreter()->dispatch(op, stack);
     return;
