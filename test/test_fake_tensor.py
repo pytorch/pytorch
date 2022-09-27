@@ -438,9 +438,7 @@ class FakeTensorConstHandling(TestCase):
         def fn(tensors):
             max_size = torch.tensor([800, 1216], dtype=torch.int64)
             batch_shape = [len(tensors)] + list(tensors[0].shape[:-2]) + list(max_size)
-            batch_shape = batch_shape + [torch.tensor(2, dtype=torch.bool).cuda()]
-            batched_imgs = tensors[0].new_full(batch_shape, 0.0)
-            return batched_imgs
+            return tensors[0].new_full(batch_shape, 0.0)
 
         with self.assertRaises(torch._subclasses.fake_tensor.DataDependentOutputException):
             with torch._subclasses.fake_tensor.FakeTensorMode(throw_on_data_dependent_ops=True):
