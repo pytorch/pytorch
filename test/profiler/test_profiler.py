@@ -1383,7 +1383,7 @@ class TestTorchTidyProfiler(TestCase):
         self.assertNotEqual(allocate_new.ptr, allocation.ptr)
 
         # Deletion when `x` goes out of scope.
-        free_new = nodes[-1].extra_fields
+        free_new = [i for i in nodes if i.tag == torch._C._profiler._EventType.Allocation][-1].extra_fields
         self.assertIsInstance(free_new, torch._C._profiler._ExtraFields_Allocation)
         self.assertEqual(free_new.id, allocate_new.id)
         self.assertEqual(free_new.ptr, allocate_new.ptr)
