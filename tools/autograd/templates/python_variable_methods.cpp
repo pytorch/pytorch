@@ -147,13 +147,21 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
   }
 
   if (r.idx == 0) {
-    return wrap(self_.stride(r.toInt64(0)));
+    return torch::toPyObject(self_.sym_stride(r.toInt64(0)));
   } else if (r.idx == 1) {
     // yes, this is called strides in ATen.
-    IntArrayRef strides = self_.strides();
+    at::SymIntArrayRef strides = self_.sym_strides();
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
-    return THPUtils_packInt64Array(strides.size(), strides.data());
+    // TODO: consider factoring this out
+    THPObjectPtr tuple(PyTuple_New(strides.size()));
+    if (!tuple) throw python_error();
+    for (size_t i = 0; i != strides.size(); i++) {
+      PyObject* s = torch::toPyObject(strides[i]);
+      if (!s) throw python_error();
+      PyTuple_SET_ITEM(tuple.get(), i, s);
+    }
+    return tuple.release();
   }
   else if (r.idx == 2) {
     return wrap(self_.stride(r.dimname(0)));
@@ -232,7 +240,12 @@ static PyObject * THPVariable_numel(PyObject* self, PyObject* args)
    if (jit::tracer::isTracing()) {
      return wrap(jit::tracer::getNumelOf(self_));
    } else {
-     return THPUtils_packInt64(self_.numel());
+     auto si = self_.sym_numel();
+     if (si.is_symbolic()) {
+       return py::cast(si.toSymIntNodeImpl()).release().ptr();
+     } else {
+       return THPUtils_packInt64(si.as_int_unchecked());
+     }
    }
    END_HANDLE_TH_ERRORS
 }
@@ -1146,7 +1159,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
@@ -1162,7 +1175,7 @@ static PyObject* THPVariable_set_(
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
         "Expected a Storage of type ", self.dtype(),
-        " or an _UntypedStorage, but got type ", storage_scalar_type,
+        " or an UntypedStorage, but got type ", storage_scalar_type,
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self,
                               Storage source,

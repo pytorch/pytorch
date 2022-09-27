@@ -13,7 +13,7 @@ bool hasNoNodes(Block* block) {
 
 bool hasTrivialSubBlocks(Node* node) {
   const auto blocks = node->blocks();
-  DCHECK_EQ(blocks.size(), 2);
+  TORCH_DCHECK_EQ(blocks.size(), 2);
 
   return hasNoNodes(blocks[0]) && hasNoNodes(blocks[1]);
 }

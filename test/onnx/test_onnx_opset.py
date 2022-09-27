@@ -4,13 +4,13 @@ import io
 import itertools
 
 import onnx
-from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
 from torch.nn import Module
 from torch.onnx import producer_name, producer_version
 from torch.onnx._globals import GLOBALS
+from torch.testing._internal import common_utils
 
 
 def check_onnx_opset_operator(
@@ -70,7 +70,7 @@ def check_onnx_opsets_operator(
         check_onnx_opset_operator(model, ops[opset_version], opset_version)
 
 
-class TestONNXOpset(TestCase):
+class TestONNXOpset(common_utils.TestCase):
     def test_opset_fallback(self):
         class MyModule(Module):
             def forward(self, x):
@@ -118,7 +118,7 @@ class TestONNXOpset(TestCase):
         x = torch.arange(1.0, 6.0, requires_grad=True)
         k = torch.tensor(3)
         module = MyModuleDynamic()
-        check_onnx_opsets_operator(module, [x, k], ops, opset_versions=[10])
+        check_onnx_opsets_operator(module, (x, k), ops, opset_versions=[10])
 
     def test_maxpool(self):
         module = torch.nn.MaxPool1d(2, stride=1)
@@ -524,4 +524,4 @@ class TestONNXOpset(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()

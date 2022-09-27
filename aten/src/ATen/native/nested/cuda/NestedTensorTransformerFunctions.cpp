@@ -60,45 +60,46 @@ Tensor nested_from_padded_cuda(
     auto input_size_ptr = output_size_ptr + target_size_sizes.numel();
     auto offsets_ptr = input_size_ptr + padded_sizes_tensor.numel();
 
+    Tensor padded_contiguous = padded.contiguous();
     if (padded.dtype() == kFloat) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded.data_ptr<float>(),
+            padded_contiguous.data_ptr<float>(),
             output.data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 2,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 2,
+            padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded.data_ptr<float>(),
+            padded_contiguous.data_ptr<float>(),
             output.data_ptr<float>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 1,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 1,
+            padded_contiguous.sizes()[0]);
       }
     } else if (padded.dtype() == kHalf) {
       if (do_transform_0213) {
         remove_padding_transform0213_kernelLauncher(
-            padded.data_ptr<c10::Half>(),
+            padded_contiguous.data_ptr<c10::Half>(),
             output.data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 2,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 2,
+            padded_contiguous.sizes()[0]);
       } else {
         remove_padding_kernelLauncher(
-            padded.data_ptr<c10::Half>(),
+            padded_contiguous.data_ptr<c10::Half>(),
             output.data_ptr<c10::Half>(),
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded.dim() - 1,
-            padded.sizes()[0]);
+            padded_contiguous.dim() - 1,
+            padded_contiguous.sizes()[0]);
       }
     } else {
       AT_ERROR("Only support fp32/fp16 for padded input");
@@ -135,7 +136,9 @@ Tensor NestedTensor_to_padded_tensor_cuda(
       (t.dtype() == at::kFloat || t.dtype() == at::kDouble ||
        t.dtype() == at::kHalf)) {
     auto* nt_input = get_nested_tensor_impl(t);
-    TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
+    TORCH_CHECK(
+        nested_tensor_impl_is_contiguous(nt_input),
+        "for now to_padded_tensor only supports contiguous nested tensor");
     const auto& nt_buffer = nt_input->get_buffer();
 
     if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0) &&
@@ -202,5 +205,6 @@ Tensor NestedTensor_to_padded_tensor_cuda(
   }
   return NestedTensor_to_padded_tensor_generic(t, padding, output_size);
 }
+
 } // namespace native
 } // namespace at

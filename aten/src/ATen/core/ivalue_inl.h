@@ -215,6 +215,14 @@ inline at::Generator IValue::toGenerator() const& {
   AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
 }
+inline c10::SymInt IValue::toSymInt() const {
+  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  if (isSymInt()) {
+    return c10::SymInt::toSymInt(toIntrusivePtr<c10::SymIntNodeImpl>());
+  } else {
+    return c10::SymInt(payload.u.as_int);
+  }
+}
 
 namespace ivalue {
 
@@ -498,6 +506,7 @@ struct TORCH_API TupleElements {
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
       return elementsInline_[idx];
     } else {
+      TORCH_CHECK(idx < elementsVector_.size(), "TupleElements: invalid index Index = ", idx, "; Length = ", elementsVector_.size());
       return elementsVector_.at(idx);
     }
   }

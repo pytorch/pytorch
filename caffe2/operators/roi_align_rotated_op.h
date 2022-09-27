@@ -27,10 +27,10 @@ class RoIAlignRotatedOp final : public Operator<Context> {
         sampling_ratio_(
             this->template GetSingleArgument<int>("sampling_ratio", -1)),
         aligned_(this->template GetSingleArgument<bool>("aligned", false)) {
-    DCHECK_GT(spatial_scale_, 0);
-    DCHECK_GT(pooled_height_, 0);
-    DCHECK_GT(pooled_width_, 0);
-    DCHECK_GE(sampling_ratio_, 0);
+    TORCH_DCHECK_GT(spatial_scale_, 0);
+    TORCH_DCHECK_GT(pooled_height_, 0);
+    TORCH_DCHECK_GT(pooled_width_, 0);
+    TORCH_DCHECK_GE(sampling_ratio_, 0);
     DCHECK(order_ == StorageOrder::NCHW || order_ == StorageOrder::NHWC);
   }
   USE_OPERATOR_CONTEXT_FUNCTIONS;

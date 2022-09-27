@@ -76,7 +76,7 @@ def _symbolic_argument_count(func):
 
 
 def _all_symbolics_schemas():
-    symbolics_schemas: Dict[str, _TorchSchema] = dict()
+    symbolics_schemas: Dict[str, _TorchSchema] = {}
 
     for domain, version in symbolic_registry._registry:
         for opname, sym_func in symbolic_registry._registry[(domain, version)].items():

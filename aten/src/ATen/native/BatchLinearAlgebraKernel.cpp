@@ -128,7 +128,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
 }
 
 template <typename scalar_t>
-void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vecs_, int64_t* info_ptr) {
+void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vecs_, int* info_ptr) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(false, "Calling torch.eig on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
@@ -158,16 +158,14 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
     // call lapackEig once to get the optimal size for work data
     scalar_t wkopt;
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int info;
     lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
-      nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork_data, &info);
+      nullptr, 1, vecs_data, ldvr, &wkopt, -1, rwork_data, info_ptr);
     int lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
 
     // call again to do the actual work
     Tensor work = at::empty({lwork}, self.dtype());
     lapackEig<scalar_t, value_t>('N', jobvr, n, self_data, n, wr,
-      nullptr, 1, vecs_data, ldvr, work.data_ptr<scalar_t>(), lwork, rwork_data, &info);
-    *info_ptr = info;
+      nullptr, 1, vecs_data, ldvr, work.data_ptr<scalar_t>(), lwork, rwork_data, info_ptr);
   }
 #endif
 }
@@ -200,12 +198,12 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
                  : Tensor();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t info;
+  auto infos = at::zeros({}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cpu", [&]{
-    apply_eig<scalar_t>(self_, eigenvectors, vals_, vecs_, &info);
+    apply_eig<scalar_t>(self_, eigenvectors, vals_, vecs_, infos.data_ptr<int>());
   });
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-  singleCheckErrors(info, "eig_cpu");
+  at::_linalg_check_errors(infos, "eig", /*is_matrix*/true);
 
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }

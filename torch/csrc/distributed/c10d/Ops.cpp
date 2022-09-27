@@ -18,17 +18,25 @@ c10::intrusive_ptr<ProcessGroup::Work> broadcast_(
           root_rank, root_tensor, std::chrono::milliseconds(timeout)});
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
+std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>
+allreduce_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t reduce_op,
     int64_t timeout) {
   auto tensor_vec = tensors.vec();
-  return process_group->allreduce(
+  auto work = process_group->allreduce(
       tensor_vec,
       AllreduceOptions{
           static_cast<ReduceOp>(reduce_op),
           std::chrono::milliseconds(timeout)});
+
+  // Return input tensors as output tensors to make inplace allreduce look like
+  // a functional API, so that make_fx can correctly build the dependencies in
+  // the graph later.
+  return std::
+      tuple<std::vector<at::Tensor>, c10::intrusive_ptr<ProcessGroup::Work>>(
+          std::move(tensor_vec), work);
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather_(
@@ -142,7 +150,11 @@ TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
   m.class_<ProcessGroup>("ProcessGroup").def(torch::init<int64_t, int64_t>());
-  m.class_<ProcessGroup::Work>("Work").def(torch::init<>());
+  m.class_<ProcessGroup::Work>("Work")
+      .def(torch::init<>())
+      .def("wait", [](const c10::intrusive_ptr<ProcessGroup::Work>& self) {
+        self->wait();
+      });
   // It's important to register the op to the CompositeExplicitAutograd key to
   // enable
   // __torch_dispatch__.
@@ -209,16 +221,19 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce(
     const AllreduceOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allreduce_", "")
-                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                       .typed<std::tuple<
+                           std::vector<at::Tensor>,
+                           c10::intrusive_ptr<ProcessGroup::Work>>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t,
                            int64_t)>();
-  return op.call(
+
+  return std::get<1>(op.call(
       tensors,
       process_group,
       static_cast<uint64_t>(opts.reduceOp),
-      opts.timeout.count());
+      opts.timeout.count()));
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather(

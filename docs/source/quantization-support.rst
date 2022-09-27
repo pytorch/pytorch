@@ -312,16 +312,16 @@ like linear + relu.
 
     LinearReLU
 
-torch.nn.qat
+torch.ao.nn.qat
 ~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.qat
-.. automodule:: torch.nn.qat.modules
+.. automodule:: torch.ao.nn.qat
+.. automodule:: torch.ao.nn.qat.modules
 
 This module implements versions of the key nn modules **Conv2d()** and
 **Linear()** which run in FP32 but with rounding applied to simulate the
 effect of INT8 quantization.
 
-.. currentmodule:: torch.nn.qat
+.. currentmodule:: torch.ao.nn.qat
 
 .. autosummary::
     :toctree: generated
@@ -332,16 +332,16 @@ effect of INT8 quantization.
     Conv3d
     Linear
 
-torch.nn.qat.dynamic
+torch.ao.nn.qat.dynamic
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.qat.dynamic
-.. automodule:: torch.nn.qat.dynamic.modules
+.. automodule:: torch.ao.nn.qat.dynamic
+.. automodule:: torch.ao.nn.qat.dynamic.modules
 
 This module implements versions of the key nn modules such as **Linear()**
 which run in FP32 but with rounding applied to simulate the effect of INT8
 quantization and will be dynamically quantized during inference.
 
-.. currentmodule:: torch.nn.qat.dynamic
+.. currentmodule:: torch.ao.nn.qat.dynamic
 
 .. autosummary::
     :toctree: generated
@@ -350,15 +350,16 @@ quantization and will be dynamically quantized during inference.
 
     Linear
 
-torch.nn.quantized
+torch.ao.nn.quantized
 ~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.quantized
-.. automodule:: torch.nn.quantized.modules
+.. automodule:: torch.ao.nn.quantized
+   :noindex:
+.. automodule:: torch.ao.nn.quantized.modules
 
 This module implements the quantized versions of the nn layers such as
 ~`torch.nn.Conv2d` and `torch.nn.ReLU`.
 
-.. currentmodule:: torch.nn.quantized
+.. currentmodule:: torch.ao.nn.quantized
 
 .. autosummary::
     :toctree: generated
@@ -390,15 +391,15 @@ This module implements the quantized versions of the nn layers such as
     InstanceNorm2d
     InstanceNorm3d
 
-torch.nn.quantized.functional
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.quantized.functional
+torch.ao.nn.quantized.functional
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.quantized.functional
 
 This module implements the quantized versions of the functional layers such as
 ~`torch.nn.functional.conv2d` and `torch.nn.functional.relu`. Note:
 :meth:`~torch.nn.functional.relu` supports quantized inputs.
 
-.. currentmodule:: torch.nn.quantized.functional
+.. currentmodule:: torch.ao.nn.quantized.functional
 
 .. autosummary::
     :toctree: generated
@@ -429,7 +430,7 @@ This module implements the quantized versions of the functional layers such as
     upsample_nearest
 
 torch.nn.quantizable
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 This module implements the quantizable versions of some of the nn layers.
 These modules can be used in conjunction with the custom module mechanism,
@@ -446,16 +447,16 @@ by providing the ``custom_module_config`` argument to both prepare and convert.
     MultiheadAttention
 
 
-torch.nn.quantized.dynamic
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.quantized.dynamic
-.. automodule:: torch.nn.quantized.dynamic.modules
+torch.ao.nn.quantized.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.quantized.dynamic
+.. automodule:: torch.ao.nn.quantized.dynamic.modules
 
 Dynamically quantized :class:`~torch.nn.Linear`, :class:`~torch.nn.LSTM`,
 :class:`~torch.nn.LSTMCell`, :class:`~torch.nn.GRUCell`, and
 :class:`~torch.nn.RNNCell`.
 
-.. currentmodule:: torch.nn.quantized.dynamic
+.. currentmodule:: torch.ao.nn.quantized.dynamic
 
 .. autosummary::
     :toctree: generated
@@ -534,3 +535,5 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. These modules are missing docs. Adding them here only for tracking
 .. automodule:: torch.nn.quantizable
 .. automodule:: torch.nn.quantizable.modules
+.. automodule:: torch.nn.quantized
+   :noindex:

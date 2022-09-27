@@ -94,13 +94,13 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
     Placeholder selfPlaceholder;
     Placeholder otherPlaceholder;
 
-    if (is_self_scalar) {
+    if (is_self_scalar && !self.is_mps()) {
       feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), getMPSScalarType(self.scalar_type()));
     } else {
       selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
-    if (is_other_scalar) {
+    if (is_other_scalar && !other.is_mps()) {
       feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), getMPSScalarType(other.scalar_type()));
     } else {
       otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
@@ -153,8 +153,10 @@ void div_mode_template(const Tensor& self, const Tensor& other,
 
 void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output, std::string op_name)
 {
-  if (alpha.toDouble() == 0.0)
+  if (alpha.toDouble() == 0.0) {
     const_cast<Tensor&>(output) = self.clone();
+    return;
+  }
 
   const bool alpha_has_value = alpha.toDouble() != 1.0;
   if (alpha_has_value) {
@@ -401,5 +403,6 @@ TORCH_IMPL_FUNC(logaddexp2_out_mps) (const Tensor& self, const Tensor& other, co
         runMPSGraph(stream, cachedGraph->graph(), feeds, results);
       }
 }
+
 } // namespace native
 } // namespace at

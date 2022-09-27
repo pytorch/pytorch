@@ -2130,7 +2130,7 @@ def embedding(
                                     is renormalized to have norm :attr:`max_norm`.
                                     Note: this will modify :attr:`weight` in-place.
         norm_type (float, optional): The p of the p-norm to compute for the :attr:`max_norm` option. Default ``2``.
-        scale_grad_by_freq (boolean, optional): If given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): If given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
         sparse (bool, optional): If ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
@@ -2144,9 +2144,10 @@ def embedding(
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = torch.tensor([[1,2,4,5],[4,3,2,9]])
+        >>> input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]])
         >>> # an embedding matrix containing 10 tensors of size 3
         >>> embedding_matrix = torch.rand(10, 3)
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding(input, embedding_matrix)
         tensor([[[ 0.8490,  0.9625,  0.6753],
                  [ 0.9666,  0.7761,  0.6108],
@@ -2237,10 +2238,10 @@ def embedding_bag(
                                     Note: this will modify :attr:`weight` in-place.
         norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the :attr:`max_norm` option.
                                      Default ``2``.
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+        scale_grad_by_freq (bool, optional): if given, this will scale gradients by the inverse of frequency of
                                                 the words in the mini-batch. Default ``False``.
                                                 Note: this option is not supported when ``mode="max"``.
-        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+        mode (str, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
                                  Default: ``"mean"``
         sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
                                  :class:`torch.nn.Embedding` for more details regarding sparse gradients.
@@ -2284,6 +2285,7 @@ def embedding_bag(
         >>> # a batch of 2 samples of 4 indices each
         >>> input = torch.tensor([1,2,4,5,4,3,2,9])
         >>> offsets = torch.tensor([0,4])
+        >>> # xdoctest: +IGNORE_WANT("non-deterministic")
         >>> F.embedding_bag(input, embedding_matrix, offsets)
         tensor([[ 0.3397,  0.3552,  0.5545],
                 [ 0.5893,  0.4386,  0.5882]])
@@ -2592,7 +2594,7 @@ def ctc_loss(
             Lengths of the targets
         blank (int, optional):
             Blank label. Default :math:`0`.
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output losses will be divided by the target lengths and
             then the mean over the batch is taken, ``'sum'``: the output will be
@@ -2662,7 +2664,7 @@ def nll_loss(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2675,7 +2677,7 @@ def nll_loss(
         >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
         >>> target = torch.tensor([1, 0, 4])
-        >>> output = F.nll_loss(F.log_softmax(input), target)
+        >>> output = F.nll_loss(F.log_softmax(input, dim=1), target)
         >>> output.backward()
     """
     if has_torch_function_variadic(input, target, weight):
@@ -2729,7 +2731,7 @@ def poisson_nll_loss(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -2779,7 +2781,7 @@ def gaussian_nll_loss(
             in the input (heteroscedastic), or a single one (homoscedastic).
         full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
         eps (float, optional): value added to var, for stability. Default: 1e-6.
-        reduction (string, optional): specifies the reduction to apply to the output:
+        reduction (str, optional): specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the output is the average of all batch member losses,
             ``'sum'``: the output is the sum of all batch member losses.
@@ -2871,7 +2873,7 @@ def kl_div(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'batchmean'`` | ``'sum'`` | ``'mean'``.
             ``'none'``: no reduction will be applied
             ``'batchmean'``: the sum of the output will be divided by the batchsize
@@ -2937,12 +2939,12 @@ def cross_entropy(
     reduction: str = "mean",
     label_smoothing: float = 0.0,
 ) -> Tensor:
-    r"""This criterion computes the cross entropy loss between input and target.
+    r"""This criterion computes the cross entropy loss between input logits and target.
 
     See :class:`~torch.nn.CrossEntropyLoss` for details.
 
     Args:
-        input (Tensor) : Predicted unnormalized scores (often referred to as logits);
+        input (Tensor) : Predicted unnormalized logits;
             see Shape section below for supported shapes.
         target (Tensor) : Ground truth class indices or class probabilities;
             see Shape section below for supported shapes.
@@ -2962,7 +2964,7 @@ def cross_entropy(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -3047,7 +3049,7 @@ def binary_cross_entropy(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -3117,7 +3119,7 @@ def binary_cross_entropy_with_logits(
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
             batch element instead and ignores :attr:`size_average`. Default: ``True``
-        reduction (string, optional): Specifies the reduction to apply to the output:
+        reduction (str, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
@@ -3695,7 +3697,7 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
-        mode (string): algorithm used for upsampling:
+        mode (str): algorithm used for upsampling:
             ``'nearest'`` | ``'linear'`` | ``'bilinear'`` | ``'bicubic'`` |
             ``'trilinear'``. Default: ``'nearest'``
         align_corners (bool, optional): Geometrically, we consider the pixels of the
@@ -4999,7 +5001,7 @@ def multi_head_attention_forward(
         - attn_output_weights: Only returned when ``need_weights=True``. If ``average_attn_weights=True``, returns
           attention weights averaged across heads of shape :math:`(L, S)` when input is unbatched or
           :math:`(N, L, S)`, where :math:`N` is the batch size, :math:`L` is the target sequence length, and
-          :math:`S` is the source sequence length. If ``average_weights=False``, returns attention weights per
+          :math:`S` is the source sequence length. If ``average_attn_weights=False``, returns attention weights per
           head of shape :math:`(num_heads, L, S)` when input is unbatched or :math:`(N, num_heads, L, S)`.
     """
     tens_ops = (query, key, value, in_proj_weight, in_proj_bias, bias_k, bias_v, out_proj_weight, out_proj_bias)

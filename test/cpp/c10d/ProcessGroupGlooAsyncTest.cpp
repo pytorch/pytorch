@@ -11,7 +11,6 @@
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
-using c10d::ProcessGroup;
 
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
@@ -94,7 +93,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     }
   }
 
-  void wait(c10::intrusive_ptr<ProcessGroup::Work>& work) {
+  void wait(c10::intrusive_ptr<c10d::ProcessGroup::Work>& work) {
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }

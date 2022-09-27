@@ -451,7 +451,6 @@ function(torch_compile_options libname)
         -Wno-unused-parameter
         -Wno-unused-function
         -Wno-unused-result
-        -Wno-unused-local-typedefs
         -Wno-missing-field-initializers
         -Wno-write-strings
         -Wno-unknown-pragmas
@@ -568,5 +567,28 @@ function(torch_update_find_cuda_flags)
                     "    CUDA_NVCC_FLAGS_RELEASE        = ${FLAGS_RELEASE}\n"
                     "    CUDA_NVCC_FLAGS_RELWITHDEBINFO = ${FLAGS_RELWITHDEBINFO}\n"
                     "    CUDA_NVCC_FLAGS_MINSIZEREL     = ${FLAGS_MINSIZEREL}")
+  endif()
+endfunction()
+
+##############################################################################
+# CHeck if given flag is supported and append it to provided outputvar
+# Also define HAS_UPPER_CASE_FLAG_NAME variable
+# Usage:
+#   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
+function(append_cxx_flag_if_supported flag outputvar)
+    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+    check_cxx_compiler_flag("${flag}" ${_FLAG_NAME})
+    if(${_FLAG_NAME})
+        string(APPEND ${outputvar} " ${flag}")
+        set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(target_compile_options_if_supported target flag)
+  set(_compile_options "")
+  append_cxx_flag_if_supported("${flag}" _compile_options)
+  if(NOT "${_compile_options}" STREQUAL "")
+    target_compile_options(${target} PRIVATE ${flag})
   endif()
 endfunction()

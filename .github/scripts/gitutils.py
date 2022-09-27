@@ -305,8 +305,8 @@ def patterns_to_regex(allowed_patterns: List[str]) -> Any:
     """
     pattern is glob-like, i.e. the only special sequences it has are:
       - ? - matches single character
-      - * - matches any non-folder separator characters
-      - ** - matches any characters
+      - * - matches any non-folder separator characters or no character
+      - ** - matches any characters or no character
       Assuming that patterns are free of braces and backslashes
       the only character that needs to be escaped are dot and plus
     """
@@ -324,9 +324,9 @@ def patterns_to_regex(allowed_patterns: List[str]) -> Any:
             elif c == "*":
                 if pattern_.peek() == "*":
                     next(pattern_)
-                    rc += ".+"
+                    rc += ".*"
                 else:
-                    rc += "[^/]+"
+                    rc += "[^/]*"
             else:
                 rc += c
     rc += ")"

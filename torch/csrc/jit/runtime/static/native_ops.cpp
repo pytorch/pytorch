@@ -92,7 +92,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       auto dict_type = n->output()->type()->expect<DictType>();
       const auto num_inputs = n->inputs().size();
-      DCHECK_EQ(num_inputs % 2, 0);
+      TORCH_DCHECK_EQ(num_inputs % 2, 0);
       return [dict_type = std::move(dict_type),
               num_inputs,
               dict_size = num_inputs / 2](ProcessedNode* p_node) {
@@ -204,15 +204,27 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::list,
     aten_list,
     [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        const auto str = p_node->Input(0).toStringRef();
-        c10::List<std::string> chars;
-        chars.reserve(str.size());
-        for (auto c : str) {
-          chars.emplace_back(1, c);
-        }
-        p_node->Output(0) = std::move(chars);
-      };
+      if (n->matches(torch::schema("aten::list(str t) -> str[]"))) {
+        return [](ProcessedNode* p_node) {
+          const auto str = p_node->Input(0).toStringRef();
+          c10::List<std::string> chars;
+          chars.reserve(str.size());
+          for (auto c : str) {
+            chars.emplace_back(1, c);
+          }
+          p_node->Output(0) = std::move(chars);
+        };
+      }
+
+      if (n->matches(torch::schema("aten::list.t(t[] l) -> t[]"))) {
+        return [](ProcessedNode* p_node) {
+          const auto input = p_node->Input(0).toList();
+          p_node->Output(0) = input.copy();
+        };
+      }
+
+      LogAndDumpSchema(n);
+      return nullptr;
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
@@ -257,19 +269,41 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
-REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    aten::index_put,
-    aten_index_put,
-    [](Node* n) -> SROperator {
-      return [](ProcessedNode* p_node) {
-        const auto& self = p_node->Input(0).toTensor();
-        const auto& indices = p_node->Input(1).toOptionalTensorList();
-        const auto& values = p_node->Input(2).toTensor();
-        const auto accumulate = p_node->Input(3).toBool();
-        p_node->Output(0) =
-            at::native::index_put(self, indices, values, accumulate);
-      };
-    });
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::index_put, aten_index_put, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::index_put(Tensor self, Tensor?[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& indices = p_node->Input(1).toOptionalTensorList();
+      const auto& values = p_node->Input(2).toTensor();
+      const auto accumulate = p_node->Input(3).toBool();
+      p_node->Output(0) =
+          at::native::index_put(self, indices, values, accumulate);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "aten::index_put(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto indices = p_node->Input(1).toTensorList();
+
+      c10::List<c10::optional<at::Tensor>> opt_list_indices;
+      opt_list_indices.reserve(indices.size());
+      for (const auto& ten : indices) {
+        opt_list_indices.push_back(ten);
+      }
+
+      const auto& values = p_node->Input(2).toTensor();
+      const auto accumulate = p_node->Input(3).toBool();
+      p_node->Output(0) =
+          at::native::index_put(self, opt_list_indices, values, accumulate);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
+});
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::item,
@@ -699,7 +733,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         // MemoryPlanner::deallocate. MemoryPlanner knows about this
         // and will safely clean it up by using the corresponding
         // destroyBorrow method.
-        DCHECK_NE(&assignFrom, &p_node->Output(0));
+        TORCH_DCHECK_NE(&assignFrom, &p_node->Output(0));
         // MemoryPlanner should have cleaned this up!
         DCHECK(p_node->Output(0).isNone());
         p_node->Output(0) =
@@ -853,7 +887,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::If,
     prim_If,
     [](Node* node) -> SROperator {
-      DCHECK_EQ(node->blocks().size(), 2);
+      TORCH_DCHECK_EQ(node->blocks().size(), 2);
       const Block* true_block = node->blocks().at(0);
       const Block* false_block = node->blocks().at(1);
 
@@ -886,7 +920,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto* metadata = p_node->metadata();
             DCHECK(metadata);
             auto& block_runners = metadata->block_runners();
-            DCHECK_EQ(block_runners.size(), 2);
+            TORCH_DCHECK_EQ(block_runners.size(), 2);
             auto& runner = block_runners[!condition];
 
             auto output = runner({});
@@ -895,7 +929,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
               return;
             }
             auto& elems = output.toTupleRef().elements();
-            DCHECK_EQ(elems.size(), p_node->num_outputs());
+            TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
             for (const auto i : c10::irange(elems.size())) {
               p_node->Output(i) = elems[i];
             }
@@ -906,7 +940,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto* metadata = p_node->metadata();
             DCHECK(metadata);
             auto& block_runners = metadata->block_runners();
-            DCHECK_EQ(block_runners.size(), 2);
+            TORCH_DCHECK_EQ(block_runners.size(), 2);
             if (condition) {
               auto output = block_runners.front()({});
               DCHECK(output.isNone());
@@ -918,7 +952,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             auto* metadata = p_node->metadata();
             DCHECK(metadata);
             auto& block_runners = metadata->block_runners();
-            DCHECK_EQ(block_runners.size(), 2);
+            TORCH_DCHECK_EQ(block_runners.size(), 2);
             if (!condition) {
               auto output = block_runners.back()({});
               DCHECK(output.isNone());
@@ -934,7 +968,7 @@ namespace {
 
 std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {
   const auto num_inputs = p_node.num_inputs();
-  DCHECK_GE(num_inputs, 2);
+  TORCH_DCHECK_GE(num_inputs, 2);
   // The first two inputs to the loop node are the max trip count
   // and initial condition. We don't collect them here, since those
   // are not inputs for the sub-block.
@@ -1078,7 +1112,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           return;
         }
         auto& elems = future->value().toTupleRef().elements();
-        DCHECK_EQ(elems.size(), p_node->num_outputs());
+        TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
         for (const auto i : c10::irange(elems.size())) {
           p_node->Output(i) = elems[i];
         }
@@ -1096,7 +1130,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto* metadata = p_node->metadata();
         DCHECK(metadata);
         auto& block_runners = metadata->block_runners();
-        DCHECK_EQ(block_runners.size(), 1);
+        TORCH_DCHECK_EQ(block_runners.size(), 1);
         auto& runner = block_runners[0];
 
         auto args = collectLoopSubBlockInputs(*p_node);
@@ -1119,7 +1153,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         }
 
         const auto num_outputs = p_node->num_outputs();
-        DCHECK_EQ(args.size(), num_outputs + 1);
+        TORCH_DCHECK_EQ(args.size(), num_outputs + 1);
         for (const auto i : c10::irange(num_outputs)) {
           p_node->Output(i) = std::move(args[i + 1]);
         }
@@ -1184,7 +1218,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto num_inputs = pnode->num_inputs();
         auto stack = boxInputs(*pnode);
         format(stack, num_inputs);
-        DCHECK_EQ(stack.size(), 1);
+        TORCH_DCHECK_EQ(stack.size(), 1);
         pnode->Output(0) = std::move(stack[0]);
       };
     });
@@ -1272,7 +1306,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto elem_type = pnode->Input(2).toInt();
         std::vector<IValue> stack{input, dim, elem_type};
         toList(stack);
-        DCHECK_EQ(stack.size(), 1);
+        TORCH_DCHECK_EQ(stack.size(), 1);
         pnode->Output(0) = std::move(stack[0]);
       };
     });

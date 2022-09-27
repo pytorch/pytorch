@@ -9,7 +9,7 @@ created on that device. The selected device can be changed with a
 :any:`torch.cuda.device` context manager.
 
 However, once a tensor is allocated, you can do operations on it irrespective
-of the selected device, and the results will be always placed in on the same
+of the selected device, and the results will be always placed on the same
 device as the tensor.
 
 Cross-GPU operations are not allowed by default, with the exception of
@@ -355,7 +355,7 @@ Use of a caching allocator can interfere with memory checking tools such as
 
 The behavior of caching allocator can be controlled via environment variable
 ``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...``
+The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``max_split_size_mb`` prevents the allocator from splitting blocks larger

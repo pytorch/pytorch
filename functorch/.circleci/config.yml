@@ -1,0 +1,316 @@
+version: 2.1
+
+executors:
+  windows-cpu:
+    machine:
+      resource_class: windows.xlarge
+      image: windows-server-2019-vs2019:stable
+      shell: bash.exe
+
+  windows-gpu:
+    machine:
+      resource_class: windows.gpu.nvidia.medium
+      image: windows-server-2019-nvidia:stable
+      shell: bash.exe
+
+commands:
+  checkout_merge:
+    description: "checkout merge branch"
+    steps:
+      - checkout
+  designate_upload_channel:
+    description: "inserts the correct upload channel into ${BASH_ENV}"
+    steps:
+      - run:
+          name: adding UPLOAD_CHANNEL to BASH_ENV
+          command: |
+            our_upload_channel=nightly
+            # On tags upload to test instead
+            if [[ -n "${CIRCLE_TAG}" ]]; then
+              our_upload_channel=test
+            fi
+            echo "export UPLOAD_CHANNEL=${our_upload_channel}" >> ${BASH_ENV}
+
+binary_common: &binary_common
+  parameters:
+    # Edit these defaults to do a release`
+    build_version:
+      description: "version number of release binary; by default, build a nightly"
+      type: string
+      default: ""
+    pytorch_version:
+      description: "PyTorch version to build against; by default, use a nightly"
+      type: string
+      default: ""
+    # Don't edit these
+    python_version:
+      description: "Python version to build against (e.g., 3.7)"
+      type: string
+    cu_version:
+      description: "CUDA version to build against, in CU format (e.g., cpu or cu100)"
+      type: string
+    unicode_abi:
+      description: "Python 2.7 wheel only: whether or not we are cp27mu (default: no)"
+      type: string
+      default: ""
+    wheel_docker_image:
+      description: "Wheel only: what docker image to use"
+      type: string
+      default: "pytorch/manylinux-cuda101"
+  environment:
+    PYTHON_VERSION: << parameters.python_version >>
+    PYTORCH_VERSION: << parameters.pytorch_version >>
+    UNICODE_ABI: << parameters.unicode_abi >>
+    CU_VERSION: << parameters.cu_version >>
+
+jobs:
+  unittest_linux_cpu:
+    <<: *binary_common
+    machine:
+      image: "ubuntu-2004:202104-01"
+    resource_class: xlarge
+    steps:
+      - checkout
+      - run:
+          name: Setup
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/setup_env.sh
+      - run:
+          name: Install functorch
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/install.sh
+      - persist_to_workspace:
+          root: wheels
+          paths:
+            - "*"
+      - store_artifacts:
+          path: wheels
+      - run:
+          name: Run tests
+          command: .circleci/unittest/linux/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/linux/scripts/post_process.sh
+      - store_test_results:
+          path: test-reports
+
+  unittest_linux_gpu:
+    <<: *binary_common
+    machine:
+      # https://circleci.com/docs/2.0/configuration-reference/#available-linux-gpu-images
+      image: ubuntu-2004-cuda-11.4:202110-01
+    resource_class: gpu.nvidia.medium
+    steps:
+      - checkout
+      - run:
+          name: Setup
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/setup_env.sh
+      - run:
+          name: Install functorch
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/install.sh
+      - persist_to_workspace:
+          root: wheels
+          paths:
+            - "*"
+      - store_artifacts:
+          path: wheels
+      - run:
+          name: Run tests
+          command: .circleci/unittest/linux/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/linux/scripts/post_process.sh
+      - store_test_results:
+          path: test-reports
+
+  unittest_macos_cpu:
+    <<: *binary_common
+    macos:
+      xcode: "12.0"
+    resource_class: large
+    steps:
+      - checkout
+      - run:
+          name: Install wget
+          command: HOMEBREW_NO_AUTO_UPDATE=1 brew install wget
+          # Disable brew auto update which is very slow
+      - run:
+          name: Setup
+          command: |
+            touch ${BASH_ENV}
+            echo "export PARAMETERS_PYTHON_VERSION=<< parameters.python_version >>" >> ${BASH_ENV}
+            cat ${BASH_ENV}
+            # For some reason circleci isn't automatically sourcing this within the builds
+            source ${BASH_ENV} && .circleci/unittest/linux/scripts/setup_env.sh
+      - run:
+          name: Install functorch
+          command: .circleci/unittest/linux/scripts/install.sh
+      - run:
+          name: Run tests
+          command: .circleci/unittest/linux/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/linux/scripts/post_process.sh
+      - store_test_results:
+          path: test-results
+
+  unittest_windows_cpu:
+    <<: *binary_common
+    executor:
+      name: windows-cpu
+    steps:
+      - checkout
+      - designate_upload_channel
+      - run:
+          name: Generate cache key
+          # This will refresh cache on Sundays, nightly build should generate new cache.
+          command: echo "$(date +"%Y-%U")" > .circleci-weekly
+      - restore_cache:
+          keys:
+            - env-v2-windows-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci/unittest/windows/scripts/environment.yml" }}-{{ checksum ".circleci-weekly" }}
+      - run:
+          name: Setup
+          command: .circleci/unittest/windows/scripts/setup_env.sh
+      - save_cache:
+          key: env-v2-windows-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci/unittest/windows/scripts/environment.yml" }}-{{ checksum ".circleci-weekly" }}
+          paths:
+            - conda
+            - env
+      - run:
+          name: Install functorch
+          command: .circleci/unittest/windows/scripts/install.sh
+      - run:
+          name: Run tests
+          command: .circleci/unittest/windows/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/windows/scripts/post_process.sh
+      - store_test_results:
+          path: test-reports
+
+  unittest_windows_gpu:
+    <<: *binary_common
+    executor:
+      name: windows-gpu
+    environment:
+      CUDA_VERSION: "11.3"
+      PYTHON_VERSION: << parameters.python_version >>
+    steps:
+      - checkout
+      - designate_upload_channel
+      - run:
+          name: Generate cache key
+          # This will refresh cache on Sundays, nightly build should generate new cache.
+          command: echo "$(date +"%Y-%U")" > .circleci-weekly
+      - restore_cache:
+          keys:
+            - env-v2-windows-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci/unittest/windows/scripts/environment.yml" }}-{{ checksum ".circleci-weekly" }}
+      - run:
+          name: Setup
+          command: .circleci/unittest/windows/scripts/setup_env.sh
+      - save_cache:
+          key: env-v2-windows-{{ arch }}-py<< parameters.python_version >>-{{ checksum ".circleci/unittest/windows/scripts/environment.yml" }}-{{ checksum ".circleci-weekly" }}
+          paths:
+            - conda
+            - env
+      - run:
+          name: Install CUDA
+          command: packaging/windows/internal/cuda_install.bat
+      - run:
+          name: Update CUDA driver
+          command: packaging/windows/internal/driver_update.bat
+      - run:
+          name: Install functorch
+          command: .circleci/unittest/windows/scripts/install.sh
+      - run:
+          name: Run tests
+          command: .circleci/unittest/windows/scripts/run_test.sh
+      - run:
+          name: Post process
+          command: .circleci/unittest/windows/scripts/post_process.sh
+      - store_test_results:
+          path: test-reports
+
+  binary_win_wheel:
+    <<: *binary_common
+    executor: windows-cpu
+    steps:
+      - checkout_merge
+      - designate_upload_channel
+      - run:
+          name: Build wheel packages
+          command: |
+            set -ex
+            source packaging/windows/internal/vc_install_helper.sh
+            packaging/windows/internal/cuda_install.bat
+            packaging/build_wheel.sh
+      - store_artifacts:
+          path: dist
+      - persist_to_workspace:
+          root: dist
+          paths:
+            - "*"
+      - store_test_results:
+          path: build_results/
+
+workflows:
+  unittest:
+    jobs:
+      - unittest_linux_cpu:
+          name: unittest_linux_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.7", "3.8", "3.9", "3.10"]
+              cu_version: ["cpu"]
+      - unittest_linux_gpu:
+          name: unittest_linux_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.7", "3.8", "3.9", "3.10"]
+              cu_version: ["cu102"]
+
+      - unittest_macos_cpu:
+          name: unittest_macos_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.10"]
+              cu_version: ["cpu"]
+
+      - unittest_windows_cpu:
+          name: unittest_windows_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.9"]
+              cu_version: ["cpu"]
+
+      - unittest_windows_gpu:
+          name: unittest_windows_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.10"]
+              cu_version: ["cu113"]
+
+      - binary_win_wheel:
+          name: binary_win_wheel_<< matrix.cu_version >>_py<< matrix.python_version >>
+          matrix:
+            parameters:
+              python_version: ["3.7", "3.8", "3.9", "3.10"]
+              cu_version: ["cpu"]

@@ -7,8 +7,26 @@ on:
       - completed
 
 jobs:
+  # the conclusion field in the github context is sometimes null
+  # solution adapted from https://github.com/community/community/discussions/21090#discussioncomment-3226271
+  get_workflow_conclusion:
+    runs-on: ubuntu-latest
+    outputs:
+      conclusion: ${{ fromJson(steps.get_conclusion.outputs.data).conclusion }}
+    steps:
+      - name: Get workflow run conclusion
+        uses: octokit/request-action@v2.1.0
+        id: get_conclusion
+        with:
+          route: GET /repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/attempts/${{ github.event.workflow_run.run_attempt }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   upload-test-stats:
-    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    needs: get_workflow_conclusion
+    if:
+      github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' ||
+      needs.get_workflow_conclusion.outputs.conclusion == 'success' || needs.get_workflow_conclusion.outputs.conclusion == 'failure'
     runs-on: [self-hosted, linux.2xlarge]
     name: Upload test stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
 

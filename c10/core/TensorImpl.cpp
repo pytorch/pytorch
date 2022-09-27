@@ -6,6 +6,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
@@ -151,6 +152,8 @@ TensorImpl::TensorImpl(
     C10_LOG_API_USAGE_ONCE("tensor.create");
   }
 
+  // XXX: if updating keyset logic here also update
+  // _change_backend_component_keys
   bool inference_mode = c10::InferenceMode::is_enabled();
 
   // TODO: be more explicit about the full key set at call sites so we
@@ -179,9 +182,27 @@ TensorImpl::TensorImpl(
   if (!is_inference()) {
     version_counter_ = VariableVersion(/*version=*/0);
   }
-
   // we would also like to check that non-cpu devices have an index, but some
   // Caffe2 operators create Storages with default devices.
+}
+
+void TensorImpl::_change_backend_component_keys(c10::Device device) {
+  BackendComponent new_backend = toBackendComponent(device.type());
+  BackendComponent old_backend = key_set_.highestBackendKey();
+
+  // following logic TensorImpl::TensorImpl, update the BackendComponent related
+  // keys to correspond to device
+
+  // TODO: Autocoast should be a per-backend functionality key, once that change
+  // is made this key swap will not be necessary.
+  auto key_set =
+      key_set_ - c10::getAutocastRelatedKeySetFromBackend(old_backend);
+  key_set = key_set | c10::getAutocastRelatedKeySetFromBackend(new_backend);
+
+  // See note [Removing keys from DispatchKeySet Only Affects Functionality
+  // Keys]
+  key_set = key_set.remove_backend(old_backend);
+  key_set_ = key_set | DispatchKeySet(new_backend);
 }
 
 void TensorImpl::HandleResize() {
@@ -398,6 +419,20 @@ c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
   return sym_sizes_default();
 }
 
+c10::SymInt TensorImpl::sym_numel_custom() const {
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_numel(this);
+  }
+  return sym_numel_default();
+}
+
+c10::SymIntArrayRef TensorImpl::sym_strides_custom() const {
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_strides(this);
+  }
+  return sym_strides_default();
+}
+
 c10::Device TensorImpl::device_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->device(this);
@@ -505,17 +540,25 @@ template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
+  c10::intrusive_ptr<TensorImpl> r;
+  const auto& maybe_torch_dispatch_mode_state =
+      c10::impl::TorchDispatchModeTLS::get_state();
+  // TODO: do we have to exclude after Python dispatch key set?
+  if (maybe_torch_dispatch_mode_state &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
-    if (r) {
-      r->set_version_counter(std::forward<VariableVersion>(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
-    }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
+    r = maybe_torch_dispatch_mode_state->pyinterpreter()->detach(this);
+  } else if (
+      key_set_.has(DispatchKey::Python) &&
+      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
   }
+  if (r) {
+    r->set_version_counter(std::forward<VariableVersion>(version_counter));
+    r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+    return r;
+  }
+  // otherwise just copy the TensorImpl and not the PyObject.  Since
+  // the interpreter is dead no one can call us out on it
   auto impl = c10::make_intrusive<TensorImpl>(
       // No need to populate Storage; copy_tensor_metadata will do it for us.
       key_set_,
@@ -526,8 +569,13 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-  impl->refresh_numel();
-  impl->refresh_contiguous();
+
+  // We currently don't support refresh_numel() and refresh_contiguous(). It's
+  // plausible that we could support it, but currently done to unblock.
+  if (!has_symbolic_sizes_strides()) {
+    impl->refresh_numel();
+    impl->refresh_contiguous();
+  }
   return impl;
 }
 
@@ -560,6 +608,9 @@ void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl) {
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
+  dest_impl->has_symbolic_sizes_strides_ =
+      src_impl->has_symbolic_sizes_strides_;
+
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
@@ -799,6 +850,9 @@ void TensorImpl::ShareExternalPointer(
       data_type != ScalarType::Undefined,
       "To share with a raw external pointer you need to pass in an "
       "initialized data_type(TypeMeta).");
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "ShareExternalPointer() called on tensor with symbolic shape");
   if (!size_bytes) {
     size_bytes = numel_ * data_type.itemsize();
   }

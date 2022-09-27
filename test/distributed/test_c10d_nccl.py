@@ -61,8 +61,12 @@ if TEST_WITH_DEV_DBG_ASAN:
 # bfloat16 is only supported by CUDA 11+
 BFLOAT16_AVAILABLE = (
     torch.cuda.is_available()
-    and torch.version.cuda is not None
-    and int(torch.version.cuda.split('.')[0]) >= 11)
+    and
+    (
+        (torch.version.cuda is not None and int(torch.version.cuda.split('.')[0]) >= 11)
+        or torch.version.hip is not None
+    )
+)
 
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
@@ -1825,7 +1829,6 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_grad_layout_1devicemodule_1replicaperprocess(self):
         dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
         # Tells DDP to use just one device.
@@ -2097,7 +2100,6 @@ class DistributedDataParallelTest(
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_bf16_compress_wrapper_nccl(self):
         self._test_bf16_compress_wrapper()
 
@@ -2138,7 +2140,6 @@ class DistributedDataParallelTest(
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     def test_bf16_compress_wrapper_is_view(self):
         self._test_bf16_compress_wrapper(gradient_as_bucket_view=True)
 
@@ -2183,7 +2184,7 @@ class DistributedDataParallelTest(
             process_group, allreduce_with_then_hook
         )
 
-        # check whether the grads are equal to what allreduce returns multuplied by 5.
+        # check whether the grads are equal to what allreduce returns multiplied by 5.
         # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(gpu_model, 8, 1.25 * torch.ones(2, 2))
 
@@ -2745,6 +2746,27 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @with_dist_debug_levels(levels=["OFF"])
     def test_nccl_warn_not_in_group_debug_off(self):
         self._test_warn_not_in_group(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_nncl_rank_membership(self):
+        self._test_rank_membership(backend="nccl")
+
+
+class CompilerTest(test_c10d_common.CompilerTest):
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _get_default_group(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        return c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+    @skip_if_lt_x_gpu(2)
+    def test_work_wait_gpu(self):
+        self._test_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
+
 
 if __name__ == "__main__":
     assert (

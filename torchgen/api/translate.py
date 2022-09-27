@@ -1,35 +1,36 @@
-from typing import Dict, Sequence, List, NoReturn, Union
+from typing import Dict, List, NoReturn, Sequence, Union
+
 from torchgen.api.types import (
-    ListCType,
-    tensorListT,
     BaseCType,
     Binding,
-    ConstRefCType,
-    Expr,
-    MutRefCType,
-    OptionalCType,
-    NamedCType,
-    SpecialArgName,
-    tensorT,
-    memoryFormatT,
-    tensorOptionsT,
-    scalarTypeT,
-    SymIntT,
-    symIntArrayRefT,
     boolT,
+    ConstRefCType,
     deviceT,
-    layoutT,
-    optionalTensorRefT,
-    iTensorListRefT,
-    iOptTensorListRefT,
-    scalarT,
-    optionalScalarRefT,
-    VectorCType,
-    longT,
+    Expr,
     intArrayRefT,
-    scalar_t,
+    iOptTensorListRefT,
+    iTensorListRefT,
+    layoutT,
+    ListCType,
+    longT,
+    memoryFormatT,
+    MutRefCType,
+    NamedCType,
     opmath_t,
+    OptionalCType,
     optionalIntArrayRefT,
+    optionalScalarRefT,
+    optionalTensorRefT,
+    scalar_t,
+    scalarT,
+    scalarTypeT,
+    SpecialArgName,
+    symIntArrayRefT,
+    SymIntT,
+    tensorListT,
+    tensorOptionsT,
+    tensorT,
+    VectorCType,
 )
 
 # This file implements a small program synthesis engine that implements
@@ -336,10 +337,16 @@ Check this module for more information.
                 )
                 return f"c10::asIntArrayRefSlow({symIntArrayRef_type})"
         elif goal.type == BaseCType(symIntArrayRefT):
-            return direct_solve(NamedCType(goal.name, longSymVec_ctype))
+            try:
+                r = direct_solve(NamedCType(goal.name, BaseCType(intArrayRefT)))
+                return f"c10::SymIntArrayRef::fromIntArrayRef({r})"
+            except UnsatError:
+                return direct_solve(NamedCType(goal.name, longSymVec_ctype))
+        elif goal.type == BaseCType(SymIntT):
+            return direct_solve(NamedCType(goal.name, BaseCType(longT)))
         elif goal.type == BaseCType(longT):
             symInt_type = direct_solve(NamedCType(goal.name, BaseCType(SymIntT)))
-            return f"{symInt_type}.expectInt()"
+            return f"{symInt_type}.expect_int()"
         elif goal.type == BaseCType(optionalIntArrayRefT):
             return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
         elif goal.type == BaseCType(optionalScalarRefT):

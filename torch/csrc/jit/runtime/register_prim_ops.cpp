@@ -1,3 +1,4 @@
+#include <ATen/autocast_mode.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -415,6 +416,26 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         sym_size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sym_size.int(Tensor self, int dim) -> SymInt"),
+        sym_size_int,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::stride(Tensor self) -> int[]"),
+        [](Stack& stack) {
+          at::Tensor arg = pop(stack).toTensor();
+          push(stack, arg.strides());
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_numel(Tensor self) -> SymInt"),
+        sym_numel,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_stride(Tensor self) -> SymInt[]"),
+        sym_stride,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);
@@ -649,6 +670,28 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, a != b);
         },
         aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_autocast_enabled() -> bool"),
+        [](Stack& stack) {
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
+          bool enabled = false;
+#else
+          bool enabled = at::autocast::is_enabled();
+#endif
+          push(stack, enabled);
+        },
+        aliasAnalysisConservative()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_autocast_cpu_enabled() -> bool"),
+        [](Stack& stack) {
+#if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
+          bool enabled = false;
+#else
+          bool enabled = at::autocast::is_cpu_enabled();
+#endif
+          push(stack, enabled);
+        },
+        aliasAnalysisConservative()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
         unInitialized,
@@ -1047,7 +1090,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           }
           auto self = pop(stack).toTensor();
           auto result =
-              at::index_put_(self, opt_list_indices, values, accumulate);
+              at::index_put(self, opt_list_indices, values, accumulate);
           push(stack, std::move(result));
         },
         aliasAnalysisFromSchema()),

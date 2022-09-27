@@ -33,6 +33,28 @@ IterDomainGraph::IterDomainGraph(Fusion* fusion) {
   build(fusion);
 }
 
+//! Map corresponding inputs and outputs of swizzle op together
+//!  on the given disjoint set, if the given id is an output
+//!  of a swizzle operator.
+//!
+//! The current usage of swizzle operator is local to each tensor
+//!  itself, so they should not affect exact or permissive mapping
+//!  between iterdomains on different tensor domains.
+//! TODO:
+//!   Exact mapping based index hoisting of swizzled iterdomains
+//!   is disabled currently and will be re-enabled in the next
+//!   few build out steps.
+void mapMaybeSwizzleOp(
+    DisjointSets<IterDomain*>& disjoint_sets,
+    IterDomain* id) {
+  if (auto swizzle_2d = dynamic_cast<Swizzle2D*>(id->definition())) {
+    // Map each input to its corresponding output on the given
+    //  disjoint set.
+    disjoint_sets.mapEntries(swizzle_2d->inX(), swizzle_2d->outX());
+    disjoint_sets.mapEntries(swizzle_2d->inY(), swizzle_2d->outY());
+  }
+}
+
 void IterDomainGraph::build(Fusion* fusion) {
   // Initialize a node for every iteration domain
   for (auto tv : ir_utils::allTvs(fusion)) {
@@ -156,6 +178,8 @@ void IterDomainGraph::build(Fusion* fusion) {
             BestEffortReplay::replayPasC(p_tv, c_tv, -1, pairwise_map);
 
         const auto& permissive_c2p_map = permissive_replay_PasC.getReplay();
+        const auto permissive_disjoint_sets =
+            permissive_replay_PasC.getDisjointSets();
 
         // For exact mapings do not map any broadcast dimensions to
         // non-broadcast dimensions. Prevent any broadcasted axes being mapped
@@ -178,6 +202,12 @@ void IterDomainGraph::build(Fusion* fusion) {
           exact_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(exact_nodes_, p_id);
+          mapMaybeSwizzleOp(exact_nodes_, c_id);
         }
 
         for (auto entry : permissive_c2p_map) {
@@ -185,14 +215,31 @@ void IterDomainGraph::build(Fusion* fusion) {
           auto p_id = entry.second;
           if (idIsAComputeAtLeafDomain(p_id, p_tv)) {
             loop_nodes_.mapEntries(c_id, p_id);
+          } else {
+            // When there are trivial reductions merged with other dims, `p_id`
+            // might not be a compute at leaf domain of `p_tv`, but it actually
+            // has an equivalent compute at leaf domain. For that case, we map
+            // the equivalent compute at leaf domain.
+            for (int i = 0; i < p_tv->getComputeAtPosition(); i++) {
+              auto id = p_tv->axis(i);
+              if (permissive_disjoint_sets.permissiveAreMapped(p_id, id)) {
+                loop_nodes_.mapEntries(c_id, id);
+              }
+            }
           }
           permissive_nodes_.mapEntries(c_id, p_id);
           consumers_.at(p_id).pushBack(c_id);
           producers_.at(c_id).pushBack(p_id);
+
+          // Add the swizzle inputs to the same
+          //  disjoint set as well if either c_id
+          //  or p_id is swizzle output.
+          mapMaybeSwizzleOp(permissive_nodes_, p_id);
+          mapMaybeSwizzleOp(permissive_nodes_, c_id);
         }
 
-        // Make sure we always get root mapping for the permissive map. Because
-        // of forwarding we could otherwise miss some root mappings.
+        // Make sure we always get root mapping for the permissive map.
+        // Because of forwarding we could otherwise miss some root mappings.
         for (auto entry : permissive_c2p_root_map) {
           auto c_id = entry.first;
           auto p_id = entry.second;
@@ -226,7 +273,8 @@ void IterDomainGraph::initializeId(
   }
 }
 
-ComputeAtMap::ComputeAtMap(Fusion* fusion) : id_graph_(fusion) {
+ComputeAtMap::ComputeAtMap(Fusion* fusion)
+    : id_graph_(fusion), fusion_(fusion) {
   build(fusion);
 }
 
@@ -254,6 +302,105 @@ void ComputeAtMap::validateAndPropagatePType() {
     for (auto id : loop_disjoint_set->vector()) {
       id->parallelize(common_ptype);
     }
+  }
+}
+
+void ComputeAtMap::allocateIndexVariables() {
+  // Run through all disjoint sets registered in loop map,
+  //  all lowered kir::ForLoop will correspond to one of the disjoint sets
+  //  and we only need one index variable for each set.
+  for (const auto& loop_disjoint_set : id_graph_.loopNodes().disjointSets()) {
+    ParallelType ptype;
+    // first allocate thread and grid parallel indices:
+    //  The validation pass will check that the parallel bindings within the
+    //  loop nodes are consistent so all the loops within this disjoint set
+    //  will be realized implicitly using parallel index variables.
+    if (std::any_of(
+            loop_disjoint_set->vector().begin(),
+            loop_disjoint_set->vector().end(),
+            [&ptype](IterDomain* id) {
+              if (id->isThread() &&
+                  // Halo extended parallel loops currently are handled
+                  // differently and an index variable would still
+                  // be allocated in this case.
+                  (GpuLower::current()->haloInfo().getExtent(id) == nullptr)) {
+                ptype = id->getParallelType();
+                return true;
+              }
+              return false;
+            })) {
+      loop_index_variable_map_[loop_disjoint_set.get()] =
+          NamedScalar::getParallelIndex(ptype);
+      continue;
+    }
+
+    // All loops in this set are non-parallel, non-concretized broadcast
+    //  iterdomains, their "index variable" should be zero.
+    if (std::all_of(
+            loop_disjoint_set->vector().begin(),
+            loop_disjoint_set->vector().end(),
+            [](IterDomain* id) { return id->isBroadcast(); })) {
+      loop_index_variable_map_[loop_disjoint_set.get()] = fusion_->zeroVal();
+      continue;
+    }
+
+    // Allocate variable for the iterdomains:
+    auto concrete_loop_id_it = concrete_id_cache_.find(loop_disjoint_set);
+    TORCH_INTERNAL_ASSERT(
+        concrete_loop_id_it != concrete_id_cache_.end(),
+        "Concrete id not computed");
+
+    auto concrete_loop_id = concrete_loop_id_it->second;
+
+    // Need to allocate double buffered loop differently.
+    if (GpuLower::current()->doubleBufferInfo().isDoubleBufferedIterDomain(
+            concrete_loop_id)) {
+      // Allocate index variable for each stage of the double buffered loop.
+      double_buffered_loop_index_variable_map_[loop_disjoint_set.get()] =
+          std::make_unique<DoubleBufferIndices>(DoubleBufferIndices(
+              {{DoubleBufferLoopStage::Prolog,
+                IrBuilder::create<Int>(c10::nullopt)},
+               {DoubleBufferLoopStage::Main,
+                IrBuilder::create<Int>(c10::nullopt)},
+               {DoubleBufferLoopStage::Epilog,
+                IrBuilder::create<Int>(c10::nullopt)}}));
+    } else {
+      // Everything now should be serial concrete loops,
+      //   we just allocate a loop index integer for each set of loops.
+      loop_index_variable_map_[loop_disjoint_set.get()] =
+          IrBuilder::create<Int>(c10::nullopt);
+    }
+  }
+}
+
+Val* ComputeAtMap::getIndexVariable(
+    IterDomain* id,
+    DoubleBufferLoopStage double_buffer_loop_stage) const {
+  TORCH_INTERNAL_ASSERT(
+      id_graph_.loopNodes().mappingExists(id),
+      "Index Variable: no index variable allocated as ",
+      id->toString(),
+      " is not registered in loop map");
+  const auto* loop_set = &(id_graph_.loopNodes().getDisjointSetOf(id));
+
+  // Check if this loop was modified by double buffer pass.
+  bool is_double_buffer_iterdomain =
+      GpuLower::current()->doubleBufferInfo().isDoubleBufferedIterDomain(id);
+
+  if (is_double_buffer_iterdomain) {
+    // Use dedicated double buffer index variable if the loop is double buffer
+    // loop
+    if (double_buffer_loop_stage == DoubleBufferLoopStage::NotApplicable) {
+      // The double buffered loop stages are created after the loop nest
+      //  lowering phase so this function will be querried before the double
+      //  buffer pass. At that point, no forloop has any double buffer
+      //  stage defined, and we just default to using the main stage index.
+      double_buffer_loop_stage = DoubleBufferLoopStage::Main;
+    }
+    return double_buffered_loop_index_variable_map_.at(loop_set)->at(
+        double_buffer_loop_stage);
+  } else {
+    return loop_index_variable_map_.at(loop_set);
   }
 }
 
@@ -648,6 +795,10 @@ std::vector<IterDomain*> ComputeAtMap::getViewRfactorDomainsOfIdGroup(
 
 const std::shared_ptr<VectorOfUniqueEntries<IterDomain*>>& ComputeAtMap::
     disjointSetOf(IterDomain* id, IdMappingMode mode) const {
+  TORCH_INTERNAL_ASSERT(
+      idExistsInMap(id),
+      id->toString(),
+      " has not been processed in this Compute At Map, yet the disjoint set for it was requested.");
   return getIdSets(mode).disjointSetMap().at(id);
 }
 
@@ -662,6 +813,11 @@ const DisjointSets<IterDomain*>& ComputeAtMap::getIdSets(
       return id_graph_.loopNodes();
   }
   TORCH_INTERNAL_ASSERT(false, "Error with mapping mode provided.");
+}
+
+bool ComputeAtMap::idExistsInMap(IterDomain* id) const {
+  return getIdSets(IdMappingMode::EXACT).disjointSetMap().find(id) !=
+      getIdSets(IdMappingMode::EXACT).disjointSetMap().end();
 }
 
 } // namespace cuda

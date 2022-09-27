@@ -35,8 +35,7 @@ namespace native {
 namespace {
 cuda::detail::LinalgDispatch disp = {_symeig_helper_cuda,
                                      _cholesky_solve_helper_cuda,
-                                     legacy_lstsq_cuda,
-                                     _linalg_inv_out_helper_cuda};
+                                     legacy_lstsq_cuda};
 
 at::DynamicLibrary& getTorchLinalgLibrary() {
   static at::DynamicLibrary lib("libtorch_cuda_linalg.so", nullptr, true);
@@ -176,12 +175,6 @@ void registerLinalgDispatch(const LinalgDispatch& disp_) {
   disp = disp_;
 }
 }} //namespace cuda::detail
-
-Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
-    getTorchLinalgLibrary();
-    TORCH_CHECK(disp.inv_out_helper != _linalg_inv_out_helper_cuda, "Can't find _linalg_inv_out_helper_cuda");
-    return disp.inv_out_helper(result, infos_lu, infos_getri);
-}
 
 std::tuple<Tensor, Tensor> legacy_lstsq_cuda(const Tensor &B, const Tensor &A) {
     getTorchLinalgLibrary();

@@ -89,15 +89,6 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
   // according to https://github.com/pytorch/xla/pull/2682.
   is_non_overlapping_and_dense_ = false;
   set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
-
-  auto rank = tensor_->shape().Get().sizes().size();
-  sym_sizes_.reserve(rank);
-  for (auto i : c10::irange(rank)) {
-    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
-        this->tensor_->GetIrValue(), i);
-    auto sn = std::make_shared<torch::lazy::SymbolicIntNode>(dim_node);
-    sym_sizes_.push_back(sn->toSymInt());
-  }
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -142,10 +133,31 @@ void LTCTensorImpl::shallow_copy_from(
   generation_ = 0;
 }
 
+c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
+  return sym_strides_default();
+}
+
+void LTCTensorImpl::setup_sym_sizes() const {
+  auto rank = tensor_->shape().Get().sizes().size();
+  std::vector<c10::SymInt> sym_sizes;
+  sym_sizes.reserve(rank);
+  for (auto i : c10::irange(rank)) {
+    auto dim_node = getBackend()->GetIrBuilder()->MakeSizeNode(
+        this->tensor_->GetIrValue(), i);
+    auto sn = c10::make_intrusive<torch::lazy::SymIntNodeImpl>(dim_node);
+    sym_sizes.push_back(sn->toSymInt());
+  }
+
+  sym_sizes_ = sym_sizes;
+}
+
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
-  return FLAGS_ltc_enable_symbolic_shapes
-      ? c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size())
-      : TensorImpl::sym_sizes_default();
+  if (FLAGS_ltc_enable_symbolic_shapes) {
+    setup_sym_sizes();
+    return c10::SymIntArrayRef(sym_sizes_->data(), sym_sizes_->size());
+  }
+
+  return c10::SymIntArrayRef::fromIntArrayRef(sizes_custom());
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {

@@ -37,13 +37,17 @@ if(env_cxx_standard GREATER -1)
       WARNING "C++ standard version definition detected in environment variable."
       "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
 endif()
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
+set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are requested to build this target.")
 
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_GLIBCXX_USE_CXX11_ABI=1")
+    string(APPEND CMAKE_CXX_FLAGS " -D_GLIBCXX_USE_CXX11_ABI=1")
+  else()
+    # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
+    # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
+    string(APPEND CMAKE_CXX_FLAGS " -fabi-version=11")
   endif()
 endif()
 
@@ -182,7 +186,7 @@ cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
-option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
+option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
@@ -205,8 +209,8 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 cmake_dependent_option(
-    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
-    "USE_CUDA;BUILD_TEST" OFF)
+    BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" OFF
+    "USE_CUDA" OFF)
 cmake_dependent_option(
     USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
     "USE_CUDNN" OFF)
@@ -291,6 +295,10 @@ if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
 endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+# Ensure that an ITT build is the default for x86 CPUs
+cmake_dependent_option(
+  USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
+  "CPU_INTEL" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
 # but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
@@ -308,6 +316,14 @@ option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_UCC "Use UCC. Only available if USE_DISTRIBUTED is on." OFF
+    "USE_DISTRIBUTED" OFF)
+cmake_dependent_option(
+    USE_SYSTEM_UCC "Use system-wide UCC" OFF
+    "USE_UCC" OFF)
+cmake_dependent_option(
+    USE_C10D_UCC "USE C10D UCC" ON "USE_DISTRIBUTED;USE_UCC" OFF)
 cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
@@ -783,22 +799,22 @@ if(NOT MSVC)
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
-  string(APPEND CMAKE_CXX_FLAGS " -Werror=return-type")
+  append_cxx_flag_if_supported("-Werror=return-type" CMAKE_CXX_FLAGS)
   if(NOT USE_CUDNN)
     # Temporary fix to ignore non virtual dtor error if cudnn is used. A
     # separate PR to cudnn_frontend is needed to address this later on
-    string(APPEND CMAKE_CXX_FLAGS " -Werror=non-virtual-dtor")
+    append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   endif()
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-field-initializers")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-type-limits")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-array-bounds")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
+  append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=deprecated-declarations" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
@@ -839,32 +855,31 @@ if(NOT MSVC)
     endif()
   endif()
 
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=pedantic")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=redundant-decls")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-error=old-style-cast")
+  append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=redundant-decls" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    string(APPEND CMAKE_CXX_FLAGS " -Wconstant-conversion")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-invalid-partial-specialization")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-typedef-redefinition")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-inconsistent-missing-override")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-aligned-allocation-unavailable")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-constexpr-not-const")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
-    string(APPEND CMAKE_CXX_FLAGS " -Qunused-arguments")
-    if(${COLORIZE_OUTPUT})
-      string(APPEND CMAKE_CXX_FLAGS " -fcolor-diagnostics")
+    append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-typedef-redefinition" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-inconsistent-missing-override" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-c++14-extensions" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
+    if(${USE_COLORIZE_OUTPUT})
     endif()
   endif()
-  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 4.9)
-    if(${COLORIZE_OUTPUT})
-      string(APPEND CMAKE_CXX_FLAGS " -fdiagnostics-color=always")
-    endif()
+
+  if(${USE_COLORIZE_OUTPUT})
+    append_cxx_flag_if_supported("-fcolor-diagnostics" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-fdiagnostics-color=always" CMAKE_CXX_FLAGS)
   endif()
+
   if((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
     OR(CMAKE_COMPILER_IS_GNUCXX
     AND(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
@@ -879,21 +894,15 @@ if(NOT MSVC)
     endif()
   endif(WERROR)
   if(NOT APPLE)
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-but-set-variable")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-maybe-uninitialized")
+    append_cxx_flag_if_supported("-Wno-unused-but-set-variable" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-maybe-uninitialized" CMAKE_CXX_FLAGS)
   endif()
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
   string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fno-omit-frame-pointer -O0")
-  string(APPEND CMAKE_CXX_FLAGS " -fno-math-errno")
-  string(APPEND CMAKE_CXX_FLAGS " -fno-trapping-math")
-  check_cxx_compiler_flag("-Werror=format" HAS_WERROR_FORMAT)
-  if(HAS_WERROR_FORMAT)
-    string(APPEND CMAKE_CXX_FLAGS " -Werror=format")
-  endif()
-  check_cxx_compiler_flag("-Werror=cast-function-type" HAS_WERROR_CAST_FUNCTION_TYPE)
-  if(HAS_WERROR_CAST_FUNCTION_TYPE)
-    string(APPEND CMAKE_CXX_FLAGS " -Werror=cast-function-type")
-  endif()
+  append_cxx_flag_if_supported("-fno-math-errno" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
   check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
   # This doesn't work globally so we use the test on specific
   # target_compile_options
@@ -954,20 +963,20 @@ if(APPLE)
     if(USE_MPS)
       string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
       string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
+      # To suppress MPSGraph availability warnings
+      append_cxx_flag_if_supported("-Wno-unguarded-availability-new" CMAKE_CXX_FLAGS)
     endif()
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-constexpr-not-const")
+    append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-c++14-extensions" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
 endif()
 
 if(EMSCRIPTEN)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-implicit-function-declaration -DEMSCRIPTEN -s DISABLE_EXCEPTION_CATCHING=0")
 endif()
 
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0.0)
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
-endif()
+append_cxx_flag_if_supported("-Wno-stringop-overflow" CMAKE_CXX_FLAGS)
 
 if(ANDROID AND (NOT ANDROID_DEBUG_SYMBOLS))
   if(CMAKE_COMPILER_IS_GNUCXX)

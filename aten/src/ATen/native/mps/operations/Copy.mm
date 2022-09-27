@@ -113,50 +113,38 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
     src = src_;
   }
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
-  const size_t src_size = src.nbytes();
-  // if there's anything wrong with source, we shouldn't return dst_ silently and must error out.
-  TORCH_CHECK(sourceBuffer && src_size > 0);
+  size_t src_total_size = src_.is_view() ? at::detail::computeStorageNbytesContiguous(src.sizes(), src.element_size(), src.storage_offset()) :
+                                           src.nbytes();
+  size_t size_to_copy = src.nbytes();
 
   // In case of dtype change, first convert src inplace
   if (src_.dtype() != dst_.dtype()) {
     copy_cast_mps(dst, src, sourceBuffer, sourceBuffer);
+    // Use the element size of dst to calculate the total size after casting
+    size_to_copy = (size_to_copy / src.element_size()) * dst.element_size();
   }
+
+  // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
+  TORCH_INTERNAL_ASSERT(sourceBuffer && size_to_copy > 0);
+  TORCH_INTERNAL_ASSERT(src_total_size >= storage_byte_offset);
+  TORCH_INTERNAL_ASSERT(dst.nbytes() >= (dst.storage_offset() * dst.element_size()));
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
     void* host_dst = dst.storage().data();
-    void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)src_size, &alignedLength);
+    void* alignedPtr = pageAlignedBlockPtr(host_dst, (NSUInteger)src_total_size, &alignedLength);
     id<MTLBuffer> destBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                                          length:alignedLength
                                                         options:options
                                                     deallocator:nil];
      NSUInteger destOffset = uintptr_t(host_dst) - uintptr_t(alignedPtr);
     // 4 bytes alignment required on macos for blits.
-    TORCH_CHECK(destOffset % 4 == 0, "Unaligned blit request");
+    TORCH_INTERNAL_ASSERT(destOffset % 4 == 0, "Unaligned blit request");
 
-    dispatch_sync(stream->queue(), ^() {
-      @autoreleasepool {
-        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
-        id<MTLBlitCommandEncoder> blitEncoder =
-            [commandBuffer blitCommandEncoder];
-
-        [blitEncoder copyFromBuffer:sourceBuffer
-                       sourceOffset:(NSUInteger)storage_byte_offset
-                           toBuffer:destBuffer
-                  destinationOffset:(NSUInteger)destOffset
-                               size:(NSUInteger)src_size];
-        [blitEncoder endEncoding];
-
-        if (non_blocking) {
-          stream->commit(true);
-        } else {
-          stream->commitAndWait();
-        }
-        [destBuffer release];
-      }
-    });
+    stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking);
+    [destBuffer release];
   }
   if (!dst.is_same(dst_)) {
     dst_.copy_(dst, non_blocking);
@@ -174,26 +162,33 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
+  uint64_t src_total_size = 0;
 
   if (src_.is_view()) {
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
+    // Get the actual size of a View (takes into account the storage offset)
+    // For View tensors, the storage offset can be bigger than what's being reported by nbytes
+    src_total_size = at::detail::computeStorageNbytesContiguous(src.sizes(), src.element_size(), src.storage_offset());
   } else {
     src = src_;
     if (src.dtype() != dst_.dtype()) {
       // In case of dtype change, perform conversion on source device
       src = src.to(dst_.dtype());
     }
+    src_total_size = src.nbytes();
   }
 
+  const size_t size_to_copy = src.nbytes();
   const void* host_src = src.storage().data();
-  uint64_t size = src.nbytes();
+  TORCH_INTERNAL_ASSERT(src_total_size >= (src.storage_offset() * src.element_size()));
+  TORCH_INTERNAL_ASSERT(dst_.nbytes() >= dst_byte_offset);
 
   NSUInteger sourceOffset = 0;
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
     NSUInteger alignedLength = 0;
 
-    void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)size, &alignedLength);
+    void* alignedPtr = pageAlignedBlockPtr(host_src, (NSUInteger)src_total_size, &alignedLength);
     id<MTLBuffer> sourceBuffer = [device newBufferWithBytesNoCopy:alignedPtr
                                           length:alignedLength
                                          options:options
@@ -202,25 +197,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
     if (src_.is_view() || !src_.is_contiguous())
       sourceOffset += src_.storage_offset() * src_.itemsize();
 
-    dispatch_sync(stream->queue(), ^() {
-      @autoreleasepool {
-        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
-        id<MTLBlitCommandEncoder> blitEncoder =
-            [commandBuffer blitCommandEncoder];
-
-        [blitEncoder copyFromBuffer:sourceBuffer
-                       sourceOffset:(NSUInteger)sourceOffset
-                           toBuffer:destBuffer
-                  destinationOffset:(NSUInteger)dst_byte_offset
-                               size:(NSUInteger)size];
-        [blitEncoder endEncoding];
-        if (non_blocking) {
-          stream->commit(true);
-        } else {
-          stream->commitAndWait();
-        }
-      }
-    });
+    stream->copy_and_sync(sourceBuffer, destBuffer, size_to_copy, sourceOffset, dst_byte_offset, non_blocking);
     [sourceBuffer release];
   }
 
@@ -229,23 +206,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
   MPSStream* stream = getCurrentMPSStream();
-  id<MTLBuffer> sourceBuffer = (id<MTLBuffer>)(src);
-  id<MTLBuffer> destBuffer = (id<MTLBuffer>)(dst);
-  dispatch_sync(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
-      id<MTLBlitCommandEncoder> blitEncoder =
-          [commandBuffer blitCommandEncoder];
-
-      [blitEncoder copyFromBuffer:sourceBuffer
-                     sourceOffset:0
-                         toBuffer:destBuffer
-                destinationOffset:0
-                             size:size];
-      [blitEncoder endEncoding];
-      stream->commitAndWait();
-    }
-  });
+  stream->copy_and_sync((id<MTLBuffer>)(src), (id<MTLBuffer>)(dst), size, 0, 0, true);
 }
 
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
@@ -286,23 +247,10 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const size_t src_size = src.nbytes();
-
   if (src.dtype() == dst_.dtype()) {
     MPSStream* stream = getCurrentMPSStream();
-    dispatch_sync(stream->queue(), ^() {
-      @autoreleasepool {
-        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
-        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
-        [blitEncoder copyFromBuffer:sourceBuffer
-                       sourceOffset:src_byte_offset
-                           toBuffer:destBuffer
-                  destinationOffset:dst_byte_offset
-                               size:src_size];
-        [blitEncoder endEncoding];
-        // GPU to GPU copy needs flushing only, and no synchronization with CPU is necessary
-        stream->commit(true);
-      }
-    });
+    // for GPU to GPU copies we only encode to stream's command buffer (no flushing)
+    stream->copy(sourceBuffer, destBuffer, src_size, src_byte_offset, dst_byte_offset);
   } else {
     copy_cast_mps(dst_, src, destBuffer, sourceBuffer);
   }

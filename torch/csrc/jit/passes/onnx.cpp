@@ -365,6 +365,21 @@ void NodeToONNX(
     }
   };
 
+  // Inline the prim::PythonOp sub-block nodes and append them to the onnx graph
+  auto inlineAutograd = [&](Node* PythonOpNode) {
+    for (auto subblock : PythonOpNode->blocks()) {
+      for (const auto i : c10::irange(PythonOpNode->inputs().size())) {
+        env[subblock->inputs()[i]] = env[PythonOpNode->inputs()[i]];
+      }
+      for (auto* node : subblock->nodes()) {
+        NodeToONNX(node, new_block, operator_export_type, env);
+      }
+      for (const auto i : c10::irange(PythonOpNode->outputs().size())) {
+        env[PythonOpNode->outputs()[i]] = env[subblock->outputs()[i]];
+      }
+    }
+  };
+
   // Cast output of symbolic() python implementation
   auto processSymbolicOutput = [&](const std::string& op_name,
                                    Node* n,
@@ -441,11 +456,30 @@ void NodeToONNX(
         "PythonOp", "prim", opset_version);
     if (!py::hasattr(pyobj, "symbolic") &&
         (!PyObject_IsTrue(is_registered_op.ptr()))) {
-      // Simply clone the node, unless either
+      // Inline the subgraph within the prim::PythonOp unless
+      // either of these conditions are satisfied
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
-      cloneNode(op);
+      if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX) {
+        try {
+          inlineAutograd(op);
+        } catch (const std::exception& ex) {
+          TORCH_WARN(
+              "Unable to inline PythonOp: ",
+              op->name(),
+              " due to the following exception\n",
+              ex.what(),
+              "prim::PythonOp will be exported as is and without being inlined\n",
+              "Try exporting with the following alternatives: \n",
+              "1) Set operator_export_type to ONNX_FALLTHROUGH mode\n",
+              "2) Register a symbolic method for the prim::PythonOp ",
+              op->name());
+          cloneNode(op);
+        }
+      } else {
+        cloneNode(op);
+      }
       return;
     }
 

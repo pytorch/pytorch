@@ -5,7 +5,6 @@
 #include <c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
-#include "c10d/ProcessGroup.hpp"
 #include "c10d/Types.hpp"
 
 #include <c10/cuda/CUDAGuard.h>
@@ -18,7 +17,6 @@
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
-using c10d::ProcessGroup;
 
 class NCCLTestBase {
  public:
@@ -94,7 +92,7 @@ class NCCLTest : public NCCLTestBase {
   }
 
   void wait(
-      c10::intrusive_ptr<ProcessGroup::Work>& work,
+      c10::intrusive_ptr<c10d::ProcessGroup::Work>& work,
       std::chrono::milliseconds timeout = kNoTimeout) {
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait(timeout);
@@ -108,7 +106,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (const auto i : c10::irange(numDevices_)) {
-      cudaStreamSynchronize(streams_[i].stream());
+      C10_CUDA_CHECK(cudaStreamSynchronize(streams_[i].stream()));
       outputs[i] = tensors_[i].cpu();
     }
 
@@ -139,7 +137,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (const auto i : c10::irange(numDevices_)) {
-      cudaStreamSynchronize(streams_[i].stream());
+      C10_CUDA_CHECK(cudaStreamSynchronize(streams_[i].stream()));
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         outputs[i][j] = tensor_lists[i][j].cpu();
       }

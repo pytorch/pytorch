@@ -530,8 +530,8 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     if (protos.protos_size() == end + 1) {
       // We have bounding box information
       const TensorProto& bounding_proto = protos.protos(end);
-      DCHECK_EQ(bounding_proto.data_type(), TensorProto::INT32);
-      DCHECK_EQ(bounding_proto.int32_data_size(), 4);
+      TORCH_DCHECK_EQ(bounding_proto.data_type(), TensorProto::INT32);
+      TORCH_DCHECK_EQ(bounding_proto.int32_data_size(), 4);
       info.bounding_params.valid = true;
       info.bounding_params.ymin = bounding_proto.int32_data(0);
       info.bounding_params.xmin = bounding_proto.int32_data(1);
@@ -541,7 +541,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
 
     if (image_proto.data_type() == TensorProto::STRING) {
       // encoded image string.
-      DCHECK_EQ(image_proto.string_data_size(), 1);
+      TORCH_DCHECK_EQ(image_proto.string_data_size(), 1);
       const string& encoded_image_str = image_proto.string_data(0);
       int encoded_size = encoded_image_str.size();
       // We use a cv::Mat to wrap the encoded str so we do not need a copy.
@@ -582,7 +582,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     // TODO: if image decoding was unsuccessful, set label to 0
     if (label_proto.data_type() == TensorProto::FLOAT) {
       if (label_type_ == SINGLE_LABEL || label_type_ == SINGLE_LABEL_WEIGHTED) {
-        DCHECK_EQ(label_proto.float_data_size(), 1);
+        TORCH_DCHECK_EQ(label_proto.float_data_size(), 1);
         prefetched_label_.mutable_data<float>()[item_id] =
             label_proto.float_data(0);
       } else if (label_type_ == MULTI_LABEL_SPARSE) {
@@ -614,7 +614,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
       }
     } else if (label_proto.data_type() == TensorProto::INT32) {
       if (label_type_ == SINGLE_LABEL || label_type_ == SINGLE_LABEL_WEIGHTED) {
-        DCHECK_EQ(label_proto.int32_data_size(), 1);
+        TORCH_DCHECK_EQ(label_proto.int32_data_size(), 1);
         prefetched_label_.mutable_data<int>()[item_id] =
             label_proto.int32_data(0);
       } else if (label_type_ == MULTI_LABEL_SPARSE) {

@@ -4,8 +4,6 @@ on:
 
 env:
   PYTHON_VERSION: "3.8"
-  CUDA_VERSION: "11.3"
-  MAGMA_VERSION: "magma-cuda113"
   # must be consistent with https://github.com/pytorch/benchmark/blob/main/requirements.txt#L19
   NUMPY_VERSION: "1.21.2"
   PR_NUM: ${{ github.event.number }}
@@ -43,8 +41,6 @@ jobs:
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
                            setuptools cmake=3.22 cffi typing_extensions \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
-          # install magma
-          conda install -y -c pytorch "${MAGMA_VERSION}"
       - name: Setup TorchBench branch
         run: |
           # shellcheck disable=SC1091
@@ -60,8 +56,12 @@ jobs:
           path: benchmark
           lfs: false
           ref: ${{ env.TORCHBENCH_BRANCH }}
+      - name: GPU Info
+        run: |
+          nvidia-smi
       - name: Run TorchBench
         run: |
+          set -x
           pushd "${HOME}"/pytorch
           PR_MERGE_BASE=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")
           popd

@@ -11,29 +11,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct ShaderSource final {
-  enum class Type {
-    GLSL,
-    SPIRV
-  } type;
-
-  union {
-    struct {
-      const char* src; // Null-terminated
-      uint32_t unused; // padding
-    } glsl;
-    struct {
-      const uint32_t* bin;
-      uint32_t size;
-    } spirv;
-  } src_code;
-
-  std::string kernel_name;
-  explicit ShaderSource(std::string name, const char* glsl);
-  explicit ShaderSource(
-      std::string name, const uint32_t* spirv, uint32_t bytes);
-};
-
 class ShaderLayout final {
  public:
   using Signature = c10::SmallVector<VkDescriptorType, 6u>;
@@ -61,6 +38,31 @@ class ShaderLayout final {
   // does not allow for move assignment. The swap function will
   // be used in the hash map.
   friend void swap(ShaderLayout& lhs, ShaderLayout& rhs) noexcept;
+};
+
+struct ShaderSource final {
+  enum class Type { GLSL, SPIRV } type;
+
+  union {
+    struct {
+      const char* src; // Null-terminated
+      uint32_t unused; // padding
+    } glsl;
+    struct {
+      const uint32_t* bin;
+      uint32_t size;
+    } spirv;
+  } src_code;
+
+  std::string kernel_name;
+  ShaderLayout::Signature kernel_layout;
+
+  explicit ShaderSource(std::string, const char*);
+  explicit ShaderSource(
+      std::string,
+      const uint32_t*,
+      const uint32_t,
+      const std::vector<VkDescriptorType>&);
 };
 
 class ShaderModule final {
@@ -110,9 +112,7 @@ class ShaderLayoutCache final {
       size_t hashed = 0u;
 
       for (const VkDescriptorType type : signature) {
-        hashed = c10::hash_combine(
-            hashed,
-            c10::get_hash(type));
+        hashed = c10::hash_combine(hashed, c10::get_hash(type));
       }
 
       return hashed;
@@ -130,7 +130,6 @@ class ShaderLayoutCache final {
  public:
   VkDescriptorSetLayout retrieve(const Key&);
   void purge();
-
 };
 
 class ShaderCache final {
@@ -151,12 +150,9 @@ class ShaderCache final {
   struct Hasher {
     inline size_t operator()(const ShaderSource& source) const {
       return c10::get_hash(
-          source.type,
-          source.src_code.spirv.bin,
-          source.src_code.spirv.size);
+          source.type, source.src_code.spirv.bin, source.src_code.spirv.size);
     }
   };
-
 
  private:
   // Multiple threads could potentially be adding entries into the cache, so use
@@ -179,12 +175,11 @@ class ShaderCache final {
 inline bool operator==(
     const VkDescriptorSetLayoutBinding& _1,
     const VkDescriptorSetLayoutBinding& _2) {
-
-  return (_1.binding == _2.binding && \
-          _1.descriptorType == _2.descriptorType && \
-          _1.descriptorCount == _2.descriptorCount && \
-          _1.stageFlags == _2.stageFlags && \
-          _1.pImmutableSamplers == _2.pImmutableSamplers);
+  return (
+      _1.binding == _2.binding && _1.descriptorType == _2.descriptorType &&
+      _1.descriptorCount == _2.descriptorCount &&
+      _1.stageFlags == _2.stageFlags &&
+      _1.pImmutableSamplers == _2.pImmutableSamplers);
 }
 
 #endif /* USE_VULKAN_API */

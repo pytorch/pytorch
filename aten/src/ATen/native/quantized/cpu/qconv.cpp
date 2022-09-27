@@ -725,17 +725,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
 
 
     // Original bias was float, so we requantize it here.
-    at::Tensor qbias;
-    if (per_channel()) {
-      auto bias_quant_scales =
-          weight_contig.q_per_channel_scales() * act_input_scale;
-      auto bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel(
-          bias, bias_quant_scales, bias_zp, 0, c10::kQInt32);
-    } else {
-      qbias = at::native::quantize_per_tensor(
-          bias, weight_contig.q_scale() * act_input_scale, 0, c10::kQInt32);
-    }
+    at::Tensor qbias = quant_utils::QuantizeBias(per_channel(), bias, weight_contig, act_input_scale);
 
     status = at::native::xnnp_utils::xnnp_create_convolution2d_nhwc(
         padding()[0],
@@ -937,21 +927,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
     for (const auto i : c10::irange(wt_numel)) {
       qnnp_w_data[i] = static_cast<c10::quint8>(w_data[i] + 128);
     }
-    at::Tensor qbias;
     // Original bias was float, so we requantize it here.
-    if (convolution_op->per_channel) {
-      at::Tensor bias_quant_scales =
-          weight_contig.q_per_channel_scales() * act_input_scale;
-      at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel(
-          bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
-    } else {
-      qbias = at::native::quantize_per_tensor(
-          bias_fp32,
-          weight_contig.q_scale() * act_input_scale,
-          0,
-          c10::kQInt32);
-    }
+    at::Tensor qbias = quant_utils::QuantizeBias(convolution_op->per_channel, bias_fp32, weight_contig, act_input_scale);
 
     // Update the input scale to not pack again.
     input_scale = act_input_scale;

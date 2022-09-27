@@ -43,6 +43,20 @@ class CommonIndexKey {
       const std::unordered_map<IterDomain*, Val*>& ref_index_map,
       const std::vector<kir::ForLoop*>& loops);
 
+  //! \param consumer_indexed_id Indexed consumer domain
+  //! \param consumer_td TensorDomain of consumer_indexed_id
+  //! \param loop_domains Resolved vector of iterdomain corresponding to loops
+  //! \param loop_index_map Index mapping generated from the loop nest.
+  //! \param loops Loop structure where this id is indexed
+  //! Duplicate of above, but without a reference domain. TODO: Remove other
+  //! implementation.
+  CommonIndexKey(
+      IterDomain* consumer_indexed_id,
+      TensorDomain* consumer_td,
+      const std::vector<IterDomain*>& loop_domains,
+      const std::unordered_map<IterDomain*, Val*>& loop_index_map,
+      const std::vector<kir::ForLoop*>& loops);
+
   const IterDomain* concreteIndexedId() const {
     return concrete_indexed_id_;
   }
@@ -96,6 +110,16 @@ class TORCH_CUDA_CU_API CommonIndexMap {
       const std::vector<kir::ForLoop*>& loops,
       Val* index);
 
+  //! Duplicate of above, but without a reference domain. TODO: Remove other
+  //! implementation.
+  std::pair<Val*, bool> insert(
+      IterDomain* indexed_consumer_id,
+      TensorDomain* consumer_td,
+      const std::vector<IterDomain*>& loop_domains,
+      const std::unordered_map<IterDomain*, Val*>& loop_index_map,
+      const std::vector<kir::ForLoop*>& loops,
+      Val* index);
+
   const auto& commonIndexMap() const {
     return common_index_map_;
   }
@@ -103,6 +127,16 @@ class TORCH_CUDA_CU_API CommonIndexMap {
   const auto& useCounts() const {
     return use_counts_;
   }
+
+ private:
+  //! Utility method to insert a key into common index
+  //!  map. Returns a pair of an IR node and a boolean value.
+  //! The IR node will be the previously inserted index if
+  //!  the key found a match, or will be the original index
+  //!  if this is new key and the key will be stored.
+  //! The boolean value will be true if the key is stored,
+  //!  i.e. first time it is inserted.
+  std::pair<Val*, bool> tryInsertNewIndex(CommonIndexKey key, Val* index);
 
  private:
   //! Map to hold hoisted common indices
