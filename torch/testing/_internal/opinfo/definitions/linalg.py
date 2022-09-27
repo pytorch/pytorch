@@ -1330,9 +1330,17 @@ op_db: List[OpInfo] = [
                 "test_noncontiguous_samples",
             ),
             DecorateInfo(
-                unittest.skip("Backward may give incorrect results"),
+                unittest.skip("Gradients are incorrect on macos"),
                 "TestGradients",
                 "test_fn_grad",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
+            ),
+            DecorateInfo(
+                unittest.skip("Gradients are incorrect on macos"),
+                "TestGradients",
+                "test_forward_mode_AD",
                 device_type="cpu",
                 dtypes=(torch.float64,),
                 active_if=IS_MACOS,
@@ -1843,12 +1851,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
-        skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
-        ),
         sample_inputs_func=sample_inputs_linalg_vander,
     ),
     ReductionOpInfo(

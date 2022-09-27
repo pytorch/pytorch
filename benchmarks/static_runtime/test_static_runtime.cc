@@ -2523,6 +2523,15 @@ TEST(StaticRuntime, Index_Put) {
   auto indices_b = c10::List<at::Tensor>{torch::tensor({0}, at::kLong)};
   std::vector<IValue> args1{a, indices_b, values_a, false};
   testStaticRuntime(index_put_non_optional_str, args1);
+
+  const auto index_put_list_construct = R"JIT(
+    def forward(self, a: Tensor, indices: Tensor, values: Tensor, accumulate: bool):
+        indices: List[Optional[Tensor]] = [indices]
+        return torch.index_put(a, indices, values, accumulate).clone()
+  )JIT";
+
+  std::vector<IValue> args2{a, torch::tensor({0}, at::kLong), values_a, false};
+  testStaticRuntime(index_put_list_construct, args2);
 }
 
 TEST(StaticRuntime, Item) {
@@ -3665,4 +3674,53 @@ TEST(StaticRuntime, ClampNaNToNum) {
   // Non-NNC path
   testStaticRuntime(src1, {a.to(at::kDouble)}, {}, /*use_allclose=*/true, /*use_equalnan=*/true);
   testStaticRuntime(src1, {a.to(at::kDouble)}, {b.to(at::kDouble)}, /*use_allclose=*/true, /*use_equalnan=*/true);
+}
+
+TEST(StaticRuntime, PrepackWeights) {
+  const std::string src = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %none: NoneType = prim::Constant()
+        %result: Tensor = fb::quantized_linear_unpacked_weight_v2(%input, %weight, %bias, %scale, %zero_point)
+        %dequantized: Tensor = aten::dequantize(%result)
+        return (%dequantized)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  PrepackWeights(graph);
+  ASSERT_TRUE(graphHasOp(graph, "quantized::linear"));
+  ASSERT_TRUE(graphHasOp(graph, "quantized::linear_prepack"));
+  ASSERT_FALSE(graphHasOp(graph, "fb::quantized_linear_unpacked_weight_v2"));
+
+  auto scale = at::tensor({2}, at::kFloat);
+  auto zero_point = at::tensor({3}, at::kLong);
+
+  auto weight =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQInt8);
+  auto input =
+      at::quantize_per_tensor(torch::randn({3, 2}), 2, 3, torch::kQUInt8);
+  auto args1 = std::vector<IValue>{input, weight, c10::nullopt, scale, zero_point};
+
+  auto weight_2 =
+      at::quantize_per_tensor(torch::randn({8, 3}), 2, 3, torch::kQInt8);
+  auto input_2 =
+      at::quantize_per_tensor(torch::randn({9, 3}), 2, 3, torch::kQUInt8);
+  auto bias_2 = torch::randn({3}, torch::kFloat);
+  auto args2 = std::vector<IValue>{input, weight, bias_2, scale, zero_point};
+
+  testStaticRuntime(src, args1);
+  testStaticRuntime(src, args2);
+}
+
+TEST(StaticRuntime, IfReturningTuple) {
+  const auto src = R"JIT(
+    def forward(self, x, y, cond: bool, idx: int):
+        if cond:
+            tup = (x, y)
+        else:
+            tup = (x, x)
+        return tup[idx]
+  )JIT";
+
+  std::vector<IValue> args{at::randn({3}), at::randn({3}), true, 0};
+  testStaticRuntime(src, args);
 }
