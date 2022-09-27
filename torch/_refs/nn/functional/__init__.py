@@ -427,33 +427,35 @@ def _nll_loss_nd(
     reduction: str,
     ignore_index: int,
 ) -> TensorLikeType:
-    if input.ndim == 3 or input.ndim > 4:
-        msg = "Expected input dimension to be either [1, 2, 4] but recieved {}."
-        raise ValueError(msg.format(input.ndim))
+    utils.check(
+        input.ndim < 4 and input.ndim != 3,
+        lambda: f"Expected input dimension to be either [1, 2, 4] but recieved {input.ndim}.",
+    )
 
-    if input.ndim != 1 and input.shape[0] != target.shape[0]:
-        msg = "Expected input batch size ({}) to match target batch size ({})."
-        raise ValueError(msg.format(input.shape[0], target.shape[0]))
+    utils.check(
+        (input.ndim == 1) or (input.shape[0] == target.shape[0]),
+        lambda: f"Expected input batch size {input.shape[0]} to match target batch size {target.shape[0]}.",
+    )
 
     _check_reduction_value(reduction)
 
     flat_target = torch.reshape(target, [-1])
     ignore_classes_mask = torch.eq(flat_target, ignore_index)
     ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
-    default_class_weight = torch.scalar_tensor(
-        1, dtype=input.dtype, device=input.device
-    )
 
     # TODO: This check does not work with FakeTensor inputs
     """
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
     valid_classes_mask = torch.logical_and((flat_target >= 0), (flat_target < num_classes))
     if not torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask)):
-        print(target, num_classes, ignore_index)
         raise ValueError("Target class is out-of-bounds and not ignore index")
     """
 
+    # TODO Add comment for expansion
     if weight is None:
+        default_class_weight = torch.scalar_tensor(
+            1, dtype=input.dtype, device=input.device
+        )
         current_weight = torch.where(
             ignore_classes_mask,
             ignore_class_weight,
@@ -466,6 +468,7 @@ def _nll_loss_nd(
             weight[flat_target],
         )
 
+    # TODO Add comments for each case
     if input.ndim == 1:
         loss = -input[target] * current_weight
     elif input.ndim == 2:
@@ -488,6 +491,7 @@ def _nll_loss_nd(
     elif reduction == "sum":
         return torch.sum(loss)
     else:
+        # TODO Add comments "mean" reduction case
         return torch.sum(loss) / torch.sum(current_weight)
 
 
@@ -506,34 +510,39 @@ def nll_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
-    if input.ndim == 3 or input.ndim > 4:
-        # input ndim is == 3 or > 4
-        batch_size = input.shape[0]
-        num_classes = input.shape[1]
-        out_size = [batch_size] + list(input.shape[2:])
-
-        if target.shape[1:] != input.shape[2:]:
-            msg = "Expected target size {} but got {}"
-            raise ValueError(msg.format(out_size, target.shape))
-
-        # support empty batches, see #15870
-        if input.numel() > 0:
-            input = torch.reshape(input, [batch_size, num_classes, 1, -1])
-        else:
-            input = torch.reshape(input, [batch_size, num_classes, 0, 0])
-
-        if target.numel() > 0:
-            target = torch.reshape(target, [batch_size, 1, -1])
-        else:
-            target = torch.reshape(target, [batch_size, 0, 0])
-
-        if reduction == "none":
-            return _nll_loss_nd(input, target, weight, reduction, ignore_index)
-        else:
-            result = _nll_loss_nd(input, target, weight, reduction, ignore_index)
-            return torch.reshape(result, out_size)
-    else:
+    # TODO Can input be zero or one dimension? If so, how do we interpret that?
+    # The documentation for suggests that input should have at least two dimensions.
+    # Why are inputs with three or four dimensions special?
+    if input.ndim < 4 and input.ndim != 3:
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
+
+    # TODO Add comment for this case
+    # input.ndim == 3 or input.ndim > 4
+    batch_size = input.shape[0]
+    num_classes = input.shape[1]
+    out_size = [batch_size] + list(input.shape[2:])
+
+    utils.check(
+        target.shape[1:] != input.shape[2:],
+        lambda: f"Expected target shape {out_size} but got {target.shape}",
+    )
+
+    # support empty batches, see #15870
+    if input.numel() > 0:
+        input = torch.reshape(input, [batch_size, num_classes, 1, -1])
+    else:
+        input = torch.reshape(input, [batch_size, num_classes, 0, 0])
+
+    if target.numel() > 0:
+        target = torch.reshape(target, [batch_size, 1, -1])
+    else:
+        target = torch.reshape(target, [batch_size, 0, 0])
+
+    if reduction == "none":
+        return _nll_loss_nd(input, target, weight, reduction, ignore_index)
+    else:
+        result = _nll_loss_nd(input, target, weight, reduction, ignore_index)
+        return torch.reshape(result, out_size)
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out
