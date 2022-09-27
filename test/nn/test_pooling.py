@@ -714,43 +714,6 @@ torch.cuda.synchronize()
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
 
-    @onlyNativeDeviceTypes  # Fails with error not raised on XLA
-    @dtypes(torch.float)
-    @parametrize_test("requires_grad", [True, False])
-    def test_max_pool_invalid_0_size(self, device, dtype, requires_grad):
-        # MaxPool1D
-        mp = torch.nn.MaxPool1d(3)
-        msg = r"Expected input's non-batch dimensions to have positive length"
-        # Unbatched Input
-        with self.assertRaisesRegex(RuntimeError, msg):
-            mp(torch.randn(0, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-
-        # Batched Input
-        with self.assertRaisesRegex(RuntimeError, msg):
-            mp(torch.randn(3, 3, 0, device=device, dtype=dtype, requires_grad=requires_grad))
-
-        # MaxPool2D
-        mp = torch.nn.MaxPool2d(3)
-        msg = r"Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input"
-        # Unbatched Input
-        with self.assertRaisesRegex(RuntimeError, msg):
-            mp(torch.randn(0, 3, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-
-        # Batched Input
-        with self.assertRaisesRegex(RuntimeError, msg):
-            mp(torch.randn(3, 3, 0, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-
-        # MaxPool3D
-        mp = torch.nn.MaxPool3d(3)
-        msg = r"Expected input's non-batch dimensions to have positive length"
-        # Unbatched Input
-        with self.assertRaisesRegex(RuntimeError, msg):
-            mp(torch.randn(3, 0, 3, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-
-        # Batched Input
-        with self.assertRaisesRegex(RuntimeError, msg):
-            mp(torch.randn(2, 0, 3, 3, 3, device=device, dtype=dtype, requires_grad=requires_grad))
-
     @onlyCPU
     @dtypes(torch.float, torch.double)
     def test_max_pool1d(self, device, dtype):

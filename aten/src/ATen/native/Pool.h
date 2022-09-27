@@ -216,7 +216,11 @@ pool3d_shape_check(
   TORCH_CHECK(ndim == 4 || ndim == 5,
               fn_name, ": Expected 4D or 5D tensor for input, but got: ", input.sizes());
 
-  for (const auto i : c10::irange(1, ndim)) {
+  for (const auto i : c10::irange(ndim)) {
+    if (ndim == 5 && i == 0) {
+      // size of batch-dim can be 0.
+      continue;
+    }
     TORCH_CHECK(
         input.size(i) > 0,
         fn_name,
