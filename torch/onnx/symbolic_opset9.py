@@ -6479,22 +6479,19 @@ def prim_loop(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
 
-    new_op_outputs = g.op("Loop", *inputs, outputs=node.outputsSize())
+    old_blocks = tuple(node.blocks())
+    new_op_outputs, new_block_contexts, new_node = torchscript.add_op_with_blocks(
+        g, "Loop", *inputs, outputs=node.outputsSize(), n_blocks=len(old_blocks)
+    )
 
-    if isinstance(new_op_outputs, Sequence):
-        new_node = new_op_outputs[0].node()
-    else:
-        new_node = new_op_outputs.node()
-
-    for block in node.blocks():
-        new_block = new_node.addBlock()
+    for old_block, new_block_context in zip(old_blocks, new_block_contexts):
         # Copy input metadata to subblock
         #
         #   prim::Loop(iter, cond, input_1, ..., input_n)
         #     block0(iter, input_1, ..., input_n)
         #
         # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
-        for i, b_in in enumerate(block.inputs()):
+        for i, b_in in enumerate(old_block.inputs()):
             if i == 0 and i < len(inputs):
                 b_in.setType(inputs[i].type())
             # For optional block inputs, they may switch between None not-None inside
@@ -6507,7 +6504,11 @@ def prim_loop(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             ):
                 b_in.setType(inputs[i + 1].type())
         torch._C._jit_pass_onnx_block(
-            block, new_block, operator_export_type, env, False
+            old_block,
+            new_block_context.block,
+            operator_export_type,
+            env,
+            False,
         )
     fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
         new_node, opset_version
@@ -6585,18 +6586,15 @@ def prim_if(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             final_b_list.append(onnx_b)
         return final_b_list
     else:
-        new_op_outputs = g.op("If", *inputs, outputs=n.outputsSize())
+        old_blocks = tuple(n.blocks())
+        new_op_outputs, new_block_contexts, new_node = torchscript.add_op_with_blocks(
+            g, "If", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
+        )
 
-        if isinstance(new_op_outputs, Sequence):
-            new_node = new_op_outputs[0].node()
-        else:
-            new_node = new_op_outputs.node()
-
-        for b in n.blocks():
-            new_block = new_node.addBlock()
+        for old_block, new_block_context in zip(old_blocks, new_block_contexts):
             torch._C._jit_pass_onnx_block(
-                b,
-                new_block,
+                old_block,
+                new_block_context.block,
                 operator_export_type,
                 env,
                 False,

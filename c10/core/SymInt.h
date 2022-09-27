@@ -102,8 +102,19 @@ class C10_API SymInt {
       SymIntNode::reclaim(toSymIntNodeImplUnowned()); // steal
     }
   }
+
+  SymIntNodeImpl* release() && {
+    TORCH_INTERNAL_ASSERT(is_symbolic());
+    auto* r = toSymIntNodeImplUnowned();
+    data_ = 0; // transfer ownership
+    return r;
+  }
 #else
   void release_() {}
+
+  SymIntNodeImpl* release() && {
+    TORCH_INTERNAL_ASSERT(false);
+  }
 #endif
 
   SymIntNode toSymIntNodeImpl() const;
