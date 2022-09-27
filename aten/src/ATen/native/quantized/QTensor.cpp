@@ -330,6 +330,8 @@ std::tuple<Tensor, Tensor> choose_qparams_optimized(
     const double ratio,
     int64_t bit_width) {
 
+  TORCH_CHECK(numel <= input_tensor.numel(), "numel ", numel,
+      " greater than input_tensor.numel() ", input_tensor.numel());
   const float* input_row = input_tensor.data_ptr<float>();
   float xmin = *std::min_element(input_row, input_row + numel);
   float xmax = *std::max_element(input_row, input_row + numel);
