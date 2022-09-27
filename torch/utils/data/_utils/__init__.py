@@ -34,20 +34,6 @@ hook in Python 3.7 multiprocessing library:
 https://github.com/python/cpython/blob/d4d60134b29290049e28df54f23493de4f1824b6/Lib/multiprocessing/util.py#L277-L327
 """
 
-DATAPIPE_SHARED_SEED = "_dl_shared_seed"
-r"""The key to share the same seed for shuffle DataPipe across distributed processes"""
-
-DATAPIPE_SHARED_SEED_COUNTER = "_dl_shared_seed_recv_cnt"
-r"""The key to count the number of distributed processes that have received the shared seed"""
-
-DATAPIPE_SHARED_SEED_DEFAULT_TIMEOUT = 30 * 60
-r"""Timeout (in seconds) sending the shared seed from Rank 0 and sending
-    the signal of the shared seed received from other Ranks.
-    It uses the same default timeout for the distributed process group"""
-
-DATAPIPE_SHARED_SEED_CHECK_INTERVAL = 0.01
-r"""Interval to check if each rank has received the shared seed"""
-
 
 try:
     import numpy

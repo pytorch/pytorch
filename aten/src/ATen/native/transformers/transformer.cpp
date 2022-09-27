@@ -107,13 +107,14 @@ Tensor transformer_encoder_layer_forward(
   if (norm_first) {
     x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
   }
-#if USE_FLASH_ATTENTION
+
+#if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
   if (x.is_nested() && x.is_cuda() && x.dtype() == at::kHalf && !mask.has_value() &&
       (embed_dim / num_heads == 16 ||
        embed_dim / num_heads == 32 ||
        embed_dim / num_heads == 64 ||
        embed_dim / num_heads == 128)) {
-     TORCH_WARN_ONCE("USING FLASH ATTENTION WITH NT");
+     TORCH_WARN_ONCE("transformer_encoder_layer_forward is using flash attention.");
      x = at::linear(x, qkv_weight, qkv_bias);
      x = x.view({x.size(0), -1, 3, num_heads, embed_dim / num_heads});
      x = flash_attention_helper(x, x, x, 0.0, false);
@@ -135,7 +136,7 @@ Tensor transformer_encoder_layer_forward(
          false /* need_weights */,
          true /* average_attn_weights */,
          mask_type));
-#if USE_FLASH_ATTENTION
+#if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
   }
 #endif
   add_in_place(x, src, use_nested_tensor);
