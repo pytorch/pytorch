@@ -177,7 +177,12 @@ jobs:
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
       - name: Build PyTorch binary
+        env:
+          BUILD_NAME: ${{ inputs.build_name }}
         run: |
+          if [[ ${BUILD_NAME} == *with-pypi-cudnn* ]]; then
+            echo "HITTING IF CONDITION"
+          fi
           set -x
           mkdir -p artifacts/
           container_name=$(docker run \
