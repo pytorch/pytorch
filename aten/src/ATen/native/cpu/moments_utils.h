@@ -14,7 +14,7 @@
 
 namespace at {
 namespace native {
-inline namespace CPU_CAPABILITY {
+namespace {
 
 constexpr int64_t kChunkSize = 16;
 

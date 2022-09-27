@@ -180,17 +180,33 @@ struct SubstituteInExpr : public OptInDispatch {
     OptInDispatch::handle(expr);
   }
 
+  void handle(ARangeOp* arange_expr) final {
+    auto start = reference_->sameAs(arange_expr->start())
+        ? substitute_
+        : arange_expr->start();
+    auto end = reference_->sameAs(arange_expr->end()) ? substitute_
+                                                      : arange_expr->end();
+    auto step = reference_->sameAs(arange_expr->step()) ? substitute_
+                                                        : arange_expr->step();
+    auto out = reference_->sameAs(arange_expr->output(0))
+        ? substitute_
+        : arange_expr->output(0);
+    expr_ = IrBuilder::create<ARangeOp>(
+        arange_expr->container(),
+        out,
+        start,
+        end,
+        step,
+        arange_expr->getLinearIndex());
+  }
+
   void handle(UnaryOp* unary_expr) final {
     auto in =
         reference_->sameAs(unary_expr->in()) ? substitute_ : unary_expr->in();
     auto out =
         reference_->sameAs(unary_expr->out()) ? substitute_ : unary_expr->out();
     expr_ = IrBuilder::create<UnaryOp>(
-        unary_expr->container(),
-        unary_expr->getUnaryOpType(),
-        out,
-        in,
-        unary_expr->getRNGOffset());
+        unary_expr->container(), unary_expr->getUnaryOpType(), out, in);
   }
 
   void handle(BinaryOp* binary_expr) final {
@@ -225,6 +241,17 @@ struct SubstituteInExpr : public OptInDispatch {
         in1,
         in2,
         in3);
+  }
+
+  void handle(RNGOp* rng_expr) final {
+    auto out = reference_->sameAs(rng_expr->output(0)) ? substitute_
+                                                       : rng_expr->output(0);
+    expr_ = IrBuilder::create<RNGOp>(
+        rng_expr->container(),
+        rng_expr->getRNGOpType(),
+        out,
+        rng_expr->getRNGOffset(),
+        rng_expr->getPhiloxIndex());
   }
 
   void handle(ReductionOp* reduction_expr) final {
@@ -415,12 +442,12 @@ struct SubstituteInExpr : public OptInDispatch {
         out_avg,
         out_var,
         out_N,
-        init_avg,
-        init_var,
-        init_N,
         in_avg,
         in_var,
         in_N,
+        init_avg,
+        init_var,
+        init_N,
         welford_expr->isAllreduce());
   }
 
@@ -720,13 +747,29 @@ class ValReplacementMutator : private OptOutMutator {
     // would be a tensorview that doesn't get updated extents. Therefore, first
     // grab all leaves towards outputs and grab stmts from there.
     auto stmts = StmtSort::getStmts(fusion, allLeafOuts(fusion), true);
-    for (auto stmt : stmts) {
+
+    // Some fusions, such as standalone randlike, can have disconnected DAG, so
+    // we need some mechanism to make sure our replacement set is as complete as
+    // possible
+    // TODO: I think we need a more general mechanism to support disconnected
+    // DAG
+    std::vector<Val*> more;
+    for (auto v : fusion->inputs()) {
+      if (std::find(stmts.begin(), stmts.end(), v) == stmts.end()) {
+        more.emplace_back(v);
+      }
+    }
+    auto more_stmts = StmtSort::getStmts(fusion, more, true);
+    more_stmts.insert(more_stmts.end(), stmts.begin(), stmts.end());
+
+    for (auto stmt : more_stmts) {
       mutate(stmt);
     }
   }
 
  private:
   using OptOutMutator::mutate;
+
   void mutate(Val* val) final {
     if (replacement_map_.find(val) == replacement_map_.end()) {
       return OptOutMutator::mutate(val);
@@ -782,29 +825,12 @@ Val* getReductionInitValOf(TensorView* tv) {
   if (auto rop = dynamic_cast<ReductionOp*>(def)) {
     init = rop->init();
   } else if (auto grop = dynamic_cast<GroupedReductionOp*>(def)) {
-    int output_idx = -1;
-    for (const auto i : c10::irange(grop->numExprs())) {
-      if (tv == grop->output(i)) {
-        output_idx = static_cast<int>(i);
-        break;
-      }
-    }
-    TORCH_INTERNAL_ASSERT(
-        output_idx >= 0,
-        "Matching output not found for GroupedReductionOp: ",
-        tv->toString(),
-        ". Defined by: ",
-        def->toString());
+    int output_idx = grop->getExprIndexOfOutput(tv);
     init = grop->initVal(output_idx);
   } else if (auto wop = dynamic_cast<WelfordOp*>(def)) {
-    if (tv == wop->outAvg()) {
-      init = wop->initAvg();
-    } else if (tv == wop->outVar()) {
-      init = wop->initVar();
-    } else {
-      TORCH_INTERNAL_ASSERT(tv == wop->outN());
-      init = wop->initN();
-    }
+    return wop->getInitValOfOutput(tv);
+  } else if (auto gwop = dynamic_cast<GroupedWelfordOp*>(def)) {
+    init = gwop->getInitValOfOutput(tv);
   } else if (auto mma = dynamic_cast<MmaOp*>(def)) {
     init = mma->init();
   }
@@ -817,7 +843,8 @@ Val* getReductionInitValOf(TensorView* tv) {
 bool isReductionOp(const Expr* expr) {
   // Note that GridReduction inherits ReductionOp
   return expr->isA<ReductionOp>() || expr->isA<GroupedReductionOp>() ||
-      expr->isA<WelfordOp>() || expr->isA<kir::GridWelford>();
+      expr->isA<WelfordOp>() || expr->isA<GroupedWelfordOp>() ||
+      expr->isA<kir::GridWelford>() || expr->isA<kir::GroupedGridWelford>();
 }
 
 bool isReductionTvOp(const Expr* expr) {
@@ -891,8 +918,7 @@ struct ReplaceValInIndexVal : public OptInDispatch {
     auto inp = last_visited_val_;
     TORCH_INTERNAL_ASSERT(uop->out()->isA<Int>());
     auto out = IrBuilder::create<Int>(c10::nullopt);
-    IrBuilder::create<UnaryOp>(
-        uop->getUnaryOpType(), out, inp, uop->getRNGOffset());
+    IrBuilder::create<UnaryOp>(uop->getUnaryOpType(), out, inp);
     last_visited_val_ = out;
   }
 

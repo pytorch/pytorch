@@ -92,7 +92,7 @@ Features described in this documentation are classified by release status:
    rpc
    torch.random <random>
    masked
-   nested
+   torch.nested <nested>
    sparse
    storage
    torch.testing <testing>
