@@ -127,9 +127,9 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
     }
 }
 
-Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
+Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // Pessimism: we can't reapply views for as_strided_scatter.
-    return base.as_strided_scatter(mutated_view, size, stride, storage_offset);
+    return base.as_strided_scatter_symint(mutated_view, size, stride, storage_offset);
 }
 
 Tensor FunctionalInverses::diagonal_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -172,9 +172,9 @@ Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Ten
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, step);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, step);
 }
 
 Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, int64_t split_size, int64_t dim) {
@@ -226,6 +226,11 @@ Tensor FunctionalInverses::transpose_copy_int_inverse(const Tensor& base, const 
     } else {
       return transpose_copy(mutated_view, dim0, dim1);
     }
+}
+
+Tensor FunctionalInverses::_nested_view_from_buffer_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, const Tensor& nested_size_tensor, const Tensor& nested_stride_tensor, IntArrayRef offsets) {
+    TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
+    return Tensor();
 }
 
 Tensor FunctionalInverses::unsqueeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim) {

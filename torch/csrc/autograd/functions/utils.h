@@ -113,5 +113,21 @@ inline bool isFwGradDefined(const at::OptionalTensorRef& t) {
   return isFwGradDefined(*t);
 }
 
+inline bool isFwGradDefinedTensorList(at::ITensorListRef variables) {
+  bool ret = false;
+  for (auto& variable : variables) {
+    ret |= isFwGradDefined(variable);
+  }
+  return ret;
+}
+
+inline bool isFwGradDefinedTensorList(at::IOptTensorListRef li) {
+  bool ret = false;
+  for (auto t : li) {
+    ret |= (t.has_value() && isFwGradDefined(*t));
+  }
+  return ret;
+}
+
 } // namespace autograd
 } // namespace torch

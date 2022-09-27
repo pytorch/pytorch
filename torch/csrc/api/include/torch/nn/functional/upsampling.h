@@ -118,8 +118,12 @@ inline Tensor interpolate(
   }
 
   if (antialias &&
-      !(input.dim() == 4 && (c10::get_if<enumtype::kBilinear>(&mode)))) {
-    TORCH_CHECK(false, "Anti-alias option is only supported for bilinear mode");
+      !(input.dim() == 4 &&
+        (c10::get_if<enumtype::kBilinear>(&mode) ||
+         c10::get_if<enumtype::kBicubic>(&mode)))) {
+    TORCH_CHECK(
+        false,
+        "Anti-alias option is only supported for bilinear and bicubic modes");
   }
 
   auto closed_over_args =
@@ -215,6 +219,14 @@ inline Tensor interpolate(
         scale_factor_list.at(2));
   } else if (input.dim() == 4 && c10::get_if<enumtype::kBicubic>(&mode)) {
     TORCH_INTERNAL_ASSERT(align_corners != c10::nullopt);
+    if (antialias) {
+      return torch::_upsample_bicubic2d_aa(
+          input,
+          _interp_output_size(2, closed_over_args),
+          *align_corners,
+          scale_factor_list.at(0),
+          scale_factor_list.at(1));
+    }
     return torch::upsample_bicubic2d(
         input,
         _interp_output_size(2, closed_over_args),

@@ -426,7 +426,11 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
     case at::kBFloat16:
       return onnx::TensorProto_DataType_BFLOAT16;
     default:
-      AT_ERROR("unexpected tensor scalar type");
+      TORCH_CHECK(
+          false,
+          "ScalarType ",
+          toString(at_type),
+          " is an unexpected tensor scalar type");
   }
 }
 
@@ -889,15 +893,24 @@ void GraphEncoder::EncodeNode(
         !node->kind().is_attr());
   }
   node_proto->set_op_type(node->kind().toUnqualString());
+  const auto node_name_attribute_symbol =
+      Symbol::attr(::torch::onnx::kOnnxNodeNameAttribute);
   if (add_node_names) {
-    auto node_name =
+    std::string node_name =
         node_proto->op_type() + "_" + std::to_string(num_op_nodes_);
+    if (node->hasAttribute(node_name_attribute_symbol)) {
+      node_name = node->s(node_name_attribute_symbol);
+    }
     node_proto->set_name(node_name);
     onnx_node_name_map_[node] = node_name;
     num_op_nodes_++;
   }
   auto attrs_it = node_attr_to_name_.find(node);
   for (auto attr_name : node->attributeNames()) {
+    if (attr_name == node_name_attribute_symbol) {
+      // Skip the node name attribute.
+      continue;
+    }
     if (attrs_it != node_attr_to_name_.end()) {
       auto attr_it = attrs_it->second.find(attr_name.toUnqualString());
       if (attr_it != attrs_it->second.end()) {

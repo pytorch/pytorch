@@ -527,18 +527,22 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
   auto input_conj = input.conj();
   auto output_conj = output.conj();
 
+  // For Composite Compliance, we always choose the slower but composite compliant path.
+  bool are_inputs_tensors_sublcass = areAnyTensorSubclassLike({input, grad, output});
+
   const auto w = output_conj * grad;
   const auto is_zero = input == 0;
-  if (!(is_zero.any().item<uint8_t>())) {
-    return reversed_cumsum(w, dim).div(input_conj);
+  if (!are_inputs_tensors_sublcass) {
+    if (is_zero.any().item<uint8_t>() == 0) {
+      return reversed_cumsum(w, dim).div(input_conj);
+    }
   }
 
   // If we are not computing a second order gradient, we can use an
   // O(n) implementation. The derivative of this implementation is _not_
   // the second derivative of cumprod. As such, we fallback to a less efficient
   // O(n^2) implementation when at::GradMode::is_enabled().
-  Tensor grad_input = at::zeros(input.sizes(), grad.options());
-  if (!at::GradMode::is_enabled()) {
+  if (!at::GradMode::is_enabled() && !are_inputs_tensors_sublcass) {
     // n.b. This could probably be implemented much faster with a kernel
 
     // From here on we need to use some mask gymnastics to
@@ -556,6 +560,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     // zeros_like(indices).scatter_(dim, indices, 1.) & cumsum == 1
     // Note that the logic_and with cumsum == 1 accounts
     // for the case when there is no first zero
+    Tensor grad_input = at::zeros(input.sizes(), grad.options());
     const auto cumsum = is_zero.cumsum(dim);
 
     // case k < z1
@@ -592,6 +597,7 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
                                     .mul_(at::gather(output_conj, dim, (first_zero_index - 1).relu_())
                                           .masked_fill_(first_zero_index == 0, 1.))
                                     .masked_select(first_zero_mask));
+    return grad_input;
   } else { // GradMode::enabled()
     /*
     If the input is nonzero, we need to calculate the dy_j / dx_k
@@ -614,6 +620,15 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     dy_j / dx_k = 0, which is done right after the assert.
     */
 
+    Tensor grad_input;
+    // For Composite Compliance, we will use
+    // at::stack on the grad slices, hence the vector.
+    std::vector<Tensor> grad_inputs;
+    if (are_inputs_tensors_sublcass) {
+      grad_inputs.reserve(dim_size);
+    } else {
+      grad_input = at::zeros(input.sizes(), grad.options());
+    }
     auto ones_size = input.sizes().vec();
     ones_size[dim] = 1;
     const Tensor ones = at::ones({1}, grad.options()).expand(ones_size);
@@ -638,11 +653,16 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
       // dim_size - k
       TORCH_CHECK(omitted_products.size(dim) == dim_size - k);
 
-      grad_input.select(dim, k).copy_(
-          at::sum(grad.slice(dim, k) * omitted_products,dim));
+      auto grad_slice = at::sum(grad.slice(dim, k) * omitted_products, dim);
+      if (are_inputs_tensors_sublcass) {
+        grad_inputs.push_back(grad_slice);
+      } else {
+        grad_input.select(dim, k).copy_(grad_slice);
+      }
     }
+
+    return are_inputs_tensors_sublcass ? at::stack(grad_inputs, dim) : grad_input;
   }
-  return grad_input;
 }
 
 // Implement std::is_nan<IntegralType> for MSVC.
@@ -1443,7 +1463,7 @@ inline void allany_impl(
   if (self.numel() == 0) {
     result.fill_(identity);
   } else if (self.numel() == 1) {
-    result.fill_(self.item().toBool());
+    result.copy_(self.view_as(result).to(at::kBool));
   } else {
     auto iter = get_allany_iter(self, result, dims, keepdim);
     stub(iter.device_type(), iter);
