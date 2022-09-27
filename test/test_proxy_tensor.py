@@ -1439,40 +1439,6 @@ class TestProxyTensorOpInfo(TestCase):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 
 
-class TestProxyTensorManual(TestCase): 
-    def test_slice(self):
-        class SampleInput:
-            def __init__(self, input, args, kwargs={}):
-                self.input = input
-                self.args = args
-                self.kwargs = kwargs
-
-        class SliceOpInfo:
-            def op(self, *args, **kwargs):
-                return torch.ops.aten.slice(*args, **kwargs)
-
-            def sample_inputs(self, device, dtype, requires_grad):
-                for i in [
-                    SampleInput(
-                        input=torch.ones(3, device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(0,),
-                    ),
-                    SampleInput(
-                        input=torch.randn((2,3,4,5), device=device, dtype=dtype, requires_grad=requires_grad),
-                        args=(),
-                        kwargs={
-                            'dim': 2,
-                            'start': 1,
-                        }
-                    ),
-                ]:
-                    yield i
-        slice = SliceOpInfo()
-        _test_make_fx_helper(self, 'cpu', torch.float, slice, "real")
-        _test_make_fx_helper(self, 'cpu', torch.float, slice, "fake")
-        _test_make_fx_helper(self, 'cpu', torch.float, slice, "symbolic")
-
-
 only_for = ("cpu")
 instantiate_device_type_tests(TestProxyTensorOpInfo, globals(), only_for=only_for)
 
