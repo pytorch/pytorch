@@ -490,7 +490,7 @@ def get_process_group_ranks(group: ProcessGroup):
     Returns:
         List of global ranks ordered by group rank.
     """
-    return list(_pg_group_ranks[group].keys())
+    return list(_world._pg_group_ranks[group].keys())
 
 def _get_group_size(group):
     """
