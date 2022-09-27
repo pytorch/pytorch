@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple, Union
 
 from torchgen.utils import dataclass_repr
 
@@ -260,6 +260,24 @@ class SampleInput(object):
             return t
 
         return self.transform(to_noncontiguous)
+
+
+def make_sample_input(
+    input: Union[torch.Tensor, Sequence[torch.Tensor]], *args, **kwargs
+) -> SampleInput:
+    """Helper function for creating simple SampleInput objects
+
+    Call make_sample_input as if you were calling the original function, and
+    this returns the corresponding SampleInput with all additional sample
+    metadata left as default.
+
+    Example
+    -------
+    >>> make_sample_input(torch.ones(1), 2, 3, alpha=4)
+    SampleInput(input=tensor([1.]), args=(2, 3), kwargs={'alpha': 4}, ...)
+
+    """
+    return SampleInput(input, args=args, kwargs=kwargs)
 
 
 NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])
