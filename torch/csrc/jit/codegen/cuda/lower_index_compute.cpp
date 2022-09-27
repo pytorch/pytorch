@@ -438,6 +438,7 @@ class LoopIndexingAnalysis {
     indexing.loop_root_ = loop_root_domains_;
     indexing.loop_domains_ = loop_domains_.vector();
     indexing.index_exprs_ = replayed_exprs_;
+    indexing.out_of_line_exprs_ = out_of_line_exprs_;
     return indexing;
   }
 
@@ -481,6 +482,12 @@ class LoopIndexingAnalysis {
   //! loop_domains_ with all of these iter domains.
   void constructLoopDomains();
 
+  //! Fills out_of_line_exprs_ by traversing the selected list of
+  //!  expressions in reverse topological order and collect iterdomains
+  //!  on the indexing paths that only involves leaf id's on the right
+  //!  of consumer's ca axis.
+  void collectOutOfLineExprs();
+
  private:
   //! Original loop nest input to derive info from.
   const std::vector<kir::ForLoop*>& loops_;
@@ -521,6 +528,10 @@ class LoopIndexingAnalysis {
   //! Selected list of exprs that will produce and consume each
   //!  of the exact concrete ids from the loop nest exactly once.
   std::vector<Expr*> replayed_exprs_;
+
+  //! Set of expressions from the selected list that can be
+  //!  resolved from axes on the right of ca axes.
+  std::vector<Expr*> out_of_line_exprs_;
 };
 
 LoopIndexingAnalysis::LoopIndexingAnalysis(
@@ -559,6 +570,10 @@ LoopIndexingAnalysis::LoopIndexingAnalysis(
   // Reconstruct the iterdomain view of the original loopnest after resolving
   // the exact definition of each index.
   constructLoopDomains();
+
+  //! Collect the set of indexing expressions that can be
+  //!  resolved out of line.
+  collectOutOfLineExprs();
 }
 
 void LoopIndexingAnalysis::validateLoopStructure(
@@ -1087,6 +1102,48 @@ std::vector<Expr*> LoopIndexingTraversal::getExprList() {
 }
 
 } // namespace
+
+void LoopIndexingAnalysis::collectOutOfLineExprs() {
+  // Keep track of all the id's that can be resolved without
+  //  iterdomains on the left of ca axes.
+  std::unordered_set<IterDomain*> out_of_line_ids;
+
+  // Start the set with all the leaf ids.
+  std::transform(
+      consumer_tv_->domain()->domain().begin() +
+          consumer_tv_->getComputeAtPosition(),
+      consumer_tv_->domain()->domain().end(),
+      std::inserter(out_of_line_ids, out_of_line_ids.end()),
+      ir_utils::caMapExactConcreteId);
+
+  // Get the original selected list of index expressions
+  //  in reverse topological order.
+  auto backward_expr_list =
+      LoopIndexingTraversal::backwardTopologicalOrder(replayed_exprs_);
+
+  for (auto expr : backward_expr_list) {
+    auto id_outputs = ir_utils::filterByType<IterDomain>(expr->outputs());
+    if (
+        // Check that all of the outputs are out of line
+        std::all_of(
+            id_outputs.begin(),
+            id_outputs.end(),
+            [&out_of_line_ids](IterDomain* id) {
+              return out_of_line_ids.count(ir_utils::caMapExactConcreteId(id));
+            })) {
+      // Record out of line expression
+      out_of_line_exprs_.push_back(expr);
+
+      // Add all of the expression inputs as out of line id's.
+      auto id_inputs = ir_utils::filterByType<IterDomain>(expr->inputs());
+      std::transform(
+          id_inputs.begin(),
+          id_inputs.end(),
+          std::inserter(out_of_line_ids, out_of_line_ids.end()),
+          ir_utils::caMapExactConcreteId);
+    }
+  }
+}
 
 std::vector<Expr*> LoopIndexing::getForwardExprList() const {
   return LoopIndexingTraversal::forwardTopologicalOrder(index_exprs_);
