@@ -1199,7 +1199,7 @@ Tensor convolution_backward_jvp_grad_bias(
 // Args:
 //  input              Tensor to call .strides() on
 //  input_name         Name of `input` tensor, from derivative formula
-at::IntArrayRef strides_or_error(
+at::SymIntArrayRef strides_or_error(
     const Tensor& input,
     c10::string_view const& input_name) {
   // TODO: Ideally, this function would never be called if requires_grad is
@@ -1215,20 +1215,20 @@ at::IntArrayRef strides_or_error(
         input_name,
         "'");
     if (input.is_mkldnn())
-      return IntArrayRef({});
+      return {};
     if (input.is_sparse_csr())
-      return IntArrayRef({});
-    return input.strides();
+      return {};
+    return input.sym_strides();
   } else {
-    return IntArrayRef({});
+    return {};
   }
 }
 
 Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
-    at::IntArrayRef mat1_sizes,
-    at::IntArrayRef mat1_strides,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
     c10::Layout mat1_layout,
     const Scalar& alpha) {
   if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
@@ -1246,8 +1246,8 @@ Tensor mm_mat1_backward(
 Tensor mm_mat2_backward(
     const Tensor& grad,
     const Tensor& mat1,
-    IntArrayRef mat2_sizes,
-    IntArrayRef mat2_strides,
+    at::SymIntArrayRef mat2_sizes,
+    at::SymIntArrayRef mat2_strides,
     c10::Layout mat2_layout,
     const Scalar& alpha) {
   if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
@@ -2752,7 +2752,7 @@ Tensor as_strided_backward(
     TensorGeometry input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
-    optional<c10::SymInt> sym_storage_offset_) {
+    const optional<c10::SymInt>& sym_storage_offset_) {
   // TODO: properly use sym
   auto sizes = c10::asIntArrayRefSlow(sym_sizes);
   auto strides = c10::asIntArrayRefSlow(sym_strides);
@@ -2880,7 +2880,7 @@ Tensor as_strided_scatter_backward(
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset) {
+    const optional<c10::SymInt>& storage_offset) {
   // Note [as_strided_scatter backward support]
   // as_strided_scatter handling for autograd is a beast, and is non-trivial to
   // implement for arbitrarily strided inputs. Most uses for as_strided with
@@ -5660,18 +5660,19 @@ Tensor lu_unpack_backward(
   }
 }
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
   Tensor out_fw_grad;
 
+  auto materialized = tensors.materialize();
   auto any_defined = false;
-  for (const auto& t : tensors) {
+  for (const Tensor& t : materialized) {
     any_defined |= isFwGradDefined(t);
   }
 
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
-    for (auto& t : tensors) {
+    for (const Tensor& t : materialized) {
       fw_grads.push_back(
           isFwGradDefined(t)
               ? t._fw_grad(/*level*/ 0)

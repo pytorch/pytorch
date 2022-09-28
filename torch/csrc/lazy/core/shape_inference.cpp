@@ -1338,8 +1338,8 @@ std::vector<Shape> compute_shape_slice_scatter_symint(
     const at::Tensor& self,
     const at::Tensor& src,
     int64_t dim,
-    c10::optional<c10::SymInt> start,
-    c10::optional<c10::SymInt> end,
+    const c10::optional<c10::SymInt>& start,
+    const c10::optional<c10::SymInt>& end,
     c10::SymInt step) {
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
@@ -1365,7 +1365,7 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
     const at::Tensor& src,
     at::SymIntArrayRef size,
     at::SymIntArrayRef stride,
-    c10::optional<c10::SymInt> storage_offset) {
+    const c10::optional<c10::SymInt>& storage_offset) {
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
