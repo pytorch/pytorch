@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
@@ -309,6 +310,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     }
   });
   m.def("_clear_callbacks", []() { at::clearCallbacks(); });
+  m.def(
+      "_saved_tensors_hooks_is_enabled",
+      at::SavedTensorDefaultHooks::is_enabled);
+  m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
+  m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_get_disabled_error_message",
+      at::SavedTensorDefaultHooks::get_disabled_error_message);
   m.def(
       "_push_saved_tensors_default_hooks",
       [](py::function& pack_hook, py::function& unpack_hook) {
