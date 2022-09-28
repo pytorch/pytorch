@@ -10,7 +10,6 @@ import torch._C
 
 import torch.jit
 from torch import _utils_internal
-from torch._C import DispatchKey  # type: ignore[attr-defined]
 
 # Query `hasattr` only once.
 
@@ -486,15 +485,8 @@ class _OpNamespace(types.ModuleType):
     def __init__(self, name):
         super(_OpNamespace, self).__init__("torch.ops." + name)
         self.name = name
-        if self.name == "pyop":
-            self.pyops = pyop_namespace
-        else:
-            self.pyops = None  # type: ignore[assignment]
 
     def __getattr__(self, op_name):
-        pyops = object.__getattribute__(self, "pyops")
-        if pyops is not None:
-            return pyops.py_ops[op_name]
         # It is not a valid op_name when __file__ is passed in
         if op_name == "__file__":
             return "torch.ops"
