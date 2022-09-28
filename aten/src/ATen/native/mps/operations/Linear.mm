@@ -18,12 +18,14 @@ namespace native {
 
 Tensor _mps_linear(
   const Tensor& input,
-  const Tensor& weight,
+  const Tensor& weight_arg,
   const c10::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
   // y=x*wT+b
 
   using namespace mps;
+
+  auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
 
   TORCH_CHECK(input.scalar_type() == ScalarType::Double
               || input.scalar_type() == ScalarType::Float
@@ -150,7 +152,17 @@ Tensor _mps_linear(
     mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  return output;
+  // Shave off '1' present at the  end of the shape
+  if(weight_arg.dim() == 1) {
+    // Number of elements in new output shape
+    auto N = output.dim() - 1;
+    int64_t out_shape[N];
+    for(int i = 0; i < N; i++)
+      out_shape[i] = output.size(i);
+    return output.view(IntArrayRef(out_shape, N));
+  }
+  else
+    return output;
 }
 
 Tensor _mps_linear_backward_input(

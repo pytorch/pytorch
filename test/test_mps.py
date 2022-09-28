@@ -338,6 +338,26 @@ class TestMPS(TestCase):
         y_mps = x_cpu.to("mps")
         torch.testing.assert_allclose(x_cpu.item(), y_mps.item())
 
+    def test_linear_1d_weight(self):
+        device = 'cpu'
+        projected = torch.rand([8]).to(device)
+        x = torch.rand([1, 2, 2, 8]).to(device)
+        x_mps = x.to('mps')
+        projected_mps = projected.to('mps')
+        linear = F.linear(x, projected)
+        linear_mps = F.linear(x_mps, projected_mps)
+
+        self.assertEqual(linear, linear_mps)
+
+        projected = torch.rand([1, 8]).to(device)
+        x = torch.rand([1, 2, 2, 8]).to(device)
+        x_mps = x.to('mps')
+        projected_mps = projected.to('mps')
+        linear = F.linear(x, projected)
+        linear_mps = F.linear(x_mps, projected_mps)
+
+        self.assertEqual(linear, linear_mps)
+
     def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
