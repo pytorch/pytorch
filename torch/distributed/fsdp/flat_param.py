@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
+    Any,
     cast,
     Dict,
     Generator,
@@ -22,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import _alloc_storage, _free_storage, _set_fsdp_flattened, p_assert
 
 __all__ = [
@@ -152,6 +154,10 @@ class FlatParameter(nn.Parameter):
             ``_numels``, ``_shapes``, and ``_prefixed_param_names``.
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
+        _param_extensions (Tuple[Optional[Any], ...]): Parameter extensions
+            (i.e. some per-parameter state) used to customize pre-flatten and
+            post-unflatten behavior. This is experimental, and users should not
+            depend on its existence in the future.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
@@ -197,6 +203,7 @@ class FlatParameter(nn.Parameter):
         shapes: List[torch.Size],
         prefixed_param_names: List[str],
         shared_param_infos: List[SharedParamInfo],
+        param_extensions: List[Any],
     ) -> None:
         """
         Initializes attributes holding metadata about the original parameters
@@ -216,12 +223,14 @@ class FlatParameter(nn.Parameter):
         assert len(param_infos) == len(numels)
         assert len(param_infos) == len(shapes)
         assert len(param_infos) == len(prefixed_param_names)
+        assert len(param_infos) == len(param_extensions)
         self._num_params = len(param_infos)
         self._param_infos = tuple(param_infos)
         self._numels = tuple(numels)
         self._shapes = tuple(shapes)
         self._prefixed_param_names = tuple(prefixed_param_names)
         self._shared_param_infos = tuple(shared_param_infos)
+        self._param_extensions = tuple(param_extensions)
         self._unpadded_unsharded_size = self.size()
         _set_fsdp_flattened(self)
 
@@ -291,6 +300,7 @@ class FlatParamHandle:
         shared_param_infos: List[SharedParamInfo] = []
         shared_param_memo: Dict[nn.Parameter, Tuple[nn.Module, str, str]] = {}
         params_to_flatten: List[nn.Parameter] = []
+        param_extensions: List[Any] = []
         dtype: Optional[torch.dtype] = None
         requires_grad: Optional[bool] = None
         for submodule_name, submodule in module.named_modules():
@@ -328,6 +338,8 @@ class FlatParamHandle:
                         raise ValueError(
                             "`FlatParameter` requires uniform `requires_grad`"
                         )
+                    param, extension = _ext_pre_flatten_transform(param)
+                    param_extensions.append(extension)
                     dtype = param.dtype
                     requires_grad = param.requires_grad
                     shared_param_memo[param] = (submodule, submodule_name, param_name)
@@ -351,6 +363,7 @@ class FlatParamHandle:
             shapes,
             prefixed_param_names,
             shared_param_infos,
+            param_extensions,
         )
 
     @staticmethod
@@ -797,17 +810,18 @@ class FlatParamHandle:
                     # If we're using mixed precision with keeping grads
                     # casted, gradient here might still be of the reduced
                     # dtype if we didn't clear / set the gradients to None
-                    # after previous forward. In that case, make sure
+                    # after previous backward. In that case, make sure
                     # p._saved_grad_shard is cast to the full precision type
                     # so that we can accumulate in full precision in
                     # _post_backward_hook and assign back in full precision
                     # in _wait_for_post_backward.
                     if (
-                        self._config.keep_low_precision_grads and
-                        flat_param._saved_grad_shard.dtype != flat_param._local_shard.dtype  # type: ignore[attr-defined]
+                        self._config.keep_low_precision_grads
+                        and flat_param._saved_grad_shard.dtype  # type: ignore[attr-defined]
+                        != flat_param._local_shard.dtype  # type: ignore[attr-defined]
                     ):
-                        flat_param._saved_grad_shard = (  # type: ignore[attr-defined]
-                            flat_param._saved_grad_shard.to(flat_param._local_shard.dtype)  # type: ignore[attr-defined]
+                        flat_param._saved_grad_shard = flat_param._saved_grad_shard.to(  # type: ignore[attr-defined]
+                            flat_param._local_shard.dtype  # type: ignore[attr-defined]
                         )
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
@@ -948,9 +962,10 @@ class FlatParamHandle:
             f"{tensor.numel()} numel",
         )
         views = (
-            subtensor.view(shape)
-            for (subtensor, shape) in zip(
-                torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes  # type: ignore[arg-type]
+            _ext_post_unflatten_transform(subtensor.view(shape), param_extension)
+            for (subtensor, shape, param_extension) in zip(
+                torch.split(tensor, flat_param._numels, dim=0),  # type: ignore[arg-type]
+                flat_param._shapes, flat_param._param_extensions,
             )
         )
         return views

@@ -30,7 +30,12 @@ install_nvidia_driver_amzn2() {
             INSTALLED_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader)
 
             if [ "$INSTALLED_DRIVER_VERSION" != "$DRIVER_VERSION" ]; then
-                echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has been installed, but we expect to have $DRIVER_VERSION instead. Continuing with NVIDIA driver installation"
+                # TODO
+                # Remove this after torchrec and FBGEMM have both been updated to use
+                # PyTorch NVIDIA installation script instead of using the latest driver
+                # from RHEL repo
+                HAS_NVIDIA_DRIVER=1
+                echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has been installed, but we expect to have $DRIVER_VERSION instead. Skipping NVIDIA driver installation for now until torchrec and FBGEMM are updated to use PyTorch NVIDIA installation script instead of RHEL repo"
             else
                 HAS_NVIDIA_DRIVER=1
                 echo "NVIDIA driver ($INSTALLED_DRIVER_VERSION) has already been installed. Skipping NVIDIA driver installation"
