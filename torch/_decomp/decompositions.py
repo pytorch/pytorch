@@ -2,6 +2,7 @@ import functools
 import operator
 import sys
 from enum import Enum
+from functools import partial, reduce
 from itertools import product
 from typing import Callable, cast, Iterable, List, Optional, Tuple
 
@@ -68,18 +69,18 @@ def type_casts(
     return inner
 
 
-compute_only_pw_cast_for_opmath = functools.partial(
+compute_only_pw_cast_for_opmath = partial(
     type_casts,
     type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     compute_dtype_only=True,
 )
-pw_cast_for_opmath = functools.partial(
+pw_cast_for_opmath = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 )
-reduction_complex_to_real = functools.partial(
+reduction_complex_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT
 )
-pw_cast_for_int_to_real = functools.partial(
+pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
@@ -707,7 +708,27 @@ def _log_softmax_backward_data(
     return _cast_grad_to_input_dtype(grad_output, grad_input, input_dtype)
 
 
+def _im2col_col2im_indices_along_dim(
+    input_d, kernel_d, dilation_d, padding_d, stride_d, device
+):
+    """Utility function to implement im2col and col2im"""
+    blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
+
+    arange_kw = partial(torch.arange, dtype=torch.int64, device=device)
+
+    # Stride kernel over input and find starting indices along dim d
+    blocks_d_indices = arange_kw(0, blocks_d, stride_d).unsqueeze(0)
+
+    # Apply dilation on kernel and find its indices along dim d
+    kernel_grid = arange_kw(0, kernel_d * dilation_d, dilation_d).unsqueeze(-1)
+
+    # Broadcast and add kernel staring positions (indices) with
+    # kernel_grid along dim d, to get block indices along dim d
+    return blocks_d_indices + kernel_grid
+
+
 @register_decomposition(aten.im2col)
+@out_wrapper()
 def im2col(
     input: Tensor,
     kernel_size: List[int],
@@ -715,59 +736,172 @@ def im2col(
     padding: List[int],
     stride: List[int],
 ) -> Tensor:
-    utils.check(input.dim() == 4, lambda: "im2col(): only 4D input supported")
     utils.check(len(kernel_size) == 2, lambda: "im2col(): only 2D kernel supported")
     utils.check(len(dilation) == 2, lambda: "im2col(): only 2D dilation supported")
     utils.check(len(padding) == 2, lambda: "im2col(): only 2D padding supported")
     utils.check(len(stride) == 2, lambda: "im2col(): only 2D stride supported")
 
-    batch_dim = input.size(0)
-    channel_dim = input.size(1)
-    input_h = input.size(2)
-    input_w = input.size(3)
+    def check_positive(param, param_name, strict=True):
+        cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
+        utils.check(
+            cond, lambda: "{param_name} should be greater {'than' zero, but got {param}"
+        )
 
-    stride_h, stride_w = stride[0], stride[1]
-    padding_h, padding_w = padding[0], padding[1]
-    dilation_h, dilation_w = dilation[0], dilation[1]
-    kernel_h, kernel_w = kernel_size[0], kernel_size[1]
+    check_positive(kernel_size, "kernel_size")
+    check_positive(dilation, "dilation")
+    check_positive(dilation, "padding", strict=False)
+    check_positive(stride, "stride")
 
-    def _get_im2col_indices_along_dim(
-        input_d, kernel_d, dilation_d, padding_d, stride_d
-    ):
-        blocks_d = input_d + padding_d * 2 - dilation_d * (kernel_d - 1)
-
-        # Stride kernel over input and find starting indices along dim d
-        blocks_d_indices = torch.arange(
-            0, blocks_d, stride_d, dtype=torch.int64, device=input.device
-        ).unsqueeze(0)
-        num_blocks = (blocks_d - 1) // stride_d + 1
-
-        # Apply dilation on kernel and find its indices along dim d
-        kernel_grid = torch.arange(
-            0, kernel_d * dilation_d, dilation_d, dtype=torch.int64, device=input.device
-        ).unsqueeze(-1)
-
-        # Broadcast and add kernel staring positions (indices) with
-        # kernel_grid along dim d, to get block indices along dim d
-        block_mask = blocks_d_indices + kernel_grid
-
-        return block_mask, num_blocks
-
-    blocks_row_indices, num_blocks_row = _get_im2col_indices_along_dim(
-        input_h, kernel_h, dilation_h, padding_h, stride_h
+    shape = input.shape
+    ndim = len(shape)
+    utils.check(
+        ndim in (3, 4) and all(d != 0 for d in shape[-3:]),
+        lambda: "Expected 3D or 4D (batch mode) tensor for input with possible 0 batch size "
+        f"and non-zero dimensions, but got: {tuple(shape)}",
     )
-    blocks_col_indices, num_blocks_col = _get_im2col_indices_along_dim(
-        input_w, kernel_w, dilation_w, padding_w, stride_w
+    output_size = tuple(
+        1 + (out + 2 * pad - dil * (ker - 1) - 1) // st
+        for out, pad, dil, ker, st in zip(
+            shape[-2:], padding, dilation, kernel_size, stride
+        )
+    )
+    utils.check(
+        all(c > 0 for c in output_size),
+        lambda: f"Given an input with spacial size {tuple(shape[-2:])}, "
+        f"kernel_size={kernel_size}, dilation={dilation}, "
+        f"padding={padding}, stride={stride}, "
+        "the calculated shape of the array of sliding blocks "
+        f"is {output_size}, but its components must be at least one.",
+    )
+    batched_input = ndim == 4
+    if not batched_input:
+        input = input.unsqueeze(0)
+
+    batch_dim, channel_dim, input_h, input_w = input.shape
+
+    stride_h, stride_w = stride
+    padding_h, padding_w = padding
+    dilation_h, dilation_w = dilation
+    kernel_h, kernel_w = kernel_size
+
+    blocks_row_indices = _im2col_col2im_indices_along_dim(
+        input_h, kernel_h, dilation_h, padding_h, stride_h, input.device
+    )
+    blocks_col_indices = _im2col_col2im_indices_along_dim(
+        input_w, kernel_w, dilation_w, padding_w, stride_w, input.device
     )
 
-    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
+    padded_input = F.pad(input, (padding_h, padding_h, padding_w, padding_w))
 
     blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
     output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
     output = output.permute(0, 1, 2, 4, 3, 5)
-    return output.reshape(
+    num_blocks_row = blocks_row_indices.size(1)
+    num_blocks_col = blocks_col_indices.size(1)
+    output = output.reshape(
         batch_dim, channel_dim * kernel_h * kernel_w, num_blocks_row * num_blocks_col
     )
+
+    if not batched_input:
+        output = output.squeeze(0)
+    return output
+
+
+@register_decomposition(torch.ops.aten.col2im)
+@out_wrapper()
+def col2im(
+    input: Tensor,
+    output_size: List[int],
+    kernel_size: List[int],
+    dilation: List[int],
+    padding: List[int],
+    stride: List[int],
+) -> Tensor:
+    utils.check(len(output_size) == 2, lambda: "only 2D output_size supported")
+    utils.check(len(kernel_size) == 2, lambda: "only 2D kernel supported")
+    utils.check(len(dilation) == 2, lambda: "only 2D dilation supported")
+    utils.check(len(padding) == 2, lambda: "only 2D padding supported")
+    utils.check(len(stride) == 2, lambda: "only 2D stride supported")
+
+    def check_positive(param, param_name, strict=True):
+        cond = all(p > 0 for p in param) if strict else all(p >= 0 for p in param)
+        utils.check(
+            cond, lambda: "{param_name} should be greater than zero, but got {param}"
+        )
+
+    check_positive(kernel_size, "kernel_size")
+    check_positive(dilation, "dilation")
+    check_positive(dilation, "padding", strict=False)
+    check_positive(stride, "stride")
+    check_positive(dilation, "output_size")
+
+    shape = input.shape
+    ndim = len(shape)
+    utils.check(
+        ndim in (2, 3) and all(d != 0 for d in shape[-2:]),
+        lambda: "Expected 2D or 3D (batch mode) tensor for input with possible 0 batch size "
+        f"and non-zero dimensions, but got: {tuple(shape)}",
+    )
+    prod_kernel_size = kernel_size[0] * kernel_size[1]
+    utils.check(
+        shape[-2] % prod_kernel_size == 0,
+        lambda: "Expected size of input's first non-batch dimension to be divisible by the "
+        f"product of kernel_size, but got input.shape[-2] = {shape[-2]} and "
+        f"kernel_size={kernel_size}",
+    )
+    col = [
+        1 + (out + 2 * pad - dil * (ker - 1) - 1) // st
+        for out, pad, dil, ker, st in zip(
+            output_size, padding, dilation, kernel_size, stride
+        )
+    ]
+    L = col[0] * col[1]
+    utils.check(
+        shape[-1] == L,
+        lambda: f"Given output_size={output_size}, kernel_size={kernel_size}, "
+        f"dilation={dilation}, padding={padding}, stride={stride}, "
+        f"expected input.size(-1) to be {L} but got {shape[-1]}.",
+    )
+    utils.check(
+        L > 0,
+        lambda: f"Given output_size={output_size}, kernel_size={kernel_size}, "
+        f"dilation={dilation}, padding={padding}, stride={stride}, "
+        f"expected input.size(-1) to be {L} but got {shape[-1]}.",
+    )
+    batched_input = ndim == 3
+    if not batched_input:
+        input = input.unsqueeze(0)
+
+    shape = input.shape
+
+    out_h, out_w = output_size
+    stride_h, stride_w = stride
+    padding_h, padding_w = padding
+    dilation_h, dilation_w = dilation
+    kernel_h, kernel_w = kernel_size
+
+    # col2im is defined as the backwards of im2col, so we differentiate its decomposition by hand
+    input = input.reshape([shape[0], shape[1] // prod_kernel_size] + kernel_size + col)
+    input = input.permute(0, 1, 2, 4, 3, 5)
+
+    indices_row = _im2col_col2im_indices_along_dim(
+        out_h, kernel_h, dilation_h, padding_h, stride_h, input.device
+    )
+    indices_row = _unsqueeze_to_dim(indices_row, 4)
+    indices_col = _im2col_col2im_indices_along_dim(
+        out_w, kernel_w, dilation_w, padding_w, stride_w, input.device
+    )
+
+    output = input.new_zeros([shape[0], shape[1] // prod(kernel_size)] + output_size)
+    idx = (None, None, indices_row, indices_col)
+    # Equiv. to `output[idx] += input` but faster as the += expression decomposes into
+    # aux = output[idx]; aux += input; output[idx] = aux
+    output = torch.ops.aten.index_put(output, idx, input, accumulate=True)
+    output = F.pad(output, (-padding_h, -padding_h, -padding_w, -padding_w))
+
+    if not batched_input:
+        output = output.squeeze(0)
+    return output
 
 
 # TODO: the type annotations on arguments are not quite right
@@ -1900,7 +2034,7 @@ def _upsample_cubic_interp1d(coeffs: TensorSequenceType, ts: Tensor) -> Tensor:
 
 # Need this instead of just sum() to keep mypy happy
 def _sum_tensors(ts: Iterable[Tensor]) -> Tensor:
-    return functools.reduce(torch.add, ts)
+    return reduce(torch.add, ts)
 
 
 @register_decomposition(aten.grid_sampler_2d)
@@ -2182,7 +2316,7 @@ def matmul(tensor1, tensor2):
         # This can happen in e.g. [3, 5, 0] @ [0, 0].
         sizes_1 = t1.shape
         output_shape = list(sizes_1[:-1])
-        folded_dim1 = functools.reduce(operator.mul, output_shape)
+        folded_dim1 = reduce(operator.mul, output_shape)
 
         # Readjust output_shape if we are multiplying by a matrix
         t2_is_matrix = t2.dim() == 2

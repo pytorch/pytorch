@@ -684,7 +684,6 @@ meta_dispatch_expected_failures = {
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.col2im.default : {c64, f32, f64, c128},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.grid_sampler_3d.default : {f32, f64},
