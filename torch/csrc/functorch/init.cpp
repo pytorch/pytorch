@@ -16,7 +16,6 @@
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/TensorWrapper.h>
 #include <c10/core/AutogradState.h>
-#include <torch/csrc/functorch/CompileCache.h>
 
 // This file contains functorch's Python bindings.
 
@@ -458,7 +457,6 @@ void initFuncTorchBindings(PyObject* module) {
     return maybe_get_level(tensor) != -1;
   });
 
-  torch::functorch::initCompileCacheBindings(m.ptr());
 }
 
 } // namespace impl
