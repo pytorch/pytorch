@@ -66,7 +66,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._tensor_flattener import _tf_chunk_tensor, _tf_pre_load_state_dict_transform
+from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -2310,7 +2310,7 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _tf_chunk_tensor(
+                state_dict[f"{prefix}{fqn}"] = _ext_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
@@ -2560,7 +2560,7 @@ class FullyShardedDataParallel(nn.Module):
             param = state_dict.pop(fqn)
 
             # All-gather the param (ShardedTensor)
-            param, shards = _tf_pre_load_state_dict_transform(param)
+            param, shards = _ext_pre_load_state_dict_transform(param)
             assert len(shards) < 2, (
                 f"Expects 0 or 1 shard per rank but got {len(shards)} shards on rank {self.rank}"
             )
