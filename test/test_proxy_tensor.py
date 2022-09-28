@@ -67,6 +67,8 @@ def process_failures():
     for failure, reason in failures:
         print(f"    xfail{remap_opinfo[failure]},  # {reason}")
     print("}")
+process_failures()
+exit(0)
 
 
 def copy_func(f):
