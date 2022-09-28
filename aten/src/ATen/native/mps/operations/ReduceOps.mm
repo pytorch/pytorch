@@ -333,12 +333,8 @@ TORCH_IMPL_FUNC(amin_out_mps)
 
 Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
 
-  auto num_dims = self.dim();
-
-  int64_t dims[num_dims];
-
-  for(int i = 0; i < num_dims; i++)
-    dims[i] = i;
+  std::vector<int64_t> dims(self.dim());
+  std::iota(dims.begin(), dims.end(), 0);
 
   Tensor output_t = at::native::empty_mps(
                       {},
@@ -348,7 +344,7 @@ Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
                       c10::nullopt,
                       c10::nullopt);
 
-  reduction_out_mps(self, IntArrayRef(dims, num_dims), false, opt_dtype, const_cast<Tensor&>(output_t), MPSReductionType::PROD, "prod_mps");
+  reduction_out_mps(self, IntArrayRef(dims), false, opt_dtype, const_cast<Tensor&>(output_t), MPSReductionType::PROD, "prod_mps");
 
   return output_t;
 }
