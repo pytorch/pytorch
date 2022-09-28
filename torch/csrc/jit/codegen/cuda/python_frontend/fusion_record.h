@@ -21,6 +21,7 @@ enum class RecordType {
   Constant,
   End,
   Tensor,
+  NullTensor,
   Output,
   ReductionOp,
   Scalar,
@@ -902,7 +903,7 @@ struct NullTensorRecord : RecordFunctor {
             {},
             std::move(_outputs),
             "null_tensor",
-            RecordType::Tensor) {}
+            RecordType::NullTensor) {}
   virtual ~NullTensorRecord() = default;
   virtual RecordFunctor* clone() final {
     return new NullTensorRecord(*this);
