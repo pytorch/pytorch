@@ -23,8 +23,12 @@ popd
 git clone https://github.com/pytorch/functorch -b gh-pages --depth 1 functorch_ghpages
 pushd functorch_ghpages
 
-git rm -rf "$install_path" || true
-mv "$pt_checkout/functorch/docs/build/html" "$install_path"
+if [ $version == "master" ]; then
+  version=nightly
+fi
+
+git rm -rf "$version" || true
+mv "$pt_checkout/functorch/docs/build/html" "$version"
 
 git add "$install_path" || true
 git status
