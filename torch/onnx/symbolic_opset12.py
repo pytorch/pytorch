@@ -11,7 +11,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -327,28 +327,36 @@ def unfold(g, input, dimension, size, step):
 
         unsqueeze_list = []
         loop_condition = g.op("Constant", value_t=torch.tensor(1))
-        loop_condition = g.op("Cast", loop_condition, to_i=9)
+        loop_condition = g.op(
+            "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
+        )
         loop_len = g.op("Min", low_size, hi_size)
-        loop = g.op("Loop", loop_len, loop_condition)
 
-        loop_block = utils._add_block(loop.node())
+        loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
+            g, "Loop", loop_len, loop_condition, n_blocks=1
+        )
+
+        loop_block = loop_context.block
         block_input_iter = utils._add_input_to_block(loop_block)
+        # FIXME(justinchuby): cond is unused?
         cond = utils._add_input_to_block(loop_block)
 
-        starts = loop_block.op("Gather", low_indices, block_input_iter)
-        ends = loop_block.op("Gather", hi_indices, block_input_iter)
-        axes = loop_block.op("Constant", value_t=torch.tensor([2]))
-        starts = symbolic_helper._unsqueeze_helper(loop_block, starts, [0])
-        ends = symbolic_helper._unsqueeze_helper(loop_block, ends, [0])
-        stack = loop_block.op("Slice", input, starts, ends, axes)
+        starts = loop_context.op("Gather", low_indices, block_input_iter)
+        ends = loop_context.op("Gather", hi_indices, block_input_iter)
+        axes = loop_context.op("Constant", value_t=torch.tensor([2]))
+        starts = symbolic_helper._unsqueeze_helper(loop_context, starts, [0])
+        ends = symbolic_helper._unsqueeze_helper(loop_context, ends, [0])
+        stack = loop_context.op("Slice", input, starts, ends, axes)
 
         unsqueeze = symbolic_helper._unsqueeze_helper(
-            loop_block, loop_block.op("Transpose", stack, perm_i=perm), [dimension]
+            loop_context, loop_context.op("Transpose", stack, perm_i=perm), [dimension]
         )
         unsqueeze_list.append(unsqueeze)
-        concat = loop_block.op("Concat", *unsqueeze_list, axis_i=0)
+        concat = loop_context.op("Concat", *unsqueeze_list, axis_i=0)
 
-        cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+        cond_out = loop_context.op(
+            "Cast", loop_condition, _C_onnx.TensorProtoDataType.BOOL
+        )
         utils._add_output_to_block(loop_block, cond_out)
         utils._add_output_to_block(loop_block, concat)
 
@@ -359,8 +367,8 @@ def unfold(g, input, dimension, size, step):
         squeeze = symbolic_helper._squeeze_helper(g, transpose, [0])
 
         return squeeze
-    else:
-        return symbolic_helper._unimplemented("Unfold", "input size not accessible")
+
+    return symbolic_helper._unimplemented("Unfold", "input size not accessible")
 
 
 @_onnx_symbolic("aten::tensordot")
