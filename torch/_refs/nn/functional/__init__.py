@@ -449,7 +449,7 @@ def _nll_loss_nd(
     )
     class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
 
-    # TODO: This check does not work with FakeTensor inputs
+    # TODO: This check does not work with FakeTensor inputs; See Issue #85834
     # Explicit cast for class_check to bool; See Issue #78071
     utils.check(
         isinstance(target, FakeTensor) or bool(class_check.item()),
