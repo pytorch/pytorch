@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
@@ -142,8 +143,6 @@ class TestPythonKey(AOTTestCase):
         self.assertTrue(includes_aten_relu)
 
     def test_make_fx_no_decompose(self, device):
-        # FIXME
-
         def f(x):
             return torch.tanh(x).sum()
 
@@ -655,7 +654,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         res = aot_mod(*inputs)
         res[0].sum().backward()
 
-# entries in here need don't work and need to be fixed.
+# entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
 aot_autograd_failures = {
     xfail('linalg.cholesky'),
@@ -682,52 +681,56 @@ def _test_aot_autograd_helper(self, device, dtype, op):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
+
+    def f(args, kwargs):
+        return op.op(*args, **kwargs)
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
     for sample_input in sample_inputs_itr:
         args = [sample_input.input] + list(sample_input.args)
         kwargs = sample_input.kwargs
 
-        if not all([isinstance(i, torch.Tensor) and i.dtype == torch.float for i in args]):
-            self.skipTest("not all inputs are float tensors")
+        f(args, kwargs)
 
-        def f(args):
-            return op.op(*args, **kwargs)
-
-        t = f(args)
-        if isinstance(t, tuple):
-            self.skipTest("output is a tuple")
-            continue
+        def call_forwards_backwards(f):
+            out = f(args, kwargs)
+            if isinstance(out, tuple):
+                out[0].sum().backward()
+            else:
+                out.sum().backward()
 
         def reset_grads():
             def f(x):
-                x.grad = None
+                if isinstance(x, torch.Tensor):
+                    x.grad = None
             pytree.tree_map(f, args)
 
         def get_grads(args):
-            return pytree.tree_map(lambda x: x.grad, args)
+            return pytree.tree_map(lambda x: x.grad if isinstance(x, torch.Tensor) else x, args)
 
         compiled_f = compiled_function(f, nop, nop)
 
         reset_grads()
-        compiled_f(args).sum().backward()
+        call_forwards_backwards(compiled_f)
         compiled_grad = get_grads(args)
 
         reset_grads()
-        f(args).sum().backward()
+        call_forwards_backwards(f)
         orig_grad = get_grads(args)
         self.assertEqual(orig_grad, compiled_grad)
 
         def create_new_arg(x):
-            return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
+            if isinstance(x, torch.Tensor):
+                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
+            return x
 
         args = pytree.tree_map(create_new_arg, args)
 
         reset_grads()
-        compiled_f(args).sum().backward()
+        call_forwards_backwards(compiled_f)
         compiled_grad = get_grads(args)
 
         reset_grads()
-        f(args).sum().backward()
+        call_forwards_backwards(f)
         orig_grad = get_grads(args)
         self.assertEqual(orig_grad, compiled_grad)
 
@@ -735,6 +738,14 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
+        _test_aot_autograd_helper(self, device, dtype, op)
+
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @patch("functorch.compile.config.use_functionalize", False)
+    @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive', aot_autograd_failures)
+    def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
 only_for = ("cpu")
