@@ -1532,7 +1532,7 @@ class TestSparseCSR(TestCase):
             return wrapper
 
         def ref_sp_numpy(c, a, b, alpha=None, beta=None, out=None):
-            
+
             def prep_input(t):
 
                 def to_sp_block_compressed(t):
@@ -1555,7 +1555,7 @@ class TestSparseCSR(TestCase):
                         return t_sp_bsr.transpose()
                     else:
                         return t_sp_bsr
-            
+
                 if t.layout is not torch.strided:
                     return to_sp_block_compressed(t)
                 else:
