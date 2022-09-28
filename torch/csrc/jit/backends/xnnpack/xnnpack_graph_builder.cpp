@@ -13,7 +13,6 @@
 #include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
-
 namespace torch {
 namespace jit {
 namespace xnnpack {
@@ -22,7 +21,6 @@ namespace delegate {
 std::shared_ptr<torch::jit::Graph> XNNGraph::optimizeAndTraceGraph(
     std::shared_ptr<torch::jit::Graph> graph,
     std::vector<c10::IValue>& example_inputs) {
-
   graph = tensorexpr::removeUnusedSelfArgument(graph);
   OptimizeFrozenGraph(graph, true);
   RemoveListMutation(graph);
@@ -57,10 +55,14 @@ void XNNGraph::checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph) {
     }
   }
   std::stringstream error;
-  for(auto itr = unsupported_ops.begin(); itr != unsupported_ops.end(); itr++){
-    error << *itr << std::endl;;
+  for (auto itr = unsupported_ops.begin(); itr != unsupported_ops.end();
+       itr++) {
+    error << *itr << std::endl;
+    ;
   }
-  TORCH_CHECK(unsupported_ops.empty(), "the module contains the following unsupported ops:\n" + error.str());
+  TORCH_CHECK(
+      unsupported_ops.empty(),
+      "the module contains the following unsupported ops:\n" + error.str());
 }
 
 } // namespace delegate

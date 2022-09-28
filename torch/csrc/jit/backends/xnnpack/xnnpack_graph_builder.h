@@ -20,8 +20,8 @@ class XNNGraph {
   // Essentially massaging the graph into a digestiable format for
   // xnnpack graph lowering.
   std::shared_ptr<torch::jit::Graph> optimizeAndTraceGraph(
-    std::shared_ptr<torch::jit::Graph> graph,
-    std::vector<c10::IValue>& example_inputs);
+      std::shared_ptr<torch::jit::Graph> graph,
+      std::vector<c10::IValue>& example_inputs);
 
   // Makes a pass through the graph and throws if any ops are unsupported
   void checkOpsToDelegate(std::shared_ptr<torch::jit::Graph>& graph);
@@ -34,7 +34,7 @@ class XNNGraph {
 
   ~XNNGraph() {
     xnn_deinitialize();
-    if(_subgraph_ptr != nullptr){
+    if (_subgraph_ptr != nullptr) {
       xnn_delete_subgraph(_subgraph_ptr);
     }
   }
