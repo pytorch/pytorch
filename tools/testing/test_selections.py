@@ -5,6 +5,8 @@ from typing import Dict, List, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
+NUM_PROCS = 3
+
 
 def calculate_shards(
     num_shards: int, tests: List[str], job_times: Dict[str, float]
