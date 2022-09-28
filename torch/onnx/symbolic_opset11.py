@@ -1353,8 +1353,8 @@ def embedding_bag(
         "Gather", offsets_starts, block_input_iter, axis_i=0
     )
     indices_end = loop_context.op("Gather", offsets_ends, block_input_iter, axis_i=0)
-    indices_start = symbolic_helper._unsqueeze_helper(loop_block, indices_start, [0])
-    indices_end = symbolic_helper._unsqueeze_helper(loop_block, indices_end, [0])
+    indices_start = symbolic_helper._unsqueeze_helper(loop_context, indices_start, [0])
+    indices_end = symbolic_helper._unsqueeze_helper(loop_context, indices_end, [0])
 
     indices_row = loop_context.op("Slice", indices, indices_start, indices_end, zero)
     embeddings = loop_context.op("Gather", embedding_matrix, indices_row, axis_i=0)
@@ -1363,12 +1363,12 @@ def embedding_bag(
             "Slice", per_sample_weights, indices_start, indices_end, zero
         )
         per_sample_weights_row = symbolic_helper._unsqueeze_helper(
-            loop_block, per_sample_weights_row, [1]
+            loop_context, per_sample_weights_row, [1]
         )
         embeddings = loop_context.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
         embeddings = symbolic_helper._reducesum_helper(
-            loop_block, embeddings, axes_i=[0], keepdims_i=0
+            loop_context, embeddings, axes_i=[0], keepdims_i=0
         )
     elif mode == 1:
         embeddings = loop_context.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
