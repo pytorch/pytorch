@@ -96,5 +96,7 @@ PyTypeObject* createForwardFunctionPyTypeObject(
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype);
 PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata);
 
+bool THPCppFunction_Check(PyObject* obj);
+
 } // namespace autograd
 } // namespace torch
