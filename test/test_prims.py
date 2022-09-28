@@ -160,6 +160,7 @@ class TestPrims(TestCase):
             a = torch.empty(3, 3, device='cuda')
             out = execute(gm, a, b, executor="strictly_nvfuser")
             self.assertEqual(out[0], a)
+            self.assertEqual(out[0].storage().data_ptr(), a.storage().data_ptr())
 
             a = torch.empty(3, 3, device='cuda')
             self.assertEqual(out, func(a, b))
