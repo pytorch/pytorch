@@ -185,6 +185,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "macos-m1-12" },
           { config: "default", shard: 2, num_shards: 2, runner: "macos-m1-12" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "macos-m1-12" },
         ]}
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
