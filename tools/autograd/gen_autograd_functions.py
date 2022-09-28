@@ -20,6 +20,7 @@ from torchgen.api.types import (
     boolT,
     doubleT,
     intArrayRefT,
+    iTensorListRefT,
     ListCType,
     longT,
     MutRefCType,
@@ -29,6 +30,7 @@ from torchgen.api.types import (
     stringT,
     symIntArrayRefT,
     SymIntT,
+    TENSOR_LIST_LIKE_CTYPES,
     tensorListT,
     tensorT,
 )
@@ -472,10 +474,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     py_getsetdef_structs: List[str] = []
 
     for arg in info.args_with_derivatives:
-        if (
-            arg.type == "at::TensorList"
-            or arg.type == "const c10::List<c10::optional<at::Tensor>> &"
-        ):
+        if arg.type in TENSOR_LIST_LIKE_CTYPES:
             size = f"{arg.name}_size_"
             saved_list_sizes.append(f"size_t {arg.name}_size_;")
         else:
@@ -509,7 +508,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
-        elif type == BaseCType(tensorListT):
+        elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
