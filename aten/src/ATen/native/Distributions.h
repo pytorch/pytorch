@@ -3,6 +3,7 @@
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
+#include <cmath>
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__)
