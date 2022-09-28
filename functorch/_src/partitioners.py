@@ -83,25 +83,15 @@ def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
 
 
-def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule):
-    num_fwd_outputs = joint_module._out_spec.children_specs[0].num_leaves
-    if hasattr(joint_module, 'input_mutation_submodule'):
-        # When running with functionalization, any program inputs that get updated get converted into outputs
-        # in the forward graph.
-        # This isn't accounted for in the original pytree spec, so we need to include them here.
-        num_input_mutations = len([
-            n for n in joint_module.input_mutation_submodule.graph.nodes
-            if n.op == 'placeholder' and 'primal' in n.target
-        ])
-        num_fwd_outputs += num_input_mutations
+def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, num_fwd_outputs):
     outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
 
 
-def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values):
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
+def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, num_fwd_outputs):
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
     # Construct the forward module
@@ -127,7 +117,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values):
 
 
 def default_partition(
-    joint_module: fx.GraphModule, _joint_inputs
+    joint_module: fx.GraphModule, _joint_inputs, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -148,12 +138,13 @@ def default_partition(
     Args:
         joint_module(fx.GraphModule): The joint forward and backward graph. This
             is the result of AOT Autograd tracing.
+        num_fwd_outputs: The number of outputs from the forward graph.
 
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs)
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
@@ -170,7 +161,7 @@ def default_partition(
             saved_values.append(node)
     saved_values = list(set(saved_values))
 
-    return _extract_fwd_bwd_modules(joint_module, saved_values)
+    return _extract_fwd_bwd_modules(joint_module, saved_values, num_fwd_outputs)
 
 # This function expects a post-functionalization FX GraphModule,
 # which means that all ops in the graph are functional, except for
@@ -311,7 +302,7 @@ def _count_ops(graph):
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser"
+    joint_module: fx.GraphModule, _joint_inputs, num_fwd_outputs, compiler="nvfuser"
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -327,6 +318,7 @@ def min_cut_rematerialization_partition(
     Args:
         joint_module(fx.GraphModule): The joint forward and backward graph. This
             is the result of AOT Autograd tracing.
+        num_fwd_outputs: The number of outputs from the forward graph.
 
     Returns:
         Returns the generated forward and backward Fx graph modules.
@@ -359,7 +351,7 @@ def min_cut_rematerialization_partition(
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module)
+        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
@@ -512,7 +504,7 @@ def min_cut_rematerialization_partition(
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
-    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values)
+    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i.meta['tensor_meta']) for i in saved_values]) / 1e9)
         fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])

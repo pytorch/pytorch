@@ -185,11 +185,6 @@ jobs:
       build-environment: ios-12-5-1-x86-64-coreml
       ios-platform: SIMULATOR
       ios-arch: x86_64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64:
     name: ios-12-5-1-arm64
@@ -198,11 +193,6 @@ jobs:
       build-environment: ios-12-5-1-arm64
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64-coreml:
     name: ios-12-5-1-arm64-coreml
@@ -211,11 +201,6 @@ jobs:
       build-environment: ios-12-5-1-arm64-coreml
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64-custom-ops:
     name: ios-12-5-1-arm64-custom-ops
@@ -224,11 +209,6 @@ jobs:
       build-environment: ios-12-5-1-arm64-custom-ops
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64-metal:
     name: ios-12-5-1-arm64-metal
@@ -237,11 +217,6 @@ jobs:
       build-environment: ios-12-5-1-arm64-metal
       ios-platform: OS
       ios-arch: arm64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   buck-build-test:
     name: buck-build-test
