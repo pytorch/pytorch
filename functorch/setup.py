@@ -9,23 +9,15 @@ import os
 import subprocess
 from setuptools import setup
 import warnings
+import torch
 
 cwd = os.path.dirname(os.path.abspath(__file__))
-version_txt = os.path.join(cwd, 'version.txt')
-with open(version_txt, 'r') as f:
-    version = f.readline().strip()
 
 try:
     sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
 except Exception:
     sha = 'Unknown'
 package_name = 'functorch'
-
-if os.getenv('BUILD_VERSION'):
-    version = os.getenv('BUILD_VERSION')
-elif sha != 'Unknown':
-    version += '+' + sha[:7]
-
 
 requirements = [
     # This represents a nightly version of PyTorch.
@@ -42,7 +34,7 @@ if __name__ == '__main__':
         setup(
             # Metadata
             name=package_name,
-            version=version,
+            version=torch.__version__,
             author='PyTorch Core Team',
             url="https://github.com/pytorch/functorch",
             description='JAX-like composable function transforms for PyTorch',
