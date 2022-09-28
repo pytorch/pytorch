@@ -162,7 +162,7 @@ class TestPrims(TestCase):
             self.assertEqual(out[0], a)
 
             a = torch.empty(3, 3, device='cuda')
-            self.assertEqual(out[0], func(a, b)[0])
+            self.assertEqual(out, func(a, b))
 
     # TODO: Combine this with test_copy_to once it passes
     @unittest.expectedFailure
