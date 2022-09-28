@@ -15,27 +15,55 @@ StmtPtr Tensor::constructStmt(
     const std::vector<VarPtr>& reduce_args) const {
   std::vector<ExprPtr> indices(args.begin(), args.end());
 
-  StmtPtr s = alloc<Store>(buf_, indices, body);
-
   size_t ndim = buf()->ndim();
   size_t reduce_ndim = reduce_dims.size();
+  auto reduce_op = to<ReduceOp>(body);
+  auto acc_buf = reduce_ndim > 0 ? reduce_op->getAccBuf() : nullptr;
+
+  StmtPtr s = alloc<Store>(buf_, indices, body);
+  if (reduce_ndim > 0) {
+    TORCH_INTERNAL_ASSERT(reduce_op != nullptr);
+    if (acc_buf != nullptr) {
+      auto reducer = reduce_op->reducer();
+      std::vector<ExprPtr> output_args(args.begin(), args.end());
+      ExprPtr new_reduce_op = reducer(
+          to<Buf>(acc_buf),
+          alloc<Cast>(acc_buf->dtype(), reduce_op->getRiOperand()),
+          output_args,
+          reduce_args);
+      new_reduce_op->set_dtype(acc_buf->dtype());
+      s = alloc<Store>(to<Buf>(acc_buf), indices, new_reduce_op);
+    }
+  }
 
   if (ndim == 0 && reduce_ndim == 0) {
     return s;
   }
 
-  ExprPtr init_expr = buf()->initializer();
-
   if (reduce_ndim > 0) {
+    TORCH_INTERNAL_ASSERT(reduce_op != nullptr);
+
     for (const auto i : c10::irange(reduce_ndim)) {
       // Going in reverse order: from innermost loop to the outermost
       size_t dim_index = reduce_ndim - i - 1;
       auto const& dim = reduce_dims[dim_index];
       s = alloc<For>(reduce_args[dim_index], immLike(dim, 0), dim, s);
     }
+    s = alloc<Block>(std::vector<StmtPtr>({s}));
+
+    BufPtr init_buf = acc_buf ? to<Buf>(acc_buf) : buf();
+    ExprPtr init_expr =
+        acc_buf ? to<Buf>(acc_buf)->initializer() : buf()->initializer();
     if (init_expr) {
-      StorePtr init_stmt = alloc<Store>(buf(), indices, init_expr);
-      s = alloc<Block>(std::vector<StmtPtr>({init_stmt, s}));
+      StorePtr init_stmt = alloc<Store>(init_buf, indices, init_expr);
+      to<Block>(s)->prepend_stmt(init_stmt);
+    }
+
+    if (acc_buf != nullptr) {
+      LoadPtr load_acc = alloc<Load>(acc_buf, indices);
+      auto cast = alloc<Cast>(buf()->dtype(), load_acc);
+      StorePtr post_stmt = alloc<Store>(buf(), indices, cast);
+      to<Block>(s)->append_stmt(post_stmt);
     }
   }
 
