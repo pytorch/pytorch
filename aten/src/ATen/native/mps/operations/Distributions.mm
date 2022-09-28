@@ -40,7 +40,7 @@ struct RandomCachedGraph : public MPSCachedGraph
 typedef MPSGraphTensor* (^RandomOpBlock)(RandomCachedGraph*, MPSGraphTensor*);
 #define RandomOpFn(graph, randomTensor) MPSGraphTensor* (mps::RandomCachedGraph* graph, MPSGraphTensor* randomTensor)
 
-// for Uniform distributions with scalar from (val1) and to (val1) intervals
+// for Uniform distributions with scalar from (val1) and to (val2) intervals
 // for Normal distributions with scalar mean (val1) and std (val2) values
 template<typename scalar_t>
 Tensor& random_mps_impl(Tensor& self, scalar_t val1, scalar_t val2,
@@ -69,18 +69,19 @@ Tensor& random_mps_impl(Tensor& self, scalar_t val1, scalar_t val2,
           newCachedGraph->stateTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@7]);
 
           // FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
-          MPSDataType mpsDataType = [&] {
+          const MPSDataType inputDataType = [&] {
             // only for random_mps, we pass interval range of type int64_t
             if (std::is_same<scalar_t, int64_t>::value)
               return MPSDataTypeInt32;
             else
               return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
           }();
+          const MPSDataType outputDataType = (std::is_same<scalar_t, bool>::value) ? MPSDataTypeBool : inputDataType;
 
           MPSGraphRandomOpDescriptor *desc = [MPSGraphRandomOpDescriptor descriptorWithDistribution: distribution
-                                                                                           dataType: mpsDataType];
+                                                                                           dataType: inputDataType];
           if (distribution == MPSGraphRandomDistributionUniform) {
-            if (mpsDataType == MPSDataTypeInt32) {
+            if (inputDataType == MPSDataTypeInt32) {
               desc.minInteger = static_cast<NSInteger>(val1);
               desc.maxInteger = static_cast<NSInteger>(val2);
             } else {
@@ -100,7 +101,7 @@ Tensor& random_mps_impl(Tensor& self, scalar_t val1, scalar_t val2,
                                                                                name: nil];
           newCachedGraph->resultTensor = randomBlock ? randomBlock(newCachedGraph, resultTensors[0]) : resultTensors[0];
           // results will be cast if self's scalar type isn't directly supported by MPS backend.
-          if (getMPSDataType(self.scalar_type()) != mpsDataType)
+          if (getMPSDataType(self.scalar_type()) != outputDataType)
             newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, self.scalar_type());
         }
         return newCachedGraph;
@@ -190,9 +191,10 @@ Tensor& bernoulli_mps_impl(Tensor& self, const Tensor& prob_t, std::string op_na
                                secondaryTensor: cachedGraph->stdTensor
                                           name: nil];
   };
-  return mps::random_mps_impl<double>(self, 0.0, 1.0, c10::nullopt, prob_t,
-                                      MPSGraphRandomDistributionUniform,
-                                      op_name + getTensorsStringKey({prob_t}), random_op_block);
+  // Bernoulli generates binary output so we use bool type
+  return mps::random_mps_impl<bool>(self, 0.0, 1.0, c10::nullopt, prob_t,
+                                    MPSGraphRandomDistributionUniform,
+                                    op_name + getTensorsStringKey({prob_t}), random_op_block);
 }
 
 } // namespace mps
