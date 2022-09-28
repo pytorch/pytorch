@@ -69,7 +69,8 @@ static void autogradBasedTransformSendToNext(
     int64_t current_level,
     TransformType transform_type,
     optional<bool> prev_grad_mode,
-    optional<bool> prev_fwd_grad_mode) {
+    optional<bool> prev_fwd_grad_mode,
+    bool grad_special_case) {
   if (transform_type == TransformType::Grad) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
   }
@@ -162,9 +163,8 @@ static void autogradBasedTransformSendToNext(
   // lift_fresh: it's must be freshly allocated and should be wrapped. User shouldn't have access to input version
   // alias: this is needed for the CompositeImplicit instance norm (running_mean/var get set to be a wrapped value)
   //        It's not a user facing function, but is more prone to possible errors
-  const bool always_wrap = op.schema().name() == "aten::lift_fresh" || op.schema().name() == "aten::alias";
   std::vector<int64_t> outputs_aliasing_immutable;
-  if (!always_wrap) {
+  if (!grad_special_case) {
     outputs_aliasing_immutable = findAliasedOutputs(op.schema(), immutable_inputs);
     // sorting (O(N logN)) lets us avoid an O(N) check for every immutable input (O(N^2))
     std::sort(outputs_aliasing_immutable.begin(), outputs_aliasing_immutable.end());
@@ -198,10 +198,11 @@ void GradInterpreterPtr::processImpl(
 
 void GradInterpreterPtr::sendToNextInterpreterImpl(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack,
+    bool grad_special_case) {
   autogradBasedTransformSendToNext(
       op, stack, level(),
-      TransformType::Grad, prevGradMode(), nullopt);
+      TransformType::Grad, prevGradMode(), nullopt, grad_special_case);
 }
 
 void JvpInterpreterPtr::processImpl(
@@ -212,10 +213,11 @@ void JvpInterpreterPtr::processImpl(
 
 void JvpInterpreterPtr::sendToNextInterpreterImpl(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack,
+    bool grad_special_case) {
   autogradBasedTransformSendToNext(
       op, stack, level(),
-      TransformType::Jvp, nullopt, prevFwdGradMode());
+      TransformType::Jvp, nullopt, prevFwdGradMode(), grad_special_case);
 }
 
 }} // namespace at::functorch

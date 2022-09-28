@@ -12,7 +12,7 @@ struct GradInterpreterPtr {
   TransformType key() const { return base_->key(); }
   int64_t level() const { return base_->level(); }
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-  void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+  void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
   bool prevGradMode() const {
     return c10::get<GradInterpreterMeta>(base_->meta()).prevGradMode_;
   }
@@ -25,7 +25,7 @@ struct JvpInterpreterPtr {
   TransformType key() const { return base_->key(); }
   int64_t level() const { return base_->level(); }
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-  void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+  void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
   bool prevFwdGradMode() const {
     return c10::get<JvpInterpreterMeta>(base_->meta()).prevFwdGradMode_;
   }

@@ -139,7 +139,7 @@ struct Interpreter {
   const InterpreterMeta& meta() const { return meta_; }
 
   void process(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-  void sendToNextInterpreter(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+  void sendToNextInterpreter(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
 
   void saveLocalDispatchKeySet(c10::impl::LocalDispatchKeySet keyset) {
     TORCH_INTERNAL_ASSERT(!savedLocalDispatchKeySet_.has_value());
