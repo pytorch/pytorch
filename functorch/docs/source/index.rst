@@ -52,7 +52,7 @@ Check out our `whirlwind tour <whirlwind_tour>`_ or some of our tutorials mentio
 
 .. toctree::
    :maxdepth: 2
-   :caption: Getting Started
+   :caption: functorch: Getting Started
 
    install
    notebooks/whirlwind_tour.ipynb
@@ -60,7 +60,7 @@ Check out our `whirlwind tour <whirlwind_tour>`_ or some of our tutorials mentio
 
 .. toctree::
    :maxdepth: 2
-   :caption: API Reference and Notes
+   :caption: functorch API Reference and Notes
 
    functorch
    experimental
@@ -68,7 +68,7 @@ Check out our `whirlwind tour <whirlwind_tour>`_ or some of our tutorials mentio
 
 .. toctree::
    :maxdepth: 1
-   :caption: Tutorials
+   :caption: functorch Tutorials
 
    notebooks/jacobians_hessians.ipynb
    notebooks/ensembling.ipynb
