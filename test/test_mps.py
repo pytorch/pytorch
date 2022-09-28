@@ -4340,8 +4340,8 @@ class TestNLLLoss(TestCase):
         helper((10, 3), 0, (5, 3), (5, 8), do_add=False)
 
     # Test pytorch scatter_add and scatter for scalar input
-    def test_scatter_add(self):
-        def helper(shape, idx_dtype=torch.int64, do_add=True):
+    def test_scatter_add_scalar(self):
+        def helper(idx_dtype=torch.int64, do_add=True):
             cpu_x = torch.tensor(2, device='cpu', dtype=torch.float, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
