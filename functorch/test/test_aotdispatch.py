@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -24,14 +24,15 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
-    nop, num_of_recompilations, default_partition, default_decompositions,
-    memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
+    nop, default_partition, default_decompositions,
+    memory_efficient_fusion, get_aot_compilation_context
 )
 from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
+    decorate,
     xfail,
     skip,
     skipOps,
@@ -60,9 +61,6 @@ except ImportError:
 class AOTTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        # NB: We cache on function id, which is unreliable
-        # Can fix by using weakrefs, but not sure if it matters
-        clear_compile_cache()
 
 class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
@@ -291,18 +289,17 @@ class TestAOTAutograd(AOTTestCase):
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
-        start_recompilations = num_of_recompilations()
         f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
         self.assertIsNone(graph_size)
 
+        f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(True):
             out = f(*inps)
             self.assertIsNone(graph_size)
             out.sum().backward()
             self.assertTrue(graph_size > 2)
-        self.assertEqual(num_of_recompilations() - start_recompilations, 2)
 
     def test_output_dict(self):
         def f(x):
@@ -365,6 +362,7 @@ class TestAOTAutograd(AOTTestCase):
 
         f = aot_function(f, compiler)
         out = f(torch.randn(5, requires_grad=True))
+        f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
@@ -446,6 +444,8 @@ class TestEagerFusionOpInfo(AOTTestCase):
         xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
+        decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+        decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     })
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         def f(args, kwargs):
@@ -710,14 +710,14 @@ class TestAOTModuleSimplified(AOTTestCase):
             if node.op == 'output':
                 continue
             self.assertTrue(node.stack_trace is not None)
-            assert 'test_pythonkey.py' in node.stack_trace
+            assert 'test_aotdispatch.py' in node.stack_trace
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
             for node in gm.graph.nodes:
                 if node.op == 'output' or node.op == 'placeholder':
                     continue
                 self.assertTrue(node.stack_trace is not None)
-                assert 'test_pythonkey.py' in node.stack_trace
+                assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
         aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
@@ -727,7 +727,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         inputs = [x, y]
         res = aot_mod(*inputs)
         res[0].sum().backward()
-
 
 only_for = ("cpu")
 instantiate_device_type_tests(
