@@ -790,10 +790,11 @@ class TestDecomp(TestCase):
 
         from torch._prims.context import TorchRefsNvfuserCapabilityMode, _is_func_unsupported_nvfuser
         from torch.fx.experimental.proxy_tensor import make_fx
-        op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
+        op = torch.ops.aten.leaky_relu_backward.default
+        op_decomp = torch._decomp.decomposition_table.get(op)
 
         def fn0(*arg):
-            return _is_func_unsupported_nvfuser(TorchRefsNvfuserCapabilityMode(), op, arg, {})
+            return _is_func_unsupported_nvfuser(TorchRefsNvfuserCapabilityMode(), op, op_decomp, arg, {})
 
         def fn1(x):
             x = x * 2
