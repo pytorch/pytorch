@@ -381,6 +381,10 @@ get_current_graph_task_exec_info() {
   return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
 }
 
+const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
+  return current_graph_task ? &current_graph_task->nodes_in_graph_ : nullptr;
+}
+
 bool get_current_graph_task_keep_graph() {
   return current_graph_task ? current_graph_task->keep_graph_ : true;
 }
@@ -1006,7 +1010,6 @@ auto Engine::compute_dependencies(
     GraphTask& task,
     uint64_t min_topo_nr) -> void {
   // Computes the number of dependencies for each function which requires grad
-  std::unordered_set<Node*> seen;
   std::vector<Node*> queue{root};
   bool might_use_cuda = at::globalContext().hasCUDA();
   bool will_use_cuda = false;
@@ -1026,7 +1029,7 @@ auto Engine::compute_dependencies(
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
-        const bool was_inserted = seen.insert(next_ptr).second;
+        const bool was_inserted = task.nodes_in_graph_.insert(next_ptr).second;
         if (was_inserted)
           queue.push_back(next_ptr);
       }

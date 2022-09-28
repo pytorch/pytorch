@@ -389,8 +389,8 @@ TORCH_IMPL_FUNC(cat_out_mps)
 
           // Create placeholders
           auto len_tensor_array = inputs.size() - skipped_tensor_indices.size();
-          MPSGraphTensor* inputMPSGraphTensors[len_tensor_array];
-          MPSGraphTensor* castInputMPSGraphTensors[len_tensor_array];
+          std::vector<MPSGraphTensor*> inputMPSGraphTensors(len_tensor_array);
+          std::vector<MPSGraphTensor*> castInputMPSGraphTensors(len_tensor_array);
 
           int graph_tensor_idx = 0;
           for(const Tensor* tensor : input_tensors) {
@@ -411,7 +411,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
             graph_tensor_idx++;
           }
 
-          auto inputTensorsArray = [NSArray arrayWithObjects:castInputMPSGraphTensors
+          auto inputTensorsArray = [NSArray arrayWithObjects:castInputMPSGraphTensors.data()
                                                        count:len_tensor_array];
           // Use concatTensors to concatenate
           MPSGraphTensor* outputTensor = [mpsGraph concatTensors:inputTensorsArray
