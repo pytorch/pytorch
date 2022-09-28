@@ -24,9 +24,6 @@ from torch.onnx import (  # noqa: F401
     errors,
     symbolic_helper,
 )
-from torch.onnx._exporter_states import (
-    SymbolicContext,  # Special case class import for readability
-)
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.types import Number
@@ -6303,33 +6300,31 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(
-    ctx: SymbolicContext, g: jit_utils.GraphContext, *inputs, **kwargs
-) -> None:
-    output_type = ctx.cur_node.output().type()
+def prim_device(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
+    output_type = g.original_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None
 
     return symbolic_helper._unimplemented(
         "prim::device",
         f"output type should be 'DeviceObjType', not '{output_type.kind()}'",
-        ctx.cur_node.output(),
+        g.original_node.output(),
     )
 
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs) -> List[_C.Value]:
-    n = ctx.cur_node
-    env = ctx.env
-    params_dict = ctx.params_dict
+def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
+    node = g.original_node
+    env = g.env
+    params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
 
-    old_blocks = tuple(n.blocks())
+    old_blocks = tuple(node.blocks())
     new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
-        g, "Loop", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
+        g, "Loop", *inputs, outputs=node.outputsSize(), n_blocks=len(old_blocks)
     )
 
     for old_block, new_block_context in zip(old_blocks, new_block_contexts):
@@ -6358,7 +6353,7 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs) -> List[_C.Value]:
             env,
             False,
         )
-    new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
+    fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
         new_node, opset_version
     )
     # Run shape type inference for Loop after subblock is converted.
@@ -6366,16 +6361,16 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs) -> List[_C.Value]:
         torch._C._jit_pass_onnx_node_shape_type_inference(
             new_node, params_dict, opset_version
         )
-    return new_op_outputs
+    return fixed_outputs
 
 
 @_onnx_symbolic("prim::If")
 @_beartype.beartype
-def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
-    n = ctx.cur_node
-    block = ctx.onnx_block
-    env = ctx.env
-    params_dict = ctx.params_dict
+def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
+    n = g.original_node
+    block = g.block
+    env = g.env
+    params_dict = g.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
@@ -6447,7 +6442,7 @@ def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
                 env,
                 False,
             )
-        new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
+        fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
             new_node, opset_version
         )
         # Run shape type inference for If after subblock is converted.
@@ -6455,44 +6450,44 @@ def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
             torch._C._jit_pass_onnx_node_shape_type_inference(
                 new_node, params_dict, opset_version
             )
-        return new_op_outputs
+        return fixed_outputs
 
 
 @_onnx_symbolic("prim::Constant")
 @_beartype.beartype
-def prim_constant(ctx: SymbolicContext, g, *inputs, **attrs):
-    n = ctx.cur_node
+def prim_constant(g: jit_utils.GraphContext, *inputs, **attrs):
+    node = g.original_node
 
-    if n.mustBeNone():
+    if node.mustBeNone():
         return None
     # This must go before checking for string values, because some device constants
     # have string values, but we want to keep them as unconverted Device types so
     # that eq() can work on them.
-    if isinstance(n.output().type(), _C.DeviceObjType):
+    if isinstance(node.output().type(), _C.DeviceObjType):
         return None
-    if n.kindOf("value") == "t":
-        return g.op("Constant", value_t=symbolic_helper._node_get(n, "value"))
-    if n.kindOf("value") == "s":
-        return g.op("Constant", value_s=symbolic_helper._node_get(n, "value"))
-    if n.output().type().isSubtypeOf(
+    if node.kindOf("value") == "t":
+        return g.op("Constant", value_t=symbolic_helper._node_get(node, "value"))
+    if node.kindOf("value") == "s":
+        return g.op("Constant", value_s=symbolic_helper._node_get(node, "value"))
+    if node.output().type().isSubtypeOf(
         _C.ListType.ofInts()
-    ) or n.output().type().isSubtypeOf(_C.ListType.ofFloats()):
+    ) or node.output().type().isSubtypeOf(_C.ListType.ofFloats()):
         return g.op(
-            "Constant", value_t=torch.tensor(symbolic_helper._node_get(n, "value"))
+            "Constant", value_t=torch.tensor(symbolic_helper._node_get(node, "value"))
         )
 
     raise errors.SymbolicValueError(
-        f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. "
+        f"Unsupported prim::Constant kind: '{node.kindOf('value')}'. "
         f"Please send a bug report at {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
-        n.output(),
+        node.output(),
     )
 
 
 @_onnx_symbolic("onnx::Placeholder")
 @_beartype.beartype
-def onnx_placeholder(ctx: SymbolicContext, g, *inputs, **attrs):
-    n = ctx.cur_node
-    block = ctx.onnx_block
-    env = ctx.env
+def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
+    node = g.original_node
+    block = g.block
+    env = g.env
 
-    return torch._C._jit_onnx_convert_pattern_from_subblock(block, n, env)
+    return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
