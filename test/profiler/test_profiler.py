@@ -1248,7 +1248,7 @@ class TestProfiler(TestCase):
         a = torch.randn(4, 4)
         b = torch.randn(4, 4)
         c = torch.randn(4, 4)
-        inp = torch.nested_tensor([a, b])
+        inp = torch.nested.nested_tensor([a, b])
         with torch.profiler.profile(record_shapes=True) as prof:
             torch.nn.functional.linear(inp, c, None)
         for e in prof.events():
