@@ -1,8 +1,16 @@
 #pragma once
 
-#include <cstddef>
-
+#include <torch/csrc/jit/codegen/cuda/executor.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <torch/torch.h>
+
+#include <gtest/gtest.h>
+
+#include <cstddef>
 
 // Tests go in torch::jit
 namespace torch {
@@ -84,6 +92,45 @@ int64_t prime_numbers[] = {
     1087, 1091, 1093, 1097, 1103, 1109, 1117, 1123, 1129, 1151, 1153, 1163,
     1171, 1181, 1187, 1193, 1201, 1213, 1217, 1223};
 
+bool deviceMajorMinorCheck(int major, int minor = 0) {
+  auto dev_prop = at::cuda::getCurrentDeviceProperties();
+  if (dev_prop->major < major ||
+      (dev_prop->major == major && dev_prop->minor < minor)) {
+    return false;
+  }
+  return true;
+}
+
+int deviceSMCount() {
+  int sm_count = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  return sm_count;
+}
+
+void clearL2Cache() {
+  torch::NoGradGuard no_grad;
+  auto l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+  auto options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(at::kCUDA, 0);
+
+  auto l2_elems = l2_cache_size / 4;
+  torch::Tensor t0 = torch::empty(l2_elems, options);
+  torch::Tensor t1 = torch::clone(t0);
+};
+
 } // namespace
+
+// Fixture class must be uniquely identified, i.e., can't be in an
+// anonymous namespace
+class NVFuserTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    // requires PASCAL or newer
+    if (!deviceMajorMinorCheck(6)) {
+      GTEST_SKIP() << "skipping tests on pre-PASCAL GPUs";
+    }
+    setFillAllocationWithNan(true);
+  }
+};
+
 } // namespace jit
 } // namespace torch
