@@ -1279,7 +1279,7 @@ class TestNestedTensorDeviceType(TestCase):
         # normal case
         x0 = torch.randn((2, 20), device=device, dtype=dtype)
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
-        t = torch.nested.nested_tensor([x0, x1])  # (2, (2, 3), 20)
+        nt = torch.nested.nested_tensor([x0, x1])  # (2, (2, 3), 20)
         pt = torch.nested.to_padded_tensor(nt, 0.0)
         # error case, trying to reshape batch dim to a legit shape
         self.assertRaisesRegex(
