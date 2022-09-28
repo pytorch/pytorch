@@ -689,11 +689,12 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
           TORCH_INTERNAL_ASSERT(
               args[inp_i]->isType(ArgType::Tensor),
               "Cannot register a scalar as an output in a fusion.");
-          // pushing empty tensor for trivial forwarding. Since we handle this in integration
+          // Pushing empty tensor for trivial forwarding. Since we handle this
+          // in integration
           c10::Device device(c10::DeviceType::CUDA, args.getDeviceIndex());
           const auto tensor_options =
               at::TensorOptions().dtype(at::kFloat).device(device);
-	  outputs.emplace_back(at::empty({0}, tensor_options));
+          outputs.emplace_back(at::empty({0}, tensor_options));
           break;
         }
       }
