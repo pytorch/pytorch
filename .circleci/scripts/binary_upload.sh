@@ -14,7 +14,7 @@ UPLOAD_CHANNEL=${UPLOAD_CHANNEL:-nightly}
 UPLOAD_SUBFOLDER=${UPLOAD_SUBFOLDER:-cpu}
 UPLOAD_BUCKET="s3://pytorch"
 BACKUP_BUCKET="s3://pytorch-backup"
-BUILD_NAME=${BUILD_NAME:}
+BUILD_NAME=${BUILD_NAME:-}
 
 # this is temporary change to upload pypi-cudnn builds to separate folder
 if [[ ${BUILD_NAME} == *with-pypi-cudnn* ]]; then
