@@ -1,7 +1,6 @@
 from typing import Optional, Union
 
 import torch
-
 import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
@@ -23,6 +22,8 @@ from torch._refs import (
     _make_elementwise_binary_reference,
     _make_elementwise_unary_reference,
 )
+
+from torch._subclasses.fake_tensor import FakeTensor
 
 __all__ = [
     "celu",
@@ -442,13 +443,18 @@ def _nll_loss_nd(
     flat_target = torch.flatten(target)
     ignore_classes_mask = torch.eq(flat_target, ignore_index)
 
-    # TODO: This check does not work with FakeTensor inputs
-    """
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
-    valid_classes_mask = torch.logical_and((flat_target >= 0), (flat_target < num_classes))
-    if not torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask)):
-        raise ValueError("Target class is out-of-bounds and not ignore index")
-    """
+    valid_classes_mask = torch.logical_and(
+        (flat_target >= 0), (flat_target < num_classes)
+    )
+    class_check = torch.all(torch.logical_or(ignore_classes_mask, valid_classes_mask))
+
+    # TODO: This check does not work with FakeTensor inputs
+    # Explicit cast for class_check to bool; See Issue #78071
+    utils.check(
+        isinstance(target, FakeTensor) or bool(class_check.item()),
+        lambda: "A target class is out-of-bounds and not the ignore index.",
+    )
 
     ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
     class_weight = (
