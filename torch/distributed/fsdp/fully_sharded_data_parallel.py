@@ -3815,6 +3815,16 @@ class FullyShardedDataParallel(nn.Module):
         return False
 
     @staticmethod
+    def _raise_on_use_orig_params_optim_checkpoint(model: nn.Module):
+        if any(
+            fsdp_module._use_orig_params
+            for fsdp_module in FullyShardedDataParallel.fsdp_modules(model)
+        ):
+            raise NotImplementedError(
+                "Optimizer state checkpointing is not supported yet for `use_orig_params=True`"
+            )
+
+    @staticmethod
     def full_optim_state_dict(
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
@@ -3870,6 +3880,7 @@ class FullyShardedDataParallel(nn.Module):
             :meth:`torch.optim.Optimizer.state_dict`. If ``rank0_only=True``,
             then nonzero ranks return an empty :class:`dict`.
         """
+        FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(model)
         FullyShardedDataParallel._warn_optim_input(optim_input)
         using_optim_input = FullyShardedDataParallel._is_using_optim_input(
             optim_input, optim,
@@ -3906,6 +3917,7 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: The returned state dict contains ``ShardedTensor`` and
             cannot be directly used by the regular ``optim.load_state_dict``.
         """
+        FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(model)
         FullyShardedDataParallel._warn_optim_input(optim_input)
         using_optim_input = FullyShardedDataParallel._is_using_optim_input(
             optim_input, optim,
@@ -3993,6 +4005,7 @@ class FullyShardedDataParallel(nn.Module):
             flattened parameters instead of unflattened parameters and
             restricted to only include this rank's part of the optimizer state.
         """
+        FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(model)
         FullyShardedDataParallel._warn_optim_input(optim_input)
         using_optim_input = FullyShardedDataParallel._is_using_optim_input(
             optim_input, optim,
@@ -4031,6 +4044,7 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             Refer to :meth:`shard_full_optim_state_dict`.
         """
+        FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(model)
         FullyShardedDataParallel._warn_optim_input(optim_input)
         using_optim_input = FullyShardedDataParallel._is_using_optim_input(
             optim_input, optim,
@@ -4112,6 +4126,7 @@ class FullyShardedDataParallel(nn.Module):
             flattened parameters instead of unflattened parameters and
             restricted to only include this rank's part of the optimizer state.
         """
+        FullyShardedDataParallel._raise_on_use_orig_params_optim_checkpoint(model)
         FullyShardedDataParallel._warn_optim_input(optim_input)
         using_optim_input = FullyShardedDataParallel._is_using_optim_input(
             optim_input, optim,
