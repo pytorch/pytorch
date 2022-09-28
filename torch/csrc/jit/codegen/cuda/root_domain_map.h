@@ -145,6 +145,9 @@ class DomainKey {
     return td() == other.td() && id() == other.id() &&
         concreteId() == other.concreteId();
   }
+  bool operator!=(const DomainKey& other) const {
+    return !(*this == other);
+  }
 
   std::string toString() const;
 
@@ -183,8 +186,10 @@ class TORCH_CUDA_CU_API UnmappableReductionDomains : private IterVisitor {
   //! reduction outputs within the corresponding reduction loop is not
   //! possible. This routine is used to build root domain mappings.
   bool isReductionOutputMapped(
-      const std::vector<DomainKey>& consumer_domains,
+      const DomainKeySet& consumer_domains,
       const ComputeAtRootDomainMap& root_map) const;
+
+  std::string toString() const;
 
  private:
   using IterVisitor::handle;
@@ -365,7 +370,7 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   void setInvalid(const DomainKey& key1, const DomainKey& key2);
 
   //! Check if no pair of domains is invalid to map
-  bool isInvalid(const std::vector<DomainKey>& domains) const;
+  bool isInvalid(const DomainKeySet& domains) const;
 
   //! Track a pair of producer-consumer domains as potentially mappable. Inserts
   //! entries into pending_map_, but does not add anything into the root_map_
@@ -398,6 +403,8 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   void handle(TernaryOp* top) override {
     mapPointwiseOrReductionOp(top);
   }
+
+  void handle(RNGOp* top) override;
 
   void handle(ReductionOp* op) override {
     mapPointwiseOrReductionOp(op);
@@ -450,8 +457,6 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   //! Maps all pending mappings for id of td. When id is a broadcast,
   //! mapping is done separately for each concrete domain.
   void mapAllPendingMappings(const TensorDomain* td, IterDomain* id);
-
-  bool hasMatchingDomains(const std::vector<DomainKey>& unique_domains);
 
   bool safeToMap(const DomainKeySet& domains);
 

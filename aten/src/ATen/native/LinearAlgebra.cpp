@@ -713,24 +713,6 @@ Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
-Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, tol, symmetric);
-}
-
-Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
-}
-
 // multi_dot helper functions
 namespace {
 
@@ -2287,8 +2269,7 @@ void compute_T18_scale_square(
   for (const auto i : c10::irange(mexp_scaled.size(0))) {
     auto s_val = s_cpu.select(0, i).template item<int64_t>();
     auto mexp = mexp_scaled.select(0, i);
-    for (const auto p : c10::irange(s_val)) {
-      (void)p; //Suppress unused variable warning
+    for (const auto p C10_UNUSED : c10::irange(s_val)) {
       mexp = at::matmul(mexp, mexp);
     }
     mexp_out.select(0, i).copy_(mexp);
@@ -2691,19 +2672,19 @@ Tensor frobenius_norm(const Tensor& self) {
   return at::norm(self);
 }
 
-Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+Tensor frobenius_norm(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
   TORCH_CHECK(
-      dim.size() <= 2,
+      !dim.has_value() || dim.value().size() <= 2,
       "Expected at most 2 dimensions, but got ",
-      dim.size(),
+      dim.value().size(),
       " dimensions instead.");
   Tensor result;
-  if (dim.size() == 1 || dim.size() == 0) {
+  if (!dim.has_value() || dim.value().size() == 1 || dim.value().size() == 0) {
     result = at::norm(self, 2, dim, keepdim);
   } else {
-    auto dim_ = dim.vec();
+    auto dim_ = dim.value().vec();
     maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
+    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim.value(), " instead");
     if (self.is_complex()) {
       result = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
     } else {
@@ -2716,7 +2697,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
-    IntArrayRef dim,
+    OptionalIntArrayRef dim,
     bool keepdim,
     Tensor& result) {
   auto result_ = at::native::frobenius_norm(self, dim, keepdim);

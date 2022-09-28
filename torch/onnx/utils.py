@@ -573,6 +573,12 @@ def _optimize_graph(
     _C._jit_pass_dce(graph)
     _C._jit_pass_lint(graph)
 
+    # CSE should improve perf when Autocast is used with disabled cache
+    # Autocast is disabled due to a limitation on tracer as described at https://github.com/pytorch/pytorch/issues/84092
+    # Must run before _C._jit_pass_erase_number_types to prevent type substitution
+    if _C._jit_pass_cse(graph):
+        _C._jit_pass_onnx_lint(graph)
+
     _C._jit_pass_canonicalize_graph_fuser_ops(graph)
     _C._jit_pass_lint(graph)
     _C._jit_pass_peephole(graph, True)
@@ -632,6 +638,7 @@ def _optimize_graph(
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         _C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     _C._jit_pass_onnx_lint(graph)
+
     graph = _C._jit_pass_onnx(graph, operator_export_type)
     _C._jit_pass_onnx_lint(graph)
     _C._jit_pass_lint(graph)
@@ -851,11 +858,10 @@ def _trace_and_get_graph_from_model(model, args):
     orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
 
     # Disable Autocast cache because it replaces kernel's weight and bias
-    # to be replaced by (undesired) constants
+    # by (undesired) constants.
+    # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
     # TODO: https://github.com/pytorch/pytorch/issues/84092
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
-    # When weights are not reused, there is no perf impact
-    # ONNX runtimes can also apply CSE optimization to compensate the lack of cache here
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
         model, args, strict=False, _force_outplace=False, _return_inputs_states=True
@@ -1676,15 +1682,6 @@ def _add_input_to_block(block: _C.Block):
 def _add_output_to_block(block: _C.Block, value: _C.Value):
     new_output = block.registerOutput(value)  # type: ignore[attr-defined]
     return new_output
-
-
-# Note [Export inplace]
-# ~~~~~~~~~~~~~~~~~~~~~
-# In abstract, it would be better for us to export inplace annotations,
-# than to not export them, since it is useful information that can
-# help the target of an ONNX export export more efficiently.  However,
-# ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
-# inplace annotations, but we are losing information this way.
 
 
 @_beartype.beartype
