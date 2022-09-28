@@ -6,7 +6,7 @@ import types
 from typing import Callable, Sequence
 
 from torch.onnx import errors
-from torch.onnx._internal import registration, torchscript
+from torch.onnx._internal import jit_utils, registration
 
 
 class _OpDomain(types.ModuleType):
@@ -50,7 +50,7 @@ def _dispatch_qualified_name(
 ) -> Callable:
     """Dispatches to the symbolic function for the given qualified op name and arguments."""
     context = args[0]
-    assert isinstance(context, torchscript.GraphContext)
+    assert isinstance(context, jit_utils.GraphContext)
     symbolic_fn = registration.registry.get_function_group(qualified_name)
     if symbolic_fn is None:
         raise errors.UnsupportedOperatorError(
