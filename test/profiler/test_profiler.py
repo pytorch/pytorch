@@ -127,6 +127,16 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
+        # Only testing that emit_itt runs when
+        # record_shapes option is enabled.
+        with torch.autograd.profiler.emit_itt(record_shapes=True) as prof:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            s = custom_layer(z)
+            q = s.sum()
+            q.backward()
+
 class TestRecordFunction(TestCase):
     def _record_function_with_param(self):
         u = torch.randn(3, 4, 5, requires_grad=True)
