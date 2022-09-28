@@ -1,6 +1,10 @@
 #!/bin/bash
 set -ex -o pipefail
 
+if ! [ "$IOS_PLATFORM" == "SIMULATOR" ]; then
+    exit 0
+fi
+
 echo ""
 echo "DIR: $(pwd)"
 PROJ_ROOT=/Users/distiller/project
