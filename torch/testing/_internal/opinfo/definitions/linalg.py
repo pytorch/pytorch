@@ -2237,6 +2237,12 @@ op_db: List[OpInfo] = [
                 device_type="mps",
                 dtypes=[torch.float32],
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cuda",
+            ),
         ),
     ),
     OpInfo(
