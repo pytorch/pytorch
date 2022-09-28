@@ -18,12 +18,14 @@ namespace native {
 
 Tensor _mps_linear(
   const Tensor& input,
-  const Tensor& weight,
+  const Tensor& weight_arg,
   const c10::optional<Tensor>& bias_opt) {
   // wT = transpose(weight);
   // y=x*wT+b
 
   using namespace mps;
+
+  auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
 
   TORCH_CHECK(input.scalar_type() == ScalarType::Double
               || input.scalar_type() == ScalarType::Float
@@ -46,6 +48,10 @@ Tensor _mps_linear(
 
   TORCH_CHECK(output.is_mps());
 
+  if(output.numel() == 0) {
+    return output;
+  }
+
   MPSStream *stream = getCurrentMPSStream();
 
   struct CachedGraph : public MPSCachedGraph
@@ -65,7 +71,6 @@ Tensor _mps_linear(
 
     MPSShape* wt_shape = getMPSShape(weight);
     string wt_key = string([[[wt_shape valueForKey:@"description"] componentsJoinedByString:@","] UTF8String]);
-    MPSShape* bias_shape = nil;
     string bias_key = "nobias";
     if(is_bias_defined) {
       bias_key = "bias";
@@ -147,7 +152,17 @@ Tensor _mps_linear(
     mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  return output;
+  // Shave off '1' present at the  end of the shape
+  if(weight_arg.dim() == 1) {
+    // Number of elements in new output shape
+    auto N = output.dim() - 1;
+    int64_t out_shape[N];
+    for(int i = 0; i < N; i++)
+      out_shape[i] = output.size(i);
+    return output.view(IntArrayRef(out_shape, N));
+  }
+  else
+    return output;
 }
 
 Tensor _mps_linear_backward_input(
@@ -358,10 +373,10 @@ std::tuple<Tensor, Tensor, Tensor> mps_linear_backward(
     const Tensor& weight, std::array<bool,3> output_mask) {
   Tensor grad_input, grad_weight, grad_bias;
   if (output_mask[0]) {
-    grad_input = at::_mps_linear_backward_input(input.sizes(), grad_output, weight);
+    grad_input = _mps_linear_backward_input(input.sizes(), grad_output, weight);
   }
   if (output_mask[1] || output_mask[2]) {
-    std::tie(grad_weight, grad_bias) = at::_mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
+    std::tie(grad_weight, grad_bias) = _mps_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }

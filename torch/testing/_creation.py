@@ -75,6 +75,7 @@ def make_tensor(
         >>> from torch.testing import make_tensor
         >>> # Creates a float tensor with values in [-1, 1)
         >>> make_tensor((3,), device='cpu', dtype=torch.float32, low=-1, high=1)
+        >>> # xdoctest: +SKIP
         tensor([ 0.1205, 0.2282, -0.6380])
         >>> # Creates a bool tensor on CUDA
         >>> make_tensor((2, 2), device='cuda', dtype=torch.bool)

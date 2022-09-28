@@ -1,9 +1,12 @@
 sphinx==5.0.0
 -e git+https://github.com/pytorch/pytorch_sphinx_theme.git#egg=pytorch_sphinx_theme
-sphinxcontrib.katex
-matplotlib
-tensorboard
+# TODO: sphinxcontrib.katex 0.9.0 adds a local KaTeX server to speed up pre-rendering
+# but it doesn't seem to work and hangs around idly. The initial thought is probably
+# something related to Docker setup. We can investigate this later
+sphinxcontrib.katex==0.8.6
+matplotlib==3.5.3
+tensorboard==2.10.0
 # required to build torch.distributed.elastic.rendezvous.etcd* docs
-python-etcd>=0.4.5
-sphinx_copybutton
-sphinx-panels
+python-etcd==0.4.5
+sphinx-copybutton==0.5.0
+sphinx-panels==0.4.1

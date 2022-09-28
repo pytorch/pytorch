@@ -22,6 +22,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/irange.h>
 
+#include <c10/core/Layout.h>
 #include <tuple>
 #include <vector>
 
@@ -442,7 +443,9 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  if (self_.is_sparse() || self_.is_sparse_csr()) {
+  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
+      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
+      self_.layout() == kSparseBsc) {
     throw TypeError("Cannot assign to a sparse tensor");
   }
   OptionalDeviceGuard device_guard(device_of(self_));

@@ -1053,7 +1053,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
      and as a decorator ``@torch.jit.script`` for :ref:`torchscript-classes` and functions.
 
     Args:
-        obj (callable, class, or ``nn.Module``):  The ``nn.Module``, function, class type,
+        obj (Callable, class, or nn.Module):  The ``nn.Module``, function, class type,
                                                   dictionary, or list to compile.
         example_inputs (Union[List[Tuple], Dict[Callable, List[Tuple]], None]): Provide example inputs
             to annotate the arguments for a function or ``nn.Module``.

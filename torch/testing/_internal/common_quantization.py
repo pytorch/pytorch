@@ -6,12 +6,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic.quantized.dynamic as nniqd
-import torch.nn.quantized as nnq
-import torch.nn.quantized.dynamic as nnqd
+import torch.ao.nn.quantized as nnq
+import torch.ao.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch.testing._internal.common_utils import TestCase
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
@@ -94,6 +94,9 @@ class NodeSpec:
 
     def __repr__(self):
         return repr(self.op) + " " + repr(self.target)
+
+def get_supported_device_types():
+    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -588,7 +591,7 @@ class QuantizationTestCase(TestCase):
             expected_node, expected_node_occurrence, expected_node_list:
                see docs for checkGraphModeFxOp
         """
-        nodes_in_graph = dict()
+        nodes_in_graph = {}
         node_list = []
         modules = dict(graph_module.named_modules(remove_duplicate=False))
         for node in graph_module.graph.nodes:
@@ -801,7 +804,7 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence=None,
                 prepare_expected_node_list=None,
                 prepare_custom_config=None,
-                backend_config_dict=None):
+                backend_config=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -867,7 +870,7 @@ class QuantizationTestCase(TestCase):
                 model, qconfig_dict,
                 example_inputs=inputs,
                 prepare_custom_config=prepare_custom_config,
-                backend_config_dict=backend_config_dict)
+                backend_config=backend_config)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 

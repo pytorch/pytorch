@@ -10,7 +10,7 @@ from torchgen.api.python import (
 )
 from torchgen.gen import parse_native_yaml
 
-from torchgen.model import Variant
+from torchgen.model import DispatchKey, Variant
 from torchgen.utils import FileManager
 
 from tools.autograd.gen_python_functions import (
@@ -136,6 +136,9 @@ blocklist = [
     "floor_divide",
     "floor_divide_",
     "floor_divide_out",
+    "to",
+    "_to_copy",
+    "copy_",
 ]
 
 binary_ops = (
@@ -430,6 +433,7 @@ def gen_pyi(
                 " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
+            "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
             ],
@@ -625,7 +629,7 @@ def gen_pyi(
             "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
             "_make_subclass": [
                 "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
-                " dispatch_device: _bool=False) -> Tensor: ..."
+                " dispatch_device: _bool=False, device_for_backend_keys: Optional[_device] = None) -> Tensor: ..."
             ],
             "__getitem__": ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
             "__setitem__": [
@@ -696,8 +700,8 @@ def gen_pyi(
                 "def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...",
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...",
@@ -718,7 +722,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number]{})"
+                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode]{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
     for binop in ["add", "sub"]:
@@ -728,7 +732,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number], "
+                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode], "
                 "*, alpha: Optional[Number]=1{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
@@ -863,6 +867,10 @@ def gen_pyi(
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
     all_directive[0] = "__all__ = {}".format(all_directive[0])
 
+    # Dispatch key hints
+    # ~~~~~~~~~~~~~~~~~~
+    dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
 
@@ -873,6 +881,7 @@ def gen_pyi(
         "legacy_class_hints": legacy_class_hints,
         "legacy_storage_base_hints": legacy_storage_base_hints,
         "dtype_class_hints": dtype_class_hints,
+        "dispatch_key_hints": dispatch_key_hints,
         "all_directive": all_directive,
     }
     fm.write_with_template(
