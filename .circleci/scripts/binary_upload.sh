@@ -26,7 +26,7 @@ fi
 
 # Sleep 2 minutes between retries for conda upload
 retry () {
-  "$@"  || (sleep 2m && "$@") || (sleep 2m && "$@")
+  "$@"  || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@")
 }
 
 do_backup() {
