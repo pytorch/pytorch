@@ -1230,8 +1230,8 @@ def native_batch_norm(
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean = running_mean.to(dtype=computation_dtype)
-        running_var = running_var.to(dtype=computation_dtype)
+        running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+        running_var = running_var.to(dtype=computation_dtype, copy=True)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
