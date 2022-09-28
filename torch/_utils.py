@@ -585,8 +585,8 @@ def get_current_device_index() -> int:
     """
     if torch.cuda.device_count() > 0:
         return torch.cuda.current_device()
-    if torch.xpu.device_count() > 0:
-        return torch.xpu.current_device()
+    if hasattr(torch, "xpu") and torch.xpu.device_count() > 0:  # type: ignore[attr-defined]
+        return torch.xpu.current_device()  # type: ignore[attr-defined]
     return -1
 
 
