@@ -156,6 +156,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
     tol_table = {
         (torch.bfloat16, torch.ops.aten.native_layer_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_layer_norm.default): 1e-5,
+        (torch.float16, torch.ops.aten.native_layer_norm_backward.default): 1e-3,
+        (torch.bfloat16, torch.ops.aten.native_layer_norm_backward.default): 2e-2,
         (torch.bfloat16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
@@ -195,6 +197,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         (torch.float32, torch.ops.aten.grid_sampler_2d.default) : (7e-6, 3e-5),
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
+        (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
@@ -474,9 +477,6 @@ class TestDecomp(TestCase):
         func = op.get_op()
         for sample_input in samples:
             if requires_grad:
-                if None in sample_input.args:
-                    continue
-
                 fn, primals = normalize_op_input_output(func, sample_input)
                 primals = tree_map(
                     lambda x: x if isinstance(x, torch.Tensor) else x, primals
@@ -514,7 +514,6 @@ class TestDecomp(TestCase):
                 self.skipTest(
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
-
 
 instantiate_device_type_tests(TestDecomp, globals())
 
