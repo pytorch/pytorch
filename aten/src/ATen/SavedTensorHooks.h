@@ -19,7 +19,8 @@ struct TORCH_API SavedTensorDefaultHooksTLS {
   // See NOTE: [Disabling SavedTensorDefaultHooks] for context
   // NOTE: [disabled_error_message invariant]
   // disabled_error_message is nullopt IFF Saved Tensor hooks is enabled
-  // We did this for efficiency (so we didn't have to keep a separate bool around)
+  // We did this for efficiency (so we didn't have to keep a separate bool
+  // around)
   c10::optional<std::string> disabled_error_message;
 };
 
