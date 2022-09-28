@@ -14,7 +14,7 @@ from typing import (
 )
 
 from torch.onnx import _constants, errors
-from torch.onnx._internal import _beartype, torchscript
+from torch.onnx._internal import _beartype, jit_utils
 
 OpsetVersion = int
 
@@ -145,7 +145,7 @@ class _SymbolicFunctionGroup:
             raise KeyError(key)
         return result
 
-    def __call__(self, context: torchscript.GraphContext, *args, **kwargs):
+    def __call__(self, context: jit_utils.GraphContext, *args, **kwargs):
         """Calls the symbolic function."""
         opset = context.opset
         function = self.get(opset)
