@@ -24,7 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from ._tensor_flattener import _tf_post_unflatten_transform, _tf_pre_flatten_transform
+from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
 from ._utils import (
     _alloc_storage,
     _free_storage,
@@ -378,7 +378,7 @@ class FlatParamHandle:
                         raise ValueError(
                             "`FlatParameter` requires uniform `requires_grad`"
                         )
-                    param, extension = _tf_pre_flatten_transform(param)
+                    param, extension = _ext_pre_flatten_transform(param)
                     param_extensions.append(extension)
                     dtype = param.dtype
                     requires_grad = param.requires_grad
@@ -1073,10 +1073,11 @@ class FlatParamHandle:
             f"{tensor.numel()} numel",
         )
         views = (
-            _tf_post_unflatten_transform(subtensor.view(shape), param_extension)
+            _ext_post_unflatten_transform(subtensor.view(shape), param_extension)
             for (subtensor, shape, param_extension) in zip(
                 torch.split(tensor, flat_param._numels, dim=0),  # type: ignore[arg-type]
-                flat_param._shapes, flat_param._param_extensions,
+                flat_param._shapes,
+                flat_param._param_extensions,
             )
         )
         return views
