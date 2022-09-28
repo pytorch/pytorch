@@ -1277,7 +1277,7 @@ void initNvFuserPythonBindings(PyObject* module) {
          nvfuser::Tensor bias,
          nvfuser::Tensor running_mean,
          nvfuser::Tensor running_var,
-         bool kTraining,
+         bool training,
          nvfuser::Scalar momentum,
          nvfuser::Scalar eps,
          bool channels_last) -> decltype(auto) {
@@ -1297,7 +1297,7 @@ void initNvFuserPythonBindings(PyObject* module) {
             {fd->recordingState(output()),
              fd->recordingState(mean()),
              fd->recordingState(invstd())},
-            kTraining,
+            training,
             channels_last));
         return std::make_tuple(output, mean, invstd);
       },
@@ -1306,7 +1306,7 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("bias").none(true),
       py::arg("running_mean").none(true),
       py::arg("running_var").none(true),
-      py::arg("kTraining"),
+      py::arg("training"),
       py::arg("momentum"),
       py::arg("eps"),
       py::arg("channels_last") = false,

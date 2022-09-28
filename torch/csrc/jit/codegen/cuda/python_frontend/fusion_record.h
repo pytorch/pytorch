@@ -1353,14 +1353,14 @@ struct BatchNormOpRecord : RecordFunctor {
   BatchNormOpRecord(
       std::vector<State> args,
       std::vector<State> outputs,
-      bool kTraining,
+      bool training,
       bool channels_last)
       : RecordFunctor(
             std::move(args),
             std::move(outputs),
             "ops.batch_norm",
             RecordType::BatchNormOp),
-        kTraining_(kTraining),
+        training_(training),
         channels_last_(channels_last) {}
   virtual ~BatchNormOpRecord() = default;
   virtual RecordFunctor* clone() final {
@@ -1371,7 +1371,7 @@ struct BatchNormOpRecord : RecordFunctor {
     auto result = false;
     if (auto child_ptr = dynamic_cast<const BatchNormOpRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
-      result = result && (kTraining_ == child_ptr->kTraining_);
+      result = result && (training_ == child_ptr->training_);
       result = result && (channels_last_ == child_ptr->channels_last_);
     }
     return result;
@@ -1379,7 +1379,7 @@ struct BatchNormOpRecord : RecordFunctor {
 
   virtual size_t hash() const final {
     auto result = RecordFunctor::hash();
-    return result | (static_cast<size_t>(kTraining_) << 28) |
+    return result | (static_cast<size_t>(training_) << 28) |
         (static_cast<size_t>(channels_last_) << 29);
   }
 
@@ -1399,7 +1399,7 @@ struct BatchNormOpRecord : RecordFunctor {
         bias,
         running_mean,
         running_var,
-        kTraining_,
+        training_,
         momentum,
         eps,
         channels_last_);
@@ -1409,7 +1409,7 @@ struct BatchNormOpRecord : RecordFunctor {
   }
 
  private:
-  bool kTraining_;
+  bool training_;
   bool channels_last_;
 };
 
