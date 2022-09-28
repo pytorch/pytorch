@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple
 
 from torchgen.utils import dataclass_repr
 
@@ -126,20 +126,44 @@ class SampleInput(object):
     def __init__(
         self,
         input,
-        *,
-        args=tuple(),
+        *var_args,
+        args=None,
         kwargs=None,
         output_process_fn_grad=lambda x: x,
         broadcasts_input=False,
         name="",
+        **var_kwargs,
     ):
         # input is the first input to the op and is typically either a Tensor or TensorList (Sequence[Tensor]).
         # This follows the typical pattern where for Tensor inputs op(t, ...) = t.op(...).
         self.input = input
-        self.args = args
+
+        # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
+        # SampleInput(input, *args, **kwargs) but not to mix the two forms
+        if args is None:
+            self.args = var_args
+        else:
+            assert (
+                len(var_args) == 0
+            ), "SampleInput cannot be constructed with args and var_args"
+            assert (
+                len(var_kwargs) == 0
+            ), "SampleInput cannot be constructed with args and var_kwargs"
+            self.args = args
         assert isinstance(self.args, tuple)
-        self.kwargs = kwargs if kwargs is not None else {}
+
+        if kwargs is None:
+            self.kwargs = var_kwargs
+        else:
+            assert (
+                len(var_args) == 0
+            ), "SampleInput cannot be constructed with kwargs and var_args"
+            assert (
+                len(var_kwargs) == 0
+            ), "SampleInput cannot be constructed with kwargs and var_kwargs"
+            self.kwargs = kwargs
         assert isinstance(self.kwargs, dict)
+
         self.output_process_fn_grad = output_process_fn_grad
         self.name = name
 
@@ -260,24 +284,6 @@ class SampleInput(object):
             return t
 
         return self.transform(to_noncontiguous)
-
-
-def make_sample_input(
-    input: Union[torch.Tensor, Sequence[torch.Tensor]], *args, **kwargs
-) -> SampleInput:
-    """Helper function for creating simple SampleInput objects
-
-    Call make_sample_input as if you were calling the original function, and
-    this returns the corresponding SampleInput with all additional sample
-    metadata left as default.
-
-    Example
-    -------
-    >>> make_sample_input(torch.ones(1), 2, 3, alpha=4)
-    SampleInput(input=tensor([1.]), args=(2, 3), kwargs={'alpha': 4}, ...)
-
-    """
-    return SampleInput(input, args=args, kwargs=kwargs)
 
 
 NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])
