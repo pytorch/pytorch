@@ -58,12 +58,12 @@ at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
 Tensor restore_reduced_dims(
     const Tensor& output,
-    IntArrayRef dims,
+    at::OptionalIntArrayRef dims,
     bool keepdim);
 Tensor scale_grad_by_count(
     const Tensor& grad,
     const Tensor& mask,
-    IntArrayRef dims);
+    at::OptionalIntArrayRef dims);
 at::Tensor norm_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -74,14 +74,14 @@ at::Tensor norm_backward(
     const at::Tensor& self,
     const optional<at::Scalar>& p_,
     at::Tensor norm,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim);
 Tensor norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
     const optional<Scalar>& p_,
     Tensor norm,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim);
 Tensor norm_jvp(
     const Tensor& grad,
@@ -754,7 +754,7 @@ Tensor amaxamin_jvp(
     const Tensor& x,
     const Tensor& dx,
     const Tensor& result,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,
