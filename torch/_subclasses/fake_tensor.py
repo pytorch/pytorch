@@ -44,8 +44,8 @@ class DataDependentOutputException(RuntimeError):
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
-    aten.nested_tensor.default,
-    aten.nested_tensor.out,
+    aten._nested_tensor_from_tensor_list.default,
+    aten._nested_tensor_from_tensor_list.out,
     aten.pin_memory.default,
     aten.is_pinned.default,
     aten.to.device,

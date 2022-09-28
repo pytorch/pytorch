@@ -3569,12 +3569,12 @@ class TestAutograd(TestCase):
         assert out_shape == torch.Size([10, 5])
         assert grad_shape == torch.Size([5, 10])
 
-        out = torch.nested_tensor([
+        out = torch.nested.as_nested_tensor([
             torch.randn(10, 5, requires_grad=True),
             torch.randn(10, 5, requires_grad=True),
             torch.randn(10, 5, requires_grad=True)]
         )
-        grad = torch.nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
+        grad = torch.nested.as_nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
         out_shape, grad_shape = _calculate_shape(out, grad, False)
 
         assert torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]))
@@ -9178,12 +9178,12 @@ class TestAutogradMultipleDispatch(TestCase):
         # test registered AutogradNestedTensor formula
         a = torch.arange(6, dtype=torch.float, device=device).reshape(2, 3).requires_grad_(True)
         b = torch.arange(8, dtype=torch.float, device=device).reshape(2, 4).requires_grad_(True)
-        nt = torch.nested_tensor([a, b], dtype=torch.float, device=device)
+        nt = torch.nested.as_nested_tensor([a, b], dtype=torch.float, device=device)
 
         nt_out = torch._test_autograd_multiple_dispatch(nt)
         c = torch.randn(2, 3, device=device)
         d = torch.randn(2, 4, device=device)
-        nt_grad = torch.nested_tensor([c, d], dtype=torch.float, device=device)
+        nt_grad = torch.nested.nested_tensor([c, d], dtype=torch.float, device=device)
         nt_out.backward(nt_grad)
 
         # bogus gradient for AutogradNestedTensor is grad * grad
@@ -9204,12 +9204,12 @@ class TestAutogradMultipleDispatch(TestCase):
         # test registered AutogradNestedTensor formula
         a = torch.arange(6, dtype=torch.float, device=device).reshape(2, 3).requires_grad_(True)
         b = torch.arange(8, dtype=torch.float, device=device).reshape(2, 4).requires_grad_(True)
-        nt = torch.nested_tensor([a, b], dtype=torch.float, device=device)
+        nt = torch.nested.as_nested_tensor([a, b], dtype=torch.float, device=device)
 
         nt_out = torch._test_autograd_multiple_dispatch(nt, True)
         c = torch.randn(2, 3, device=device)
         d = torch.randn(2, 4, device=device)
-        nt_grad = torch.nested_tensor([c, d], dtype=torch.float, device=device)
+        nt_grad = torch.nested.nested_tensor([c, d], dtype=torch.float, device=device)
         nt_out.backward(nt_grad)
 
         # bogus gradient for AutogradNestedTensor is grad * grad + grad
@@ -9274,9 +9274,9 @@ class TestAutogradMultipleDispatch(TestCase):
         foo(inp).backward()
 
         # sum's input is saved for Nested Tensors
-        nt = torch.nested_tensor([torch.rand(2), torch.rand(2)], device=device).requires_grad_()
+        nt = torch.nested.nested_tensor([torch.rand(2), torch.rand(2)], device=device, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            foo(nt).backward(torch.nested_tensor([torch.rand(1), torch.rand(1)], device=device))
+            foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)], device=device))
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence

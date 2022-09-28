@@ -5867,7 +5867,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
         mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
-        nt = torch.nested_tensor([torch.randn(4, 4)])
+        nt = torch.nested.nested_tensor([torch.randn(4, 4)])
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
         has_torch_func = torch.overrides.has_torch_function(
@@ -5888,7 +5888,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mha(nt, nt, nt)
         with torch.inference_mode():
             mha(nt, nt, nt)
-        nt = torch.nested_tensor([torch.randn(4, 4, requires_grad=False)])
+        nt = torch.nested.nested_tensor([torch.randn(4, 4, requires_grad=False)])
         nt.requires_grad = False
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
@@ -13893,10 +13893,10 @@ class TestNNDeviceType(NNTestCase):
                             # result.
                             with self.assertRaisesRegex(
                                     AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
-                                nt = torch.nested_tensor([], device=device)
+                                nt = torch.nested.nested_tensor([], device=device)
                                 _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
-                            nt = torch.nested_tensor([torch.rand(0, 512, device=device)], device=device)
+                            nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device)], device=device)
                             _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
                 else:
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
@@ -18703,7 +18703,7 @@ class TestNNDeviceType(NNTestCase):
                 mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
                 mask[0][-1] = True
 
-                nt = torch.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
+                nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
                 result = model(nt)
                 ref_output = torch.tensor(
                     [
