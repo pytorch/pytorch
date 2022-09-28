@@ -270,7 +270,33 @@ test_dynamo_shard() {
         test_package \
         test_vmap \
         distributions/test_distributions \
-        nn/test_dropout \
+        lazy/test_reuse_ir \
+        lazy/test_ts_opinfo \
+        nn/test_pooling \
+        test_complex \
+        test_cpp_extensions_aot_ninja \
+        test_cpp_extensions_jit \
+        test_cuda \
+        test_dlpack \
+        test_expanded_weights \
+        test_foreach \
+        test_indexing \
+        test_jit_autocast \
+        test_jit_llga_fuser \
+        test_maskedtensor \
+        test_native_mha \
+        test_nn \
+        test_numpy_interop \
+        test_ops_gradients \
+        test_optim \
+        test_prims \
+        test_schema_check \
+        test_sparse \
+        test_spectral_ops \
+        test_subclass \
+        test_torch \
+        test_type_promotion \
+        test_utils \
       --shard "$1" "$NUM_TEST_SHARDS" \
       --continue-through-error \
       --verbose

@@ -9,14 +9,13 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
-import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._python_dispatch import enable_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import PyTree, tree_flatten, tree_map
 
@@ -211,6 +210,7 @@ class FakeTensorConverter(object):
                 existing_device,
                 constant=t if make_constant else None,
             )
+            out.requires_grad_(t.requires_grad)
             if make_constant:
                 self.add_constant_storage_mapping(out)
         if type(t) is torch.nn.Parameter:
@@ -437,7 +437,6 @@ def in_kernel_invocation_manager(fake_mode):
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
-    has_sym_ints: bool
     constant: Optional[torch.Tensor]
 
     # Note: [Fake Tensor Dispatch Keys]
@@ -485,10 +484,6 @@ class FakeTensor(torch.Tensor):
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.fake_device = device
         self.fake_mode = fake_mode
-        self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
-        assert not (
-            self.has_sym_ints and constant is not None
-        ), f"meta: {elem}, constant: {constant}"
         self.constant = constant
 
     @staticmethod
@@ -563,7 +558,8 @@ class FakeTensor(torch.Tensor):
                 else:
                     assert fake_mode is arg.fake_mode, "Mixing modes NYI"
 
-        with enable_torch_dispatch_mode(fake_mode):
+        assert fake_mode is not None
+        with fake_mode:  # type: ignore[attr-defined]
             return func(*args, **kwargs)
 
     @staticmethod
@@ -622,7 +618,7 @@ class FakeTensor(torch.Tensor):
 
 
 # We keep one instantiation of `fake_tensor_converter` active
-# for the duration of `with torch_enable_mode(FakeTensorMode)`.
+# for the duration of `with FakeTensorMode()`.
 # This allows accurate storage aliasing across invocation of
 # different operators. While this will keep all freshly allocated
 # tensors alive during `FakeTensorMode`, there will no be no
@@ -670,7 +666,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_fake_tensors])
+            any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
             or len(flat_symints) > 0
         )
 
@@ -778,7 +774,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
                     return None
 
-            with self.restore():
+            with self:
                 if func in meta_table:
                     r = meta_table[func](*args, **kwargs)
                     return r
@@ -800,7 +796,7 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_fake_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
-            with self.restore():
+            with self:
                 return func.prim_meta_impl(*args, **kwargs)
 
         if has_symbolic_sizes:
