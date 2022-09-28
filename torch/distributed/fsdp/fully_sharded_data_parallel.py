@@ -66,7 +66,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._shard_utils import _create_chunk_sharded_tensor
+from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -2279,11 +2279,11 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _create_chunk_sharded_tensor(
+                state_dict[f"{prefix}{fqn}"] = _ext_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
-                    device_per_node=torch.cuda.device_count(),
+                    num_devices_per_node=torch.cuda.device_count(),
                     pg=self.process_group
                 )  # type: ignore[assignment]
         state_dict.pop(f"{prefix}{FLAT_PARAM}")
@@ -2527,7 +2527,10 @@ class FullyShardedDataParallel(nn.Module):
             param = state_dict.pop(fqn)
 
             # All-gather the param (ShardedTensor)
-            shards = param.local_shards()
+            param, shards = _ext_pre_load_state_dict_transform(param)
+            assert len(shards) < 2, (
+                f"Expects 0 or 1 shard per rank but got {len(shards)} shards on rank {self.rank}"
+            )
             param_numel = param.size().numel()
             dim_0_size = param.size()[0]
             chunk_size = (
