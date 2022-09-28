@@ -561,6 +561,29 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           pack(stack, result);
         },
         aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool"),
+        [](Stack& stack) {
+          auto memory_format = pop(stack).toMemoryFormat();
+          auto t = pop(stack).toTensor();
+          push(stack, t.is_contiguous(memory_format));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_strides_like(Tensor self, MemoryFormat memory_format) -> bool"),
+        [](Stack& stack) {
+          auto memory_format = pop(stack).toMemoryFormat();
+          auto t = pop(stack).toTensor();
+          push(stack, t.unsafeGetTensorImpl()->is_strides_like(memory_format));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::is_non_overlapping_and_dense(Tensor self) -> bool"),
+        [](Stack& stack) {
+          auto t = pop(stack).toTensor();
+          push(stack, t.unsafeGetTensorImpl()->is_non_overlapping_and_dense());
+        },
+        aliasAnalysisFromSchema()),
     // these ops are generic over the list element type.
     // CREATING GENERIC_LIST_OPS
     OperatorGeneratorArgs(

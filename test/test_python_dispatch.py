@@ -1402,6 +1402,27 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
             with self.assertRaisesRegex(TypeError, err_msg):
                 e.contiguous()
 
+    def test_contiguous_memory_format(self):
+        for use_wrapper_subclass in [False]:
+            calls = []
+
+            class ExampleTensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data):
+                    return TestPythonDispatch.subclass_helper(cls, data, use_wrapper_subclass, dispatch_sizes_strides_policy="strides")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func in [torch.ops.aten.is_contiguous.default, torch.ops.aten.is_contiguous.memory_format, torch.ops.aten.stride.default]:
+                        calls.append((func, list(args)[1:]))
+                        return None
+                    with no_dispatch():
+                        return func(*args, **kwargs)
+
+            e = ExampleTensor(torch.randn(2, 2))
+            self.assertFalse(e.is_contiguous(memory_format=torch.channels_last))
+            self.assertEqual(calls, [(torch.ops.aten.is_contiguous.memory_format, [torch.channels_last])])
+
     def test_device_slowpath(self):
         for use_wrapper_subclass in [True]:
             class ExampleTensor1(torch.Tensor):

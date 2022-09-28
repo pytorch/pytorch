@@ -2,6 +2,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -146,7 +147,11 @@ struct C10_API PyInterpreterVTable {
       c10::DispatchKeySet,
       torch::jit::Stack* stack) const = 0;
 
-  virtual bool is_contiguous(const TensorImpl* self) const = 0;
+  virtual bool is_contiguous(const TensorImpl* self, at::MemoryFormat)
+      const = 0;
+  virtual bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
+      const = 0;
+  virtual bool is_non_overlapping_and_dense(const TensorImpl* self) const = 0;
   virtual c10::Device device(const TensorImpl* self) const = 0;
   virtual int64_t dim(const TensorImpl* self) const = 0;
   virtual c10::IntArrayRef strides(const TensorImpl* self) const = 0;
