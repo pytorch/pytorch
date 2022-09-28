@@ -5,8 +5,6 @@ from .._src.aot_autograd import (
     aot_module,
     compiled_function,
     compiled_module,
-    num_of_recompilations,
-    clear_compile_cache,
     aot_module_simplified,
     get_graph_being_compiled,
     get_aot_graph_name,
