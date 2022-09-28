@@ -168,7 +168,8 @@ class FlatParameter(nn.Parameter):
             info entries; see :class:`SharedParamInfo`.
         _param_extensions (Tuple[Optional[Any], ...]): Parameter extensions
             (i.e. some per-parameter state) used to customize pre-flatten and
-            post-unflatten behavior.
+            post-unflatten behavior. This is experimental, and users should not
+            depend on its existence in the future.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
