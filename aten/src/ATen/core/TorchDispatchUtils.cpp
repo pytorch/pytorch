@@ -8,8 +8,8 @@ bool tensor_has_dispatch(const at::Tensor& t) {
   return t.key_set().has_any(key_set);
 }
 
-bool tensorlist_has_dispatch(const at::TensorList& li) {
-  for (const auto& t: li) {
+bool tensorlist_has_dispatch(at::ITensorListRef li) {
+  for (const auto& t : li) {
     if (tensor_has_dispatch(t)) {
       return true;
     }
