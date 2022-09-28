@@ -820,6 +820,8 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=(hi, lo))
 
 def sample_inputs_ones_zeros(op, device, dtype, requires_grad, **kwargs):
+    # this is a bit messy, as we want the args to be tuples
+    # so if we pass size as a tuple, we have a tuple containing a tuple
     sizes = (
         (M,),
         (S, S),
@@ -2502,11 +2504,8 @@ def error_inputs_aminmax_amax_amin(op_info, device, **kwargs):
 
     # Error Inputs for zero-dim tensors, when 'dim' arg is not provided.
     shape = (S, 0, S)
-    err_msg_amax_amin = "reduction"
     err_msg_aminmax = "cannot compute aminmax over an empty dimension as the operation has no identity"
-    if op_info.name in ['amax', 'amin', '_refs.amax', '_refs.amin']:
-        yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_amax_amin)
-    elif op_info.name in ['aminmax']:
+    if op_info.name in ['aminmax']:
         yield ErrorInput(SampleInput(torch.rand(shape, device=device)), error_regex=err_msg_aminmax)
 
     # Error Inputs for tensors with more than 64 dimension
@@ -11267,6 +11266,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_leaky_relu,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           inplace_variant=lambda x, negative_slope=0.01:
+               torch.nn.functional.leaky_relu(x, negative_slope, inplace=True),
            supports_autograd=True,
            assert_autodiffed=True,
            supports_gradgrad=True,
@@ -11466,7 +11467,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -11939,14 +11940,16 @@ op_db: List[OpInfo] = [
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        inplace_variant=lambda x, threshold, value:
+            torch.nn.functional.threshold(x, threshold, value, inplace=True),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'threshold': 0.123,
+        sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9},
-                                                    {'threshold': 0.123,
+                                                    {'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9}),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
@@ -12405,6 +12408,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
@@ -14169,6 +14173,7 @@ op_db: List[OpInfo] = [
     OpInfo('ones',
            op=torch.ones,
            supports_autograd=False,
+           supports_varargs=True,
            is_factory_function=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=True,
