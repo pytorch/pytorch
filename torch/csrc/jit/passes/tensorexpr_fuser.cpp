@@ -1039,6 +1039,40 @@ class TensorExprFuser {
         }
       }
 
+      bool is_reduced_precision =
+          node->kind() == aten::_autocast_to_reduced_precision;
+      bool is_full_precision =
+          node->kind() == aten::_autocast_to_full_precision;
+      auto self_tensor = node->inputs()[0]; // input tensor
+
+      if (auto const& tt = self_tensor->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st.has_value()) {
+          return false;
+        }
+
+        auto device = tt->device();
+        if (!device.has_value()) {
+          return false;
+        }
+
+        bool is_cpu = device->is_cpu();
+
+        if (*st != at::kFloat && is_reduced_precision && is_cpu) {
+          // Regarding CPU, aten would do nothing if the data type is
+          // float. Then the aten performance is better than NNC. So NNC
+          // does not pull it into its fusion group.
+          return false;
+        }
+
+        if (*st != at::kBFloat16 && is_full_precision && is_cpu) {
+          // Regarding CPU, aten would do nothing if the data type is
+          // BFloat16. Then the aten performance is better than NNC. So NNC
+          // does not pull it into its fusion group.
+          return false;
+        }
+      }
+
       if (has_unsupported_pin_memory(node)) {
         return false;
       }

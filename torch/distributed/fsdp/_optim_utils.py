@@ -21,11 +21,9 @@ import torch.distributed as dist
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
 import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
-from torch.distributed.fsdp._shard_utils import (
-    _create_chunk_sharded_tensor,
-    _gather_state_dict,
-)
+from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.flat_param import FlatParameter, FlatParamHandle
+from torch.distributed.fsdp._fsdp_extensions import _ext_chunk_tensor
 
 
 def sorted_items(dictionary: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
@@ -248,7 +246,7 @@ def _unflatten_communicated_optim_state(
                 views = flat_param_views[state_name]
             optim_state: Union[torch.Tensor, ShardedTensor] = next(views)
             if shard_state:
-                optim_state = _create_chunk_sharded_tensor(
+                optim_state = _ext_chunk_tensor(
                     optim_state,
                     fsdp_module.rank,
                     fsdp_module.world_size,

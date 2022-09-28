@@ -263,7 +263,7 @@ Tensor& add_out_sparse_csr_cuda(
         self.sizes(),
         " and tensor `other` with shape ",
         other.sizes());
-    at::native::resize_as_sparse_csr_(out, self);
+    at::native::resize_as_sparse_compressed_(out, self);
     sparse::impl::cuda::add_out_sparse_csr(self, other, Scalar(1), alpha, out);
   }
   return out;
