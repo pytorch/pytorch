@@ -70,12 +70,13 @@ at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
 #pragma mark - ATen Ops
 
 Tensor empty(
-    IntArrayRef size,
+    c10::SymIntArrayRef sym_size,
     optional<ScalarType> dtype,
     optional<Layout> layout,
     optional<Device> device,
     optional<bool> pin_memory,
     c10::optional<MemoryFormat> memory_format) {
+  auto size = c10::asIntArrayRefSlow(sym_size);
   TORCH_CHECK(
       !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Metal tensor");

@@ -35,6 +35,7 @@ __all__ = [
     "margin_ranking_loss",
     "mish",
     "mse_loss",
+    "poisson_nll_loss",
     "prelu",
     "relu",
     "relu6",
@@ -43,6 +44,9 @@ __all__ = [
     "softshrink",
     "tanhshrink",
     "threshold",
+    "glu",
+    "pairwise_distance",
+    "pdist",
 ]
 
 Tensor = torch.Tensor
@@ -329,7 +333,11 @@ def _get_string_reduction_arg(
     return ret
 
 
-@register_decomposition(torch.ops.aten.l1_loss)
+# CompositeImplicitAutograd - don't register decomp
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+)
 def l1_loss(
     input: TensorLikeType,
     target: TensorLikeType,
@@ -337,6 +345,9 @@ def l1_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.l1_loss
+    """
     if size_average is not None or reduce is not None:
         # TODO: raise exception instead of converting value
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
@@ -508,6 +519,43 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
 
+# CompositeImplicitAutograd - don't register decomp
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def poisson_nll_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    log_input: bool = True,
+    full: bool = False,
+    size_average: Optional[bool] = None,
+    eps: float = 1e-8,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.poisson_nll_loss
+    """
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
+    _check_reduction_value(reduction)
+    if log_input:
+        loss = torch.exp(input) - target * input
+    else:
+        loss = input - target * torch.log(input + eps)
+
+    if full:
+        stirling_term = (
+            target * torch.log(target) - target + 0.5 * torch.log(2 * torch.pi * target)
+        )
+        # avoid inplace add
+        loss = loss + stirling_term.masked_fill(target <= 1, 0)
+    return _apply_loss_reduction(loss, reduction)
+
+
 @register_decomposition(torch.ops.aten.prelu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "weight"),
@@ -559,3 +607,53 @@ def relu6(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     # It may be better to use clamp here, but we use hardtanh to replicate
     # the behavior of the existing implementation
     return refs.nn.functional.hardtanh(a, 0, 6)
+
+
+@register_decomposition(torch.ops.aten.glu)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def glu(a: TensorLikeType, dim: int = -1) -> TensorLikeType:
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    check(
+        a.shape[dim] % 2 == 0,
+        lambda: f"Halving dimension must be even, but dimension {dim} is size {a.shape[dim]}",
+    )
+    b, c = torch.tensor_split(a, 2, dim)
+
+    return b * torch.sigmoid(c)
+
+
+@register_decomposition(torch.ops.aten.pairwise_distance)
+@out_wrapper()
+def pairwise_distance(
+    x1: TensorLikeType,
+    x2: TensorLikeType,
+    p: NumberType = 2.0,
+    eps: NumberType = 1e-6,
+    keepdim=False,
+) -> TensorLikeType:
+    return torch.linalg.vector_norm(x1 - x2 + eps, ord=p, dim=-1, keepdim=keepdim)
+
+
+@register_decomposition(torch.ops.aten.pdist)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+@out_wrapper()
+def pdist(a: TensorLikeType, p: float = 2) -> TensorLikeType:
+    check(a.ndim == 2, lambda: f"pdist only supports 2D tensors, got: {a.ndim}D")
+    check(p >= 0, lambda: "pdist only supports non-negative p values")
+    # For p == 2 we can use an efficient implementation, but other values of p
+    # require creating a much bigger tensor for an intermediate step
+    if p == 2:
+        aTa = torch.mm(a, a.T)
+        aTa_diag = torch.diag(aTa)
+        t = torch.sqrt(torch.clamp(aTa_diag + aTa_diag.unsqueeze(-1) - 2 * aTa, min=0))
+    else:
+        t = torch.linalg.vector_norm(a.unsqueeze(1) - a, ord=p, dim=2)
+    i = torch.triu_indices(t.shape[0], t.shape[1], offset=1, device=a.device)
+    return t.flatten().index_select(0, i[0] * t.shape[0] + i[1])

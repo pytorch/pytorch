@@ -26,9 +26,4 @@ at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {
   return IntArrayRef(reinterpret_cast<const int64_t*>(ar.data()), ar.size());
 }
 
-std::ostream& operator<<(std::ostream& os, SymInt s) {
-  os << "SymInt(" << s.data() << ")";
-  return os;
-}
-
 } // namespace c10

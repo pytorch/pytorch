@@ -21,7 +21,7 @@ class FakeTensorProp(torch.fx.Interpreter):
 
     def run_node(self, n: Node):
         result = super().run_node(n)
-        n.meta['fake_result'] = result
+        n.meta['val'] = result
         return result
 
     def propagate(self, *args):

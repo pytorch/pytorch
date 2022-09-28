@@ -379,10 +379,6 @@ class DeviceContextArena {
   std::map<BackendDevice, DeviceContext*> device_contexts_;
 };
 
-bool ShouldSyncIrValue(const Value& ir_value) {
-  return ir_value->op() != ltc_not_supported;
-}
-
 // Return true if no tensor in the list has an underlying IR (leaf or
 // operation).
 bool TensorsHaveIR(const std::vector<LazyTensorPtr>& tensors) {
@@ -530,13 +526,13 @@ Value LazyGraphExecutor::GetDeviceDataIrValue(
 }
 
 Value LazyGraphExecutor::GetIrValueForScalarFromCodegen(
-    const at::Scalar& value) {
+    const at::Scalar& value,
+    const BackendDevice& device) {
   if (IsSpecialScalar(value)) {
     return MakeScalar(value, value.type());
   }
-  auto cpu_device = getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0));
   BackendDataPtr data =
-      getBackend()->MakeComputationDataFromScalar(value, cpu_device);
+      getBackend()->MakeComputationDataFromScalar(value, device);
   data->SetInfo(
       std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
   return MakeDeviceData(std::move(data));
@@ -549,8 +545,7 @@ Value LazyGraphExecutor::GetIrValueForScalar(
   if (IsSpecialScalar(value)) {
     return MakeScalar(value, type);
   }
-  return GetDeviceDataIrValue(
-      value, type, getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0)));
+  return GetDeviceDataIrValue(value, type, device);
 }
 
 Value LazyGraphExecutor::GetIrValueForScalar(
@@ -640,7 +635,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         tensors[i]->CurrentDataHandle() == nullptr) {
       Value ir_value = tensors[i]->CurrentIrValue();
       if (ir_value) {
-        if (ShouldSyncIrValue(ir_value)) {
+        if (getBackend()->ShouldSyncTensor(tensors[i])) {
           // Add only tensors which need to be synced.
           coll.hash = HashCombine(coll.hash, ir_value.hash());
           coll.indices.push_back(i);
@@ -706,6 +701,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::FetchTensorData(
       const BackendDevice& tensor_device = tensor->GetDevice();
       handle = getBackend()->CreateDataPlaceholder(
           tensor_device, std::move(tensor->shape()));
+
       tensor->SetDataHandle(handle, config.sync_ltc_data);
     }
     tensors_data.emplace_back(std::move(handle));

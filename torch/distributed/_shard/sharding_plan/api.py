@@ -48,6 +48,7 @@ class ShardingPlan(object):
         >>>         return self.relu(self.fc2(self.gelu(self.fc1(input))))
 
 
+        >>> # xdoctest: +SKIP("Undefined spec1, spec2)
         >>> sharding_plan = ShardingPlan(
         >>>    plan={
         >>>        "fc1.weight": spec1,

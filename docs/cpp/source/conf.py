@@ -16,6 +16,9 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
+# NB: C++ API doc generation using doxygen / breathe / exhale is currently only
+# enabled on nightlies (and not trunk or on PRs) due to OOM errors in CI.
+# See https://github.com/pytorch/pytorch/issues/79992.
 import os
 # sys.path.insert(0, os.path.abspath('.'))
 
@@ -26,15 +29,17 @@ import textwrap
 # If your documentation needs a minimal Sphinx version, state it here.
 #
 needs_sphinx = '3.1.2'
+run_doxygen = os.environ.get('RUN_DOXYGEN', "false") == "true"
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
     'sphinx.ext.intersphinx',
+] + ([
     'breathe',
     'exhale'
-]
+] if run_doxygen else [])
 
 intersphinx_mapping = {
     'pytorch': ('https://pytorch.org/docs/master', None)
