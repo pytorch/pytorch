@@ -212,7 +212,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     CUDAInitMode.CUDA_AFTER,
                 ],
                 "init_optim_before_wrap": [False, True],
-                "optim_class": [torch.optim.Adam, torch.optim.AdamW],
+                "optim_class": [torch.optim.AdamW],
                 "multi_tensor": [False, True],
                 "set_to_none": [False, True],
                 "backward_prefetch": [
@@ -420,31 +420,37 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             optim_orig_params,
         ) = self._get_fsdp_models_and_optims(sharding_strategy, cpu_offload)
         device = torch.device("cuda")
-        for i in range(3):
-            optim.zero_grad()
-            optim_orig_params.zero_grad()
-
+        for _ in range(3):
             inp1 = fsdp_model.get_input(device)
-            loss1 = fsdp_model(*inp1)
-            loss_orig_params1 = fsdp_model_orig_params(*inp1)
-            self.assertEqual(loss1, loss_orig_params1)
-
-            inp2 = fsdp_model.get_input(device)
-            loss2 = fsdp_model(*inp2)
-            loss_orig_params2 = fsdp_model_orig_params(*inp2)
-            self.assertEqual(loss2, loss_orig_params2)
-
-            loss = (loss1 + loss2).sum()
-            loss_orig_params = (loss_orig_params1 + loss_orig_params2).sum()
-            fsdp_model.run_backward(loss)
-            fsdp_model_orig_params.run_backward(loss_orig_params)
-            optim.step()
-            optim_orig_params.step()
+            _inp2 = fsdp_model.get_input(device)
+            inp2 = tuple(
+                t + torch.ones_like(t) for t in _inp2
+            )  # make different from `inp1`
+            # For these loss lists: elem 0 is baseline; elem 1 is test
+            losses1 = []
+            losses2 = []
+            losses = []
+            for _model, _optim in (fsdp_model, optim), (
+                fsdp_model_orig_params,
+                optim_orig_params,
+            ):
+                _optim.zero_grad()
+                loss1 = _model(*inp1)
+                losses1.append(loss1)
+                loss2 = _model(*inp2)
+                losses2.append(loss2)
+                loss = (loss1 + loss2).sum()
+                losses.append(loss)
+                _model.run_backward(loss)
+                _optim.step()
+            self.assertEqual(losses1[0], losses1[1])
+            self.assertEqual(losses2[0], losses2[1])
+            self.assertEqual(losses[0], losses[1])
         self._check_fsdp_parameter_parity(fsdp_model, fsdp_model_orig_params)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_params", [False, True])
-    def test_forward_summon_forward(self, offload_params: bool):
+    def test_summon_between_two_forwards(self, offload_params: bool):
         """
         Tests that ``use_orig_params=True`` has parity with ``False`` when
         running a forward pass, :meth:`summon_full_params()`, and another
@@ -453,11 +459,11 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         cpu_offload = CPUOffload(offload_params=offload_params)
         self.run_subtests(
             self._get_fsdp_parity_subtest_config(),
-            self._test_forward_summon_forward,
+            self._test_summon_between_two_forwards,
             cpu_offload=cpu_offload,
         )
 
-    def _test_forward_summon_forward(
+    def _test_summon_between_two_forwards(
         self,
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
