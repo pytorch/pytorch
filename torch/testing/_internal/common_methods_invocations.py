@@ -10796,6 +10796,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=5e-2, rtol=5e-2), }),
                    'TestCommon', 'test_complex_half_reference_testing')
+               DecorateInfo(
+                   toleranceOverride({torch.complex32: tol(atol=1e-5, rtol=5e-3)}),
+                   "TestCudaFuserOpInfo", "test_nvfuser_correctness")
            ),
            skips=(
                # Reason for Skip: https://github.com/pytorch/pytorch/pull/79694#issuecomment-1186949486
@@ -12891,6 +12894,9 @@ op_db: List[OpInfo] = [
                             'TestMathBits', 'test_conj_view'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples'),
+               DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
+                            "TestDecomp", "test_comprehensive", device_type="cuda",
+                            active_if=IS_ROCM),
            ),
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
