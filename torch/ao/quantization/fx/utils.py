@@ -972,11 +972,16 @@ def _qconfig_satisfies_dtype_config_constraints(
             activation_post_process: Union[ObserverBase, FakeQuantize],
             dtype_with_constraints: DTypeWithConstraints,
             debug_string: str) -> bool:
-        app_quant_min = getattr(activation_post_process, "quant_min", None)
-        app_quant_max = getattr(activation_post_process, "quant_max", None)
+        # For FakeQuantize, the attributes are set in the observer inside the FakeQuantize
+        if isinstance(activation_post_process, FakeQuantize):
+            observer = activation_post_process.activation_post_process
+        else:
+            observer = activation_post_process
+        app_quant_min = getattr(observer, "quant_min", None)
+        app_quant_max = getattr(observer, "quant_max", None)
         # TODO: for now, just use the existing eps value as scale_min. In the future, we should
         # resolve the differences between the two, either by renaming eps or some other way
-        app_scale_min = getattr(activation_post_process, "eps", None)
+        app_scale_min = getattr(observer, "eps", None)
         backend_quant_min = dtype_with_constraints.quant_min_lower_bound
         backend_quant_max = dtype_with_constraints.quant_max_upper_bound
         backend_scale_min = dtype_with_constraints.scale_min_lower_bound

@@ -16,6 +16,7 @@ from torch.ao.quantization.fake_quantize import (
     default_fused_per_channel_wt_fake_quant,
     default_embedding_fake_quant,
     default_embedding_fake_quant_4bit,
+    _wt_fake_quant_range_neg_127_to_127,
     fused_wt_fake_quant_range_neg_127_to_127,
     fused_per_channel_wt_fake_quant_range_neg_127_to_127,
 )
@@ -239,8 +240,8 @@ def get_default_qconfig(backend='fbgemm', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                               weight=default_per_channel_weight_observer)
         elif backend == 'qnnpack':
-            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
-                              weight=default_weight_observer)
+            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False, eps=2 ** -12),
+                              weight=weight_observer_range_neg_127_to_127)
         elif backend == 'onednn':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_per_channel_weight_observer)
@@ -318,8 +319,9 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
                                                                 quant_max=255,
-                                                                reduce_range=False),
-                              weight=default_weight_fake_quant)
+                                                                reduce_range=False,
+                                                                eps=2 ** -12),
+                              weight=_wt_fake_quant_range_neg_127_to_127)
         elif backend == 'onednn':
             qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                 quant_min=0,
@@ -339,8 +341,9 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
                                                                                  quant_max=255,
-                                                                                 reduce_range=False),
-                              weight=default_fused_wt_fake_quant)
+                                                                                 reduce_range=False,
+                                                                                 eps=2 ** -12),
+                              weight=fused_wt_fake_quant_range_neg_127_to_127)
         elif backend == 'onednn':
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
