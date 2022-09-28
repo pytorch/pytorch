@@ -186,6 +186,26 @@ class TestPrims(TestCase):
         )
         self.assertFalse(include_any_nvprims_sin)
 
+    def test_skip_ops_nvfuser_capability_mode(self, device):
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+        a = torch.randn(5, 5, device=device)
+
+        def func(a):
+            return torch.sin(a)
+
+        skip_ops = {"torch.sin", }
+        with TorchRefsNvfuserCapabilityMode(skip_ops=skip_ops):
+            gm = make_fx(func)(a)
+
+        includes_any_aten_sin = any(
+            node.target == torch.ops.aten.sin.default for node in gm.graph.nodes
+        )
+        self.assertTrue(includes_any_aten_sin)
+        include_any_nvprims_sin = any(
+            node.target == torch.ops.nvprims.sin.default for node in gm.graph.nodes
+        )
+        self.assertFalse(include_any_nvprims_sin)
 
     @onlyCUDA
     @skipCUDAIfRocm

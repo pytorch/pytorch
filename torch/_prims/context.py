@@ -189,7 +189,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
         if func is not None:
             # If the ref exists query whether we should use it or not
-            if self.should_fallback_fn(self, func, args, kwargs):
+            if self.should_fallback_fn(self, orig_func, func, args, kwargs):
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
             with self:
@@ -208,7 +208,14 @@ def _is_node_supported_nvfuser(node):
     )
 
 
-def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
+def _is_func_unsupported_nvfuser(
+    torch_function_mode, orig_func, func, args, kwargs, *, skip_ops=()
+):
+    # One supported case is easy to check: if the resolved name of the original
+    # function in the skip list, skip it.
+    if torch.overrides.resolve_name(orig_func) in skip_ops:
+        return True
+
     with torch_function_mode:
         gm = get_isolated_graphmodule(func, args, kwargs)
 
@@ -221,11 +228,13 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
 
 class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
-    def __init__(self):
+    def __init__(self, *, skip_ops=()):
         super().__init__(
             strict=False,
-            should_fallback_fn=_is_func_unsupported_nvfuser,
-            prims_mode_cls=NvfuserPrimsMode,
+            should_fallback_fn=functools.partial(
+                _is_func_unsupported_nvfuser, skip_ops=skip_ops
+            ),
+            prims_mode_cls=functools.partial(NvfuserPrimsMode, skip_ops=skip_ops),
         )
 
     def _is_var_mean(self, func):
