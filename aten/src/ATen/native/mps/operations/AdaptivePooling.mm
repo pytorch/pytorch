@@ -97,13 +97,11 @@ Tensor& adaptive_avg_pool2d_out_mps
                              c10::nullopt);
   }  else {
     Tensor phony_grad = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    auto num_input_dims = input.sizes().size();
-    int64_t phony_shape[num_input_dims];
-    for(int i = 0; i < num_input_dims - 2; i++)
-      phony_shape[i] = input.size(i);
-    phony_shape[num_input_dims-2] = output_size[0];
-    phony_shape[num_input_dims-1] = output_size[1];
-    phony_grad.resize_(IntArrayRef(phony_shape, num_input_dims));
+    auto input_sizes = input.sizes();
+    std::vector<int64_t> phony_shape{input_sizes.begin(), input_sizes.end() -2};
+    phony_shape.push_back(output_size[0]);
+    phony_shape.push_back(output_size[1]);
+    phony_grad.resize_(IntArrayRef(phony_shape));
     output =  at::avg_pool2d_backward(input,
                                       phony_grad,
                                       IntArrayRef({kernel_sizeH, kernel_sizeW}),
