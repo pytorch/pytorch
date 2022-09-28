@@ -109,6 +109,43 @@ def valuetype_type(
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
+        if str(t.elem) == "SymInt" and symint:
+            # clang7 appears to mis-compile c10::optional<c10::SymInt>
+            # so instead we wrap optional SymInt arguments as const references.
+            # This manifested as an ASAN error under a clang7 compilation:
+            #
+            # test_view_inplace (__main__.TestFunctionalization) ... =================================================================  # noqa: B950
+            #  6234
+            #   ==792==ERROR: AddressSanitizer: stack-use-after-return on address 0x7f02e9ddb460 at pc 0x7f02be9d2380 bp 0x7ffde3af28b0 sp 0x7ffde3af28a8  # noqa: B950
+            # 6235
+            #   READ of size 8 at 0x7f02e9ddb460 thread T0
+            # 6236
+            #       #0 0x7f02be9d237f in std::decay<c10::guts::infer_function_traits<c10::impl::detail::WrapFunctionIntoFunctor_<c10::CompileTimeFunctionPointer<at::Tensor const& (c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>), &(at::functionalization::as_strided_(c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>))>, at::Tensor const&, c10::guts::typelist::typelist<c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt> > > >::type::return_type>::type c10::impl::call_functor_with_args_from_stack_<c10::impl::detail::WrapFunctionIntoFunctor_<c10::CompileTimeFunctionPointer<at::Tensor const& (c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>), &(at::functionalization::as_strided_(c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>))>, at::Tensor const&, c10::guts::typelist::typelist<c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt> > >, false, 0ul, 1ul, 2ul, 3ul, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt> >(c10::OperatorKernel*, c10::DispatchKeySet, std::vector<c10::IValue, std::allocator<std::vector> >*, std::integer_sequence<unsigned long, 0ul, 1ul, 2ul, 3ul>, c10::guts::typelist::typelist<at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt> >*) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0x1200837f)  # noqa: B950
+            # 6237
+            #       #1 0x7f02be9d1b36 in auto c10::impl::make_boxed_from_unboxed_functor<c10::impl::detail::WrapFunctionIntoFunctor_<c10::CompileTimeFunctionPointer<at::Tensor const& (c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>), &(at::functionalization::as_strided_(c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>))>, at::Tensor const&, c10::guts::typelist::typelist<c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt> > >, false>::call(c10::OperatorKernel*, c10::OperatorHandle const&, c10::DispatchKeySet, std::vector<c10::IValue, std::allocator<c10::IValue> >*)::'lambda'(auto)::operator()<c10::guts::detail::_identity>(auto) const (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0x12007b36)  # noqa: B950
+            # 6238
+            #       #2 0x7f02be9d1904 in c10::impl::make_boxed_from_unboxed_functor<c10::impl::detail::WrapFunctionIntoFunctor_<c10::CompileTimeFunctionPointer<at::Tensor const& (c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>), &(at::functionalization::as_strided_(c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>))>, at::Tensor const&, c10::guts::typelist::typelist<c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt> > >, false>::call(c10::OperatorKernel*, c10::OperatorHandle const&, c10::DispatchKeySet, std::vector<c10::IValue, std::allocator<c10::IValue> >*) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0x12007904)  # noqa: B950
+            # 6239
+            #       #3 0x7f02b9e013f1 in c10::Dispatcher::callBoxed(c10::OperatorHandle const&, std::vector<c10::IValue, std::allocator<c10::IValue> >*) const (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0xd4373f1)  # noqa: B950
+            # 6240
+            #       #4 0x7f02ba4a8b3c in at::functorch::FunctionalizeInterpreterPtr::processImpl(c10::OperatorHandle const&, std::vector<c10::IValue, std::allocator<c10::IValue> >*) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0  # noqa: B950xdadeb3c)
+            # 6241
+            #       #5 0x7f02ba4aa8a0 in at::functorch::Interpreter::process(c10::OperatorHandle const&, std::vector<c10::IValue, std::allocator<c10::IValue> >*) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0xdae08a0)  # noqa: B950
+            # 6242
+            #       #6 0x7f02ba49f6b9 in at::functorch::dynamicLayerFrontFallback(c10::OperatorHandle const&, std::vector<c10::IValue, std::allocator<c10::IValue> >*) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0xdad56b9)  # noqa: B950
+            # 6243
+            #       #7 0x7f02bbfbc222 in c10::impl::BoxedKernelWrapper<at::Tensor const& (at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>), void>::call(c10::BoxedKernel const&, c10::OperatorHandle const&  # noqa: B950, c10::DispatchKeySet, at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0xf5f2222)
+            # 6244
+            #       #8 0x7f02bbd78b42 in at::_ops::as_strided_::call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_cpu.so+0xf3aeb42)  # noqa: B950
+            # 6245
+            #       #9 0x7f02e4d453e1 in at::Tensor::as_strided_(c10::ArrayRef<long>, c10::ArrayRef<long>, c10::optional<long>) const (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_python.so+0x2d8b3e1)  # noqa: B950
+            # 6246
+            #       #10 0x7f02e4d3e2de in torch::functorch::impl::_propagate_functional_input_mutation(at::Tensor const&, at::Tensor const&) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_python.so+0x2d842de)  # noqa: B950
+            # 6247
+            #       #11 0x7f02e4d5417c in void pybind11::cpp_function::initialize<void (*&)(at::Tensor const&, at::Tensor const&), void, at::Tensor const&, at::Tensor const&, pybind11::name, pybind11::scope, pybind11::sibling, char [3  # noqa: B9507]>(void (*&)(at::Tensor const&, at::Tensor const&), void (*)(at::Tensor const&, at::Tensor const&), pybind11::name const&, pybind11::scope const&, pybind11::sibling const&, char const (&) [37])::'lambda'(pybind11::detail::function_call&)::operator()(pybind11::detail::function_call&) const (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_python.so+0x2d9a17c)
+            # 6248
+            #       #12 0x7f02e426183d in pybind11::cpp_function::dispatcher(_object*, _object*, _object*) (/opt/conda/lib/python3.7/site-packages/torch/lib/libtorch_python.so+0x22a783d)  # noqa: B950
+            return NamedCType(binds, ConstRefCType(OptionalCType(BaseCType(SymIntT))))
         elem = valuetype_type(t.elem, binds=binds, symint=symint)
         if elem is None:
             return None

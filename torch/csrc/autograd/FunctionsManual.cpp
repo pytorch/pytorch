@@ -2752,7 +2752,7 @@ Tensor as_strided_backward(
     TensorGeometry input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
-    optional<c10::SymInt> sym_storage_offset_) {
+    const optional<c10::SymInt>& sym_storage_offset_) {
   // TODO: properly use sym
   auto sizes = c10::asIntArrayRefSlow(sym_sizes);
   auto strides = c10::asIntArrayRefSlow(sym_strides);
@@ -2880,7 +2880,7 @@ Tensor as_strided_scatter_backward(
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> storage_offset) {
+    const optional<c10::SymInt>& storage_offset) {
   // Note [as_strided_scatter backward support]
   // as_strided_scatter handling for autograd is a beast, and is non-trivial to
   // implement for arbitrarily strided inputs. Most uses for as_strided with

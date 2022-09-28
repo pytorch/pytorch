@@ -345,9 +345,16 @@ Check this module for more information.
             symInt_type = direct_solve(NamedCType(goal.name, BaseCType(SymIntT)))
             return f"{symInt_type}.expect_int()"
         elif goal.type == OptionalCType(BaseCType(longT)):
-            argname = direct_solve(
-                NamedCType(goal.name, OptionalCType(BaseCType(SymIntT)))
-            )
+            try:
+                argname = direct_solve(
+                    NamedCType(goal.name, OptionalCType(BaseCType(SymIntT)))
+                )
+            except UnsatError:
+                argname = direct_solve(
+                    NamedCType(
+                        goal.name, ConstRefCType(OptionalCType(BaseCType(SymIntT)))
+                    )
+                )
             return f"{argname}.has_value() ? c10::make_optional({argname}->expect_int()) : c10::nullopt"
         elif goal.type == BaseCType(optionalIntArrayRefT):
             return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))

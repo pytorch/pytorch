@@ -329,6 +329,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
         OptionalCType(BaseCType(longT)),
         BaseCType(SymIntT),
         OptionalCType(BaseCType(SymIntT)),
+        ConstRefCType(OptionalCType(BaseCType(SymIntT))),
         BaseCType(boolT),
         BaseCType(intArrayRefT),
         BaseCType(symIntArrayRefT),
