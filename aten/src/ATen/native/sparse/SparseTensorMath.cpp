@@ -7,6 +7,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
@@ -371,14 +372,14 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
   return norm_sparse(self, p, IntArrayRef{}, false, c10::nullopt);
 }
 
-Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, OptionalIntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.size() > 0) {
+  if (dim.has_value() && dim.value().size() > 0) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
-    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
+    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.value().size();
     if (passed_full_reduction_check) {
-      auto dim_ = dim.vec();
+      auto dim_ = dim.value().vec();
       maybe_wrap_dims(dim_, ndim);
       std::vector<bool> dims_check(ndim, false);
       // Need to check for duplicates, and fail if any are found
@@ -1087,6 +1088,13 @@ Tensor& _mul_sparse_sparse_zero_dim_out(const Tensor& zero_dim, const Tensor& ot
   return _mul_dense_sparse_out(scalar_val, other, r);
 }
 
+DEFINE_DISPATCH(mul_sparse_sparse_out_stub);
+
+Tensor& _mul_sparse_sparse_out(const Tensor& x, const Tensor& y, Tensor& res) {
+  mul_sparse_sparse_out_stub(res.device().type(), res, x, y);
+  return res;
+}
+
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r) {
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -1109,13 +1117,34 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, Tensor& r
     return _mul_sparse_sparse_zero_dim_out(t_, src_, r);
   }
 
-  TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes when both are sparse"
+  const auto is_equal_size_inputs = t_.sizes().equals(src_.sizes());
+
+  // mul(sparse, sparse) with inputs which broadcast only in dense dims
+  if (!is_equal_size_inputs) {
+    _mul_sparse_sparse_out(t_, src_, r);
+    return r;
+  }
+
+  TORCH_CHECK(is_equal_size_inputs, "mul: expected 'self' and 'other' to have same sizes when both are sparse"
       ", but ", t_.sizes(), " != ", src_.sizes());
 
+  // Short circuit when there is zero nnz
+  // Not strictly necessary, but there are tests checking whether
+  // resize in mul fails if run on tensors coming from .data/.detach.
   if (!t_._nnz() || !src_._nnz()) {
     r.resize_as_(t_);
     return r.zero_();
   }
+
+  // _mul_sparse_sparse_out is faster for large inputs
+  // and when either of the inputs is uncoalesced.
+  if (!t_.is_coalesced() || !src_.is_coalesced()) {
+    _mul_sparse_sparse_out(t_, src_, r);
+    return r;
+  }
+
+  // Otherwise _mul_sparse_sparse_out might be slower
+  // than the brute-force solution below.
 
   SparseTensor t = t_.coalesce();
   SparseTensor src = src_.coalesce();
