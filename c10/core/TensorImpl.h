@@ -2464,8 +2464,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   SymInt compute_sym_numel() const {
+    TORCH_INTERNAL_ASSERT(has_symbolic_sizes_strides_);
     SymInt numel = 1;
-    for (const auto& s : sym_sizes()) {
+    for (const auto& s : extra_meta_->sizes_) {
       numel *= s;
     }
     return numel;
@@ -2595,7 +2596,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         auto is_channels_last_3d = bool_is_channels_last_3d(
             !is_channels_last && compute_strides_like_channels_last_3d());
         auto is_non_overlapping_and_dense = bool_is_non_overlapping_and_dense(
-            is_contiguous_ || is_channels_last_contiguous ||
+            is_contiguous || is_channels_last_contiguous ||
             is_channels_last_3d_contiguous ||
             compute_non_overlapping_and_dense());
         set_fields(
