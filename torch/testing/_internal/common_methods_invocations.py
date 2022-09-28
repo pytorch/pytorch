@@ -820,6 +820,8 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=(hi, lo))
 
 def sample_inputs_ones_zeros(op, device, dtype, requires_grad, **kwargs):
+    # this is a bit messy, as we want the args to be tuples
+    # so if we pass size as a tuple, we have a tuple containing a tuple
     sizes = (
         (M,),
         (S, S),
@@ -7226,6 +7228,18 @@ def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
         d['delta'] = random.uniform(1e-3, 9)
         yield SampleInput(input, args=(target, ), kwargs=d)
 
+def error_inputs_huber_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction value
+    err = 'is not a valid value for reduction'
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'reduction': 'abc'}),
+                     error_type=ValueError, error_regex=err)
+    # delta <= 0
+    for delta in (0, -1):
+        err = 'huber_loss does not support non-positive values for delta.'
+        yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'delta': delta}),
+                         error_type=RuntimeError, error_regex=err)
+
 def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11468,7 +11482,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -12409,6 +12423,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
@@ -14173,6 +14188,7 @@ op_db: List[OpInfo] = [
     OpInfo('ones',
            op=torch.ones,
            supports_autograd=False,
+           supports_varargs=True,
            is_factory_function=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=True,
@@ -16119,6 +16135,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
+        error_inputs_func=error_inputs_huber_loss,
         skips=(
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -16975,6 +16992,13 @@ python_ref_db = [
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.huber_loss",
+        torch_opinfo_name="nn.functional.huber_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
