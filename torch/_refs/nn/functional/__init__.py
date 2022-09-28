@@ -451,22 +451,16 @@ def _nll_loss_nd(
         raise ValueError("Target class is out-of-bounds and not ignore index")
     """
 
-    # TODO Add comment for expansion
-    if weight is None:
-        default_class_weight = torch.scalar_tensor(
-            1, dtype=input.dtype, device=input.device
-        )
-        current_weight = torch.where(
-            ignore_classes_mask,
-            ignore_class_weight,
-            default_class_weight,
-        )
-    else:
-        current_weight = torch.where(
-            ignore_classes_mask,
-            ignore_class_weight.expand_as(flat_target),
-            weight[flat_target],
-        )
+    class_weight = (
+        torch.scalar_tensor(1, dtype=input.dtype, device=input.device)
+        if weight is None
+        else weight[flat_target]
+    )
+    current_weight = torch.where(
+        ignore_classes_mask,
+        ignore_class_weight,
+        class_weight,
+    )
 
     # TODO Add comments for each case
     if input.ndim == 1:
