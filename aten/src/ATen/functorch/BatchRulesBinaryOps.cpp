@@ -300,14 +300,9 @@ std::tuple<Tensor, optional<int64_t>> log_sigmoid_backward_batch_rule(
     out_logical_rank = std::max(out_logical_rank, rankWithoutBatchDim(buffer, buffer_bdim));
   }
   Tensor out_grad = maybePadToLogicalRank(moveBatchDimToFront(grad, grad_bdim), grad_bdim, out_logical_rank);
-  Tensor out_self =  maybePadToLogicalRank(moveBatchDimToFront(self, self_bdim), self_bdim, out_logical_rank);
-  Tensor out_buffer =  maybePadToLogicalRank(moveBatchDimToFront(buffer, buffer_bdim), buffer_bdim, out_logical_rank);
-
-  optional<int64_t> out_bdim = nullopt;
-  if (grad_bdim || self_bdim || buffer_bdim) {
-    out_bdim = 0;
-  }
-  return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), out_bdim);
+  Tensor out_self = maybePadToLogicalRank(moveBatchDimToFront(self, self_bdim), self_bdim, out_logical_rank);
+  Tensor out_buffer = maybePadToLogicalRank(moveBatchDimToFront(buffer, buffer_bdim), buffer_bdim, out_logical_rank);
+  return std::make_tuple(at::log_sigmoid_backward(out_grad, out_self, out_buffer), 0);
 }
 
 Tensor binomial_wrapper(const Tensor& count, const Tensor& prob, c10::optional<Generator> gen) {
