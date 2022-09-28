@@ -43,6 +43,14 @@ std::string getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string>
     case ncclInvalidUsage:
       interpret = "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
       break;
+    case ncclRemoteError:
+      interpret = "ncclRemoteError: A network error or a remote process exiting prematurely.";
+      break;
+    // NOTE(crcrpar): This should not been accessed until `ncclCommInitRankConfig` is integrated.
+    //   See: https://docs.nvidia.com/deeplearning/nccl/archives/nccl_2143/user-guide/docs/usage/communicators.html#creating-a-communication-with-options
+    case ncclInProgress:
+      interpret = "ncclInProgress: A NCCL operation on the communicator is being enqueued and is being processed in the background.";
+      break;
     default:
       interpret = "Unknown NCCL error!";
   }
