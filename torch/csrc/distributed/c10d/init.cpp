@@ -17,6 +17,7 @@
 #endif
 
 #ifdef USE_C10D_NCCL
+#include <c10d/NCCLUtils.hpp>
 #include <c10d/ProcessGroupNCCL.hpp>
 #endif
 
@@ -514,9 +515,10 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           R"(Sets the debug level of the torch.distributed package from the
           ``TORCH_DISTRIBUTED_DEBUG`` environment variable.)");
 
-  py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
-An enum-like class for available reduction operations: ``SUM``, ``AVG``,
-``PRODUCT``, ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+  // https://pybind11.readthedocs.io/en/stable/classes.html#enumerations-and-internal-types
+  py::class_<::c10d::ReduceOp> reduce_op(module, "ReduceOp", R"(
+An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
+``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
 ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
 using the ``NCCL`` backend.
@@ -525,19 +527,67 @@ using the ``NCCL`` backend.
 ``AVG`` is only available with the ``NCCL`` backend,
 and only for NCCL versions 2.10 or later.
 
+``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
+``PREMUL_SUM`` is only available with the ``NCCL`` backend,
+and only available for NCCL versions 2.11 or later.
+
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
-:func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
-      .value("SUM", ::c10d::ReduceOp::SUM)
-      .value("AVG", ::c10d::ReduceOp::AVG)
-      .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
-      .value("MIN", ::c10d::ReduceOp::MIN)
-      .value("MAX", ::c10d::ReduceOp::MAX)
-      .value("BAND", ::c10d::ReduceOp::BAND)
-      .value("BOR", ::c10d::ReduceOp::BOR)
-      .value("BXOR", ::c10d::ReduceOp::BXOR);
+:func:`reduce`, :func:`all_reduce_multigpu`, etc.)");
+
+  reduce_op.def(py::init<::c10d::ReduceOp::RedOpType>())
+      .def_readwrite("op", &::c10d::ReduceOp::op_);
+  // The following are for some kind of backward compatibility.
+  // Since c10d::ReduceOp had been an `enum class`, users can do comparison and
+  // take hash of `::c10d::ReduceOp`. To avoid losing these functionality, here
+  // I define some member methods.
+  reduce_op
+      .def(
+          "__eq__",
+          [](const ::c10d::ReduceOp& self,
+             const ::c10d::ReduceOp::RedOpType& other) {
+            return self == other;
+          })
+      .def(
+          "__eq__",
+          [](const ::c10d::ReduceOp& self, const ::c10d::ReduceOp& other) {
+            return self == other.op_;
+          })
+      .def("__hash__", [](const ::c10d::ReduceOp& self) { return self.op_; });
+
+  py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
+      .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
+      .value("AVG", ::c10d::ReduceOp::RedOpType::AVG)
+      .value("PRODUCT", ::c10d::ReduceOp::RedOpType::PRODUCT)
+      .value("MIN", ::c10d::ReduceOp::RedOpType::MIN)
+      .value("MAX", ::c10d::ReduceOp::RedOpType::MAX)
+      .value("BAND", ::c10d::ReduceOp::RedOpType::BAND)
+      .value("BOR", ::c10d::ReduceOp::RedOpType::BOR)
+      .value("BXOR", ::c10d::ReduceOp::RedOpType::BXOR)
+      .value("PREMUL_SUM", ::c10d::ReduceOp::RedOpType::PREMUL_SUM)
+      .export_values();
+
+  // Ref: [Implicit
+  // conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
+  // Let us skip the explicit construction of `c10d::ReduceOp` from
+  // `c10d::ReduceOp::RedOpType` in Python.
+  py::implicitly_convertible<::c10d::ReduceOp::RedOpType, ::c10d::ReduceOp>();
+
+  module
+      .def(
+          "_make_nccl_premul_sum",
+          &::c10d::makeNCCLPreMulSum<double>,
+          py::arg("factor").noconvert(),
+          py::return_value_policy::copy, // seems safest
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_make_nccl_premul_sum",
+          &::c10d::makeNCCLPreMulSum<std::vector<at::Tensor>>,
+          py::arg("factor").noconvert(),
+          py::return_value_policy::copy, // seems safest
+          py::call_guard<py::gil_scoped_release>());
 
   py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
       .def(py::init<>())
@@ -977,7 +1027,11 @@ Arguments:
     prefix (str): The prefix string that is prepended to each key before being inserted into the store.
     store (torch.distributed.store): A store object that forms the underlying key-value store.
       )")
-      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>());
+      .def(py::init<const std::string&, c10::intrusive_ptr<::c10d::Store>>())
+      .def_property_readonly(
+          "underlying_store",
+          &::c10d::PrefixStore::getUnderlyingStore,
+          R"(Gets the underlying store object that PrefixStore wraps around.)");
 
   auto processGroup =
       py::class_<
@@ -1353,6 +1407,15 @@ Arguments:
           .def(
               "_get_backend_name",
               &::c10d::ProcessGroup::getBackendName,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_start_coalescing",
+              &::c10d::ProcessGroup::startCoalescing,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_end_coalescing",
+              &::c10d::ProcessGroup::endCoalescing,
+              py::arg("reqs"),
               py::call_guard<py::gil_scoped_release>());
 
   // base ProcessGroup::Options binding
@@ -1581,60 +1644,59 @@ Example::
 #endif
 
   py::class_<
-      ::c10d::ProcessGroup::Work,
-      c10::intrusive_ptr<::c10d::ProcessGroup::Work>,
+      ::c10d::Work,
+      c10::intrusive_ptr<::c10d::Work>,
       ::c10d::PyProcessGroup::PyWork>(module, "Work")
       .def(py::init<>())
-      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("is_completed", &::c10d::Work::isCompleted)
       .def(
           "is_success",
-          [](::c10d::ProcessGroup::Work& work) -> bool {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "ProcessGroup::Work::is_success"));
+          [](::c10d::Work& work) -> bool {
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::is_success"));
             return work.isSuccess();
           })
       .def(
           "exception",
-          [](::c10d::ProcessGroup::Work& work) -> std::exception_ptr {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "ProcessGroup::Work::exception"));
+          [](::c10d::Work& work) -> std::exception_ptr {
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::exception"));
             return work.exception();
           })
       .def(
           "source_rank",
-          [](::c10d::ProcessGroup::Work& work) -> int {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "ProcessGroup::Work::source_rank"));
+          [](::c10d::Work& work) -> int {
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::source_rank"));
             return work.sourceRank();
           })
-      .def("_source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+      .def("_source_rank", &::c10d::Work::sourceRank)
       .def(
           "result",
-          [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
+          [](::c10d::Work& work) -> std::vector<at::Tensor> {
             return work.result();
           })
       .def(
           "synchronize",
-          [](::c10d::ProcessGroup::Work& work) -> void {
-            TORCH_WARN_ONCE(fmt::format(
-                kDeprecationWarning, "ProcessGroup::Work::synchronize"));
+          [](::c10d::Work& work) -> void {
+            TORCH_WARN_ONCE(
+                fmt::format(kDeprecationWarning, "Work::synchronize"));
             work.synchronize();
           })
       .def(
           "wait",
-          &::c10d::ProcessGroup::Work::wait,
+          &::c10d::Work::wait,
           py::arg("timeout") = kNoTimeout,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_future",
-          [](::c10d::ProcessGroup::Work& work)
-              -> std::shared_ptr<jit::PythonFutureWrapper> {
+          [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
           },
           R"(
             Returns:
                 A ``torch.futures.Future`` object which is associated with the completion of
-                the ``ProcessGroup::Work``. As an example, a future object can be retrieved
+                the ``Work``. As an example, a future object can be retrieved
                 by ``fut = process_group.allreduce(tensors).get_future()``.
 
             Example::
@@ -1803,14 +1865,14 @@ Example::
   module.def(
       "_create_work_from_future",
       [](std::shared_ptr<jit::PythonFutureWrapper> future) {
-        return ::c10d::ProcessGroup::Work::create_from_future(future->fut);
+        return ::c10d::Work::create_from_future(future->fut);
       },
       py::arg("future"),
       R"(
         Arguments:
             future(str): The future to wrap.
         Returns:
-            A ``ProcessGroup::Work`` object which is associated with the completion of
+            A ``Work`` object which is associated with the completion of
             the ``torch.futures.Future``.
         This is the prefered way of constructing Work objects when writing a custom ProcessGroup
         in python.

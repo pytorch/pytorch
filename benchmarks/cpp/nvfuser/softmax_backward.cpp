@@ -116,7 +116,7 @@ static void Baseline_Softmax_BWD(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   benchmark_state.SetBytesProcessed(
       int64_t(benchmark_state.iterations()) *
@@ -177,13 +177,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Outer_fp32)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Outer_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Outer_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -201,13 +201,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Outer_fp16)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Outer_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Outer_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -225,13 +225,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Inner_fp32)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Inner_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Inner_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -249,13 +249,13 @@ NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Inner_fp16)
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Inner_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_RUN(NvFuserScheduler_Softmax_BWD_Inner_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -275,13 +275,13 @@ BENCHMARK(Baseline_Softmax_BWD_Outer_fp32)
 
 BENCHMARK(Baseline_Softmax_BWD_Outer_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_Softmax_BWD_Outer_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -299,13 +299,13 @@ BENCHMARK(Baseline_Softmax_BWD_Outer_fp16)
 
 BENCHMARK(Baseline_Softmax_BWD_Outer_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_Softmax_BWD_Outer_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -323,13 +323,13 @@ BENCHMARK(Baseline_Softmax_BWD_Inner_fp32)
 
 BENCHMARK(Baseline_Softmax_BWD_Inner_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_Softmax_BWD_Inner_fp32)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
@@ -347,13 +347,13 @@ BENCHMARK(Baseline_Softmax_BWD_Inner_fp16)
 
 BENCHMARK(Baseline_Softmax_BWD_Inner_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Ranges({{32768, 16 * 1024 * 1024}, {2, 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_Softmax_BWD_Inner_fp16)
     // ->RangeMultiplier(2)
-    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Ranges({{2, 16}, {32768, 16 * 1024 * 1024}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
