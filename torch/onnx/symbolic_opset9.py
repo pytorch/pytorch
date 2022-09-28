@@ -28,7 +28,7 @@ from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -644,7 +644,7 @@ def sqrt(g, self):
 @_beartype.beartype
 def rsqrt(g, self):
     return g.op(
-        "Div", symbolic_helper._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self)
+        "Div", symbolic_helper._if_scalar_type_as(torch.ones(1), self), sqrt(g, self)
     )
 
 
@@ -2884,7 +2884,7 @@ def index_fill(g, self, dim, index, value):
         g, self, dim, index
     )
     value = symbolic_helper._maybe_get_scalar(value)
-    value = symbolic_helper._if_scalar_type_as(g, value, self)
+    value = symbolic_helper._if_scalar_type_as(value, self)
     expanded_value = expand(g, value, expanded_index_shape, None)
 
     return scatter(g, self, dim, expanded_index, expanded_value)
@@ -3026,9 +3026,7 @@ def log(g, self):
 @_onnx_symbolic("aten::log1p")
 @_beartype.beartype
 def log1p(g, self):
-    return log(
-        g, add(g, symbolic_helper._if_scalar_type_as(g, torch.ones(1), self), self)
-    )
+    return log(g, add(g, symbolic_helper._if_scalar_type_as(torch.ones(1), self), self))
 
 
 @_onnx_symbolic("aten::log10")
@@ -3319,6 +3317,7 @@ def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
 
+# TODO(justinchuby): Use the decorator and _export for these operators
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_Byte` that instantiates an
 # ONNX cast node with `to` attribute "UINT8"
@@ -5187,7 +5186,7 @@ def lift(g, self):
 def masked_fill(g, self, mask, value):
     mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
     value = symbolic_helper._maybe_get_scalar(value)
-    return g.op("Where", mask, symbolic_helper._if_scalar_type_as(g, value, self), self)
+    return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
 
 
 @_onnx_symbolic("aten::index")
@@ -6304,7 +6303,9 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
+def prim_device(
+    ctx: SymbolicContext, g: jit_utils.GraphContext, *inputs, **kwargs
+) -> None:
     output_type = ctx.cur_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None
@@ -6318,7 +6319,7 @@ def prim_device(ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
+def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs) -> List[_C.Value]:
     n = ctx.cur_node
     env = ctx.env
     params_dict = ctx.params_dict
@@ -6326,19 +6327,19 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
 
-    new_op_outputs = g.op("Loop", *inputs, outputs=n.outputsSize())
-    new_node = (
-        new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
+    old_blocks = tuple(n.blocks())
+    new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
+        g, "Loop", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
     )
-    for b in n.blocks():
-        new_block = new_node.addBlock()
+
+    for old_block, new_block_context in zip(old_blocks, new_block_contexts):
         # Copy input metadata to subblock
         #
         #   prim::Loop(iter, cond, input_1, ..., input_n)
         #     block0(iter, input_1, ..., input_n)
         #
         # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
-        for i, b_in in enumerate(b.inputs()):
+        for i, b_in in enumerate(old_block.inputs()):
             if i == 0 and i < len(inputs):
                 b_in.setType(inputs[i].type())
             # For optional block inputs, they may switch between None not-None inside
@@ -6351,7 +6352,11 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
             ):
                 b_in.setType(inputs[i + 1].type())
         torch._C._jit_pass_onnx_block(
-            b, new_block, operator_export_type, env, False  # type:ignore[arg-type]
+            old_block,
+            new_block_context.block,
+            operator_export_type,  # type:ignore[arg-type]
+            env,
+            False,
         )
     new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
         new_node, opset_version
@@ -6429,15 +6434,15 @@ def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
             final_b_list.append(onnx_b)
         return final_b_list
     else:
-        new_op_outputs = g.op("If", *inputs, outputs=n.outputsSize())
-        new_node = (
-            new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
+        old_blocks = tuple(n.blocks())
+        new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
+            g, "If", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
         )
-        for b in n.blocks():
-            new_block = new_node.addBlock()
+
+        for old_block, new_block_context in zip(old_blocks, new_block_contexts):
             torch._C._jit_pass_onnx_block(
-                b,
-                new_block,
+                old_block,
+                new_block_context.block,
                 operator_export_type,  # type:ignore[arg-type]
                 env,
                 False,

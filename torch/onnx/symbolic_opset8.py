@@ -183,7 +183,7 @@ def _cast_to_type(g, input, to_type):
 
 def _comparison_operator(g, input, other, op_name):
     other = symbolic_helper._maybe_get_scalar(other)
-    other = symbolic_helper._if_scalar_type_as(g, other, input)
+    other = symbolic_helper._if_scalar_type_as(other, input)
     _, input, other = _try_cast_integer_to_float(g, input, other)
     return g.op(op_name, input, other)
 
