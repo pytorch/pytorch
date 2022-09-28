@@ -188,6 +188,16 @@ void GpuLower::collectPaddedParallelDims() {
   }
 }
 
+void assignRNGOffset(Fusion* fusion) {
+  int counter = 0;
+  for (auto expr : fusion->exprs()) {
+    if (expr->isA<RNGOp>()) {
+      auto rop = expr->as<RNGOp>();
+      rop->setRNGOffset(counter++);
+    }
+  }
+}
+
 void GpuLower::lower(Fusion* fusion, DataType index_type) {
   FUSER_PERF_SCOPE("GpuLower::lower");
   TORCH_INTERNAL_ASSERT(fusion != nullptr);
@@ -213,6 +223,7 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
       tv->resolveIndexDtype();
     }
   }
+  assignRNGOffset(fusion_);
 
   FusionGuard fg(fusion_);
   // prepare for lowering
@@ -257,6 +268,9 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Validate mma data format and compatibility if any on the fusion.
   validateMma(fusion_);
 
+  // Validate swizzle usage on the fusion schedule.
+  validateSwizzle(fusion_);
+
   // Compute thread predicates. Depends on parallel_dimension_map_
   thread_pred_map_.build(fusion_);
 
@@ -272,6 +286,14 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Want to run this after parallel map and halo info map are
   // created. vectorized_accesses_ and vectorized_set_info_ are filled.
   validateAndCollectVectorizeInfo(fusion_);
+
+  // Depends on ComputeAtMap and HaloInfo.
+  validateAndConvertIterDomainGrouping(fusion_);
+
+  // Assumes all grouped reductions are convered to
+  // GroupedReductionOp, which is done by
+  // validateAndConvertIterDomainGrouping
+  validateGroupedReductions(fusion_);
 
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs

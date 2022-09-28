@@ -18,9 +18,10 @@ inline T unpackIntegral(PyObject* obj, const char* type) {
   if (PyFloat_Check(obj)) {
     return c10::checked_convert<T>(THPUtils_unpackDouble(obj), type);
   }
-#endif
-
   return c10::checked_convert<T>(THPUtils_unpackLong(obj), type);
+#else
+  return static_cast<T>(THPUtils_unpackLong(obj));
+#endif
 }
 
 inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {

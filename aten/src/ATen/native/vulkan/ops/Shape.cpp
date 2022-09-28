@@ -1,3 +1,4 @@
+#include <ATen/InferSize.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
@@ -13,13 +14,15 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   vTensor& v_self = convert(self);
 
+  at::DimVector inferred_size = at::infer_size_dv(shape, self.numel());
+
   vTensor v_output{
       context,
-      shape,
+      inferred_size,
       self.options(),
   };
 
-  api::StagingBuffer buffer(context, v_self.buffer_bytes(), true);
+  api::StorageBuffer buffer(context, at::kFloat, v_self.numcells(), true);
 
   utils::pack_vtensor_to_staging(v_self, buffer.buffer());
 
@@ -39,7 +42,7 @@ Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   return convert(v_output);
 }
 
-inline Tensor view(const Tensor& self_arg, const IntArrayRef shape) {
+inline Tensor view(const Tensor& self_arg, IntArrayRef shape) {
   return view_internal(self_arg, shape);
 }
 

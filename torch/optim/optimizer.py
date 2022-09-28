@@ -1,5 +1,4 @@
 from collections import defaultdict, abc as container_abcs
-
 import torch
 from copy import deepcopy
 from itertools import chain
@@ -14,6 +13,18 @@ class _RequiredParameter(object):
         return "<required parameter>"
 
 required = _RequiredParameter()
+
+
+def _use_grad_for_differentiable(func):
+    def _use_grad(self, *args, **kwargs):
+        prev_grad = torch.is_grad_enabled()
+        try:
+            torch.set_grad_enabled(self.defaults['differentiable'])
+            ret = func(self, *args, **kwargs)
+        finally:
+            torch.set_grad_enabled(prev_grad)
+        return ret
+    return _use_grad
 
 
 class Optimizer(object):
@@ -59,6 +70,7 @@ class Optimizer(object):
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
+
     def __getstate__(self):
         return {
             'defaults': self.defaults,
@@ -69,6 +81,7 @@ class Optimizer(object):
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._hook_for_profile()  # To support multiprocessing pickle/unpickle.
+        self.defaults.setdefault('differentiable', False)
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
@@ -101,6 +114,19 @@ class Optimizer(object):
                       "instance, capturable=True can impair performance, and you should set capturable=False.")
                 self._warned_capturable_if_run_uncaptured = True
 
+    def _optimizer_step_code(self):
+        """Entry point for `torch.profile.profiler`.
+
+        When python tracing is enabled the profiler will hook into this
+        function at the CPython level to inspect the optimizer's parameters and
+        param groups. It is called it after `step()` since many optimizers
+        lazily initialize state.
+
+        This is a workaround due to lack of a proper step hook on the optimizer,
+        and will be removed if it exists.
+        """
+        pass
+
     def _hook_for_profile(self):
         self._zero_grad_profile_name = "Optimizer.zero_grad#{}.zero_grad".format(self.__class__.__name__)
 
@@ -111,7 +137,10 @@ class Optimizer(object):
                 obj, *_ = args
                 profile_name = "Optimizer.step#{}.step".format(obj.__class__.__name__)
                 with torch.autograd.profiler.record_function(profile_name):
-                    return func(*args, **kwargs)
+                    out = func(*args, **kwargs)
+                    obj._optimizer_step_code()
+                    return out
+
             return wrapper
 
         hooked = getattr(self.__class__.step, "hooked", None)
@@ -259,7 +288,7 @@ class Optimizer(object):
         r"""Performs a single optimization step (parameter update).
 
         Args:
-            closure (callable): A closure that reevaluates the model and
+            closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
 
         .. note::
@@ -293,7 +322,7 @@ class Optimizer(object):
             if not isinstance(param, torch.Tensor):
                 raise TypeError("optimizer can only optimize Tensors, "
                                 "but one of the params is " + torch.typename(param))
-            if not param.is_leaf:
+            if not self.defaults.get('differentiable', None) and not (param.is_leaf or param.retains_grad):
                 raise ValueError("can't optimize a non-leaf Tensor")
 
         for name, default in self.defaults.items():

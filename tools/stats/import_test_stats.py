@@ -81,13 +81,21 @@ def get_slow_tests(
         return {}
 
 
-def get_test_times(dirpath: str, filename: str) -> Dict[str, float]:
+def get_test_times(dirpath: str, filename: str) -> Dict[str, Dict[str, float]]:
     url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/test-times.json"
+    build_environment = os.environ.get("BUILD_ENVIRONMENT")
+    if build_environment is None:
+        test_times = fetch_and_cache(dirpath, filename, url, lambda x: x)
+        raise RuntimeError(
+            f"BUILD_ENVIRONMENT is not defined, available keys are {test_times.keys()}"
+        )
 
     def process_response(the_response: Dict[str, Any]) -> Any:
-        build_environment = os.environ["BUILD_ENVIRONMENT"]
-        test_config = os.environ["TEST_CONFIG"]
-        return the_response[build_environment][test_config]
+        if build_environment not in the_response:
+            raise RuntimeError(
+                f"{build_environment} not found, available envs are: {the_response.keys()}"
+            )
+        return the_response[build_environment]
 
     try:
         return fetch_and_cache(dirpath, filename, url, process_response)
@@ -100,34 +108,18 @@ def get_disabled_tests(
     dirpath: str, filename: str = DISABLED_TESTS_FILE
 ) -> Optional[Dict[str, Any]]:
     def process_disabled_test(the_response: Dict[str, Any]) -> Dict[str, Any]:
+        # remove re-enabled tests and condense even further by getting rid of pr_num
         disabled_test_from_issues = dict()
-        for item in the_response["items"]:
-            title = item["title"]
-            key = "DISABLED "
-            issue_url = item["html_url"]
-            issue_number = issue_url.split("/")[-1]
-            if title.startswith(key) and issue_number not in IGNORE_DISABLED_ISSUES:
-                test_name = title[len(key) :].strip()
-                body = item["body"]
-                platforms_to_skip = []
-                key = "platforms:"
-                # When the issue has no body, it is assumed that all platforms should skip the test
-                if body is not None:
-                    for line in body.splitlines():
-                        line = line.lower()
-                        if line.startswith(key):
-                            pattern = re.compile(r"^\s+|\s*,\s*|\s+$")
-                            platforms_to_skip.extend(
-                                [x for x in pattern.split(line[len(key) :]) if x]
-                            )
+        for test_name, (pr_num, link, platforms) in the_response.items():
+            if pr_num not in IGNORE_DISABLED_ISSUES:
                 disabled_test_from_issues[test_name] = (
-                    item["html_url"],
-                    platforms_to_skip,
+                    link,
+                    platforms,
                 )
         return disabled_test_from_issues
 
     try:
-        url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/disabled-tests.json"
+        url = "https://raw.githubusercontent.com/pytorch/test-infra/generated-stats/stats/disabled-tests-condensed.json"
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")

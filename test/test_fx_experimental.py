@@ -1,4 +1,4 @@
-# Owner(s): ["oncall: fx"]
+# Owner(s): ["module: fx"]
 
 import math
 import numbers
@@ -1014,6 +1014,19 @@ class {test_classname}(torch.nn.Module):
         else:
             self.fail("Didn't find call_function torch.add")
 
+    def test_normalize_args_perserve_type(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, a: List[torch.Tensor]):
+                return torch.add(a[0], a[1])
+
+        m = MyModule()
+        traced = symbolic_trace(m)
+        traced = NormalizeArgs(traced).transform()
+
+        for node in traced.graph.nodes:
+            if node.op == "placeholder":
+                self.assertEqual(node.type, List[torch.Tensor])
+
     @skipIfNoTorchVision
     def test_annotate_returns_with_schema(self):
         m = resnet18()
@@ -1468,6 +1481,8 @@ class TestNormalizeOperators(JitTestCase):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
         fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot"}
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        if isinstance(op.op, torch._ops.OpOverload):
+            self.skipTest("normalize operator doesn't work on torch.ops")
         for sample_input in sample_inputs_itr:
             unsupported_arg_type = False
             arg_values = [sample_input.input] + list(sample_input.args)

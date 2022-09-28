@@ -55,7 +55,7 @@ is_hand_written_ops_ = frozenset(
 )
 
 
-def is_hand_written(g: NativeFunctionsGroup) -> bool:
+def is_hand_written(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
     name_base = func_name_base_str(g)
     return name_base in is_hand_written_ops_
 
@@ -214,23 +214,39 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
         return
     if op_name == "adaptive_max_pool2d_backward":
         if index == 0:
-            arg_map["grad_output"] = "at::randint(-3, 2, {2,2,2})"
-            arg_map["self"] = "at::randint(-3, 2, {2,2,2})"
-            arg_map["indices"] = "at::randint(0, 1, {2,2,2}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({2, 2, 2}, at::kFloat)"
+            arg_map["self"] = "at::rand({2, 2, 2}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {2, 2, 2}, at::kLong)"
         else:
-            arg_map["grad_output"] = "at::randint(-3, 3, {3,3,3})"
-            arg_map["self"] = "at::randint(-3, 2, {3,3,3})"
-            arg_map["indices"] = "at::randint(0, 1, {3,3,3}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({3, 3, 3}, at::kFloat)"
+            arg_map["self"] = "at::rand({3, 3, 3}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {3, 3, 3}, at::kLong)"
         return
     if op_name == "adaptive_max_pool3d_backward":
         if index == 0:
-            arg_map["grad_output"] = "at::randint(-3, 2, {2,2,2,2})"
-            arg_map["self"] = "at::randint(-3, 2, {2,2,2,2})"
-            arg_map["indices"] = "at::randint(0, 1, {2,2,2,2}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({2, 2, 2, 2}, at::kFloat)"
+            arg_map["self"] = "at::rand({2, 2, 2, 2}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {2, 2, 2, 2}, at::kLong)"
         else:
-            arg_map["grad_output"] = "at::randint(-3, 3, {3,3,3,3})"
-            arg_map["self"] = "at::randint(-3, 2, {3,3,3,3})"
-            arg_map["indices"] = "at::randint(0, 1, {3,3,3,3}, at::kLong)"
+            arg_map["grad_output"] = "at::rand({3, 3, 3, 3}, at::kFloat)"
+            arg_map["self"] = "at::rand({3, 3, 3, 3}, at::kFloat)"
+            arg_map["indices"] = "at::randint(0, 1, {3, 3, 3, 3}, at::kLong)"
+        return
+    if op_name == "bitwise_left_shift":
+        if index == 0:
+            arg_map["self"] = "at::randint(1, 1 << 4, {6, 6, 6}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 26, {6, 6, 6}, at::kInt)"
+        else:
+            arg_map["self"] = "at::randint(1, 1 << 4, {22, 22, 22}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 26, {22, 22, 22}, at::kInt)"
+        return
+    if op_name == "bitwise_right_shift":
+        if index == 0:
+            arg_map["self"] = "at::randint(1 << 21, 1 << 30, {6, 6, 6}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 22, {6, 6, 6}, at::kInt)"
+        else:
+            arg_map["self"] = "at::randint(1 << 21, 1 << 30, {22, 22, 22}, at::kInt)"
+            arg_map["other"] = "at::randint(1, 22, {22, 22, 22}, at::kInt)"
         return
     if op_name == "gather":
         if index == 0:

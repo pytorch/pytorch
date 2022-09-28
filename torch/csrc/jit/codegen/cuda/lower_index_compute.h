@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/index_compute.h>
 
 namespace torch {
 namespace jit {
@@ -35,6 +36,17 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
     const TensorView* producer_tv = nullptr,
     bool is_global = true,
     std::unordered_map<IterDomain*, IterDomain*> c2p_map = {});
+
+//! Indexing interface for calculating predicate index returns IndexFromIdGraph
+//! which the IndexCompute object can be queried from directly for the produced
+//! indexing If is_start_predicate, will produce indexing math for the start
+//! predicates.
+IndexFromIdGraph getPredicateIndexingFromIdGraph(
+    const std::vector<kir::ForLoop*>& loops,
+    TensorView* consumer_tv,
+    kir::ForLoop* unswitch_or_vec_loop,
+    IterDomain* double_buffer_axis,
+    bool is_start_predicate);
 
 //! getTensorIndexFromIdGraph is the function that index_compute will call very
 //! straightforwardly. However, for implementing the new indexing logic that
@@ -115,6 +127,12 @@ class LoopIndexing {
   //!  topological order.
   std::vector<Expr*> getBackwardExprList() const;
 
+  //! Returns the set of out of line expressions in
+  //!  reverse topological order.
+  const std::vector<Expr*>& getBackwardOutOfLineExprList() const {
+    return out_of_line_exprs_;
+  }
+
   //! Returns all exact concrete id's that were produced
   //!  or consumed in the selected indexing expressions
   std::unordered_set<IterDomain*> getAllExactConcreteIdSet() const;
@@ -140,7 +158,31 @@ class LoopIndexing {
   //! The selected sequence of expressions that should represent
   //!  the correct indexing math from the given loop nest.
   std::vector<Expr*> index_exprs_;
+
+  //! The subset of sequence of expressions that can be resolved
+  //!  with only the iterdomains on the right of consumer tv's ca
+  //!  axis.
+  //! Expressions are ordered in reverse topological order.
+  std::vector<Expr*> out_of_line_exprs_;
 };
+
+// When indexing there are sometimes an option to propagate an index down
+// multiple paths. This will return the IterDomains in the history of the
+// reference domain and mark which paths should be taken (if there's a
+// preference) to reach the roots provided in preferred_roots.
+std::unordered_set<IterDomain*> buildLoopIndexingPreferredPath(
+    const TensorView* original_tv,
+    const LoopIndexing& loop_indexing,
+    bool use_replay_map = false,
+    std::unordered_map<IterDomain*, IterDomain*> p2c_map = {});
+
+// Get an rfactor IterDomain that is mapped with an IterDomain. If
+// multiple such IDs exist, select one whose input IDs are mapped with
+// the consumer IDs. This is to ensure the path from the leaf
+// IterDomains to the root matches with the consumer tensor.
+IterDomain* getRfactorIDToTraverse(
+    IterDomain* id,
+    const std::vector<Val*>& consumer_all_ids);
 
 } // namespace cuda
 } // namespace fuser
