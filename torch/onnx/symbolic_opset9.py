@@ -706,6 +706,7 @@ def sign(g: jit_utils.GraphContext, self):
     return g.op("Sign", self)
 
 
+@symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
     assert len(starts) == len(ends)

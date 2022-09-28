@@ -663,7 +663,6 @@ def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=Tr
     return g.op("Gather", self, index, axis_i=dim)
 
 
-@quantized_args(True)
 @_beartype.beartype
 def _slice_helper(
     g: jit_utils.GraphContext,
