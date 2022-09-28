@@ -930,6 +930,19 @@ class TestNestedTensorDeviceType(TestCase):
             nt0_contiguous.transpose(-1, -2).bmm(nt1_contiguous),
             nt0_noncontiguous.transpose(-1, -2).bmm(nt1_noncontiguous))
 
+    @dtypes(torch.float, torch.double)
+    def test_matmul_with_bmm_path(self, device, dtype):
+        # [N, *, n_head, head_dim]
+        nt0 = torch.nested.nested_tensor([torch.randn((2, 2, 4)),
+                                          torch.randn((3, 2, 4)),
+                                          torch.randn((1, 2, 4))],
+                                         device=device, dtype=dtype)
+        nt1 = torch.nested.nested_tensor([torch.randn((2, 2, 4)),
+                                          torch.randn((3, 2, 4)),
+                                          torch.randn((1, 2, 4))],
+                                         device=device, dtype=dtype)
+        self.assertEqual(torch._matmul_with_bmm_nested(nt0, nt1.transpose(-1, -2)), nt0.matmul(nt1.transpose(-1, -2)))
+
     # cannot test torch.float16 because: RuntimeError: "bmm" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
     def test_matmul(self, device, dtype):
