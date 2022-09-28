@@ -439,9 +439,8 @@ def _nll_loss_nd(
 
     _check_reduction_value(reduction)
 
-    flat_target = torch.reshape(target, [-1])
+    flat_target = torch.flatten(target)
     ignore_classes_mask = torch.eq(flat_target, ignore_index)
-    ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
 
     # TODO: This check does not work with FakeTensor inputs
     """
@@ -451,6 +450,7 @@ def _nll_loss_nd(
         raise ValueError("Target class is out-of-bounds and not ignore index")
     """
 
+    ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
     class_weight = (
         torch.scalar_tensor(1, dtype=input.dtype, device=input.device)
         if weight is None
@@ -462,21 +462,26 @@ def _nll_loss_nd(
         class_weight,
     )
 
-    # TODO Add comments for each case
     if input.ndim == 1:
+        # implicit batch size = 1
+        # input (1 batch size, C classes)
         loss = -input[target] * current_weight
     elif input.ndim == 2:
+        # input (N batch size, C classes)
         batch_size = input.shape[0]
         loss = -input[torch.arange(batch_size), target] * current_weight
     else:
+        # 4D case - Image Inputs
+        # input (N batch size, C classes, H height, W width)
         batch_size = input.shape[0]
         height = input.shape[2]
         width = input.shape[3]
         extent = height * width
         numel = batch_size * extent
-        bdx = torch.arange(numel) // extent
-        hdx = (torch.arange(numel) - (bdx * extent)) // width
-        wdx = torch.arange(numel) % width
+        indices = torch.arange(numel)
+        bdx = indices // extent
+        hdx = (indices - (bdx * extent)) // width
+        wdx = indices % width
         loss = -input[bdx, flat_target, hdx, wdx] * current_weight
     loss = torch.reshape(loss, target.shape)
 
@@ -485,7 +490,7 @@ def _nll_loss_nd(
     elif reduction == "sum":
         return torch.sum(loss)
     else:
-        # TODO Add comments "mean" reduction case
+        # calculate weighted mean of the loss function
         return torch.sum(loss) / torch.sum(current_weight)
 
 
@@ -504,14 +509,34 @@ def nll_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
-    # TODO Can input be zero or one dimension? If so, how do we interpret that?
-    # The documentation for suggests that input should have at least two dimensions.
-    # Why are inputs with three or four dimensions special?
+    # The expected behavior when the target and input have zero elements:
+    #   reduction = 'none' --- tensor([])
+    #   reduction = 'sum'  --- tensor(0.)
+    #   reduction = 'mean' --- tensor(nan)
+    # Mean reduction on empty tensors produces NaN. See the discussion in
+    # https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
+    if input.numel() == 0 and target.numel() == 0:
+        if reduction == "none":
+            return torch.zeros_like(target)
+        elif reduction == "sum":
+            return torch.empty_like(target)
+        else:
+            return torch.full_like(target, float("nan"))
+
+    # The _nll_loss_nd helper function handles the most common cases.
+    # ndim == 1 (Single Example)
+    #   => Batch Size: 1, Input: (C), Target: ()
+    # ndim == 2 (k = 1)
+    #   => Batch Size: N, Input: (N, C), Target: (N)
+    # ndim == 4 (Image Inputs)
+    #   => Batch Size: N, Input: (N, C, H, W), Target: (N, H, W)
+    #
+    # For ndim == 3 or ndim > 4, we reshape the input and target to 4-D case.
+    # Input (N batch-size, C classes, k-dimensions)
+    # Target (N batch-size, k-dimensions)
     if input.ndim <= 4 and input.ndim != 3:
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
 
-    # TODO Add comment for this case
-    # input.ndim == 3 or input.ndim > 4
     batch_size = input.shape[0]
     num_classes = input.shape[1]
     out_size = [batch_size] + list(input.shape[2:])
@@ -521,7 +546,6 @@ def nll_loss(
         lambda: f"Expected target shape {out_size} but got {target.shape}",
     )
 
-    # support empty batches, see #15870
     if input.numel() > 0:
         input = torch.reshape(input, [batch_size, num_classes, 1, -1])
     else:
@@ -532,7 +556,7 @@ def nll_loss(
     else:
         target = torch.reshape(target, [batch_size, 0, 0])
 
-    if reduction == "none":
+    if reduction != "none":
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
     else:
         result = _nll_loss_nd(input, target, weight, reduction, ignore_index)
