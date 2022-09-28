@@ -17888,13 +17888,19 @@ class TestNNDeviceType(NNTestCase):
         out_cpu = F.nll_loss(input_cpu, labels_cpu, reduction=reduction)
         # workaround to reduce memory usage vs. self.assertEqual, see #84944
         rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        if reduction == "sum":
+            orig_rtol, orig_atol = rtol, atol
+            rtol, atol = 7 * rtol, 3 * atol
         with torch.no_grad():
             self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
+        if reduction == "sum":
+            rtol, atol = orig_rtol, orig_atol
 
-        out.backward()
-        out_cpu.backward()
-        with torch.no_grad():
-            self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
+        if reduction != "none":
+            out.backward()
+            out_cpu.backward()
+            with torch.no_grad():
+                self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
@@ -18211,18 +18217,21 @@ class TestNNDeviceType(NNTestCase):
         logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
         labels = torch.zeros(logits.size(0), dtype=torch.long, device='cuda')
         loss = F.cross_entropy(logits, labels, reduction=reduction)
-        loss.backward()
+        if reduction != "none":
+            loss.backward()
 
         with torch.no_grad():
             logits_cpu = logits.cpu().detach().requires_grad_()
             labels_cpu = labels.cpu().detach()
         loss_cpu = F.cross_entropy(logits_cpu, labels_cpu, reduction=reduction)
-        loss_cpu.backward()
+        if reduction != "none":
+            loss_cpu.backward()
 
         # workaround to reduce memory usage vs. self.assertEqual, see #84944
         rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
         self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
-        self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
+        if reduction != "none":
+            self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
