@@ -654,7 +654,8 @@ class GELU(Module):
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     When the approximate argument is 'tanh', Gelu is estimated with:
-        :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
+    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
         approximate (str, optional): the gelu approximation algorithm to use:
@@ -683,7 +684,7 @@ class GELU(Module):
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
-        return 'approximate={}'.format(self.approximate)
+        return 'approximate={}'.format(repr(self.approximate))
 
 
 class Hardshrink(Module):
@@ -1094,6 +1095,8 @@ class MultiheadAttention(Module):
             why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
         elif self.num_heads % 2 == 1:
             why_not_fast_path = "num_heads is odd"
+        elif torch.is_autocast_enabled():
+            why_not_fast_path = "autocast is enabled"
 
         if not why_not_fast_path:
             tensor_args = (
@@ -1115,36 +1118,20 @@ class MultiheadAttention(Module):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
-                if not torch.jit.is_scripting():
-                    return torch._native_multi_head_attention(
-                        query,
-                        key,
-                        value,
-                        self.embed_dim,
-                        self.num_heads,
-                        self.in_proj_weight,
-                        self.in_proj_bias,
-                        self.out_proj.weight,
-                        self.out_proj.bias,
-                        key_padding_mask if key_padding_mask is not None else attn_mask,
-                        need_weights,
-                        average_attn_weights,
-                        1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
-                elif attn_mask is None:
-                    # hack until 9/26/2022 for TS jit compatibility window
-                    return torch._native_multi_head_attention(
-                        query,
-                        key,
-                        value,
-                        self.embed_dim,
-                        self.num_heads,
-                        self.in_proj_weight,
-                        self.in_proj_bias,
-                        self.out_proj.weight,
-                        self.out_proj.bias,
-                        key_padding_mask if key_padding_mask is not None else attn_mask,
-                        need_weights,
-                        average_attn_weights)
+                return torch._native_multi_head_attention(
+                    query,
+                    key,
+                    value,
+                    self.embed_dim,
+                    self.num_heads,
+                    self.in_proj_weight,
+                    self.in_proj_bias,
+                    self.out_proj.weight,
+                    self.out_proj.bias,
+                    key_padding_mask if key_padding_mask is not None else attn_mask,
+                    need_weights,
+                    average_attn_weights,
+                    1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +

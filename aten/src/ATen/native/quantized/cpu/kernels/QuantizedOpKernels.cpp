@@ -47,7 +47,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor qcat_nhwc_kernel(
-    const c10::List<Tensor>& qxs,
+    const MaterializedITensorListRef& qxs,
     int64_t dim,
     double scale,
     int64_t zero_point) {
@@ -3790,8 +3790,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (const auto b : c10::irange(batches)) {
-      for (const auto e : c10::irange(elements_per_channel)) {
+    for (const auto b C10_UNUSED : c10::irange(batches)) {
+      for (const auto e C10_UNUSED : c10::irange(elements_per_channel)) {
         uint32_t c = 0;
         while (c + 8 < channels) {
           const int16x8_t vzero_point = vld1q_s16(&zero_points_int16t[c]);
@@ -3821,8 +3821,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
       }
     }
   } else {
-    for (const auto b : c10::irange(batches)) {
-      for (const auto c : c10::irange(channels)) {
+    for (const auto b C10_UNUSED : c10::irange(batches)) {
+      for (const auto c C10_UNUSED : c10::irange(channels)) {
         uint32_t e = 0;
         const int16x8_t vzero_point = vdupq_n_s16(zero_points_int16t[c]);
         const float32x4_t vinv_scale = vdupq_n_f32(inv_scales[c]);

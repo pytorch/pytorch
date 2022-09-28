@@ -899,6 +899,14 @@ class TestOptim(TestCase):
                     lr=1e-3, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            # Ref: https://github.com/pytorch/pytorch/issues/84560
+            # self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(lambda params: optimizer([params]))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=False, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], weight_decay=0.9))
+
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
 
@@ -2061,6 +2069,20 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(ValueError):
             adam_opt = optim.Adam(self.net.parameters())
             scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+
+    def test_cycle_lr_removed_after_out_of_scope(self):
+        import gc
+        import weakref
+        gc.disable()
+
+        def test():
+            adam_opt = optim.Adam(self.net.parameters())
+            scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
+            return weakref.ref(scheduler)
+
+        ref = test()
+        assert ref() is None
+        gc.enable()
 
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):

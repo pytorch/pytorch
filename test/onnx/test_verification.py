@@ -93,6 +93,7 @@ class TestVerification(common_utils.TestCase):
             atol=1e-6,
             check_shape=True,
             check_dtype=False,
+            ignore_none=True,
             acceptable_error_percentage=0.3,
         )
 
@@ -109,5 +110,6 @@ class TestVerification(common_utils.TestCase):
                 atol=1e-6,
                 check_shape=True,
                 check_dtype=False,
+                ignore_none=True,
                 acceptable_error_percentage=None,
             )

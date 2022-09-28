@@ -125,5 +125,9 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.aws-access-key-id }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
+          BUILD_NAME: ${{ inputs.build_name }}
         run: |
+            if [[ ${BUILD_NAME} == *with-pypi-cudnn* ]]; then
+              export UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_cudnn"
+            fi
             bash .circleci/scripts/binary_upload.sh

@@ -1,4 +1,5 @@
 from cimodel.data.simple.util.versions import MultiPartVersion
+from cimodel.data.simple.util.branch_filters import gen_filter_dict_exclude
 import cimodel.lib.miniutils as miniutils
 
 XCODE_VERSION = MultiPartVersion([12, 5, 1])
@@ -52,26 +53,28 @@ class IOSJob:
         if self.extra_props:
             props_dict.update(self.extra_props)
 
+        props_dict["filters"] = gen_filter_dict_exclude()
+
         return [{"pytorch_ios_build": props_dict}]
 
 
 WORKFLOW_DATA = [
     IOSJob(XCODE_VERSION, ArchVariant("x86_64"), is_org_member_context=False, extra_props={
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64"), extra_props={
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={
-        "use_metal": miniutils.quote(str(int(True))),
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom-ops"), extra_props={
-        "op_list": "mobilenetv2.yaml",
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64"), extra_props={
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64", "metal"), extra_props={
+    #     "use_metal": miniutils.quote(str(int(True))),
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64", "custom-ops"), extra_props={
+    #     "op_list": "mobilenetv2.yaml",
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
     IOSJob(XCODE_VERSION, ArchVariant("x86_64", "coreml"), is_org_member_context=False, extra_props={
         "use_coreml": miniutils.quote(str(int(True))),
         "lite_interpreter": miniutils.quote(str(int(True)))}),
-    IOSJob(XCODE_VERSION, ArchVariant("arm64", "coreml"), extra_props={
-        "use_coreml": miniutils.quote(str(int(True))),
-        "lite_interpreter": miniutils.quote(str(int(True)))}),
+    # IOSJob(XCODE_VERSION, ArchVariant("arm64", "coreml"), extra_props={
+    #     "use_coreml": miniutils.quote(str(int(True))),
+    #     "lite_interpreter": miniutils.quote(str(int(True)))}),
 ]
 
 
