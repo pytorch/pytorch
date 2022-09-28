@@ -585,16 +585,16 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     r_split = loop_context.op("SequenceAt", r_splits, block_input_iter)
     i_split = loop_context.op("SequenceAt", i_splits, block_input_iter)
 
-    i_split = opset11.unsqueeze(loop_block, i_split, dim + 1)
+    i_split = opset11.unsqueeze(loop_context, i_split, dim + 1)
     r_concat = [
         loop_context.op("Constant", value_t=torch.LongTensor(input_sizes[: dim + 1])),
         r_split,
         loop_context.op("Constant", value_t=torch.LongTensor(input_sizes[dim + 1 :])),
     ]
     r_concat = loop_context.op("Concat", *r_concat, axis_i=0)
-    i_split = opset9.expand(loop_block, i_split, r_concat, None)
+    i_split = opset9.expand(loop_context, i_split, r_concat, None)
     i_split = symbolic_helper._reshape_helper(
-        loop_block, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes))
+        loop_context, i_split, g.op("Constant", value_t=torch.LongTensor(output_sizes))
     )
     final_splits = loop_context.op("SequenceInsert", final_splits, i_split)
 
