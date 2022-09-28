@@ -401,6 +401,10 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
 #define CUDNN_GRID_SAMPLE_BW_BATCH_RULE(fn)\
     CudnnGridSampleBackwardBatchRuleHelper<decltype(&ATEN_FN(fn)), &ATEN_FN(fn)>::apply
 
+#define UPSAMPLE_BATCH(op) \
+  EXISTING_BDIM2(op, vec); \
+  EXISTING_BDIM(op);
+
 #define UPSAMPLE_BACKWARD(op) VMAP_SUPPORT(op, SINGLE_ARG(\
     UpsampleBackwardBatchRuleHelper<\
       decltype(&ATEN_FN(op)),\
@@ -444,13 +448,13 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   EXISTING_BDIM_ALL_BOXED(reflection_pad2d_backward);
   EXISTING_BDIM_ALL_BOXED(reflection_pad3d_backward);
 
-  EXISTING_BDIM(upsample_bicubic2d);
-  EXISTING_BDIM(upsample_bilinear2d);
-  EXISTING_BDIM(upsample_linear1d);
-  EXISTING_BDIM(upsample_nearest1d);
-  EXISTING_BDIM(upsample_nearest2d);
-  EXISTING_BDIM(upsample_nearest3d);
-  EXISTING_BDIM(upsample_trilinear3d);
+  UPSAMPLE_BATCH(upsample_bicubic2d);
+  UPSAMPLE_BATCH(upsample_bilinear2d);
+  UPSAMPLE_BATCH(upsample_linear1d);
+  UPSAMPLE_BATCH(upsample_nearest1d);
+  UPSAMPLE_BATCH(upsample_nearest2d);
+  UPSAMPLE_BATCH(upsample_nearest3d);
+  UPSAMPLE_BATCH(upsample_trilinear3d);
 
   UPSAMPLE_BACKWARD(upsample_bicubic2d_backward);
   UPSAMPLE_BACKWARD(upsample_bilinear2d_backward);
