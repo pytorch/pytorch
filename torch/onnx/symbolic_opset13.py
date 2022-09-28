@@ -14,7 +14,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.onnx._internal.dispatch import symbolics
 
 
@@ -33,7 +33,7 @@ def _apply_params(*args, **kwargs):
 @_onnx_symbolic("aten::softmax")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
-def softmax(g: torchscript.GraphContext, input, dim, dtype=None):
+def softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
     softmax = g.op("Softmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -47,7 +47,7 @@ def softmax(g: torchscript.GraphContext, input, dim, dtype=None):
 @_onnx_symbolic("aten::log_softmax")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
-def log_softmax(g: torchscript.GraphContext, input, dim, dtype=None):
+def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
     return_op = g.op("LogSoftmax", input, axis_i=dim)
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -60,7 +60,7 @@ def log_softmax(g: torchscript.GraphContext, input, dim, dtype=None):
 @_onnx_symbolic("aten::frobenius_norm")
 @symbolic_helper.parse_args("v", "v", "i")
 @_beartype.beartype
-def frobenius_norm(g: torchscript.GraphContext, self, dim=None, keepdim=False):
+def frobenius_norm(g: jit_utils.GraphContext, self, dim=None, keepdim=False):
     dim_val = symbolic_helper._maybe_get_const(dim, "is")
     if not symbolic_helper._is_value(dim_val) and len(dim_val) == 0:
         return g.op("ReduceL2", self, keepdims_i=0)
@@ -72,7 +72,7 @@ def frobenius_norm(g: torchscript.GraphContext, self, dim=None, keepdim=False):
 @_onnx_symbolic("aten::split")
 @symbolic_helper.parse_args("v", "v", "i", "i")
 @_beartype.beartype
-def split(g: torchscript.GraphContext, self, split_size_or_sizes, dim, _outputs=None):
+def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
         if _outputs is None:
@@ -130,16 +130,14 @@ def split(g: torchscript.GraphContext, self, split_size_or_sizes, dim, _outputs=
 
 @_onnx_symbolic("aten::split_with_sizes")
 @_beartype.beartype
-def split_with_sizes(
-    g: torchscript.GraphContext, self, split_sizes, dim, _outputs=None
-):
+def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs=None):
     return split(g, self, split_sizes, dim, _outputs)
 
 
 @_onnx_symbolic("aten::unsafe_split")
 @_beartype.beartype
 def unsafe_split(
-    g: torchscript.GraphContext, self, split_size_or_sizes, dim, _outputs=None
+    g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=None
 ):
     return split(g, self, split_size_or_sizes, dim, _outputs)
 
@@ -147,7 +145,7 @@ def unsafe_split(
 @_onnx_symbolic("aten::unsafe_split_with_sizes")
 @_beartype.beartype
 def unsafe_split_with_sizes(
-    g: torchscript.GraphContext, self, split_sizes, dim, _outputs=None
+    g: jit_utils.GraphContext, self, split_sizes, dim, _outputs=None
 ):
     return split_with_sizes(g, self, split_sizes, dim, _outputs)
 
@@ -156,7 +154,7 @@ def unsafe_split_with_sizes(
 @symbolic_helper.parse_args("v", "v", "i", "i")
 @_beartype.beartype
 def tensor_split(
-    g: torchscript.GraphContext, self, indices_or_sections, dim, _outputs=None
+    g: jit_utils.GraphContext, self, indices_or_sections, dim, _outputs=None
 ):
     axis = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.long))
     axis = opset11.unsqueeze(g, axis, 0)
@@ -224,7 +222,7 @@ def tensor_split(
 
         final_splits = g.op("SequenceEmpty")
         # Loop inputs
-        loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+        loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
             g, "Loop", loop_len, loop_condition, final_splits, outputs=1, n_blocks=1
         )
 
@@ -294,7 +292,7 @@ def tensor_split(
 @_onnx_symbolic("aten::unbind")
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def unbind(g: torchscript.GraphContext, self, dim=0, _outputs=None):
+def unbind(g: jit_utils.GraphContext, self, dim=0, _outputs=None):
     if _outputs is None:
         return g.op(
             "SplitToSequence",
@@ -317,14 +315,14 @@ def unbind(g: torchscript.GraphContext, self, dim=0, _outputs=None):
 @_onnx_symbolic("aten::nonzero_numpy")
 # Emitted from `torch.nonzero(x, as_tuple=True)`
 @_beartype.beartype
-def nonzero_numpy(g: torchscript.GraphContext, input, _outputs=None):
+def nonzero_numpy(g: jit_utils.GraphContext, input, _outputs=None):
     return unbind(g, opset9.nonzero(g, input), 1, _outputs=_outputs)
 
 
 @_onnx_symbolic("aten::where")
 @symbolic_helper.parse_args("v", "v", "v", "i")
 @_beartype.beartype
-def where(g: torchscript.GraphContext, condition, self=None, other=None, _outputs=None):
+def where(g: jit_utils.GraphContext, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if not symbolic_helper._is_bool(condition):
         condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
@@ -340,7 +338,7 @@ def where(g: torchscript.GraphContext, condition, self=None, other=None, _output
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i")
 @_beartype.beartype
 def fake_quantize_per_channel_affine(
-    g: torchscript.GraphContext,
+    g: jit_utils.GraphContext,
     inputs,
     scale,
     zero_point,
@@ -376,7 +374,7 @@ def fake_quantize_per_channel_affine(
 @symbolic_helper.parse_args("v", "v", "v", "i", "i")
 @_beartype.beartype
 def fake_quantize_per_tensor_affine(
-    g: torchscript.GraphContext,
+    g: jit_utils.GraphContext,
     inputs,
     scale,
     zero_point,
@@ -466,7 +464,7 @@ def _reduce_with_dtype(onnx_op, name):
 @_onnx_symbolic("aten::unsafe_chunk")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
-def unsafe_chunk(g: torchscript.GraphContext, self, chunks, dim, _outputs=None):
+def unsafe_chunk(g: jit_utils.GraphContext, self, chunks, dim, _outputs=None):
     if _outputs is None:
         return g.op(
             "SplitToSequence",
@@ -496,7 +494,7 @@ def unsafe_chunk(g: torchscript.GraphContext, self, chunks, dim, _outputs=None):
 @_onnx_symbolic("aten::repeat_interleave")
 @_beartype.beartype
 def repeat_interleave(
-    g: torchscript.GraphContext, self, repeats, dim=None, output_size=None
+    g: jit_utils.GraphContext, self, repeats, dim=None, output_size=None
 ):
     input = self
     final_dim = dim
@@ -597,7 +595,7 @@ def repeat_interleave(
     final_splits = g.op("SequenceEmpty")
 
     # Loop inputs
-    loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+    loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
         g, "Loop", loop_len, loop_condition, final_splits, n_blocks=1
     )
 
@@ -637,7 +635,7 @@ def repeat_interleave(
 @_onnx_symbolic("aten::diagonal")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
-def diagonal(g: torchscript.GraphContext, self, offset, dim1, dim2):
+def diagonal(g: jit_utils.GraphContext, self, offset, dim1, dim2):
     dim1_size = opset9.size(
         g, self, dim=g.op("Constant", value_t=torch.LongTensor([dim1]))
     )
@@ -734,7 +732,7 @@ def diagonal(g: torchscript.GraphContext, self, offset, dim1, dim2):
         ),
     )
 
-    if_op, (if_context, else_context), _ = torchscript.add_op_with_blocks(
+    if_op, (if_context, else_context), _ = jit_utils.add_op_with_blocks(
         g, "If", overrun_cond, n_blocks=2
     )
 
@@ -757,7 +755,7 @@ def diagonal(g: torchscript.GraphContext, self, offset, dim1, dim2):
 @_onnx_symbolic("quantized::linear")
 @_beartype.beartype
 def quantized_linear(
-    g: torchscript.GraphContext, q_input, q_weight, bias, op_scale, op_zero_point
+    g: jit_utils.GraphContext, q_input, q_weight, bias, op_scale, op_zero_point
 ):
     input, input_scale, _, _ = symbolic_helper.dequantize_helper(g, q_input)
     weight, weight_scale, _, axis = symbolic_helper.dequantize_helper(g, q_weight)
@@ -774,7 +772,7 @@ def quantized_linear(
 @_onnx_symbolic("quantized::conv2d")
 @_beartype.beartype
 def quantized_conv2d(
-    g: torchscript.GraphContext,
+    g: jit_utils.GraphContext,
     q_input,
     q_weight,
     bias,
@@ -800,7 +798,7 @@ def quantized_conv2d(
 @_onnx_symbolic("quantized::conv2d_relu")
 @_beartype.beartype
 def quantized_conv2d_relu(
-    g: torchscript.GraphContext,
+    g: jit_utils.GraphContext,
     q_input,
     q_weight,
     bias,
