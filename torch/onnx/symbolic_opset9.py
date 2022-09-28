@@ -25,7 +25,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -6300,7 +6300,7 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(g: torchscript.GraphContext, *inputs, **kwargs) -> None:
+def prim_device(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
     output_type = g.original_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None
@@ -6314,7 +6314,7 @@ def prim_device(g: torchscript.GraphContext, *inputs, **kwargs) -> None:
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
+def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     node = g.original_node
     env = g.env
     params_dict = g.params_dict
@@ -6323,7 +6323,7 @@ def prim_loop(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     opset_version = GLOBALS.export_onnx_opset_version
 
     old_blocks = tuple(node.blocks())
-    new_op_outputs, new_block_contexts, new_node = torchscript.add_op_with_blocks(
+    new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
         g, "Loop", *inputs, outputs=node.outputsSize(), n_blocks=len(old_blocks)
     )
 
@@ -6366,7 +6366,7 @@ def prim_loop(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
 
 @_onnx_symbolic("prim::If")
 @_beartype.beartype
-def prim_if(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
+def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
     n = g.original_node
     block = g.block
     env = g.env
@@ -6430,7 +6430,7 @@ def prim_if(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
         return final_b_list
     else:
         old_blocks = tuple(n.blocks())
-        new_op_outputs, new_block_contexts, new_node = torchscript.add_op_with_blocks(
+        new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
             g, "If", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
         )
 
@@ -6455,7 +6455,7 @@ def prim_if(g: torchscript.GraphContext, *inputs, **attrs) -> List[_C.Value]:
 
 @_onnx_symbolic("prim::Constant")
 @_beartype.beartype
-def prim_constant(g: torchscript.GraphContext, *inputs, **attrs):
+def prim_constant(g: jit_utils.GraphContext, *inputs, **attrs):
     node = g.original_node
 
     if node.mustBeNone():
@@ -6485,7 +6485,7 @@ def prim_constant(g: torchscript.GraphContext, *inputs, **attrs):
 
 @_onnx_symbolic("onnx::Placeholder")
 @_beartype.beartype
-def onnx_placeholder(g: torchscript.GraphContext, *inputs, **attrs):
+def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
     node = g.original_node
     block = g.block
     env = g.env
