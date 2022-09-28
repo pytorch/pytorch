@@ -2436,7 +2436,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // should never get called
   int64_t compute_numel() const {
     TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
-    TORCH_INTERNAL_ASSERT(!matches_policy(SizesStridesPolicy::CustomSizes));
 #if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
@@ -2452,7 +2451,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   int64_t safe_compute_numel() const {
     TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
-    TORCH_INTERNAL_ASSERT(!matches_policy(SizesStridesPolicy::CustomSizes));
     uint64_t n = 1;
     bool overflows =
         c10::safe_multiplies_u64(sizes_and_strides_.sizes_arrayref(), &n);
