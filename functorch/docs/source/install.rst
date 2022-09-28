@@ -3,7 +3,7 @@ Install functorch
 
 As of PyTorch 1.13, functorch is now included in the PyTorch binary. That is,
 installing PyTorch will let you ``import functorch``. Please see the
-`PyTorch site <pytorch.org>`_ for installation instructions.
+`PyTorch homepage <https://pytorch.org>`_ for installation instructions.
 
 Colab
 -----
@@ -15,7 +15,7 @@ Nightly
 
 Looking for the newest functorch features? Please download the latest nightly PyTorch
 binary (``import functorch`` is included in nightly PyTorch binaries as of 09/21/2022).
-by following instructions `here <pytorch.org>`_.
+by following instructions `here <https://pytorch.org>`_.
 
 Previous Versions
 -----------------
