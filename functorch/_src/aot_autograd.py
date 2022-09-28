@@ -520,7 +520,6 @@ def create_aot_dispatcher_function(
             return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
 
 
-
 # Inspired by autodidax (thanks!)
 class PytreeThunk:
     spec = None
@@ -546,53 +545,6 @@ class PytreeThunk:
         if self.is_simple:
             return x
         return pytree.tree_unflatten(x, self.spec)
-
-
-def filter_tensor_and_static_args(args, static_argnums):
-    """
-    Separate out the tensor and static args. Also, for the static args, store
-    the hash.
-    """
-    tensor_args = []
-    static_args = []
-    static_args_hashed = []
-    for idx, arg in enumerate(args):
-        if idx not in static_argnums:
-            tensor_args.append(arg)
-        else:
-            static_args.append(arg)
-            static_args_hashed.append(arg.__hash__())
-    return tensor_args, static_args, static_args_hashed
-
-
-def rearrange(tensor_args, static_args, static_argnums):
-    """
-    Generate the args as per the original spec. static_argnums is sorted.
-    """
-    tensor_index = 0
-    static_index = 0
-    index = 0
-    args = []
-    assert len(static_args) == len(static_argnums)
-    while tensor_index < len(tensor_args) and static_index < len(static_args):
-        if index == static_argnums[static_index]:
-            args.append(static_args[static_index])
-            static_index += 1
-        else:
-            args.append(tensor_args[tensor_index])
-            tensor_index += 1
-        index += 1
-
-    while tensor_index < len(tensor_args):
-        args.append(tensor_args[tensor_index])
-        tensor_index += 1
-
-    while static_index < len(static_args):
-        args.append(static_args[static_index])
-        static_index += 1
-
-    return args
-
 
 KNOWN_TYPES = [torch.Tensor, int, str, float, bool]
 
@@ -655,18 +607,6 @@ def aot_function(
         >>> aot_fn = aot_function(fn, print_compile_fn)
         >>> x = torch.randn(4, 5, requires_grad=True)
         >>> aot_fn(x)
-
-    The static argnums are used to mark the non-tensor arguments as static. An
-    example is as follows where the dropout probability is as argument to the
-    original function.
-
-        >>> def fn(input, bias, residual, p: float):
-        >>>     a = torch.add(input, bias)
-        >>>     b = torch.nn.functional.dropout(a, p, training=True)
-        >>>     c = b + residual
-        >>>     return c
-        >>> aot_fn = aot_function(fn, print_compile_fn, static_argnums=(3,))
-
     """
     if static_argnums is not None:
         raise RuntimeError("static_argnums has been deprecated - manually wrap your function or use torchdynamo.")
@@ -684,8 +624,6 @@ def aot_function(
     @wraps(fn)
     def returned_function(*args, **kwargs):
         nonlocal cached_res
-        # Separate out static args if static_argnums is present
-
         # Now flatten the tensor args
         flat_args, _ = pytree.tree_flatten((args, kwargs))
 
@@ -831,8 +769,8 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         bw_compiler: Optional[Callable] = None,
         partition_fn: Callable = default_partition,
         decompositions: Optional[Dict] = None,
-        hasher_type: str = "StaticShapeHasher",
-        static_argnums: Optional[Tuple[int]] = None,
+        hasher_type=None,
+        static_argnums=None,
     ) -> Callable:
         assert static_argnums is None
         if bw_compiler is None:
