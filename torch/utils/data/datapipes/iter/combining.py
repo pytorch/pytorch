@@ -29,6 +29,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         datapipes: Iterable DataPipes being concatenated
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> import random
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp1 = IterableWrapper(range(3))
@@ -77,6 +78,7 @@ class ForkerIterDataPipe(IterDataPipe):
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper(range(5))
         >>> dp1, dp2 = source_dp.fork(num_instances=2)
@@ -166,9 +168,6 @@ class _ForkerIterDataPipe(IterDataPipe):
         self.end_ptr = None
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
         state = (
             self.main_datapipe,
             self.num_instances,
@@ -176,6 +175,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):
@@ -208,15 +209,18 @@ class _ChildDataPipe(IterDataPipe):
         the previous iterators  for all ChildDataPipes must be invalidated, with the exception when a ChildDataPipe
         hasn't had an iterator created from it since the last invalidation. See the example below.
 
-    Singler Iterator per IteraDataPipe Invalidation Example:
+    Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
+        >>> # Singler Iterator per IteraDataPipe Invalidation
+        >>> from torchdata.datapipes.iter import IterableWrapper
         >>> source_dp = IterableWrapper(range(10))
         >>> cdp1, cdp2 = source_dp.fork(num_instances=2)
         >>> it1, it2 = iter(cdp1), iter(cdp2)
         >>> it3 = iter(cdp1)
-        The line above invalidates `it1` and `it2`, and resets `ForkerIterDataPipe`.
+        >>> # The line above invalidates `it1` and `it2`, and resets `ForkerIterDataPipe`.
         >>> it4 = iter(cdp2)
-        The line above doesn't invalidate `it3`, because an iterator for `cdp2` hasn't been created since
-        the last invalidation.
+        >>> # The line above doesn't invalidate `it3`, because an iterator for `cdp2` hasn't been created since
+        >>> # the last invalidation.
 
     Args:
         main_datapipe: Main DataPipe with a method 'get_next_element_by_instance(instance_id)'
@@ -287,6 +291,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
             Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
 
     Examples:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> def odd_or_even(n):
         ...     return n % 2
@@ -395,9 +400,6 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
         self.main_datapipe_exhausted = False
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
         state = (
             self.main_datapipe,
             self.num_instances,
@@ -407,6 +409,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):
@@ -440,6 +444,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
         datapipes: Iterable DataPipes that will take turn to yield their elements, until the shortest DataPipe is exhausted
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp1, dp2, dp3 = IterableWrapper(range(3)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
         >>> list(dp1.mux(dp2, dp3))
@@ -479,15 +484,14 @@ class MultiplexerIterDataPipe(IterDataPipe):
         self.buffer = []
 
     def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-
         state = (
             self.datapipes,
             self.length,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(state)
         return state
 
     def __setstate__(self, state):
@@ -513,6 +517,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
         *datapipes: Iterable DataPipes being aggregated
 
     Example:
+        >>> # xdoctest: +REQUIRES(module:torchdata)
         >>> from torchdata.datapipes.iter import IterableWrapper
         >>> dp1, dp2, dp3 = IterableWrapper(range(5)), IterableWrapper(range(10, 15)), IterableWrapper(range(20, 25))
         >>> list(dp1.zip(dp2, dp3))

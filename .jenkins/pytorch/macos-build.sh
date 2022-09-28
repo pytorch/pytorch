@@ -35,11 +35,11 @@ fi
 
 cross_compile_arm64() {
   # Cross compilation for arm64
-  USE_DISTRIBUTED=1 CMAKE_OSX_ARCHITECTURES=arm64 MACOSX_DEPLOYMENT_TARGET=11.0 USE_MKLDNN=OFF USE_QNNPACK=OFF BUILD_TEST=OFF python setup.py bdist_wheel
+  USE_DISTRIBUTED=1 CMAKE_OSX_ARCHITECTURES=arm64 MACOSX_DEPLOYMENT_TARGET=11.0 USE_MKLDNN=OFF USE_QNNPACK=OFF WERROR=1 BUILD_TEST=OFF python setup.py bdist_wheel
 }
 
 compile_x86_64() {
-  USE_DISTRIBUTED=1 python setup.py bdist_wheel
+  USE_DISTRIBUTED=1 WERROR=1 python setup.py bdist_wheel
 }
 
 build_lite_interpreter() {

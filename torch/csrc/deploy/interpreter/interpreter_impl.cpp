@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <cassert>
 #include <cstdio>
@@ -207,7 +208,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterImpl
   ~ConcreteInterpreterImpl() override {
     PyGILState_Ensure();
     // make sure pybind11 doesn't try to decref after we have destroyed python
-    // note: this leads the referneces to these objects, but we are about to
+    // note: this leaks the references to these objects, but we are about to
     // deinit python anyway so it doesn't matter
     objects.release();
     saveStorage.release();
