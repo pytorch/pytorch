@@ -2528,15 +2528,20 @@ class FullyShardedDataParallel(nn.Module):
 
             # All-gather the param (ShardedTensor)
             shards = param.local_shards()
-            local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
-            dim_0_size = param.size()[0]
             param_numel = param.size().numel()
+            dim_0_size = param.size()[0]
             chunk_size = (
                 math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
             )
-            num_padding = chunk_size - local_tensor.numel()
-            if num_padding > 0:
-                local_tensor = F.pad(local_tensor, [0, num_padding])
+            if shards:
+                local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
+                if not local_tensor.is_cuda:
+                    local_tensor = local_tensor.cuda()
+                num_padding = chunk_size - local_tensor.numel()
+                if num_padding > 0:
+                    local_tensor = F.pad(local_tensor, [0, num_padding])
+            else:
+                local_tensor = torch.zeros(chunk_size, dtype=param.dtype).cuda()
             tensor = torch.empty(
                 chunk_size * self.world_size, dtype=local_tensor.dtype
             ).cuda()
@@ -2552,6 +2557,7 @@ class FullyShardedDataParallel(nn.Module):
         loaded_flat_param, num_to_pad = FlatParamHandle._get_shard(
             loaded_flat_param, self.rank, self.world_size,
         )
+        loaded_flat_param.to(flat_param.device)
         assert flat_param.numel() == loaded_flat_param.numel(), (
             f"The loaded local chunk has different numel({flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."
@@ -3067,7 +3073,7 @@ class FullyShardedDataParallel(nn.Module):
             _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
             # Only run the pre-backward hook once per group of handles involved
             # in the same module forward computation
-            if _handles_key and self._ran_pre_backward_hook[_handles_key]:
+            if _handles_key and self._ran_pre_backward_hook.get(_handles_key, False):
                 return
 
             with torch.autograd.profiler.record_function(
