@@ -816,6 +816,18 @@ class TestGradTransform(TestCase):
                 expected = expected.replace("\n", "").replace("  ", "")
                 self.assertEqual(expected, buf)
 
+    def test_print_captured_tensor_inside_transform(self, device):
+        x = torch.tensor([1., 2., 3.], device=device)
+        out = None
+
+        def f(y):
+            nonlocal out
+            out = repr(x)
+            return y
+
+        vjp(f, torch.randn(4, device=device))
+        self.assertEqual(out, repr(x))
+
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)
         with torch.no_grad():
