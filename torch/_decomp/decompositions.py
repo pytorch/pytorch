@@ -362,20 +362,6 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss)
-@pw_cast_for_opmath
-def huber_loss(
-    self: Tensor,
-    target: Tensor,
-    reduction: int = Reduction.MEAN.value,
-    delta: float = 1.0,
-) -> Tensor:
-    assert delta > 0, "huber_loss does not support non-positive values for delta."
-    z = (self - target).abs()
-    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
-    return apply_loss_reduction(loss, reduction)
-
-
 @register_decomposition(aten.huber_loss_backward)
 @pw_cast_for_opmath
 def huber_loss_backward(
