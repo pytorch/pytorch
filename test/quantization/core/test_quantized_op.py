@@ -23,7 +23,7 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase, skipIfSlowGradcheckEnv
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, get_supported_device_types
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import (
@@ -253,7 +253,7 @@ class TestQuantizedOps(TestCase):
                 }
             }
         ]
-        devices = get_supported_device_types()
+        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
         for device in devices:
             # Only test the non-in-place version relu quantized cuda,
             # will remove this when creating in-place version relu quantized cuda.
