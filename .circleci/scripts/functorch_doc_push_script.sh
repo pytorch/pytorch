@@ -20,8 +20,8 @@ pip -q install -r requirements.txt
 make html
 popd
 
-git clone https://github.com/pytorch/functorch -b gh-pages --depth 1
-pushd functorch
+git clone https://github.com/pytorch/functorch -b gh-pages --depth 1 functorch_ghpages
+pushd functorch_ghpages
 
 git rm -rf "$install_path" || true
 mv "$pt_checkout/functorch/docs/build/html" "$install_path"
