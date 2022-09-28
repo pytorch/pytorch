@@ -3553,9 +3553,13 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
-- func: _cusparselt_masked_mm(Tensor A, Tensor B, Tensor C, int m, int n, int k, int iters, int gpu_index, int check_correctness, int end2end) -> Tensor
+# - func: cusparselt_linear(Tensor A, Tensor B) -> Tensor
+#   dispatch:
+#     CUDA: cusparselt_linear
+
+- func: cusparselt_spmma2(Tensor A, int m, int n, int k) -> float
   dispatch:
-    CUDA: _cusparselt_masked_mm
+    CUDA: cusparselt_spmma2
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse

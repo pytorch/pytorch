@@ -72,6 +72,7 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "record_stream",  # no return
     "sparse_dim",  # returns an int
     "_nested_tensor_offsets",  # returns a vector of ints
+    "cusparselt_spmma2", # return a float
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
