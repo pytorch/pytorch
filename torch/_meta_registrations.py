@@ -816,16 +816,6 @@ def meta_repeat(self, repeats):
     return self.new_empty(target_size)
 
 
-@register_meta(aten.rand_like.default)
-def meta_rand_like(self, **kwargs):
-    return aten.empty_like.default(self, **kwargs)
-
-
-@register_meta(aten.full_like.default)
-def meta_full_like(self, fill_value, **kwargs):
-    return aten.empty_like.default(self, **kwargs)
-
-
 @register_meta(aten.zero_.default, register_dispatcher=False)
 def meta_zero_(self):
     return self
