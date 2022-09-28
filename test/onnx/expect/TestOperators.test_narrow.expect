@@ -3,7 +3,7 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
-    output: "onnx::Slice_14"
+    output: "onnx::Slice_13"
     name: "Constant_0"
     op_type: "Constant"
     attribute {
@@ -17,7 +17,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Slice_15"
+    output: "onnx::Slice_14"
     name: "Constant_1"
     op_type: "Constant"
     attribute {
@@ -31,7 +31,7 @@ graph {
     }
   }
   node {
-    output: "onnx::Slice_16"
+    output: "onnx::Slice_15"
     name: "Constant_2"
     op_type: "Constant"
     attribute {
@@ -46,10 +46,10 @@ graph {
   }
   node {
     input: "onnx::Slice_0"
+    input: "onnx::Slice_13"
     input: "onnx::Slice_14"
     input: "onnx::Slice_15"
-    input: "onnx::Slice_16"
-    output: "12"
+    output: "11"
     name: "Slice_3"
     op_type: "Slice"
   }
@@ -71,7 +71,7 @@ graph {
     }
   }
   output {
-    name: "12"
+    name: "11"
     type {
       tensor_type {
         elem_type: 1
@@ -88,5 +88,5 @@ graph {
   }
 }
 opset_import {
-  version: 13
+  version: 14
 }

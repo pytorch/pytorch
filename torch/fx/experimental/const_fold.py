@@ -180,6 +180,10 @@ def split_const_subgraphs(
         if skip_folding_node_fn and skip_folding_node_fn(node):
             continue
 
+        # Skip folding side-effectful functions
+        if node.is_impure():
+            continue
+
         # Must be a constant foldable node at this point.
         const_nodes.add(node)
         if node.op != "get_attr":

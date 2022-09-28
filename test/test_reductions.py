@@ -2541,11 +2541,7 @@ class TestReductions(TestCase):
             torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
         else:
             out = torch.empty(0, device=device, dtype=dtype)
-            try:
-                torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
-            except RuntimeError:
-                return
-            self.fail("Failed to hit RuntimeError!")
+            torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
 
         exact_dtype = input.dtype not in (torch.bfloat16, torch.complex32, torch.complex64, torch.complex128)
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
@@ -3365,7 +3361,7 @@ as the input tensor excluding its innermost dimension'):
             expected = op.ref(to_numpy(t), *sample_input.args,
                               **dict(
                                   # `identity` is mapped to numpy reduction `initial` argument
-                                  identity=torch._masked._reduction_identity(op.name, t),
+                                  identity=torch.masked._reduction_identity(op.name, t),
                                   **sample_input.kwargs))
 
             # Workaround https://github.com/pytorch/pytorch/issues/66556
