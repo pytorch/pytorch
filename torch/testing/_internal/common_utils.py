@@ -1517,18 +1517,31 @@ class CudaMemoryLeakCheck():
         torch.cuda.empty_cache()
 
         for i in range(num_devices):
-            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
-            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
-            driver_mem_allocated = bytes_total - bytes_free
 
-            caching_allocator_discrepancy = False
-            driver_discrepancy = False
+            discrepancy_detected = True
 
-            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
-                caching_allocator_discrepancy = True
+            # Query memory multiple tiems to ensure leak was not transient
+            for n in range(3):
+                caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+                bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+                driver_mem_allocated = bytes_total - bytes_free
 
-            if driver_mem_allocated > self.driver_befores[i]:
-                driver_discrepancy = True
+                caching_allocator_discrepancy = False
+                driver_discrepancy = False
+
+                if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
+                    caching_allocator_discrepancy = True
+
+                if driver_mem_allocated > self.driver_befores[i]:
+                    driver_discrepancy = True
+
+                if not(caching_allocator_discrepancy or driver_discrepancy):
+                    # Leak was false positive, exit loop
+                    discrepancy_detected = False
+                    break
+
+            if not discrepancy_detected:
+                continue
 
             if caching_allocator_discrepancy and not driver_discrepancy:
                 # Just raises a warning if the leak is not validated by the
@@ -1562,12 +1575,7 @@ class CudaMemoryLeakCheck():
                     self.driver_befores[i],
                     driver_mem_allocated)
 
-                # See #62533
-                # ROCM: Sometimes the transient memory is reported as leaked memory
-                if TEST_WITH_ROCM:
-                    warnings.warn(msg)
-                else:
-                    raise RuntimeError(msg)
+                raise RuntimeError(msg)
 
 @contextmanager
 def skip_exception_type(exc_type):
