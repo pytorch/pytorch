@@ -705,6 +705,8 @@ symbolic_aot_autograd_failures = {
     xfail('addbmm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addcdiv', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('addcmul', ''),  # 'int' and 'torch._C.SymIntNode'
+    xfail('addmm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('addmm', 'decomposed'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('addr', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -875,6 +877,7 @@ symbolic_aot_autograd_failures = {
     xfail('min', 'reduction_no_dim'),  # aten.logical_or_.default - couldn't find symbolic meta function/dec...
     xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('minimum', ''),  # aten.masked_fill_.Scalar - couldn't find symbolic meta function/decomposition
+    xfail('mm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('msort', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mul', ''),  # 'int' and 'torch._C.SymIntNode'
