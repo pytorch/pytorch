@@ -27,11 +27,6 @@ from torch.testing._creation import float_to_corresponding_complex_type_map
 
 from torch.utils.dlpack import to_dlpack
 
-# TODO: refactor tri_tests_args, _compare_trilu_indices, run_additional_tri_tests
-from torch.testing._internal.common_methods_invocations import (
-    tri_tests_args, _compare_trilu_indices, run_additional_tri_tests)
-
-
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
     if shape == ():
@@ -231,106 +226,6 @@ class TestTensorCreation(TestCase):
         t[3] = 4.
         expected = torch.tensor([6., 1 + 0.5j, 2 + 1j, 3.5, 4., 5j], device=device)
         self.assertEqual(expected, t.roll(1, 0))
-
-    @slowTest
-    def test_triu_tril(self, device):
-        def gen_mask(shape, diagonal, device, upper):
-            mask = torch.zeros(*shape[-2:]).byte()
-            for i in range(shape[-2]):
-                for j in range(shape[-1]):
-                    cond = j - i < diagonal if upper else j - i > diagonal
-                    if cond:
-                        mask[i, j] = 1
-            return mask.expand(*shape).to(device)
-
-        torch_functions = {True: torch.triu, False: torch.tril}
-        numpy_functions = {True: np.triu, False: np.tril}
-
-        # TODO: remove this when bool and half are supported for torch.where
-        def bool_half_compat_where(pred, true_tensor, false_tensor, dtype):
-            if dtype == torch.bool or dtype == torch.half:
-                return torch.where(pred.byte(), true_tensor.byte(), false_tensor.byte()).to(dtype=dtype)
-            else:
-                return torch.where(pred, true_tensor, false_tensor)
-
-        def run_test(shape, device, diagonal, dtype):
-            x = torch.empty(*shape, device=device, dtype=dtype).fill_(2)
-
-            for upper in [True, False]:
-                # normal test with mask
-                torch_tri_func = torch_functions[upper]
-                res1 = torch_tri_func(x, diagonal=diagonal)
-                res2 = torch.empty(0, device=device, dtype=dtype)
-                torch_tri_func(x, diagonal=diagonal, out=res2)
-                exp_mask = gen_mask(shape, diagonal, device, upper)
-                expected = bool_half_compat_where(exp_mask, torch.tensor(0).type_as(x), x, dtype)
-                self.assertEqual(res1, res2, atol=0, rtol=0)
-                self.assertEqual(expected, res1, atol=0, rtol=0)
-
-                # non-contiguous and expanded tensors test
-                if 0 not in shape:
-                    for s in range(-len(shape), -1):
-                        # non-contiguous tensors
-                        x_nc = x.clone().transpose(s, s + 1)
-                        exp_mask = gen_mask(x_nc.size(), diagonal, device, upper)
-                        if 1 not in shape:
-                            assert not x_nc.is_contiguous(), "x is intentionally non-contiguous"
-                        exp_nc = bool_half_compat_where(exp_mask, torch.tensor(0).type_as(x), x_nc, dtype)
-                        self.assertEqual(torch_tri_func(x_nc, diagonal), exp_nc, atol=0, rtol=0)
-                        x_nc_is_contiguous = x_nc.is_contiguous()
-                        if upper:
-                            self.assertEqual(x_nc.triu_(diagonal), exp_nc, atol=0, rtol=0)
-                        else:
-                            self.assertEqual(x_nc.tril_(diagonal), exp_nc, atol=0, rtol=0)
-
-                        self.assertTrue(x_nc.is_contiguous() == x_nc_is_contiguous,
-                                        "contiguity of x_nc should not be changed")
-
-                    # expanded tensors
-                    expanded_size = (x.size(0),) + x.size()
-                    x_expanded = x.clone().expand(*expanded_size)
-                    if x.size(0) != 1:
-                        assert 0 in x_expanded.stride(), "x intentionally has 0 in its stride"
-                    output = torch_tri_func(x_expanded, diagonal)
-                    self.assertEqual(output, expected.expand(expanded_size), atol=0, rtol=0)
-                    if x.size(0) != 1:
-                        self.assertTrue(0 in x_expanded.stride(),
-                                        "geometry of x_expanded should be the same")
-                    if upper:
-                        self.assertEqual(output, x_expanded.triu_(diagonal), atol=0, rtol=0)
-                    else:
-                        self.assertEqual(output, x_expanded.tril_(diagonal), atol=0, rtol=0)
-
-                # numpy test
-                numpy_tri_func = numpy_functions[upper]
-                self.assertEqual(numpy_tri_func(x.to('cpu').numpy(), diagonal), res1.cpu().numpy())
-
-        diagonals = [-2, -1, 0, 1, 2]
-        shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
-                  (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
-                  (3, 7), (5, 3, 7), (7, 5, 3, 7),  # thin matrices
-                  (3, 0), (0, 3, 3), (3, 3, 0, 0),  # no numel matrices
-                  (3, 1), (5, 3, 1), (7, 5, 3, 1),  # very fat matrices
-                  (1, 3), (5, 1, 3), (7, 5, 1, 3),  # very thin matrices
-                  (1, 3, 3, 3), (3, 1, 3, 3, 3)]    # unsqueezed batch dimensions
-        dtypes = all_types_and_complex_and(torch.half, torch.bool)
-        for s, d, dtype in product(shapes, diagonals, dtypes):
-            run_test(s, device, d, dtype)
-
-    @onlyCPU
-    def test_triu_tril_bfloat16(self, device):
-        op_funcs = [torch.tril, torch.triu]
-        for op_fun in op_funcs:
-            input = torch.randn(3, 3, dtype=torch.float32, device=device).bfloat16().requires_grad_(True)
-            input2 = input.detach().clone().float().requires_grad_(True)
-            out = op_fun(input)
-            out.sum().backward()
-            out2 = op_fun(input2)
-            out2.sum().backward()
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(input.grad.dtype, torch.bfloat16)
-            self.assertEqual(out, out2.bfloat16())
-            self.assertEqual(input.grad, input2.grad.bfloat16(), atol=0.01, rtol=0)
 
     def test_diagflat(self, device):
         dtype = torch.float32
@@ -596,10 +491,6 @@ class TestTensorCreation(TestCase):
         res1 = torch.cat([empty, empty], dim=1)
         self.assertEqual(res1, empty)
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    'non-empty list of Tensors'):
-            torch.cat([], dim=1)
-
     def test_cat_empty(self, device):
         dtype = torch.float32
 
@@ -613,38 +504,9 @@ class TestTensorCreation(TestCase):
         res1 = torch.cat([empty, empty], dim=1)
         self.assertEqual(res1, empty)
 
-        # check non-legacy-behavior (sizes don't match)
-        empty = torch.randn((4, 0, 31, 32), dtype=dtype, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, empty], dim=1))
-        self.assertRaises(RuntimeError, lambda: torch.cat([empty, x], dim=1))
-
-        # check non-legacy-behavior (dimensions don't match)
-        empty = torch.randn((4, 0), dtype=dtype, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, empty], dim=1))
-        self.assertRaises(RuntimeError, lambda: torch.cat([empty, x], dim=1))
-
     def test_cat_out(self, device):
         x = torch.zeros((0), device=device)
         y = torch.randn((4, 6), device=device)
-
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"unsupported operation: some elements of the input tensor and "
-                r"the written-to tensor refer to a single memory location."):
-            torch.cat([x, y], dim=0, out=x)
-
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"unsupported operation: some elements of the input tensor and "
-                r"the written-to tensor refer to a single memory location."):
-            torch.cat([x, y], dim=0, out=y)
-
-        z = torch.zeros((4, 6), device=device)
-        with self.assertRaisesRegex(
-                RuntimeError,
-                r"unsupported operation: some elements of the input tensor and "
-                r"the written-to tensor refer to a single memory location."):
-            torch.cat([y, z], out=z[:2, :])
 
         w = y.view(-1).clone()
         a = torch.cat([w[:2], w[4:6]])
@@ -767,30 +629,9 @@ class TestTensorCreation(TestCase):
         self.assertTrue(res3_cuda.is_contiguous(memory_format=torch.channels_last))
 
     @onlyCUDA
-    @deviceCountAtLeast(2)
-    def test_cat_different_devices(self, devices):
-        cuda0 = torch.randn((3, 3), device=devices[0])
-        cuda1 = torch.randn((3, 3), device=devices[1])
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cuda0, cuda1))
-
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cuda0, cuda0), out=cuda1)
-
-    @onlyCUDA
     def test_cat_stack_cross_devices(self, device):
         cuda = torch.randn((3, 3), device=device)
         cpu = torch.randn((3, 3), device='cpu')
-
-        # cat
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cuda, cpu))
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Expected all tensors to be on the same device"):
-            torch.cat((cpu, cuda))
 
         # Stack
         with self.assertRaisesRegex(RuntimeError,
@@ -1165,18 +1006,6 @@ class TestTensorCreation(TestCase):
         self.assertEqual(result.size(0), SIZE1 + SIZE2)
 
     @onlyCPU
-    def test_cat_bad_input_sizes(self, device):
-        x = torch.randn(2, 1, device=device)
-        y = torch.randn(2, 1, 1, device=device)
-        z = torch.randn(2, 1, 1, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z]))
-
-        x = torch.randn(2, 1, 2, device=device)
-        y = torch.randn(2, 1, 1, device=device)
-        z = torch.randn(2, 2, 1, device=device)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
-
-    @onlyCPU
     @dtypes(torch.half, torch.double, torch.int)
     def test_cat2(self, device, dtype):
         SIZE = 10
@@ -1199,20 +1028,6 @@ class TestTensorCreation(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-        self.assertRaises(RuntimeError, lambda: torch.cat([]))
-        self.assertRaisesRegex(TypeError, 'got None', lambda: torch.cat([x, None]))
-
-    @onlyCPU
-    def test_cat_scalars(self, device):
-        x = torch.tensor(0, device=device)
-        y = torch.tensor(1, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'zero-dimensional.*cannot be concatenated'):
-            torch.cat([x, y])
-
-    def test_zeros_dtype_out_match(self, device):
-        d = torch.tensor((2, 3), device=device, dtype=torch.double)
-        self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), device=device, dtype=torch.float32, out=d))
-
     # FIXME: Create an OpInfo-based tensor creation method test that verifies this for all tensor
     #   creation methods and verify all dtypes and layouts
     @dtypes(torch.bool, torch.uint8, torch.int16, torch.int64, torch.float16, torch.float32, torch.complex64)
@@ -1222,38 +1037,6 @@ class TestTensorCreation(TestCase):
         self.assertIs(dtype, t.dtype)
         self.assertIs(layout, t.layout)
         self.assertEqual(torch.device(device), t.device)
-
-    # TODO: update to work on CUDA, too
-    @onlyCPU
-    def test_trilu_indices(self, device):
-        for test_args in tri_tests_args:
-            _compare_trilu_indices(self, *test_args)
-        run_additional_tri_tests(self, 'cpu')
-
-        # test default options
-        x = torch.ones(
-            3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
-        self.assertEqual(
-            x.tril(0).nonzero().transpose(0, 1), torch.tril_indices(3, 3))
-        self.assertEqual(
-            x.triu(0).nonzero().transpose(0, 1), torch.triu_indices(3, 3))
-
-        # test stride 0 cases
-        x = torch.ones(
-            3, 1, 3, 3, dtype=torch.long, device='cpu', layout=torch.strided)
-        output = x.triu(2).expand(3, 3, 3, 3)
-        b = x.clone().expand(3, 3, 3, 3)
-        self.assertEqual(b.triu(2), output)
-        self.assertRaises(RuntimeError, lambda: b.triu_(2))
-
-    @onlyCPU
-    def test_triu_tril_indices_bfloat16(self, device):
-        op_funcs = [torch.tril_indices, torch.triu_indices]
-        for op_fun in op_funcs:
-            out = op_fun(4, 3, 1, dtype=torch.bfloat16)
-            out2 = op_fun(4, 3, 1, dtype=torch.float)
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(out, out2.bfloat16())
 
     # TODO: update to work on CUDA, too
     @onlyCPU
@@ -2675,6 +2458,17 @@ class TestTensorCreation(TestCase):
         for shape in [(2, 3, 4), (0, 2, 0)]:
             for strides in [(12, 4, 1), (2, 4, 6), (0, 0, 0)]:
                 _test(shape, strides, torch.float)
+
+        # Make sure sizes and strides have the same length
+        # https://github.com/pytorch/pytorch/issues/82416
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"dimensionality of sizes \(1\) must match dimensionality of strides \(0\)"):
+            dtype = torch.float64
+            x = torch.tensor(-4.8270, dtype=dtype, device=device)
+            size = (2,)
+            stride = ()
+            x.new_empty_strided(size, stride, dtype=dtype, device=device)
 
     def test_strided_mismatched_stride_shape(self, device):
         for shape, strides in [((1, ), ()), ((1, 2), (1, ))]:

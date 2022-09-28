@@ -460,6 +460,7 @@ def register_parametrization(
         ValueError: if the module does not have a parameter or a buffer named :attr:`tensor_name`
 
     Examples:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LAPACK)
         >>> import torch
         >>> import torch.nn as nn
         >>> import torch.nn.utils.parametrize as P

@@ -30,6 +30,7 @@ F2 = TypeVar(
     NativeFunctionsGroup,
     Optional[NativeFunction],
     bool,
+    str,
 )
 
 
@@ -50,7 +51,8 @@ def native_function_manager(
         f = g
     with context(lambda: f"in native_functions.yaml line {f.loc}:\n  {f.func}"):
         with local.parametrize(
-            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors
+            use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
+            use_ilistref_for_tensor_lists=f.part_of_structured_group,
         ):
             yield
 

@@ -34,6 +34,7 @@ def default_convert(data):
             >>> default_convert(0)
             0
             >>> # Example with NumPy array
+            >>> # xdoctest: +SKIP
             >>> default_convert(np.array([0, 1]))
             tensor([0, 1])
             >>> # Example with NamedTuple
@@ -118,6 +119,7 @@ def default_collate(batch):
             >>> default_collate([{'A': 0, 'B': 1}, {'A': 100, 'B': 100}])
             {'A': tensor([  0, 100]), 'B': tensor([  1, 100])}
             >>> # Example with `NamedTuple` inside the batch:
+            >>> # xdoctest: +SKIP
             >>> Point = namedtuple('Point', ['x', 'y'])
             >>> default_collate([Point(0, 0), Point(1, 1)])
             Point(x=tensor([0, 1]), y=tensor([0, 1]))

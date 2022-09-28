@@ -6,6 +6,8 @@ from .utils import transitive_get as walk
 from .variable import isvar
 from .dispatch import dispatch
 
+__all__ = ["reify", "unify"]
+
 ################
 # Reificiation #
 ################
@@ -37,6 +39,7 @@ def _reify(o, s):
 
 def reify(e, s):
     """ Replace variables of expression with substitution
+    >>> # xdoctest: +SKIP
     >>> x, y = var(), var()
     >>> e = (1, x, (3, y))
     >>> s = {x: 2, y: 4}
