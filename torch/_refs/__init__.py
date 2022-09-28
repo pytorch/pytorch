@@ -2749,8 +2749,10 @@ def native_layer_norm(
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
 # test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
 @register_decomposition(torch.ops.aten.permute, disable_meta=True)
-def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
-    _permutation = utils.canonicalize_dims(a.ndim, dims)
+def permute(a: TensorLikeType, *dims) -> TensorLikeType:
+    _permutation = utils.canonicalize_dims(
+        a.ndim, utils.extract_dims_from_varargs(dims)
+    )
     return prims.transpose(a, _permutation)
 
 
@@ -2775,11 +2777,10 @@ def _get_unfold_shape_stride(
 
     shape = list(a_shape)
     strides = list(a_stride)
-    if dim < a_ndim:
-        shape[dim] = (shape[dim] - size) // step + 1
-        strides[dim] = step * strides[dim]
     shape.append(size)
     strides.append(last_stride)
+    shape[dim] = (shape[dim] - size) // step + 1
+    strides[dim] *= step
     return shape, strides
 
 

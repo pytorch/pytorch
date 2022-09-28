@@ -3313,12 +3313,10 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
-  if (d < ndim) {
-    sizes[d] = (sizes[d] - size) / step + 1;
-    strides[d] = step * strides[d];
-  }
   sizes.push_back(size);
   strides.push_back(self.dim() == 0 ? 1 : strides[d]);
+  sizes[d] = (sizes[d] - size) / step + 1;
+  strides[d] *= step;
   return self.as_strided(sizes, strides);
 }
 
