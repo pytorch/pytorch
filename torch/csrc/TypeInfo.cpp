@@ -108,7 +108,7 @@ PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
 
 static PyObject* THPDTypeInfo_bits(THPDTypeInfo* self, void*) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers)
-  int bits = elementSize(self->type) * 8;
+  int64_t bits = elementSize(self->type) * 8;
   return THPUtils_packInt64(bits);
 }
 
@@ -220,13 +220,10 @@ PyObject* THPFInfo_str(THPFInfo* self) {
 }
 
 PyObject* THPIInfo_str(THPIInfo* self) {
-  auto type = self->type;
-  std::string primary_name, legacy_name;
-  std::tie(primary_name, legacy_name) = torch::utils::getDtypeNames(type);
   std::ostringstream oss;
 
-  oss << "iinfo(min=" << PyFloat_AsDouble(THPIInfo_min(self, nullptr));
-  oss << ", max=" << PyFloat_AsDouble(THPIInfo_max(self, nullptr));
+  oss << "iinfo(min=" << PyLong_AsDouble(THPIInfo_min(self, nullptr));
+  oss << ", max=" << PyLong_AsDouble(THPIInfo_max(self, nullptr));
   oss << ", dtype=" << PyUnicode_AsUTF8(THPIInfo_dtype(self, nullptr)) << ")";
 
   return THPUtils_packString(oss.str().c_str());

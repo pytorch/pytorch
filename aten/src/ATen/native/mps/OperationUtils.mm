@@ -231,7 +231,12 @@ void printTensorNDArray(const Tensor& t) {
   MPSGraphTensorData* tdata = [[[MPSGraphTensorData alloc] initWithMTLBuffer:selfBuf
                                                             shape:selfShape
                                                          dataType:selfDType] autorelease];
+  C10_CLANG_DIAGNOSTIC_PUSH()
+  #if C10_CLANG_HAS_WARNING("-Wobjc-method-access")
+  C10_CLANG_DIAGNOSTIC_IGNORE("-Wobjc-method-access")
+  #endif
   [tdata printNDArray];
+  C10_CLANG_DIAGNOSTIC_POP()
 }
 
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape) : _tensor(src)
@@ -245,9 +250,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src, emptyShell);
     if (!_tensor.has_storage()) {
-      // if we cannot gather, we make the the tensor contiguous implicitly, and keep
+      // if we cannot gather, we make the tensor contiguous implicitly, and keep
       // it in placeholder to be able to retrieve it when we return from constructor
-      _tensor = src.contiguous();
+      _tensor = src.clone(MemoryFormat::Contiguous);
     }
     srcBuf = getMTLBufferStorage(_tensor);
   }

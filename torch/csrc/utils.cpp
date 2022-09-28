@@ -4,6 +4,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/invalid_arguments.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/python_tuples.h>
 
 #include <torch/csrc/Export.h>
 
@@ -294,3 +295,58 @@ error:
 
 } // namespace gdb
 } // namespace torch
+
+namespace pybind11 {
+namespace detail {
+
+bool type_caster<at::Tensor>::load(handle src, bool) {
+  PyObject* obj = src.ptr();
+  if (THPVariable_Check(obj)) {
+    value = THPVariable_Unpack(obj);
+    return true;
+  }
+  return false;
+}
+
+handle type_caster<at::Tensor>::cast(
+    const at::Tensor& src,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  return handle(THPVariable_Wrap(src));
+}
+
+bool type_caster<at::IntArrayRef>::load(handle src, bool) {
+  PyObject* source = src.ptr();
+  auto tuple = PyTuple_Check(source);
+  if (tuple || PyList_Check(source)) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+    const auto size =
+        tuple ? PyTuple_GET_SIZE(source) : PyList_GET_SIZE(source);
+    v_value.resize(size);
+    for (const auto idx : c10::irange(size)) {
+      PyObject* obj =
+          tuple ? PyTuple_GET_ITEM(source, idx) : PyList_GET_ITEM(source, idx);
+      if (THPVariable_Check(obj)) {
+        v_value[idx] = THPVariable_Unpack(obj).item<int64_t>();
+      } else if (PyLong_Check(obj)) {
+        // use THPUtils_unpackLong after it is safe to include
+        // python_numbers.h
+        v_value[idx] = THPUtils_unpackLong(obj);
+      } else {
+        return false;
+      }
+    }
+    value = v_value;
+    return true;
+  }
+  return false;
+}
+handle type_caster<at::IntArrayRef>::cast(
+    at::IntArrayRef src,
+    return_value_policy /* policy */,
+    handle /* parent */) {
+  return handle(THPUtils_packInt64Array(src.size(), src.data()));
+}
+
+} // namespace detail
+} // namespace pybind11

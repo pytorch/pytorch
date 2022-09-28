@@ -65,7 +65,7 @@ class ASGD(Optimizer):
         """Performs a single optimization step.
 
         Args:
-            closure (callable, optional): A closure that reevaluates the model
+            closure (Callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
         loss = None
@@ -187,6 +187,11 @@ def _single_tensor_asgd(params: List[Tensor],
         eta = etas[i]
         step_t = state_steps[i]
 
+        if torch.is_complex(param):
+            grad = torch.view_as_real(grad)
+            param = torch.view_as_real(param)
+            ax = torch.view_as_real(ax)
+
         # update step
         step_t += 1
         step = step_t.item()
@@ -232,11 +237,18 @@ def _multi_tensor_asgd(params: List[Tensor],
     if maximize:
         grads = torch._foreach_neg(grads)
 
+    def _view_complex_as_real(tensor_list):
+        return [torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list]
+
+    grads = _view_complex_as_real(grads)
+    params = _view_complex_as_real(params)
+    axs = _view_complex_as_real(axs)
+
     # update step
     torch._foreach_add_(state_steps, 1)
 
     if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        grads = torch._foreach_add(grads, params, alpha=weight_decay)
 
     # decay term
     eta = etas[0].item()
