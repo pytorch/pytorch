@@ -10121,7 +10121,10 @@ op_db: List[OpInfo] = [
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cpu'),
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                   toleranceOverride({
+                       torch.float32: tol(atol=1e-5, rtol=1e-5),
+                       torch.complex64: tol(atol=1e-5, rtol=1e-5),
+                   }),
                    "TestDecomp", "test_comprehensive", device_type="cuda",
                ),
            ],
