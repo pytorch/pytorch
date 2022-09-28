@@ -1557,7 +1557,7 @@ def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Number
 xlogy = _make_elementwise_binary_reference(
     _xlogy,
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    aten_op=None,  # Defined in torch/_decomp/decompositions.py
+    aten_op=torch.ops.aten.xlogy,  # Defined in torch/_decomp/decompositions.py
 )
 
 
