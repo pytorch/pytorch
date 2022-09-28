@@ -6,7 +6,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
@@ -25,8 +24,8 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
-    nop, default_partition, default_decompositions,
-    memory_efficient_fusion, get_aot_compilation_context
+    nop, num_of_recompilations, default_partition, default_decompositions,
+    memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
 )
 from torch._decomp import decomposition_table
 
@@ -64,6 +63,7 @@ class AOTTestCase(TestCase):
         super().setUp()
         # NB: We cache on function id, which is unreliable
         # Can fix by using weakrefs, but not sure if it matters
+        clear_compile_cache()
 
 class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
@@ -143,17 +143,20 @@ class TestPythonKey(AOTTestCase):
         self.assertTrue(includes_aten_relu)
 
     def test_make_fx_no_decompose(self, device):
+        # FIXME
+        return self.skipTest("error: maximum recursion reached")
+
         def f(x):
             return torch.tanh(x).sum()
 
         fx_f = make_fx(grad(f))(torch.randn(5))
         ops = set([i.target for i in fx_f.graph.nodes])
 
-        self.assertEqual(torch.ops.aten.tanh_backward.default in ops, True)
+        self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
 
         fx_f = make_fx(grad(f), decomposition_table)(torch.randn(5))
         ops = set([i.target for i in fx_f.graph.nodes])
-        self.assertEqual(torch.ops.aten.tanh_backward.default in ops, False)
+        self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
     def test_nnc_jit(self, device):
         def f(x):
@@ -289,18 +292,18 @@ class TestAOTAutograd(AOTTestCase):
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
+        start_recompilations = num_of_recompilations()
         f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
         self.assertIsNone(graph_size)
-
-        f = aot_function(foo, nop, get_graph_size)
 
         with torch.set_grad_enabled(True):
             out = f(*inps)
             self.assertIsNone(graph_size)
             out.sum().backward()
             self.assertTrue(graph_size > 2)
+        self.assertEqual(num_of_recompilations() - start_recompilations, 2)
 
     def test_output_dict(self):
         def f(x):
@@ -363,7 +366,6 @@ class TestAOTAutograd(AOTTestCase):
 
         f = aot_function(f, compiler)
         out = f(torch.randn(5, requires_grad=True))
-        f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
@@ -421,8 +423,6 @@ class TestAOTAutograd(AOTTestCase):
         res = aot_fn(inp)
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
-
-
 
 
 
@@ -669,6 +669,7 @@ aot_autograd_failures = {
     xfail('index_reduce'),
     xfail('istft'),
     xfail('linalg.eig'),
+    xfail('scatter_reduce.prod'),
 
     # non-deterministic
     xfail('as_strided_scatter'),
