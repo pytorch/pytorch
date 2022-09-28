@@ -534,13 +534,13 @@ def nll_loss(
     # Input (N batch-size, C classes, k-dimensions)
     # Target (N batch-size, k-dimensions)
     utils.check(
-        target.shape[1:] == input.shape[2:],
+        input.ndim > 0 and target.ndim > 0 and target.shape[1:] == input.shape[2:],
         lambda: f"Expected target shape {out_size} but got {target.shape}",
     )
 
     batch_size = input.shape[0]
     num_classes = input.shape[1]
-    out_size = [batch_size] + list(input.shape[2:])
+    out_size = [batch_size] + list(target.shape[1:])
 
     input = torch.reshape(input, [batch_size, num_classes, -1])
     target = torch.reshape(target, [batch_size, -1])
@@ -548,6 +548,7 @@ def nll_loss(
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
     else:
         result = _nll_loss_nd(input, target, weight, reduction, ignore_index)
+        # reshape flattened inner-dim to original k-dimensions
         return torch.reshape(result, out_size)
 
 
