@@ -58,12 +58,12 @@ at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
 Tensor restore_reduced_dims(
     const Tensor& output,
-    IntArrayRef dims,
+    at::OptionalIntArrayRef dims,
     bool keepdim);
 Tensor scale_grad_by_count(
     const Tensor& grad,
     const Tensor& mask,
-    IntArrayRef dims);
+    at::OptionalIntArrayRef dims);
 at::Tensor norm_backward(
     const at::Tensor& grad,
     const at::Tensor& self,
@@ -74,14 +74,14 @@ at::Tensor norm_backward(
     const at::Tensor& self,
     const optional<at::Scalar>& p_,
     at::Tensor norm,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim);
 Tensor norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
     const optional<Scalar>& p_,
     Tensor norm,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim);
 Tensor norm_jvp(
     const Tensor& grad,
@@ -555,11 +555,11 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
     const bool full_matrices);
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
-    const c10::IntArrayRef& input_sizes,
+    const c10::SymIntArrayRef& input_sizes,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step);
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
+    c10::SymInt step);
 std::tuple<Tensor, Tensor> linalg_eig_jvp(
     const Tensor& dA,
     const Tensor& L,
@@ -754,7 +754,7 @@ Tensor amaxamin_jvp(
     const Tensor& x,
     const Tensor& dx,
     const Tensor& result,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,
@@ -955,7 +955,7 @@ Tensor convolution_backward_jvp_grad_bias(
     const Tensor& grad_out_t,
     const Tensor& grad_bias);
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim);
 Tensor block_diag_jvp(at::TensorList tensors);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
