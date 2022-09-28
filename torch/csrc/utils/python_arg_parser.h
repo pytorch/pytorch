@@ -693,7 +693,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         res[idx] = var.item<int64_t>();
       } else {
         try {
-          res[idx] = THPUtils_unpackLong(obj);
+          res[idx] = THPUtils_unpackIndex(obj);
         } catch (std::exception& e) {
           throw_intlist_exception(this, i, obj, idx);
         }
