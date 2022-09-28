@@ -1491,19 +1491,7 @@ class TestSparseCSR(TestCase):
 
         out = torch.empty_like(c.mH if op_out and a.shape == b.shape else c)
         addmv_addmm(c, a, b, alpha=alpha, beta=beta, out=out)
-
-        if dtype not in {torch.half, torch.bfloat16}:
-            a_bsr = sp.bsr_matrix(
-                (
-                    a.values().cpu().numpy(),
-                    a.col_indices().cpu().numpy(),
-                    a.crow_indices().cpu().numpy(),
-                ),
-                shape=a.shape,
-            )
-            expected = ref(c.cpu().numpy(), a_bsr, b.cpu().resolve_conj().numpy(), alpha, beta)
-        else:
-            expected = alpha * (a.to_dense() @ b) + beta * c
+        expected = ref(c, a, b, alpha, beta)
 
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
@@ -1543,6 +1531,61 @@ class TestSparseCSR(TestCase):
 
             return wrapper
 
+        def ref_sp_numpy(c, a, b, alpha=None, beta=None, out=None):
+            
+            def prep_input(t):
+
+                def to_sp_block_compressed(t):
+
+                    if t.layout is torch.sparse_bsc:
+                        tt = t.transpose(-1, -2)
+                    else:
+                        tt = t
+
+                    t_sp_bsr = sp.bsr_matrix(
+                        (
+                            tt.values().cpu().numpy(),
+                            tt.col_indices().cpu().numpy(),
+                            tt.crow_indices().cpu().numpy(),
+                        ),
+                        shape=tt.shape,
+                    )
+
+                    if t.layout is torch.sparse_bsc:
+                        return t_sp_bsr.transpose()
+                    else:
+                        return t_sp_bsr
+            
+                if t.layout is not torch.strided:
+                    return to_sp_block_compressed(t)
+                else:
+                    return t.cpu().resolve_conj().numpy()
+
+            res = _npref_block_addmm_addmv(
+                *map(lambda t: prep_input(t), (c, a, b)),
+                alpha,
+                beta
+            )
+
+            if out is not None:
+                out.copy_(res)
+                return out
+            else:
+                return res
+
+        def ref_half_bfloat16(c, a, b, alpha=None, beta=None, out=None):
+            res = alpha * (a.to_dense() @ b) + beta * c
+            if out is not None:
+                out.copy_(res)
+                return out
+            else:
+                return res
+
+        if dtype in (torch.half, torch.bfloat16):
+            ref = ref_half_bfloat16
+        else:
+            ref = ref_sp_numpy
+
         for (m, n, k) in itertools.product([2, 5], repeat=3):
             nnz = random.randint(0, m * k)
             a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
@@ -1553,7 +1596,7 @@ class TestSparseCSR(TestCase):
             b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for op_b, op_out in itertools.product([True, False], repeat=2):
-                self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
+                self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device, ref=ref)
                 self.run_test_block_addmm_addmv(make_transposed_addmm_op(torch.addmm),
                                                 c,
                                                 a,
@@ -1562,7 +1605,7 @@ class TestSparseCSR(TestCase):
                                                 op_out,
                                                 dtype=dtype,
                                                 device=device,
-                                                ref=make_transposed_addmm_op(_npref_block_addmm_addmv))
+                                                ref=make_transposed_addmm_op(ref))
 
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
