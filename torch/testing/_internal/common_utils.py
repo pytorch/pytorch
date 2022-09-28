@@ -489,7 +489,7 @@ def _get_test_report_path():
     return os.path.join('test-reports', test_source)
 
 is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
-parser = argparse.ArgumentParser(add_help=not is_running_via_run_test)
+parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
@@ -2920,13 +2920,6 @@ def noncontiguous_like(t):
     if not t.is_contiguous():
         return t
 
-    # Special-cases 0-dim tensors
-    zero_dim = t.ndim == 0
-    if zero_dim:
-        t = t.unsqueeze(0)
-
-    result = torch.repeat_interleave(t.detach(), 2, dim=-1)
-
     # Choose a "weird" value that won't be accessed
     if t.dtype.is_floating_point or t.dtype.is_complex:
         value = math.nan
@@ -2935,14 +2928,10 @@ def noncontiguous_like(t):
     else:
         value = 12
 
-    if zero_dim:
-        result[0] = value
-        result.set_(result.storage(), 1, (), ())
-    else:
-        result[..., 1::2] = value
-        strides = list(result.stride())
-        strides[-1] *= 2
-        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    result = t.new_empty(t.shape + (2,))
+    result[..., 0] = value
+    result[..., 1] = t.detach()
+    result = result[..., 1]
     result.requires_grad_(t.requires_grad)
     return result
 
