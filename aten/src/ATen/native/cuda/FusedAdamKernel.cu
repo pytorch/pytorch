@@ -1,7 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TypeDefault.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/fused_adam_amsgrad_impl.cuh>
 #include <ATen/native/cuda/fused_adam_impl.cuh>
+#include <c10/util/Exception.h>
 
 
 namespace at { namespace native {
@@ -28,8 +30,14 @@ void _fused_adam_kernel_cuda_(
     const c10::optional<at::Tensor>& found_inf
 ) {
   if (amsgrad) {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs}),
+        "params, grads, exp_avgs, exp_avg_sqs, and max_exp_avg_sqs must have same dtype, device, and layout");
     _fused_adam_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
   } else {
+    TORCH_CHECK(
+        at::native::check_fast_path_restrictions({params, grads, exp_avgs, exp_avg_sqs}),
+        "params, grads, exp_avgs, and exp_avg_sqs must have same dtype, device, and layout");
     _fused_adam_cuda_impl_(params, grads, exp_avgs, exp_avg_sqs, state_steps, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
   }
 }
