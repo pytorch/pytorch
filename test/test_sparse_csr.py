@@ -1574,7 +1574,7 @@ class TestSparseCSR(TestCase):
                 return res
 
         def ref_half_bfloat16(c, a, b, alpha=None, beta=None, out=None):
-            res = alpha * (a.to_dense() @ b) + beta * c
+            res = alpha * (a.to_dense() @ b.to_dense()) + beta * c
             if out is not None:
                 out.copy_(res)
                 return out
