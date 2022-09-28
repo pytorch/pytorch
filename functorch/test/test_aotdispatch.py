@@ -56,6 +56,13 @@ except ImportError:
     warnings.warn("Some tests use networkx but it was not installed",
                   UserWarning)
 
+try:
+    import sympy  # noqa: F401
+    HAS_SYMPY = True
+except ImportError:
+    HAS_SYMPY = False
+skipIfNoSympy = unittest.skipIf(not HAS_SYMPY, "no sympy")
+
 # NB: numpy is a testing dependency!
 
 class AOTTestCase(TestCase):
@@ -1135,6 +1142,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
         _test_aot_autograd_helper(self, device, dtype, op)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipIfNoSympy
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", False)
