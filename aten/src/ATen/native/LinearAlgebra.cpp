@@ -2672,19 +2672,19 @@ Tensor frobenius_norm(const Tensor& self) {
   return at::norm(self);
 }
 
-Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
+Tensor frobenius_norm(const Tensor& self, OptionalIntArrayRef dim, bool keepdim) {
   TORCH_CHECK(
-      dim.size() <= 2,
+      !dim.has_value() || dim.value().size() <= 2,
       "Expected at most 2 dimensions, but got ",
-      dim.size(),
+      dim.value().size(),
       " dimensions instead.");
   Tensor result;
-  if (dim.size() == 1 || dim.size() == 0) {
+  if (!dim.has_value() || dim.value().size() == 1 || dim.value().size() == 0) {
     result = at::norm(self, 2, dim, keepdim);
   } else {
-    auto dim_ = dim.vec();
+    auto dim_ = dim.value().vec();
     maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
+    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim.value(), " instead");
     if (self.is_complex()) {
       result = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
     } else {
@@ -2697,7 +2697,7 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
-    IntArrayRef dim,
+    OptionalIntArrayRef dim,
     bool keepdim,
     Tensor& result) {
   auto result_ = at::native::frobenius_norm(self, dim, keepdim);
