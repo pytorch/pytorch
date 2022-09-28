@@ -127,8 +127,5 @@ jobs:
           ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
           BUILD_NAME: ${{ inputs.build_name }}
         run: |
-            if [[ ${BUILD_NAME} = *with-pypi-cudnn* ]]; then
-              export UPLOAD_SUBFOLDER="${UPLOAD_SUBFOLDER}_pypi_cudnn"
-              echo "Setting upload subfolder for pypi-cudnn build ${UPLOAD_SUBFOLDER}"
-            fi
+            set -ex
             bash .circleci/scripts/binary_upload.sh
