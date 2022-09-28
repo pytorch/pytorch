@@ -1956,12 +1956,12 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   return num_nonzero;
 }
 
-Tensor count_nonzero_cuda(const Tensor& self, OptionalIntArrayRef dims){
+Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
   return (self != 0).sum(dims);
 }
 
-Tensor count_nonzero_cpu(const Tensor& self, OptionalIntArrayRef dims){
-  if (dims.has_value() && dims.value().size() > 0) {
+Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
+  if (dims.size() > 0) {
     return (self != 0).sum(dims);
   }
 
