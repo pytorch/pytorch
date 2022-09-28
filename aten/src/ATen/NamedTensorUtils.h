@@ -118,7 +118,8 @@ TORCH_API void propagate_names_for_expand(
     const Tensor& result,
     const Tensor& self);
 
-TORCH_API std::vector<Dimname> compute_cat_outnames(ITensorListRef tensors);
+TORCH_API std::vector<Dimname> compute_cat_outnames(
+    const MaterializedITensorListRef& tensors);
 
 TORCH_API std::vector<Dimname> compute_broadcast_outnames(
     const Tensor& self,
