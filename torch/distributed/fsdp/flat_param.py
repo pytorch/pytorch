@@ -167,8 +167,8 @@ class FlatParameter(nn.Parameter):
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
         _param_extensions (Tuple[Optional[Any], ...]): Parameter extensions
-            (i.e. some per-parameter state) used for the tensor flattener to
-            customize pre-flatten and post-unflatten behavior.
+            (i.e. some per-parameter state) used to customize pre-flatten and
+            post-unflatten behavior.
 
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
