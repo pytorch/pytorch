@@ -9413,7 +9413,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerInstanceNormalizationBackward_CUDA) {
       "");
 }
 
-TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalShared_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9519,10 +9519,11 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   const int64_t dimy = 16384;
 
   auto properties = at::cuda::getDeviceProperties(0);
-  // Require 70KB of smem to run test
-  const size_t required_smem_size = 70 << 10;
+  const size_t required_smem_size =
+      (dimy - static_size) * sizeof(float) + TIDX * sizeof(float);
   if (properties->sharedMemPerBlockOptin < required_smem_size) {
-    GTEST_SKIP() << "not enough shared memory space on device to run test";
+    GTEST_SKIP() << "not enough shared memory space on device to run test: "
+                 << properties->sharedMemPerBlock;
   }
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -9708,6 +9709,14 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
   const float kEps = 1e-5;
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
+  auto properties = at::cuda::getDeviceProperties(0);
+  const size_t required_smem_size =
+      (dimy - static_size) * sizeof(float) + TIDX * sizeof(float);
+  if (properties->sharedMemPerBlockOptin < required_smem_size) {
+    GTEST_SKIP() << "not enough shared memory space on device to run test: "
+                 << properties->sharedMemPerBlock;
+  }
+
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
   at::Tensor aten_static_in = aten_input.narrow(1, 0, static_size);
   at::Tensor aten_dynamic_in =
@@ -9722,13 +9731,6 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
-
-  auto properties = at::cuda::getDeviceProperties(0);
-  // Require 70KB of smem to run test
-  const size_t required_smem_size = 70 << 10;
-  if (properties->sharedMemPerBlockOptin < required_smem_size) {
-    GTEST_SKIP() << "not enough shared memory space on device to run test";
-  }
 
   fe.runFusion(aten_inputs, {cg_static_out, cg_dynamic_out});
 
