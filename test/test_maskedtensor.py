@@ -19,8 +19,7 @@ from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
 )
 
-from torch._masked import _combine_input_and_mask
-from torch.masked import as_masked_tensor, masked_tensor
+from torch.masked import as_masked_tensor, masked_tensor, _combine_input_and_mask
 from torch.masked.maskedtensor.core import _masks_match, _tensors_match
 from torch.masked.maskedtensor.unary import NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS, UNARY_NAMES
 from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS, BINARY_NAMES

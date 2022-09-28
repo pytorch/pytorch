@@ -159,7 +159,7 @@ class MaskedTensor(torch.Tensor):
         return torch.Tensor._make_wrapper_subclass(cls, data.size(), **kwargs)  # type: ignore[attr-defined]
 
     def _preprocess_data(self, data, mask):
-        from torch._masked import _sparse_coo_where, _sparse_csr_where
+        from .._ops import _sparse_coo_where, _sparse_csr_where
 
         if data.layout != mask.layout:
             raise TypeError("data and mask must have the same layout.")
