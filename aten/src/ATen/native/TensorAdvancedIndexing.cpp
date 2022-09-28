@@ -416,6 +416,7 @@ DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -1955,12 +1956,12 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   return num_nonzero;
 }
 
-Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
+Tensor count_nonzero_cuda(const Tensor& self, OptionalIntArrayRef dims){
   return (self != 0).sum(dims);
 }
 
-Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
-  if (dims.size() > 0) {
+Tensor count_nonzero_cpu(const Tensor& self, OptionalIntArrayRef dims){
+  if (dims.has_value() && dims.value().size() > 0) {
     return (self != 0).sum(dims);
   }
 
