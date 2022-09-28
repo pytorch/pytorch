@@ -351,7 +351,7 @@ inline void Context::submit_copy(
   if (enable_op_profiling_) {
     std::string label = "cmd_copy";
     log_idx = querypool_.shader_profile_begin(
-      cmd_, label, create_extent3d({0, 0, 0}), create_extent3d({0, 0, 0}));
+        cmd_, label, create_extent3d({0, 0, 0}), create_extent3d({0, 0, 0}));
   }
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 
