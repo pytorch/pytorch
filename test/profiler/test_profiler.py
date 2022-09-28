@@ -1259,7 +1259,6 @@ class TestProfiler(TestCase):
                 self.assertTrue(len(e.input_shapes[0]) > 0)
 
 
-
 def find_node_with_name(nodes, name):
     for node in nodes:
         if node.name() == name:
@@ -1267,6 +1266,17 @@ def find_node_with_name(nodes, name):
         result = find_node_with_name(node.children, name)
         if result is not None:
             return result
+
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(10, 5)
+        self.fc2 = nn.Linear(5, 2)
+
+    def forward(self, x):
+        return self.fc2(self.fc1(x))
+
 
 class TestTorchTidyProfiler(TestCase):
 
@@ -1335,6 +1345,7 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(d_storage_data, c_storage_data_new)
         self.assertEqual(c_id, c_id_new)
         self.assertEqual(d_id, c_id_new)
+
 
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
@@ -1477,18 +1488,10 @@ class TestTorchTidyProfiler(TestCase):
                 flat_out_extrafields(node.children, out)
             return out
 
-        class simpleNet(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(10, 5)
-                self.fc2 = nn.Linear(5, 2)
-
-            def forward(self, x):
-                return self.fc2(self.fc1(x))
 
         inputs = torch.rand(10)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = simpleNet()
+            net = SimpleNet()
             out = net(inputs)
 
         modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
@@ -1498,6 +1501,32 @@ class TestTorchTidyProfiler(TestCase):
         expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
         expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
+
+    def test_optimizer(self):
+
+        def flat_out_extrafields(nodes, out=None):
+            if out is None:
+                out = []
+            for node in nodes:
+                if isinstance(node.extra_fields, _ExtraFields_PyCall) and node.extra_fields.opt:
+                    out.append(node.extra_fields.opt.self)
+                flat_out_extrafields(node.children, out)
+            return out
+
+        inputs = torch.rand(10)
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
+            net = SimpleNet()
+            opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+
+            opt.zero_grad()
+            out = net(inputs)
+            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+            loss.backward()
+            opt.step()
+
+        opts = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
+        self.assertEqual(len(opts), 1, f"Expected 1 optimizer, got {len(opts)}")
+        self.assertEqual(id(opt), opts[0], f"Optimizer addr ({id(opt)}) vs. Profiled optimizer addr ({opts[0]})")
 
     def test_allocations(self):
         gc.collect()
