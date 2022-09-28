@@ -603,8 +603,8 @@ def aot_function(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
-    hasher_type = None,
-    static_argnums: Optional[Tuple[int]] = None,
+    hasher_type=None,  # deprecated
+    static_argnums: Optional[Tuple[int]] = None,  # deprecated
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch

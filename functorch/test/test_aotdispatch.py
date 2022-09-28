@@ -6,7 +6,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
@@ -736,14 +735,6 @@ class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
-        _test_aot_autograd_helper(self, device, dtype, op)
-
-    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
-    @patch("functorch.compile.config.use_functionalize", False)
-    @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive', aot_autograd_failures)
-    def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
 only_for = ("cpu")
