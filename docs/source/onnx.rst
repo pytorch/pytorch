@@ -73,7 +73,7 @@ exporter to print out a human-readable representation of the model::
     }
 
 You can also verify the output using the `ONNX <https://github.com/onnx/onnx/>`_ library,
-which you can install using `pip`_::
+which you can install using ``pip``::
 
     pip install onnx
 
@@ -452,12 +452,12 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 
 .. Custom symbolic functions should add type and shape information by calling ``setType(...)``
 .. on Value objects before returning them (implemented in C++ by
-.. ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
+.. . ``torch::jit::Value::setType``). This is not required, but it can help the exporter's
 .. shape and type inference for down-stream nodes. For a non-trivial example of ``setType``, see
 .. ``test_aten_embedding_2`` in
 .. `test_operators.py <https://github.com/pytorch/pytorch/blob/master/test/onnx/test_operators.py>`_.
 
-.. The example below shows how you can access ``requires_grad`` via the ``Node`` object::
+.. The example below shows how you can access ``requires_grad`` via the ``Node`` object:
 
 ..     class MyClip(torch.autograd.Function):
 ..         @staticmethod
@@ -495,7 +495,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 ..         return ret
 
 ..     from torch.onnx import register_custom_op_symbolic
-..     register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
+.. .     register_custom_op_symbolic("prim::PythonOp", symbolic_python_op, 1)
 
 Inline Autograd Function
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -645,4 +645,4 @@ Classes
     :nosignatures:
     :template: classtemplate.rst
 
-    .. autoclass::JitScalarType
+    JitScalarType
