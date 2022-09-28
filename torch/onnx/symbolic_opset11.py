@@ -17,7 +17,7 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -937,7 +937,7 @@ def squeeze(g, self, dim=None):
         const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
         cond = g.op("Equal", size, const_one)
         # create the "If" node and add the "then" and "else" blocks to it.
-        if_op, (if_context, else_context), _ = torchscript.add_op_with_blocks(
+        if_op, (if_context, else_context), _ = jit_utils.add_op_with_blocks(
             g, "If", cond, n_blocks=2
         )
         squeeze_ = symbolic_helper._squeeze_helper(if_context, self, [dim])
@@ -1339,7 +1339,7 @@ def embedding_bag(
         g, offsets_ends, g.op("Constant", value_t=torch.tensor(0))
     )
 
-    loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+    loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
         g, "Loop", loop_len, loop_condition, n_blocks=1
     )
     loop_block = loop_context.block

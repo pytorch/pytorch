@@ -11,7 +11,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -332,7 +332,7 @@ def unfold(g, input, dimension, size, step):
         )
         loop_len = g.op("Min", low_size, hi_size)
 
-        loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+        loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
             g, "Loop", loop_len, loop_condition, n_blocks=1
         )
 
