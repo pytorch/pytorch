@@ -6698,7 +6698,7 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {opt_dim}
+    {dim}
     {keepdim}
 
 Keyword args:
@@ -7320,7 +7320,7 @@ dimension(s) :attr:`dim`.
 
 Args:
     {input}
-    {opt_dim}
+    {dim}
     {keepdim}
 
 Keyword args:
