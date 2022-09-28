@@ -3779,7 +3779,39 @@ TEST_F(NVFuserTest, FusionRootMappingTrivialReduction_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {t3, t4}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
+// Repro of issue #1950
+TEST_F(NVFuserTest, FusionRootMappingRepro1950_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+  auto tv0 = makeSymbolicTensor(3);
+  auto tv1 = makeSymbolicTensor(3);
+  auto tv2 = makeSymbolicTensor(3);
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+
+  auto tv3 = set(tv0);
+  auto tv4 = mul(tv1, tv3);
+  auto tv5 = mul(tv1, tv2);
+  auto tv6 = mul(tv5, tv3);
+  auto tv7 = sum(tv6, {2});
+  auto tv8 = broadcast(tv7, {false, false, true});
+  auto tv9 = mul(tv3, tv8);
+
+  // Issue #1950 was caused by a particular traversal ordering based
+  // on the output tensor ordering as below
+  fusion.addOutput(tv9);
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv4);
+
+  ComputeAtRootDomainMap root_map;
+  root_map.build();
+
+  checkIdMapped(root_map, tv4, tv4->axis(-1), tv9, tv9->axis(-1), false);
+}
+
+TEST_F(NVFuserTest, FusionDetectSelfMappedDomains_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
