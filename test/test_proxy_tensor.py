@@ -1008,25 +1008,25 @@ symbolic_tensor_failures = {
     xfail('polar'),
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
-    skip('_masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
+    skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.amin', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.argmax', ''),  # aten.argmax.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.argmin', ''),  # aten.argmin.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.cumsum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.log_softmax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.mean', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, ...
-    xfail('_masked.median', ''),  # aten.nanmedian.dim - couldn't find symbolic meta function/decomposition
-    xfail('_masked.norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.prod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.softmax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.softmin', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
-    xfail('_masked.sum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
+    xfail('masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.amin', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.argmax', ''),  # aten.argmax.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.argmin', ''),  # aten.argmin.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.cumsum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.log_softmax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.mean', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, ...
+    xfail('masked.median', ''),  # aten.nanmedian.dim - couldn't find symbolic meta function/decomposition
+    xfail('masked.norm', ''),  # aten.linalg_vector_norm.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.prod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.softmax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.softmin', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
+    xfail('masked.sum', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
+    xfail('masked.var', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=torch.device, d...
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('addr', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
@@ -1084,7 +1084,6 @@ symbolic_tensor_failures = {
     xfail('flatten', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('full_like', ''),  # aten.full_like.default - couldn't find symbolic meta function/decomposition
     xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1101,7 +1100,6 @@ symbolic_tensor_failures = {
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
-    xfail('isreal', ''),  # aten.ones_like.default - couldn't find symbolic meta function/decomposition
     xfail('kron', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('lerp', ''),  # aten.lerp.Scalar - couldn't find symbolic meta function/decomposition
@@ -1226,7 +1224,6 @@ symbolic_tensor_failures = {
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # aten.normal.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('normal', 'number_mean'),  # aten.normal.float_Tensor - couldn't find symbolic meta function/decomposition
-    xfail('ones_like', ''),  # aten.ones_like.default - couldn't find symbolic meta function/decomposition
     xfail('ormqr', ''),  # aten.ormqr.default - couldn't find symbolic meta function/decomposition
     xfail('outer', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('pca_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
@@ -1240,9 +1237,6 @@ symbolic_tensor_failures = {
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
-    xfail('rand_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
-    xfail('randint_like', ''),  # aten.randint_like.default - couldn't find symbolic meta function/decomposition
-    xfail('randn_like', ''),  # aten.randn_like.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('reshape_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('reshape', ''),  # Tensors of type TensorImpl do not have numel
@@ -1311,7 +1305,6 @@ symbolic_tensor_failures = {
     xfail('view_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('zero_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
-    xfail('zeros_like', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('unbind', ''),  # aten.unbind.int - couldn't find symbolic meta function/decomposition
 }
 symbolic_tensor_segfaults = {
