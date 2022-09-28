@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/pointwise.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -805,9 +805,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
   // get a higher position in later inline propagation. We need this separate
   // step because we were not using ParallelType::Unroll, so we have to do
   // unrolling manually.
-  InlinePropagator inline_unswitch(
-      reference_tv, unswitch_pos, ComputeAtMode::BestEffort);
-  spanning_tree.traverse(&inline_unswitch);
+  inlineAllAt(reference_tv, unswitch_pos, true);
 
   auto all_tvs = ir_utils::allTvs(fusion);
 
@@ -822,9 +820,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     auto output = entry.second;
     inner_most_tensors.erase(output);
   }
-  InlinePropagator inline_inner_most(
-      reference_tv, -1, ComputeAtMode::BestEffort, inner_most_tensors);
-  spanning_tree.traverse(&inline_inner_most);
+  inlineMost(inner_most_tensors);
 }
 
 } // namespace cuda

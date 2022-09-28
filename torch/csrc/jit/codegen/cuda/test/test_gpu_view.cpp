@@ -10,7 +10,7 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
@@ -1390,8 +1390,7 @@ TEST_F(NVFuserTest, FusionPwiseViewSchedule_CUDA) {
     scheduler_utils::parallelizeAllLike(tv5);
 
     // Inline the schedule
-    InlinePropagator inline_propagator(tv5, -1, ComputeAtMode::MostInlined);
-    spanning_tree.traverse(&inline_propagator);
+    inlineMost();
   }
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -1457,8 +1456,7 @@ TEST_F(NVFuserTest, FusionSumViewSchedule_CUDA) {
     scheduler_utils::parallelizeAllLike(tv5_rf);
 
     // Inline the schedule
-    InlinePropagator inline_propagator(tv5_rf, -1, ComputeAtMode::MostInlined);
-    spanning_tree.traverse(&inline_propagator);
+    inlineMost();
   }
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -1763,8 +1761,7 @@ TEST_F(NVFuserTest, FusionViewMapping_CUDA) {
   scheduler_utils::parallelizeAllLike(tv6);
 
   // Inline the schedule
-  InlinePropagator inline_propagator(tv6, -1, ComputeAtMode::MostInlined);
-  spanning_tree.traverse(&inline_propagator);
+  inlineMost();
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
@@ -1805,8 +1802,7 @@ TEST_F(NVFuserTest, FusionLowerDivisibleSplits_CUDA) {
   scheduler_utils::parallelizeAllLike(tv2);
 
   // Inline the schedule
-  InlinePropagator inline_propagator(tv2, -1, ComputeAtMode::MostInlined);
-  spanning_tree.traverse(&inline_propagator);
+  inlineMost();
 
   auto divisible_splits = getAllDivisibleSplits(&fusion);
 

@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor.h>
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
@@ -750,9 +750,7 @@ TEST_F(NVFuserTest, FusionManualScheduleTransposeComplexDAG1_CUDA) {
   }
 
   // inline
-  MaxRootDomainInfoSpanningTree entire_dag(tv9);
-  InlinePropagator inline_propagator(tv9, -1, ComputeAtMode::MostInlined);
-  entire_dag.traverse(&inline_propagator);
+  inlineMost();
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input0 = at::randn({512, 1024, 256}, options);

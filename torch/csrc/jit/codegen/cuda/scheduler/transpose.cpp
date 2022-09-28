@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/transpose.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
-#include <torch/csrc/jit/codegen/cuda/inline_propagator.h>
+#include <torch/csrc/jit/codegen/cuda/inlining.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
@@ -1131,9 +1131,7 @@ void scheduleTranspose(Fusion* fusion, TransposeParams params) {
   }
 
   // Inline
-  InlinePropagator inline_propagator(
-      reference1, -1, ComputeAtMode::MostInlined);
-  entire_dag.traverse(&inline_propagator);
+  inlineMost();
 }
 
 } // namespace cuda

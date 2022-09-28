@@ -54,8 +54,6 @@ enum class DebugDumpOption {
                     //! associated with what's running
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
-  InlinePropagator, //! When running InlinePropagator, print propagation
-                    //! path and inlining result
   Cubin, //! Dump compiled CUBIN
   Ptx //! Dump compiled PTX
 };

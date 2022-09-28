@@ -38,7 +38,6 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::Halo, false},
       {DebugDumpOption::PerfDebugVerbose, false},
       {DebugDumpOption::TransformPropagator, false},
-      {DebugDumpOption::InlinePropagator, false},
       {DebugDumpOption::Cubin, false},
       {DebugDumpOption::Ptx, false}};
 
@@ -91,8 +90,6 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::PerfDebugVerbose] = true;
       } else if (token == "transform_propagator") {
         options_map[DebugDumpOption::TransformPropagator] = true;
-      } else if (token == "inline_propagator") {
-        options_map[DebugDumpOption::InlinePropagator] = true;
       } else if (token == "cubin") {
         options_map[DebugDumpOption::Cubin] = true;
       } else if (token == "ptx") {
@@ -108,7 +105,7 @@ auto parseDebugDumpOptions() {
             "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
             "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
             "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose\n",
-            "\ttransform_propagator, inline_propagator, cubin, ptx\n");
+            "\ttransform_propagator, cubin, ptx\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
