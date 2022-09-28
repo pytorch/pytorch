@@ -3,7 +3,7 @@
 #include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MathConstants.h>
-#include <cmath>
+#include <limits>
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
 #if defined(__CUDA_ARCH__)
@@ -246,7 +246,7 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
     }
   } else {
     // prob is nan?
-    return static_cast<scalar_t>(NAN);
+    return std::numeric_limits<scalar_t>::quiet_NaN();
   }
 }
 
