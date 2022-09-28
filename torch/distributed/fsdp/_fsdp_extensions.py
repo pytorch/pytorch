@@ -109,4 +109,4 @@ def _ext_pre_load_state_dict_transform(
     if _extensions is not None:
         return _extensions.pre_load_state_dict_transform(tensor)
     shards = tensor.local_shards()  # type: ignore[attr-defined]
-    return (tensor, [shards[0].tensor] if shards else [])
+    return (tensor, shards)
