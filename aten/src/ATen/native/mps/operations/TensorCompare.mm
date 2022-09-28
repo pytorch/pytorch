@@ -104,17 +104,17 @@ void clamp_tensor_out_mps(const Tensor& input_t,
     auto num_max_dims = max_opt->dim();
     auto num_input_dims = input_t.dim();
 
-    int64_t new_min_arr[num_input_dims];
-    int64_t new_max_arr[num_input_dims];
+    std::vector<int64_t> new_min_arr(num_input_dims);
+    std::vector<int64_t> new_max_arr(num_input_dims);
 
     if(has_min && num_min_dims < num_input_dims) {
-        fill_new_shape(num_input_dims, num_min_dims, new_min_arr, min_opt->sizes());
-        new_min_shape = IntArrayRef({new_min_arr, num_input_dims});
+        fill_new_shape(num_input_dims, num_min_dims, new_min_arr.data(), min_opt->sizes());
+        new_min_shape = IntArrayRef(new_min_arr);
     }
 
     if(has_max && num_max_dims < num_input_dims) {
-        fill_new_shape(num_input_dims, num_max_dims, new_max_arr, max_opt->sizes());
-        new_max_shape = IntArrayRef({new_max_arr, num_input_dims});
+        fill_new_shape(num_input_dims, num_max_dims, new_max_arr.data(), max_opt->sizes());
+        new_max_shape = IntArrayRef(new_max_arr);
     }
 
     Tensor min_opt_tensor;
@@ -390,7 +390,7 @@ Tensor where_mps(const Tensor& condition,
 
   TORCH_CHECK(max_dim == 0 || !(sum_dims % max_dim), "All inputs of where should have same/compatible number of dims")
 
-  int64_t out_arr[max_dim];
+  std::vector<int64_t> out_arr(max_dim);
 
   // Broadcasted output shape
   for(int i = 0; i < max_dim; i++) {
@@ -402,7 +402,7 @@ Tensor where_mps(const Tensor& condition,
     out_arr[i] = std::max(cond_num, std::max(self_num, other_num));
   }
 
-  Tensor ret = empty_mps(IntArrayRef(out_arr, max_dim),
+  Tensor ret = empty_mps(IntArrayRef(out_arr),
                          self.scalar_type(),
                          c10::nullopt,
                          kMPS,
