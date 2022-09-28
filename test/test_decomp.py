@@ -520,5 +520,39 @@ class TestDecomp(TestCase):
 
 instantiate_device_type_tests(TestDecomp, globals())
 
+class DecompContiguousTests(TestCase):
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_contiguous_softmax(self, device):
+        size = (2, 4, 3, 3)
+        stride = (9, 18, 3, 1)
+        dtype = torch.float32
+
+        x = torch.randn(size, dtype=dtype, device=device)
+        x = torch.as_strided(x, size, stride)
+
+        ref = torch.ops.aten._softmax(x, -1, False)
+        res = torch._decomp.decompositions._softmax(x, -1, False)
+        self.assertEqual(ref.stride(), res.stride())
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_contiguous_log_softmax(self, device):
+        size = (2, 4, 3, 3)
+        stride = (9, 18, 3, 1)
+
+        dtype = torch.float32
+        x = torch.randn(size, dtype=dtype, device=device)
+        x = torch.as_strided(x, size, stride)
+
+        ref = torch.ops.aten._log_softmax(x, -1, False)
+        res = torch._decomp.decompositions._log_softmax(x, -1, False)
+        self.assertEqual(ref.stride(), res.stride())
+
+instantiate_device_type_tests(DecompContiguousTests, globals())
+
+
 if __name__ == "__main__":
     run_tests()
