@@ -507,14 +507,10 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
-    // TODO: this message is not correct anymore, since this InferredType is
-    // used from a bunch of circumstances unrelated to tracing. We can re-use
-    // this instead of the attribute_failure stuff in concreteType
     return InferredType(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
-        "are supported ",
-        "as inputs or outputs of traced functions",
-        ", but instead got value of type ",
+        "TorchScript tried to infer the type of an object, but it doesn't ",
+        "support automatic type inference of this type of object. The ",
+        "reported type of this object is ",
         py::str(input.get_type().attr("__name__")),
         "."));
   }
