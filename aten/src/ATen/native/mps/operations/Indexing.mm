@@ -321,7 +321,6 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
   dim = maybe_wrap_dim(dim, self.dim());
   auto numel = index.numel();
   auto alpha_f = alpha.to<float>();
-  
 
   if (numel == 0) {
     return;
