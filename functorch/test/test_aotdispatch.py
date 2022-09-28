@@ -6,6 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
@@ -15,7 +16,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
