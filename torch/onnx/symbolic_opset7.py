@@ -14,7 +14,7 @@ import functools
 import warnings
 
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
-from torch.onnx._internal import registration
+from torch.onnx._internal import jit_utils, registration
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=7)
@@ -37,7 +37,7 @@ block_listed_operators = (
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 @_onnx_symbolic("aten::max")
-def max(g, self, dim_or_y=None, keepdim=None):
+def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
     # torch.max(input, other)
     if keepdim is None and dim_or_y is not None:
         warnings.warn(
@@ -49,7 +49,7 @@ def max(g, self, dim_or_y=None, keepdim=None):
 
 
 @_onnx_symbolic("aten::min")
-def min(g, self, dim_or_y=None, keepdim=None):
+def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
     # torch.min(input, other)
     if keepdim is None and dim_or_y is not None:
         warnings.warn(

@@ -32,7 +32,7 @@ from torch.nn.functional import (
     GRID_SAMPLE_PADDING_MODES,
 )
 from torch.onnx import _type_utils, symbolic_helper
-from torch.onnx._internal import _beartype, registration
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 
@@ -42,7 +42,14 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=16)
 @_onnx_symbolic("aten::grid_sampler")
 @symbolic_helper.parse_args("v", "v", "i", "i", "b")
 @_beartype.beartype
-def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
+def grid_sampler(
+    g: jit_utils.GraphContext,
+    input,
+    grid,
+    mode_enum,
+    padding_mode_enum,
+    align_corners,
+):
     mode_s = {v: k for k, v in GRID_SAMPLE_INTERPOLATION_MODES.items()}[mode_enum]  # type: ignore[call-arg]
     padding_mode_s = {v: k for k, v in GRID_SAMPLE_PADDING_MODES.items()}[padding_mode_enum]  # type: ignore[call-arg]
     return g.op(
@@ -58,7 +65,7 @@ def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
 @_onnx_symbolic("aten::scatter_add")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def scatter_add(g, self, dim, index, src):
+def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("scatter", self, dim, index, src, overload_name="src")
 

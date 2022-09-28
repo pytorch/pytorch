@@ -2,7 +2,7 @@ import importlib
 import inspect
 
 from torch.onnx import symbolic_helper, symbolic_opset9 as opset9
-from torch.onnx._internal import registration
+from torch.onnx._internal import jit_utils, registration
 
 
 def register_quantized_ops(domain: str, version: int):
@@ -35,7 +35,7 @@ def register_quantized_ops(domain: str, version: int):
             registration.registry.register(name, version, func)
 
 
-def _permute_helper(g, input, axes):
+def _permute_helper(g: jit_utils.GraphContext, input, axes):
     quant_args = {
         "axes_i": axes,
         "Y_scale_f": symbolic_helper._node_get(input.node(), "Y_scale"),
@@ -46,17 +46,17 @@ def _permute_helper(g, input, axes):
     return output
 
 
-def nchw2nhwc(g, input):
+def nchw2nhwc(g: jit_utils.GraphContext, input):
     axes = [0, 2, 3, 1]
     return _permute_helper(g, input, axes)
 
 
-def nhwc2nchw(g, input):
+def nhwc2nchw(g: jit_utils.GraphContext, input):
     axes = [0, 3, 1, 2]
     return _permute_helper(g, input, axes)
 
 
-def linear_prepack(g, weight, bias):
+def linear_prepack(g: jit_utils.GraphContext, weight, bias):
     # Mapping to a dummy caffe2 prepack node.
     # During the onnx -> c2 conversion we can look up original weight and bias
     # from this node
@@ -66,7 +66,7 @@ def linear_prepack(g, weight, bias):
 
 
 @symbolic_helper.parse_args("v", "v", "v", "f", "i")
-def linear(g, input, weight, bias, scale, zero_point):
+def linear(g: jit_utils.GraphContext, input, weight, bias, scale, zero_point):
     kwargs = {
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
@@ -76,7 +76,9 @@ def linear(g, input, weight, bias, scale, zero_point):
     return output
 
 
-def conv_prepack(g, input, weight, bias, stride, padding, dilation, groups):
+def conv_prepack(
+    g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
+):
     # Mapping to a dummy caffe2 prepack node.
     # During the onnx -> c2 conversion we can look up original weight and bias
     # from this node
@@ -87,7 +89,16 @@ def conv_prepack(g, input, weight, bias, stride, padding, dilation, groups):
 
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d(
-    g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point
+    g: jit_utils.GraphContext,
+    input,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    scale,
+    zero_point,
 ):
     kernel_size = weight.node()["shape"][1:3]
     kwargs = {
@@ -107,7 +118,16 @@ def conv2d(
 
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "f", "i")
 def conv2d_relu(
-    g, input, weight, bias, stride, padding, dilation, groups, scale, zero_point
+    g: jit_utils.GraphContext,
+    input,
+    weight,
+    bias,
+    stride,
+    padding,
+    dilation,
+    groups,
+    scale,
+    zero_point,
 ):
     kernel_size = weight.node()["shape"][1:3]
     kwargs = {
@@ -126,7 +146,7 @@ def conv2d_relu(
 
 
 @symbolic_helper.parse_args("v", "v", "f", "i")
-def add(g, input_a, input_b, scale, zero_point):
+def add(g: jit_utils.GraphContext, input_a, input_b, scale, zero_point):
     kwargs = {
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
@@ -137,7 +157,7 @@ def add(g, input_a, input_b, scale, zero_point):
 
 
 @symbolic_helper.parse_args("v")
-def relu(g, input):
+def relu(g: jit_utils.GraphContext, input):
     if input not in symbolic_helper._quantized_ops:
         return opset9.relu(g, input)
     kwargs = {
@@ -150,7 +170,7 @@ def relu(g, input):
 
 
 @symbolic_helper.parse_args("v", "f", "i", "t")
-def quantize_per_tensor(g, input, scale, zero_point, dtype):
+def quantize_per_tensor(g: jit_utils.GraphContext, input, scale, zero_point, dtype):
     kwargs = {
         "Y_scale_f": scale,
         "Y_zero_point_i": zero_point,
@@ -161,19 +181,32 @@ def quantize_per_tensor(g, input, scale, zero_point, dtype):
 
 
 @symbolic_helper.parse_args("v")
-def dequantize(g, input):
+def dequantize(g: jit_utils.GraphContext, input):
     return g.op("_caffe2::Int8Dequantize", input)
 
 
 @symbolic_helper.parse_args("v", "t", "t", "t", "t", "t", "t", "t")
 def _empty_affine_quantized(
-    g, input, shape, scale, zero_point, dtype, pin_memory, memory_format, layout
+    g: jit_utils.GraphContext,
+    input,
+    shape,
+    scale,
+    zero_point,
+    dtype,
+    pin_memory,
+    memory_format,
+    layout,
 ):
     return input
 
 
 def upsample_nearest2d(
-    g, input, output_size, align_corners=None, scales_h=None, scales_w=None
+    g: jit_utils.GraphContext,
+    input,
+    output_size,
+    align_corners=None,
+    scales_h=None,
+    scales_w=None,
 ):
     if input not in symbolic_helper._quantized_ops:
         return opset9.upsample_nearest2d(g, input, output_size, align_corners)  # type: ignore[attr-defined]
@@ -192,7 +225,15 @@ def upsample_nearest2d(
 
 
 @symbolic_helper.parse_args("v", "is", "is", "is", "is", "i")
-def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool2d(
+    g: jit_utils.GraphContext,
+    input,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode,
+):
     if input not in symbolic_helper._quantized_ops:
         return opset9.max_pool2d(  # type: ignore[attr-defined]
             g, input, kernel_size, stride, padding, dilation, ceil_mode
@@ -214,7 +255,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
 
 @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
 def avg_pool2d(
-    g,
+    g: jit_utils.GraphContext,
     input,
     kernel_size,
     stride,
@@ -249,7 +290,7 @@ def avg_pool2d(
     return output
 
 
-def reshape(g, input, shape):
+def reshape(g: jit_utils.GraphContext, input, shape):
     if input not in symbolic_helper._quantized_ops:
         return opset9.reshape(g, input, shape)
 
@@ -263,7 +304,7 @@ def reshape(g, input, shape):
 
 
 @symbolic_helper.parse_args("v", "v", "v", "v", "i")
-def slice(g, input, dim, start, end, step):
+def slice(g: jit_utils.GraphContext, input, dim, start, end, step):
     if input not in symbolic_helper._quantized_ops:
         return opset9.slice(g, input, dim, start, end, step)
 
@@ -285,7 +326,7 @@ def slice(g, input, dim, start, end, step):
     return output
 
 
-def cat(g, tensor_list, dim, scale=None, zero_point=None):
+def cat(g: jit_utils.GraphContext, tensor_list, dim, scale=None, zero_point=None):
     tensors = symbolic_helper._unpack_list(tensor_list)
     input = tensors[0]
     if input not in symbolic_helper._quantized_ops:
@@ -302,7 +343,7 @@ def cat(g, tensor_list, dim, scale=None, zero_point=None):
 
 
 @symbolic_helper.parse_args("v")
-def sigmoid(g, input):
+def sigmoid(g: jit_utils.GraphContext, input):
     if input not in symbolic_helper._quantized_ops:
         return opset9.sigmoid(g, input)
     # Caffe2 expects the output scale to be 1/2^8

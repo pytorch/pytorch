@@ -20,7 +20,7 @@ from typing import Sequence
 
 from torch import _C
 from torch.onnx import symbolic_helper
-from torch.onnx._internal import registration
+from torch.onnx._internal import jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
@@ -33,7 +33,7 @@ _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=17)
 @_onnx_symbolic("aten::layer_norm")
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "none")
 def layer_norm(
-    g,
+    g: jit_utils.GraphContext,
     input: _C.Value,
     normalized_shape: Sequence[int],
     weight: _C.Value,
