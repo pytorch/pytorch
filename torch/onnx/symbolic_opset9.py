@@ -6502,7 +6502,7 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
         torch._C._jit_pass_onnx_block(
             old_block,
             new_block_context.block,
-            operator_export_type,  # type:ignore[arg-type]
+            operator_export_type,
             env,
             False,
         )
@@ -6564,8 +6564,8 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
         env = torch._C._jit_pass_onnx_block(
             current_b,
             block,
-            operator_export_type,  # type:ignore[arg-type]
-            env,  # type:ignore[arg-type]
+            operator_export_type,
+            env,
             True,
         )
         if_output_list = list(n.outputs())
@@ -6591,7 +6591,7 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             torch._C._jit_pass_onnx_block(
                 old_block,
                 new_block_context.block,
-                operator_export_type,  # type:ignore[arg-type]
+                operator_export_type,
                 env,
                 False,
             )
