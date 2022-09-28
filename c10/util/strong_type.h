@@ -14,11 +14,6 @@
 #ifndef ROLLBEAR_STRONG_TYPE_HPP_INCLUDED
 #define ROLLBEAR_STRONG_TYPE_HPP_INCLUDED
 
-#if defined(_WIN32)
-// Make sure min/max macros not defined
-#include <c10/util/win32-headers.h>
-#endif
-
 #include <functional>
 #include <istream>
 #include <ostream>
@@ -38,19 +33,11 @@
 #endif
 
 #ifndef STRONG_HAS_STD_FORMAT
-#if __has_include(<format>)
-#define STRONG_HAS_STD_FORMAT 1
-#else
 #define STRONG_HAS_STD_FORMAT 0
-#endif
 #endif
 
 #ifndef STRONG_HAS_FMT_FORMAT
-#if __has_include(<fmt/format.h>)
-#define STRONG_HAS_FMT_FORMAT 1
-#else
 #define STRONG_HAS_FMT_FORMAT 0
-#endif
 #endif
 
 #if STRONG_HAS_STD_FORMAT
