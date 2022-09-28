@@ -24,8 +24,8 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
-    nop, num_of_recompilations, default_partition, default_decompositions,
-    memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
+    nop, default_partition, default_decompositions,
+    memory_efficient_fusion, get_aot_compilation_context
 )
 from torch._decomp import decomposition_table
 
@@ -61,9 +61,6 @@ except ImportError:
 class AOTTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        # NB: We cache on function id, which is unreliable
-        # Can fix by using weakrefs, but not sure if it matters
-        clear_compile_cache()
 
 class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
@@ -292,18 +289,17 @@ class TestAOTAutograd(AOTTestCase):
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
-        start_recompilations = num_of_recompilations()
         f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
         self.assertIsNone(graph_size)
 
+        f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(True):
             out = f(*inps)
             self.assertIsNone(graph_size)
             out.sum().backward()
             self.assertTrue(graph_size > 2)
-        self.assertEqual(num_of_recompilations() - start_recompilations, 2)
 
     def test_output_dict(self):
         def f(x):
@@ -366,6 +362,7 @@ class TestAOTAutograd(AOTTestCase):
 
         f = aot_function(f, compiler)
         out = f(torch.randn(5, requires_grad=True))
+        f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
@@ -730,7 +727,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         inputs = [x, y]
         res = aot_mod(*inputs)
         res[0].sum().backward()
-
 
 only_for = ("cpu")
 instantiate_device_type_tests(
