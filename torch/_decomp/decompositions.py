@@ -1324,12 +1324,11 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
 @reduction_complex_to_real
 def var_correction(
     x: Tensor,
-    dims: Optional[List[int]],
+    dim: Optional[List[int]],
     correction: Optional[int] = None,
     keepdim: bool = False,
 ):
-    if dims is None:
-        dims = []
+    dims: List[int] = [] if dim is None else dim
 
     if x.is_complex():
         # For complex, calculate variance of real and imaginary components
@@ -1347,8 +1346,8 @@ def var_correction(
         n = prod(x.shape)  # type: ignore[arg-type]
     else:
         n = 1
-        for dim in dims:
-            n *= x.shape[dim]
+        for d in dims:
+            n *= x.shape[d]
 
     mean = torch.mean(x, dims, True)
     sub = x - mean
@@ -1364,9 +1363,12 @@ def var_correction(
 @register_decomposition(aten.std.correction)
 @reduction_complex_to_real
 def std_decomposition(
-    x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False
+    x: Tensor,
+    dim: Optional[List[int]],
+    correction: Optional[int] = None,
+    keepdim: bool = False,
 ):
-    return torch.sqrt(torch.var(x, dims, correction=correction, keepdim=keepdim))
+    return torch.sqrt(torch.var(x, dim, correction=correction, keepdim=keepdim))
 
 
 # Questionable decompositions
