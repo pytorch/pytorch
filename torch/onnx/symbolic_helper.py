@@ -14,7 +14,13 @@ import torch._C._onnx as _C_onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import _constants, _patch_torch, _type_utils, errors  # noqa: F401
+from torch.onnx import (  # noqa: F401
+    _constants,
+    _deprecation,
+    _patch_torch,
+    _type_utils,
+    errors,
+)
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils
 from torch.types import Number
@@ -1632,16 +1638,31 @@ def args_have_same_dtype(args):
 
 
 # TODO(justinchuby): Delete these setters, users should set the vars directly.
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "remove its usage and avoid setting internal variables directly",
+)
 def _set_opset_version(opset_version: int):
     GLOBALS.export_onnx_opset_version = opset_version
 
 
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "remove its usage and avoid setting internal variables directly",
+)
 def _set_operator_export_type(operator_export_type):
     GLOBALS.operator_export_type = operator_export_type
 
 
 # This function is for debug use only.
 # onnx_shape_inference = True by default.
+@_deprecation.deprecated(
+    "1.13",
+    "1.14",
+    "remove its usage and avoid setting internal variables directly",
+)
 def _set_onnx_shape_inference(onnx_shape_inference: bool):
     GLOBALS.onnx_shape_inference = onnx_shape_inference
 
