@@ -835,6 +835,7 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 
 @register_decomposition(aten._softmax)
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    x = x.contiguous()
     if half_to_float:
         assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
