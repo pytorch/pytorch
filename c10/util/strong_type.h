@@ -14,6 +14,11 @@
 #ifndef ROLLBEAR_STRONG_TYPE_HPP_INCLUDED
 #define ROLLBEAR_STRONG_TYPE_HPP_INCLUDED
 
+#if defined(_WIN32)
+// Make sure min/max macros not defined
+#include <c10/util/win32-headers.h>
+#endif
+
 #include <functional>
 #include <istream>
 #include <ostream>

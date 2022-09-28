@@ -17,9 +17,11 @@ std::array<PyObject*, static_cast<int>(at::MemoryFormat::NumOptions)>
     memory_format_registry = {};
 } // anonymous namespace
 
-py::object getTHPMemoryFormat(at::MemoryFormat memory_format) {
+PyObject* getTHPMemoryFormat(at::MemoryFormat memory_format) {
   return py::reinterpret_borrow<py::object>(
-      memory_format_registry[static_cast<size_t>(memory_format)]);
+             memory_format_registry[static_cast<size_t>(memory_format)])
+      .release()
+      .ptr();
 }
 
 void initializeMemoryFormats() {

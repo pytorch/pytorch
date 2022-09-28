@@ -132,8 +132,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
-      return torch::utils::getTHPMemoryFormat(
-          static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
+      return py::cast(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
     } else {
       return torch::jit::toPyObject(arguments[idx]);
     }
@@ -2206,7 +2205,8 @@ py::object torchDispatchFromTensorImpl(
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
   int64_t i = 1;
   for (auto& a : extra_args) {
-    if (a.ptr() == nullptr) throw python_error();
+    if (a.ptr() == nullptr)
+      throw python_error();
     PyTuple_SET_ITEM(args.ptr(), i, std::move(a).release().ptr());
     i++;
   }
@@ -2396,7 +2396,7 @@ bool ConcretePyInterpreterVTable::is_contiguous(
             .attr("memory_format")
             .ptr(),
         "torch.ops.aten",
-        {torch::utils::getTHPMemoryFormat(memory_format)});
+        {py::cast(memory_format)});
   }
 
   if (out.is(py::none())) {
@@ -2428,7 +2428,7 @@ bool ConcretePyInterpreterVTable::is_strides_like(
           .attr("default")
           .ptr(),
       "torch.ops.aten",
-      {torch::utils::getTHPMemoryFormat(memory_format)});
+      {py::cast(memory_format)});
 
   if (out.is(py::none())) {
     return self->is_strides_like_default(memory_format);

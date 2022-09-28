@@ -562,7 +562,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool"),
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_contiguous.memory_format(Tensor self, MemoryFormat memory_format) -> bool"),
         [](Stack& stack) {
           auto memory_format = pop(stack).toMemoryFormat();
           auto t = pop(stack).toTensor();
@@ -570,7 +571,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::is_strides_like(Tensor self, MemoryFormat memory_format) -> bool"),
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_strides_like(Tensor self, MemoryFormat memory_format) -> bool"),
         [](Stack& stack) {
           auto memory_format = pop(stack).toMemoryFormat();
           auto t = pop(stack).toTensor();
@@ -578,7 +580,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("aten::is_non_overlapping_and_dense(Tensor self) -> bool"),
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::is_non_overlapping_and_dense(Tensor self) -> bool"),
         [](Stack& stack) {
           auto t = pop(stack).toTensor();
           push(stack, t.unsafeGetTensorImpl()->is_non_overlapping_and_dense());
