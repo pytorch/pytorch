@@ -22,7 +22,7 @@ popd
 
 
 if [[ "${WITH_PUSH:-}" == false ]]; then
-	exit 0
+    exit 0
 fi
 
 # Push functorch docs
