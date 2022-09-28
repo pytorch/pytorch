@@ -131,8 +131,8 @@ void initNvFuserPythonBindings(PyObject* module) {
           [](nvfuser::FusionDefinition& self) -> nvfuser::Tensor {
             FUSER_PERF_SCOPE("FusionDefinition.define_null_tensor");
             nvfuser::Tensor out = self.defineTensor();
-            self.defineRecord(new nvfuser::NullTensorRecord(
-                {self.recordingState(out())}));
+            self.defineRecord(
+                new nvfuser::NullTensorRecord({self.recordingState(out())}));
             return out;
           },
           py::return_value_policy::reference)
