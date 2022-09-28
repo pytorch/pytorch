@@ -34,6 +34,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 def get_cur_mem(rank, result, prefix):
     """Collect memory allocated values in a result dict in MB"""
+    torch._C._cuda_clearCublasWorkspaces()
     result[prefix] = round(torch.cuda.memory_allocated() / 1024 / 1024)
 
 
