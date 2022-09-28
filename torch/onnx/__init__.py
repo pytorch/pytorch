@@ -67,8 +67,6 @@ __all__ = [
     "TrainingMode",
     "TensorProtoDataType",
     "JitScalarType",
-    # Classes
-    "SymbolicContext",
     # Public functions
     "export",
     "export_to_pretty_string",
@@ -87,7 +85,6 @@ __all__ = [
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
-SymbolicContext.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
