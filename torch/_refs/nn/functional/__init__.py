@@ -429,7 +429,7 @@ def _nll_loss_nd(
     ignore_index: int,
 ) -> TensorLikeType:
     utils.check(
-        input.ndim <= 3,
+        input.ndim > 0 and input.ndim <= 3,
         lambda: f"Expected input dimension to be either [1, 2, 3] but recieved {input.ndim}.",
     )
 
@@ -507,6 +507,11 @@ def nll_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
+    utils.check(
+        input.ndim > 0,
+        lambda: f"Expected input tensor to have 1 or more dimensions (got {input.ndim})",
+    )
+
     if size_average is not None or reduce is not None:
         # TODO: raise exception instead of converting value
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
