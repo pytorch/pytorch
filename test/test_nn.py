@@ -6101,6 +6101,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
 
+    def test_load_state_dict_child(self):
+        base_module = nn.Linear(1, 1)
+        model = base_module
+        for _ in range(3):
+            model = nn.Sequential(*[deepcopy(model) for _ in range(10)])
+
+        def hook_fn(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+            module_state_dict = module.state_dict()
+            self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
+
+        model[0][0]._register_load_state_dict_pre_hook(hook_fn, with_module=True)
+        model.load_state_dict(model.state_dict(), strict=True)
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
         # load_state_dict shouldn't cause a reference cycle involving Tensors
