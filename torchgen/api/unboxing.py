@@ -122,7 +122,9 @@ def convert_arguments(f: NativeFunction) -> Tuple[List[Binding], List[str]]:
             )
         argument: Argument = arg.argument
         unboxed_name, _, code, decl = argumenttype_ivalue_convert(
-            argument.type, argument.name, mutable=argument.is_write
+            argument.type,
+            argument.name,
+            mutable=argument.is_write,
         )
         code_list.extend(decl)
         code_list.extend(code)
@@ -149,12 +151,18 @@ def argumenttype_ivalue_convert(
     elif isinstance(t, OptionalType):
         out_name = f"{arg_name}_opt_out"
         code, decl = _gen_code_optional_type(
-            arg_name=arg_name, out_name=out_name, t=t, ctype=ctype
+            arg_name=arg_name,
+            out_name=out_name,
+            t=t,
+            ctype=ctype,
         )
     elif isinstance(t, ListType):
         out_name = f"{arg_name}_list_out"
         code, decl = _gen_code_list_type(
-            arg_name=arg_name, out_name=out_name, t=t, ctype=ctype
+            arg_name=arg_name,
+            out_name=out_name,
+            t=t,
+            ctype=ctype,
         )
     else:
         raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")

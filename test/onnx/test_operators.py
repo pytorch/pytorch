@@ -1,5 +1,11 @@
 # Owner(s): ["module: onnx"]
 
+"""
+Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
+          --no-onnx: no onnx python dependency
+          --produce-onnx-test-data: generate onnx test data
+          --accept: accept onnx updates and overwrite models
+"""
 import glob
 import inspect
 import io
@@ -7,6 +13,9 @@ import itertools
 import os
 import shutil
 import tempfile
+
+# Full diff for expect files
+import unittest
 
 import torch
 import torch.nn as nn
@@ -29,15 +38,6 @@ from torch.onnx.symbolic_helper import (
 )
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfCaffe2, skipIfNoLapack
-
-"""Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
-          --no-onnx: no onnx python dependence
-          --produce-onnx-test-data: generate onnx test data
-          --accept: accept onnx updates and overwrite models
-"""
-
-# Full diff for expect files
-import unittest
 
 unittest.TestCase.maxDiff = None
 
