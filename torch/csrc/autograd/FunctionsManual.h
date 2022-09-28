@@ -256,21 +256,21 @@ at::Tensor clamp_jvp(
     const Tensor& min_t,
     const Tensor& max_p,
     const Tensor& max_t);
-at::IntArrayRef strides_or_error(
+at::SymIntArrayRef strides_or_error(
     const Tensor& input,
     c10::string_view const& input_name);
 at::Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
-    at::IntArrayRef mat1_sizes,
-    at::IntArrayRef mat1_strides,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
     c10::Layout mat1_layout,
     const Scalar& alpha);
 at::Tensor mm_mat2_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,
-    at::IntArrayRef sizes,
-    at::IntArrayRef strides,
+    at::SymIntArrayRef sizes,
+    at::SymIntArrayRef strides,
     c10::Layout layout,
     const at::Scalar& alpha);
 at::Tensor mm_mat1_sparse_backward(
@@ -555,11 +555,11 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
     const bool full_matrices);
 Tensor slice_backward_wrapper(
     const at::Tensor& grad,
-    const c10::IntArrayRef& input_sizes,
+    const c10::SymIntArrayRef& input_sizes,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
-    int64_t step);
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
+    c10::SymInt step);
 std::tuple<Tensor, Tensor> linalg_eig_jvp(
     const Tensor& dA,
     const Tensor& L,

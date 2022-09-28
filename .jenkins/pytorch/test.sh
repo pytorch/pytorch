@@ -109,7 +109,7 @@ if [[ "$TEST_CONFIG" == *dynamo* ]]; then
   export PYTORCH_TEST_WITH_DYNAMO=1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" == *inductor* ]]; then
+if [[ "$TEST_CONFIG" == *inductor* ]]; then
   export PYTORCH_TEST_WITH_INDUCTOR=1
 fi
 
@@ -225,83 +225,32 @@ test_dynamo_shard() {
   fi
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
-
-  if [[ "${TEST_CONFIG}" == *dynamo* ]]; then
-    time python test/run_test.py \
-      --exclude-jit-executor \
-      --exclude-distributed-tests \
-      --exclude \
-        test_autograd \
-        test_proxy_tensor \
-        test_quantization \
-        test_public_bindings \
-        test_dataloader \
-        test_reductions \
-        test_namedtensor \
-        test_namedtuple_return_api \
-        profiler/test_profiler \
-        profiler/test_profiler_tree \
-        test_overrides \
-        test_python_dispatch \
-        test_fx \
-        test_package \
-        test_vmap \
-      --shard "$1" "$NUM_TEST_SHARDS" \
-      --verbose
-  fi
-  if [[ "${TEST_CONFIG}" == *inductor* ]]; then
-    time python test/run_test.py \
-      --exclude-jit-executor \
-      --exclude-distributed-tests \
-      --exclude \
-        test_autograd \
-        test_proxy_tensor \
-        test_quantization \
-        test_public_bindings \
-        test_dataloader \
-        test_reductions \
-        test_namedtensor \
-        test_namedtuple_return_api \
-        profiler/test_profiler \
-        profiler/test_profiler_tree \
-        test_overrides \
-        test_python_dispatch \
-        test_fx \
-        test_package \
-        test_vmap \
-        distributions/test_distributions \
-        lazy/test_reuse_ir \
-        lazy/test_ts_opinfo \
-        nn/test_pooling \
-        test_complex \
-        test_cpp_extensions_aot_ninja \
-        test_cpp_extensions_jit \
-        test_cuda \
-        test_dlpack \
-        test_expanded_weights \
-        test_foreach \
-        test_indexing \
-        test_jit_autocast \
-        test_jit_llga_fuser \
-        test_maskedtensor \
-        test_native_mha \
-        test_nn \
-        test_numpy_interop \
-        test_ops_gradients \
-        test_optim \
-        test_prims \
-        test_schema_check \
-        test_sparse \
-        test_spectral_ops \
-        test_subclass \
-        test_torch \
-        test_type_promotion \
-        test_utils \
-      --shard "$1" "$NUM_TEST_SHARDS" \
-      --continue-through-error \
-      --verbose
-  fi
+  time python test/run_test.py \
+    --exclude-jit-executor \
+    --exclude-distributed-tests \
+    --exclude \
+      test_autograd \
+      test_proxy_tensor \
+      test_quantization \
+      test_public_bindings \
+      test_dataloader \
+      test_reductions \
+      test_namedtensor \
+      test_namedtuple_return_api \
+      profiler/test_profiler \
+      profiler/test_profiler_tree \
+      test_overrides \
+      test_python_dispatch \
+      test_fx \
+      test_package \
+      test_vmap \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   assert_git_not_dirty
+}
+
+test_inductor() {
+  time python test/run_test.py --core --continue-through-error --verbose
 }
 
 test_python_gloo_with_tls() {
@@ -750,21 +699,21 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
-elif [[ "${TEST_CONFIG}" == *dynamo* || "${TEST_CONFIG}" == *inductor* ]] && [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_without_numpy
-  install_jinja2
+elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     install_triton
   fi
+  install_jinja2
   install_torchvision
   checkout_install_torchdynamo
+  test_inductor
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_without_numpy
+  install_torchvision
+  install_torchdynamo
   test_dynamo_shard 1
   test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* || "${TEST_CONFIG}" == *inductor* ]] && [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_jinja2
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-    install_triton
-  fi
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   checkout_install_torchdynamo
   test_dynamo_shard 2
