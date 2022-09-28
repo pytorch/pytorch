@@ -30,7 +30,7 @@ fi
 git rm -rf "$version" || true
 mv "$pt_checkout/functorch/docs/build/html" "$version"
 
-git add "$install_path" || true
+git add "$version" || true
 git status
 git config user.email "soumith+bot@pytorch.org"
 git config user.name "pytorchbot"
