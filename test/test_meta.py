@@ -4,7 +4,7 @@ import torch
 import os
 from enum import Enum
 from torch.overrides import resolve_name
-from torch.utils._pytree import tree_map, tree_flatten
+from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.meta_utils import MetaConverter
 import torch.utils._python_dispatch
 from torch.testing._internal.common_utils import (
@@ -217,7 +217,6 @@ def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
         test_assert(isinstance(meta_r, torch.Tensor), f"but real {i}th result is Tensor")
         test_assert(meta_r.dtype == r.dtype, f"but real dtype was {r.dtype}")
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
-        # NOTE: stride checking is currently disabled
         # See https://github.com/pytorch/pytorch/issues/78050
         if should_check_strides(func):
             same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
@@ -340,6 +339,15 @@ def run_meta_crossref(
         if func is torch.tensor_split:
             # Use original indices_or_sections, this argument is data dependent
             meta_args = (meta_args[0], args[1]) + meta_args[2:]
+        elif func is torch.Tensor.__getitem__:
+            # Ensure boolean tensors use original
+            assert len(args) == 2
+            flat_args, _ = tree_flatten(args[1])
+            flat_meta_args, spec = tree_flatten(meta_args[1])
+            flat_new_args = []
+            for a, ma in zip(flat_args, flat_meta_args):
+                flat_new_args.append(a if isinstance(a, torch.Tensor) and a.dtype in [torch.int8, torch.bool] else ma)
+            meta_args = (meta_args[0], tree_unflatten(flat_new_args, spec))
         elif func is torch.ops.aten.repeat_interleave.Tensor:
             if kwargs.get("output_size", None) is None:
                 meta_args = args
@@ -426,6 +434,7 @@ meta_function_expected_failures = {
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.matrix_exp : {f64, c128, c64, bf16, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
+    torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.ormqr : {f64, c64, c128, f32},
     torch.repeat_interleave : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.take : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
