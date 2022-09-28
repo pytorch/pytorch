@@ -28,7 +28,7 @@ from torch.onnx._exporter_states import (
     SymbolicContext,  # Special case class import for readability
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -6304,7 +6304,7 @@ def prim_tolist(g, input, dim_val, elem_ty_val):
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
 def prim_device(
-    ctx: SymbolicContext, g: torchscript.GraphContext, *inputs, **kwargs
+    ctx: SymbolicContext, g: jit_utils.GraphContext, *inputs, **kwargs
 ) -> None:
     output_type = ctx.cur_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
@@ -6328,7 +6328,7 @@ def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs) -> List[_C.Value]:
     opset_version = GLOBALS.export_onnx_opset_version
 
     old_blocks = tuple(n.blocks())
-    new_op_outputs, new_block_contexts, new_node = torchscript.add_op_with_blocks(
+    new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
         g, "Loop", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
     )
 
@@ -6435,7 +6435,7 @@ def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
         return final_b_list
     else:
         old_blocks = tuple(n.blocks())
-        new_op_outputs, new_block_contexts, new_node = torchscript.add_op_with_blocks(
+        new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
             g, "If", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
         )
 

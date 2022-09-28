@@ -14,7 +14,7 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._internal import _beartype, registration, torchscript
+from torch.onnx._internal import _beartype, jit_utils, registration
 
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)
@@ -214,7 +214,7 @@ def tensor_split(g, self, indices_or_sections, dim, _outputs=None):
 
         final_splits = g.op("SequenceEmpty")
         # Loop inputs
-        loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+        loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
             g, "Loop", loop_len, loop_condition, final_splits, outputs=1, n_blocks=1
         )
 
@@ -573,7 +573,7 @@ def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     final_splits = g.op("SequenceEmpty")
 
     # Loop inputs
-    loop, (loop_context,), _ = torchscript.add_op_with_blocks(
+    loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
         g, "Loop", loop_len, loop_condition, final_splits, n_blocks=1
     )
 
@@ -710,7 +710,7 @@ def diagonal(g, self, offset, dim1, dim2):
         ),
     )
 
-    if_op, (if_context, else_context), _ = torchscript.add_op_with_blocks(
+    if_op, (if_context, else_context), _ = jit_utils.add_op_with_blocks(
         g, "If", overrun_cond, n_blocks=2
     )
 
