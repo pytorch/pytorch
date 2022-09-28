@@ -920,7 +920,7 @@ struct NullTensorRecord : RecordFunctor {
 
   virtual bool operator==(const RecordFunctor& other) const final {
     auto result = false;
-    if (auto child_ptr = dynamic_cast<const NullTensorRecord*>(&other)) {
+    if (dynamic_cast<const NullTensorRecord*>(&other)) {
       result = RecordFunctor::operator==(other);
     }
     return result;
