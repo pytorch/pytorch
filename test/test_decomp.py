@@ -3,8 +3,8 @@
 from collections import defaultdict
 from torch import Tensor
 import torch.autograd
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 from torch._decomp import decomposition_table
+from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch.utils._mode_utils import no_dispatch
@@ -384,17 +384,16 @@ class TestDecomp(TestCase):
 
         saved_precision = self.precision
         saved_rel_tol = self.rel_tol
+        test_case = self
 
-        class DecompCrossRefMode(torch.Tensor):
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        class DecompCrossRefMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 with no_dispatch():
-                    return cls._torch_dispatch(func, types, args, kwargs)
+                    return self._torch_dispatch(func, types, args, kwargs)
 
-            @classmethod
-            def _torch_dispatch(cls, func, types, args=(), kwargs=None):
-                self.precision = saved_precision
-                self.rel_tol = saved_rel_tol
+            def _torch_dispatch(self, func, types, args=(), kwargs=None):
+                test_case.precision = saved_precision
+                test_case.rel_tol = saved_rel_tol
 
                 called.add(func)
                 all_called[func] += 1
@@ -441,14 +440,14 @@ class TestDecomp(TestCase):
                             assert type(orig) == type(decomp)
                             assert orig == decomp
                             continue
-                        op_assert_ref(self, func, test_dtype, i, orig, decomp, ref, args, kwargs)
+                        op_assert_ref(test_case, func, test_dtype, i, orig, decomp, ref, args, kwargs)
                 else:
                     for orig, decomp in zip(real_out, decomp_out):
                         if not isinstance(orig, torch.Tensor):
                             assert type(orig) == type(decomp)
                             assert orig == decomp
                             continue
-                        op_assert_equal(self, func, test_dtype, orig, decomp, args, kwargs)
+                        op_assert_equal(test_case, func, test_dtype, orig, decomp, args, kwargs)
 
                 return real_out_unflat
 
@@ -487,7 +486,7 @@ class TestDecomp(TestCase):
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
+                with DecompCrossRefMode(), enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
@@ -496,7 +495,7 @@ class TestDecomp(TestCase):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
-                    with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
+                    with DecompCrossRefMode(), enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
                         check_decomposed(op.aten_backward_name)
@@ -505,7 +504,7 @@ class TestDecomp(TestCase):
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 decomposed.clear()
-                with enable_torch_dispatch_mode(DecompCrossRefMode), enable_python_dispatcher():
+                with DecompCrossRefMode(), enable_python_dispatcher():
                     func(*args, **kwargs)
                 if not run_all:
                     check_decomposed(aten_name)
