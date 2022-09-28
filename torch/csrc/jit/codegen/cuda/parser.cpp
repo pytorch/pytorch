@@ -2312,7 +2312,7 @@ class IrParser {
 
               auto data_type = DataType::Null;
               if (const auto opt_ivalue = toIValue(node->input(2))) {
-                if (!opt_ivalue.value().isNone()) {
+                if (!opt_ivalue->isNone()) {
                   data_type = aten_to_data_type(opt_ivalue->toScalarType());
                 }
               }
@@ -3043,8 +3043,8 @@ class IrParser {
 
     {
       std::array<const char*, kNumAminAmaxOps> BinaryFloatOp = {
-          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor",
-          "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor"};
+          "aten::amax(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor",
+          "aten::amin(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor"};
       for (auto signature : BinaryFloatOp) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
@@ -4008,11 +4008,11 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto amax_schema =
       getOperatorForLiteral(
-          "aten::amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
+          "aten::amax(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor")
           ->schema();
   static auto amin_schema =
       getOperatorForLiteral(
-          "aten::amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor")
+          "aten::amin(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor")
           ->schema();
   if (node->matches(amax_schema) || node->matches(amin_schema)) {
     switch (offset) {
