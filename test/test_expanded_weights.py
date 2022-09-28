@@ -273,7 +273,7 @@ class TestExpandedWeightFunctional(TestCase):
 
         expected = [torch.stack(grad) for grad in zip(*expected)]
         for (res, exp) in zip(result, expected):
-            self.assertEqual(res, exp, atol=3e-4, rtol=5e-5)
+            self.assertEqual(res, exp, atol=4e-4, rtol=5e-5)
 
 
     def test_cnn_model_sum(self, device):

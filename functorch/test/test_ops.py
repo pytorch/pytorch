@@ -653,7 +653,7 @@ class TestOperators(TestCase):
             generator = get_fallback_and_vmap_exhaustive(
                 vjp_of_vjp, args_and_cotangents, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
-                self.assertEqual(loop_out, batched_out, atol=2e-2)
+                self.assertEqual(loop_out, batched_out, atol=2e-2, rtol=2e-2)
 
     vmapvjp_fail = vjp_fail.union({
         # -------------------- ALLOWED FAILURES --------------------------------
