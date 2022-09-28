@@ -10,6 +10,6 @@
 TEST(NestedTest, Nested) {
   auto a = torch::randn({2, 3});
   auto b = torch::randn({4, 5});
-  auto nt = torch::nested_tensor({a, b});
+  auto nt = torch::nested::nested_tensor({a, b});
   torch::nested::to_padded_tensor(nt, 0);
 }
