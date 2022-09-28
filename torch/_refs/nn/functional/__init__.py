@@ -1,4 +1,3 @@
-import math
 from typing import Optional, Union
 
 import torch
@@ -29,7 +28,6 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
-    "gaussian_nll_loss",
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
@@ -147,64 +145,6 @@ def elu(
         rhs = torch.expm1(a)
 
     return torch.where(a > 0, a, rhs)
-
-
-# Pure Python implementation - don't register decomp
-@elementwise_type_promotion_wrapper(
-    type_promoting_args=("input", "target", "var"),
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-)
-def gaussian_nll_loss(
-    input: TensorLikeType,
-    target: TensorLikeType,
-    var: TensorLikeType,
-    full: bool = False,
-    eps: float = 1e-6,
-    reduction: str = "mean",
-) -> TensorLikeType:
-    # Check var shape
-    # var, which is a tensor of variances, can either represent a homoscedastic
-    # assumption (data has the same variance) or a heteroscedastic one (data has
-    # different variances).
-    #
-    # If var is the same shape as input, it's the heteroscedastic case.
-    # If var is *not* the same shape as input, it's the homoscedastic case.
-    #
-    # To support broadcasting, the following sub-cases are allowed in the
-    # homoscedastic case.  With all other sizes being the same as input (when
-    # comparing from the outermost dimension), var must either have:
-    # 1) one fewer dimension or
-    # 2) the final dimension of 1
-    if var.shape != input.shape:
-        # If shapes are not equal, it's the homoscedastic case or invalid input
-        if input.shape[:-1] == var.shape:
-            # Homoscedastic case 1
-            var = torch.unsqueeze(var, -1)
-        else:
-            # Homoscedastic case 2 or invalid input
-            check(
-                input.shape[:-1] == var.shape[:-1] and var.shape[-1] == 1,
-                lambda: "var is of incorrect size",
-                exc_type=ValueError,
-            )
-
-    # Check validity of reduction mode
-    _check_reduction_value(reduction)
-
-    # Clamp for stability
-    # Done in the no_grad context so that clamping is not affecting the
-    # gradients.
-    with torch.no_grad():
-        var = var.clamp(min=eps)
-
-    # Calculate the loss
-    diff = input - target
-    loss = 0.5 * (torch.log(var) + diff * diff / var)
-    if full:
-        # Avoid inplace add
-        loss = loss + 0.5 * math.log(2 * math.pi)
-
-    return _apply_loss_reduction(loss, reduction)
 
 
 @register_decomposition(torch.ops.aten.relu)

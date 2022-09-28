@@ -7,8 +7,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
+import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64
 import torch
 from torch import Tensor
 import functools
@@ -22,11 +23,12 @@ from common_utils import (
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
     get_exhaustive_batched_inputs_batch_norm_is_training,
+    decorate,
     xfail,
     skip,
     skipOps,
     tol1,
-    # tol2,
+    tol2,
     opsToleranceOverride,
     check_vmap_fallback,
     is_batch_norm_training,
@@ -477,19 +479,21 @@ class TestOperators(TestCase):
         # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
         # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
         # The failure occurred for item [0]
-        xfail('_masked.prod')
+        xfail('masked.prod')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('prod',
              {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
-        tol1('_masked.cumprod',
+        tol1('masked.cumprod',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.vander',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+        tol2('linalg.det', 'singular',
+             {torch.float32: tol(atol=2e-05, rtol=2e-05)}),
     ))
     def test_vjpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -559,11 +563,8 @@ class TestOperators(TestCase):
         skip("nn.functional.feature_alpha_dropout", "with_train"),  # calls random op
         skip("nn.functional.fractional_max_pool2d"),  # calls random op
         skip("nn.functional.fractional_max_pool3d"),  # calls random op
+        skip("nn.functional.gaussian_nll_loss"),  # takes too long
         skip('nn.functional._scaled_dot_product_attention'),  # randomness
-        # It looks like you're either (1) calling .item() on a Tensor or
-        # (2) attempting to use a Tensor in some data-dependent control flow or
-        # (3) encountering this error in PyTorch internals.
-        xfail("nn.functional.gaussian_nll_loss"),
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.instance_norm"),
@@ -591,8 +592,8 @@ class TestOperators(TestCase):
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("_masked.softmax", device_type='cuda'),  # Mismatch in values!
-        xfail("_masked.softmin", device_type='cuda'),  # Mismatch in values!
+        xfail("masked.softmax", device_type='cuda'),  # Mismatch in values!
+        xfail("masked.softmin", device_type='cuda'),  # Mismatch in values!
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
@@ -684,7 +685,6 @@ class TestOperators(TestCase):
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
-        xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('narrow'),  # .item() call
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
@@ -762,8 +762,9 @@ class TestOperators(TestCase):
 
         # ---------------------------- BUGS ------------------------------------
         # The following are bugs that we should fix
+        decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
-        xfail('_masked.mean'),  # silent incorrectness (nan difference)
+        xfail('masked.mean'),  # silent incorrectness (nan difference)
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
@@ -836,7 +837,7 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('copysign'),
         xfail('complex'),
-        skip('_masked.mean'),  # ???
+        skip('masked.mean'),  # ???
         xfail('masked_scatter'),
         xfail('index_fill'),
         xfail('put'),
@@ -874,7 +875,7 @@ class TestOperators(TestCase):
         xfail('linalg.lu_solve', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
-        xfail('_masked.cumprod', ''),
+        xfail('masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -982,7 +983,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('segment_reduce', 'offsets'),
-        xfail('_masked.cumprod', ''),
+        xfail('masked.cumprod', ''),
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
@@ -1031,7 +1032,6 @@ class TestOperators(TestCase):
         xfail('__getitem__', ''),
         xfail('index_put', ''),
         xfail('view_as_complex'),
-        xfail('nn.functional.gaussian_nll_loss'),
         xfail('masked_select'),
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         skip('nn.functional.fractional_max_pool3d'),  # generator works on cpu, fails on cuda
@@ -1148,9 +1148,9 @@ class TestOperators(TestCase):
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
     }))
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
-        tol1('_masked.prod',
+        tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
-        tol1('_masked.cumprod',
+        tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),

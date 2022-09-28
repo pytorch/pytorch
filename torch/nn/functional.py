@@ -2762,6 +2762,7 @@ def poisson_nll_loss(
     return ret
 
 
+# TODO: Pure Python impl - don't add a primTorch ref
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
@@ -2773,21 +2774,6 @@ def gaussian_nll_loss(
     r"""Gaussian negative log likelihood loss.
 
     See :class:`~torch.nn.GaussianNLLLoss` for details.
-
-    Args:
-        input: expectation of the Gaussian distribution.
-        target: sample from the Gaussian distribution.
-        var: same shape as the input, or same shape as the input but with the
-            last dimension equal to 1, or same shape as the input but with one
-            fewer dimension (to allow for broadcasting).  If ``var < 0``, the
-            behavior is undefined.
-        full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
-        eps (float, optional): value added to var, for stability. Default: 1e-6.
-        reduction (str, optional): specifies the reduction to apply to the output:
-            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
-            ``'mean'``: the output is the average of all batch member losses,
-            ``'sum'``: the output is the sum of all batch member losses.
-            Default: ``'mean'``.
     """
     if has_torch_function_variadic(input, target, var):
         return handle_torch_function(
@@ -2800,26 +2786,29 @@ def gaussian_nll_loss(
             eps=eps,
             reduction=reduction,
         )
-
-    # Check var size
-    # If var.size == input.size, the case is heteroscedastic and no further checks are needed.
-    # Otherwise:
-    if var.size() != input.size():
-
-        # If var is one dimension short of input, but the sizes match otherwise, then this is a homoscedastic case.
-        # e.g. input.size = (10, 2, 3), var.size = (10, 2)
-        # -> unsqueeze var so that var.shape = (10, 2, 1)
-        # this is done so that broadcasting can happen in the loss calculation
-        if input.size()[:-1] == var.size():
+    # Check var shape
+    # var, which is a tensor of variances, can either represent a homoscedastic
+    # assumption (data has the same variance) or a heteroscedastic one (data has
+    # different variances).
+    #
+    # If var is the same shape as input, it's the heteroscedastic case.
+    # If var is *not* the same shape as input, it's the homoscedastic case.
+    #
+    # To support broadcasting, the following sub-cases are allowed in the
+    # homoscedastic case.  With all other sizes being the same as input (when
+    # comparing from the outermost dimension), var must either have:
+    # 1) one fewer dimension or
+    # 2) the final dimension of 1
+    if var.shape != input.shape:
+        # Homoscedastic case 1
+        if input.shape[:-1] == var.shape:
             var = torch.unsqueeze(var, -1)
 
-        # This checks if the sizes match up to the final dimension, and the final dimension of var is of size 1.
-        # This is also a homoscedastic case.
-        # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
-        elif input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1:  # Heteroscedastic case
+        # Homoscedastic case 2
+        elif input.shape[:-1] == var.shape[:-1] and var.shape[-1] == 1:
             pass
 
-        # If none of the above pass, then the size of var is incorrect.
+        # Invalid input
         else:
             raise ValueError("var is of incorrect size")
 
@@ -3859,7 +3848,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             if len(size) != dim:
                 raise ValueError(
                     "Input and output must have the same number of spatial dimensions, but got "
-                    f"input with with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
+                    f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
 
