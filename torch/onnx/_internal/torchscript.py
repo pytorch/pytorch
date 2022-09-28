@@ -69,12 +69,10 @@ class GraphContext(_WithOp):
         outputs: int = 1,
         **kwargs,
     ):
-        """Creates an ONNX operator "opname", taking "args" as inputs and attributes "kwargs".
+        """Creates an ONNX operator "opname", taking "raw_args" as inputs and attributes "kwargs".
 
         The set of operators and the inputs/attributes they take
         is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
-
-        This function is monkey-patched onto Graph.
 
         Args:
             opname: The ONNX operator name, e.g., `Abs` or `Add`, or an operator qualified
@@ -84,8 +82,8 @@ class GraphContext(_WithOp):
             outputs: The number of outputs this operator returns.
                 By default an operator is assumed to return a single output.
                 If `outputs` is greater than one, this functions returns a tuple
-                of output `Node`, representing each output of the ONNX operator
-                in positional.
+                of output `Value`, representing each output of the ONNX operator
+                in order.
             kwargs: The attributes of the ONNX operator, whose keys are named
                 according to the following convention: `alpha_f` indicates
                 the `alpha` attribute with type `f`.  The valid type specifiers are
@@ -95,7 +93,7 @@ class GraphContext(_WithOp):
                 that takes a list of integers).
 
         Returns:
-            The node representing the single output of this operator (see the `outputs`
+            The value representing the single output of this operator (see the `outputs`
             keyword argument for multi-return nodes).
         """
         # FIXME(justinchuby): Add the return type back once we know how to handle mypy
@@ -125,7 +123,7 @@ def add_op_with_blocks(
     n_blocks: int = 1,
     **attributes,
 ) -> Tuple[Any, Tuple[GraphContext, ...], _C.Node]:
-    """Creates an ONNX operator "opname", taking "args" as inputs and attributes "kwargs".
+    """Creates an ONNX operator "opname", taking inputs and attributes.
 
     Args:
         graph_context: The context for the current graph.
@@ -135,14 +133,14 @@ def add_op_with_blocks(
         outputs: The number of outputs this operator returns.
             By default an operator is assumed to return a single output.
             If `outputs` is greater than one, this functions returns a tuple
-            of output `Node`, representing each output of the ONNX operator
-            in positional.
+            of output `Value`, representing each output of the ONNX operator
+            in order.
         n_blocks: The number of sub-blocks to create in the node.
         attributes: The attributes of the ONNX operator.
 
     Returns:
         A tuple of (output_values, new_contexts, node) where:
-            output_values: The node representing the single output of this operator
+            output_values: ONe or more output value of this operator
                 (see the `outputs` keyword argument for multi-return nodes).
             new_contexts: A tuple of new graph contexts for each sub-block.
             node: The node representing the operator.
@@ -157,16 +155,8 @@ def add_op_with_blocks(
     new_contexts = []
     for _ in range(n_blocks):
         new_block = node.addBlock()
-        # Create new copy of the graph context and update the block
-        new_context = GraphContext(
-            graph_context.graph,
-            new_block,
-            graph_context.opset,
-            graph_context.original_node,
-            graph_context.params_dict,
-            graph_context.env,
-        )
-        new_context.block = new_block
+        # Create shallow copy of the graph context and update the block
+        new_context = dataclasses.replace(graph_context, block=new_block)
         new_contexts.append(new_context)
 
     return output_values, tuple(new_contexts), node
@@ -196,8 +186,8 @@ def _add_op(
         outputs: The number of outputs this operator returns.
             By default an operator is assumed to return a single output.
             If `outputs` is greater than one, this functions returns a tuple
-            of output `Node`, representing each output of the ONNX operator
-            in positional.
+            of output `Value`, representing each output of the ONNX operator
+            in order.
         kwargs: The attributes of the ONNX operator, whose keys are named
             according to the following convention: `alpha_f` indicates
             the `alpha` attribute with type `f`.  The valid type specifiers are
@@ -208,7 +198,7 @@ def _add_op(
 
     Returns:
         (Union[_C.Value, Tuple[_C.Value, ...]])
-        The node representing the single output of this operator (see the `outputs`
+        The value representing the single output of this operator (see the `outputs`
         keyword argument for multi-return nodes).
     """
     inputs = [_const_if_tensor(graph_context, arg) for arg in args]
