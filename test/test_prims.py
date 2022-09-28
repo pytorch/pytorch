@@ -27,6 +27,7 @@ from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, 
 import torch._prims as prims
 from torch._prims.executor import make_traced
 import torch._refs as refs
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 if TEST_SCIPY:
@@ -163,6 +164,28 @@ class TestPrims(TestCase):
             len(ops_without_nvfuser_impl) == 0
         ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
             "while there exists nvfuser implementations for them.")
+
+    def test_skip_ops_nvfuser_prims_mode(self, device):
+        from torch._prims.context import NvfuserPrimsMode
+
+        a = torch.randn(5, 5, device=device)
+
+        def func(a):
+            return torch.ops.prims.sin.default(a)
+
+        skip_ops = {"prims.sin.default", }
+        with NvfuserPrimsMode(skip_ops=skip_ops):
+            gm = make_fx(func)(a)
+
+        includes_any_prims_sin = any(
+            node.target == torch.ops.prims.sin.default for node in gm.graph.nodes
+        )
+        self.assertTrue(includes_any_prims_sin)
+        include_any_nvprims_sin = any(
+            node.target == torch.ops.nvprims.sin.default for node in gm.graph.nodes
+        )
+        self.assertFalse(include_any_nvprims_sin)
+
 
     @onlyCUDA
     @skipCUDAIfRocm

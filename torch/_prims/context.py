@@ -108,6 +108,9 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     nvprim does not exist.
     """
 
+    def __init__(self, *, skip_ops=()):
+        self.skip_ops = skip_ops
+
     def __torch_function__(
         self,
         orig_func: Callable,
@@ -117,6 +120,10 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     ):
         if kwargs is None:
             kwargs = {}
+
+        if torch.overrides.resolve_name(orig_func) in self.skip_ops:
+            return orig_func(*args, **kwargs)
+
         if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
             orig_func, torch._ops.OpOverloadPacket
         ):
