@@ -315,7 +315,7 @@ inline ScalarType get_dtype_from_self(
 
 TORCH_IMPL_FUNC(amax_out_mps)
    (const Tensor& input_t,
-    at::OptionalIntArrayRef dim,
+    IntArrayRef dim,
     bool keepdim,
     const Tensor& output_t) {
 
@@ -324,7 +324,7 @@ TORCH_IMPL_FUNC(amax_out_mps)
 
 TORCH_IMPL_FUNC(amin_out_mps)
    (const Tensor& input_t,
-    at::OptionalIntArrayRef dim,
+    IntArrayRef dim,
     bool keepdim,
     const Tensor& output_t) {
 
@@ -333,12 +333,8 @@ TORCH_IMPL_FUNC(amin_out_mps)
 
 Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
 
-  auto num_dims = self.dim();
-
-  int64_t dims[num_dims];
-
-  for(int i = 0; i < num_dims; i++)
-    dims[i] = i;
+  std::vector<int64_t> dims(self.dim());
+  std::iota(dims.begin(), dims.end(), 0);
 
   Tensor output_t = at::native::empty_mps(
                       {},
@@ -348,13 +344,13 @@ Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
                       c10::nullopt,
                       c10::nullopt);
 
-  reduction_out_mps(self, IntArrayRef(dims, num_dims), false, opt_dtype, const_cast<Tensor&>(output_t), MPSReductionType::PROD, "prod_mps");
+  reduction_out_mps(self, IntArrayRef(dims), false, opt_dtype, const_cast<Tensor&>(output_t), MPSReductionType::PROD, "prod_mps");
 
   return output_t;
 }
 
 
-Tensor count_nonzero_mps(const Tensor& self, OptionalIntArrayRef dims){
+Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
   NSMutableArray<NSNumber*> *axes = nil;
   NSMutableArray<NSNumber*> *apparent_input_shape = nil;
   NSMutableArray<NSNumber*> *apparent_output_shape = nil;
@@ -395,7 +391,7 @@ TORCH_IMPL_FUNC(mean_out_mps)
 TORCH_IMPL_FUNC(norm_out_mps)
 (const Tensor& input_tensor,
  const OptionalScalarRef opt_p,
- OptionalIntArrayRef opt_dim,
+ IntArrayRef dim,
  bool keepdim,
  const Tensor& output_t)
 {
@@ -406,13 +402,10 @@ TORCH_IMPL_FUNC(norm_out_mps)
 
   IntArrayRef input_shape = input_t.sizes();
 
-  if (opt_dim.has_value()) {
-    IntArrayRef dim = opt_dim.value();
-    for(int i = 0; i < dim.size(); i++) {
-      auto wrap_dim = maybe_wrap_dim(dim[i], input_shape.size());
-      TORCH_CHECK(wrap_dim < input_shape.size(),
-      "norm_out_mps: reduction dim must be in the range of input shape")
-    }
+  for(int i = 0; i < dim.size(); i++) {
+    auto wrap_dim = maybe_wrap_dim(dim[i], input_shape.size());
+    TORCH_CHECK(wrap_dim < input_shape.size(),
+    "norm_out_mps: reduction dim must be in the range of input shape")
   }
   namespace native_mps = at::native::mps;
 
@@ -427,7 +420,7 @@ TORCH_IMPL_FUNC(norm_out_mps)
   bool pIsNegInf = (p == -numeric_limits<double>::infinity());
 
   int64_t num_input_dims = input_shape.size();
-  int64_t num_reduce_dims = opt_dim.has_value() ? opt_dim.value().size() : 0;
+  int64_t num_reduce_dims = dim.size();
   int64_t num_output_dims;
 
   // For output shape calculation, assume that keepdim is true
@@ -437,7 +430,7 @@ TORCH_IMPL_FUNC(norm_out_mps)
 
   // Reduction axes
   NSMutableArray<NSNumber *> *axes;
-  set_axes(axes, num_reduce_dims, opt_dim, input_shape.size());
+  set_axes(axes, num_reduce_dims, dim, input_shape.size());
 
   set_apparent_shapes(apparent_output_shape,
                       apparent_input_shape,
