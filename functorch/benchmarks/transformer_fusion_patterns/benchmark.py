@@ -1,5 +1,5 @@
 import torch
-from functorch.compile import memory_efficient_fusion, clear_compile_cache
+from functorch.compile import memory_efficient_fusion
 import benchmark_helper
 
 
@@ -159,7 +159,6 @@ class LayerNormSigmoid:
 
 for cl in [DropoutResBias, BiasReluDropout, DropoutResBiasScalar, BiasDropoutResLayerNorm, LayerNormSigmoid]:
     # Clear the compile cache
-    clear_compile_cache()
 
     # Get the function and inputs
     obj = cl()
