@@ -23,8 +23,8 @@
 #include <cfloat>
 #include <cmath>
 
-#define START_IND(a,b,c) (int)std::floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)std::ceil((float)((a + 1) * c) / b)
+#define START_IND(a,b,c) ((int64_t)((a / b) * c + ((a % b) * c) / b))
+#define END_IND(a,b,c) (1 + ((int64_t)(a + 1) * c - 1) / b)
 
 #define START_IND_INT(a,b,c) ((a * c) / b)
 #define END_IND_INT(a,b,c) (((a + 1) * c + b - 1) / b)

@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   do_update_viablestrict:
@@ -51,4 +51,6 @@ jobs:
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
           echo "Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
-          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict
+          # Pushing an older green commit here will fail because it's non-fast-forward, which is ok
+          # to ignore because we already have the later green commit in visable/strict
+          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict || true

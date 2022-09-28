@@ -143,6 +143,7 @@ c10::FunctionSchema class_base::withNewArguments(
     new_args.emplace_back(
         default_arg.name_,
         old_arg.type(),
+        old_arg.real_type(),
         old_arg.N(),
         default_arg.value_);
   }

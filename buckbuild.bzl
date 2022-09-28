@@ -22,6 +22,7 @@ load(
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
+    "torch_mobile_tracer_sources",
 )
 load(
     ":pt_ops.bzl",
@@ -249,6 +250,7 @@ PT_BACKEND_HEADERS = [
     "CompositeExplicitAutograd",
     "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
+    "CompositeImplicitAutogradNestedTensor",
     "Meta",
 ]
 
@@ -307,6 +309,7 @@ def get_aten_generated_files(enabled_backends):
     src_files = [
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
         "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
@@ -327,10 +330,13 @@ def get_aten_generated_files(enabled_backends):
         "Operators_4.cpp",
         "CompositeImplicitAutogradFunctions.h",
         "CompositeImplicitAutogradFunctions_inl.h",
+        "CompositeImplicitAutogradNestedTensorFunctions.h",
+        "CompositeImplicitAutogradNestedTensorFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
@@ -364,7 +370,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
@@ -502,6 +508,16 @@ def copy_template_registration_files(name, apple_sdks = None):
         default_outs = ["."],
         apple_sdks = apple_sdks,
     )
+
+def get_feature_tracer_source_list():
+    """
+    Return just the Feature specific handlers used in the model tracer.
+    """
+    sources = []
+    for s in torch_mobile_tracer_sources:
+        if s.endswith("Tracer.cpp"):
+            sources.append(s)
+    return sources
 
 def pt_operator_query_codegen(
         name,
@@ -803,6 +819,7 @@ def define_buck_targets(
             ("aten/src", "ATen/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
+            ("aten/src", "ATen/functorch/**/*.h"),
             ("aten/src", "ATen/quantized/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
             ("aten/src", "ATen/metal/*.h"),
@@ -865,6 +882,7 @@ def define_buck_targets(
                 ("", "torch/custom_class_detail.h"),
                 # Add again due to namespace difference from aten_header.
                 ("", "aten/src/ATen/*.h"),
+                ("", "aten/src/ATen/functorch/**/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ],
             exclude = [
@@ -1083,6 +1101,8 @@ def define_buck_targets(
             "CompositeExplicitAutogradNonFunctionalFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions_inl.h]",
             "CompositeImplicitAutogradFunctions.h": ":gen_aten[CompositeImplicitAutogradFunctions.h]",
             "CompositeImplicitAutogradFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradFunctions_inl.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions_inl.h]",
             "FunctionalInverses.h": ":gen_aten[FunctionalInverses.h]",
             "Functions.h": ":gen_aten[Functions.h]",
             "MethodOperators.h": ":gen_aten[MethodOperators.h]",
@@ -1246,12 +1266,8 @@ def define_buck_targets(
     pt_xplat_cxx_library(
         name = "torch_model_tracer",
         srcs = [
-            "torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/CustomClassTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
             "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
-        ],
+        ] + get_feature_tracer_source_list(),
         header_namespace = "",
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
@@ -1417,6 +1433,7 @@ def define_buck_targets(
             "torch/csrc/autograd/VariableTypeManual.cpp",
             "torch/csrc/autograd/FunctionsManual.cpp",
             "torch/csrc/api/src/data/datasets/mnist.cpp",
+            "torch/csrc/jit/mobile/quantization.cpp",
             "torch/csrc/jit/mobile/train/export_data.cpp",
             "torch/csrc/jit/mobile/train/optim/sgd.cpp",
             "torch/csrc/jit/mobile/train/random.cpp",

@@ -411,7 +411,8 @@ SchemaTypeParser::parseFakeAndRealType() {
     real_value = parseBaseType();
     if (real_value->kind() == ScalarTypeType::Kind ||
         real_value->kind() == MemoryFormatType::Kind ||
-        real_value->kind() == LayoutType::Kind) {
+        real_value->kind() == LayoutType::Kind ||
+        real_value->kind() == SymIntType::Kind) {
       fake_value = c10::TypeFactory::get<IntType>();
     } else {
       fake_value = real_value;
