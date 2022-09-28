@@ -428,8 +428,8 @@ def _nll_loss_nd(
     ignore_index: int,
 ) -> TensorLikeType:
     utils.check(
-        input.ndim <= 4 and input.ndim != 3,
-        lambda: f"Expected input dimension to be either [1, 2, 4] but recieved {input.ndim}.",
+        input.ndim <= 3,
+        lambda: f"Expected input dimension to be either [1, 2, 3] but recieved {input.ndim}.",
     )
 
     utils.check(
@@ -471,18 +471,15 @@ def _nll_loss_nd(
         batch_size = input.shape[0]
         loss = -input[torch.arange(batch_size), target] * current_weight
     else:
-        # 4D case - Image Inputs
-        # input (N batch size, C classes, H height, W width)
+        # 3D case (N batch size, C classe, K dimensions)
+        # input (N batch size, C classes, K)
         batch_size = input.shape[0]
-        height = input.shape[2]
-        width = input.shape[3]
-        extent = height * width
+        extent = input.shape[2]
         numel = batch_size * extent
         indices = torch.arange(numel)
         bdx = indices // extent
-        hdx = (indices - (bdx * extent)) // width
-        wdx = indices % width
-        loss = -input[bdx, flat_target, hdx, wdx] * current_weight
+        kdx = indices % extent
+        loss = -input[bdx, flat_target, kdx] * current_weight
     loss = torch.reshape(loss, target.shape)
 
     if reduction == "none":
@@ -528,34 +525,25 @@ def nll_loss(
     #   => Batch Size: 1, Input: (C), Target: ()
     # ndim == 2 (k = 1)
     #   => Batch Size: N, Input: (N, C), Target: (N)
-    # ndim == 4 (Image Inputs)
-    #   => Batch Size: N, Input: (N, C, H, W), Target: (N, H, W)
-    #
-    # For ndim == 3 or ndim > 4, we reshape the input and target to 4-D case.
-    # Input (N batch-size, C classes, k-dimensions)
-    # Target (N batch-size, k-dimensions)
-    if input.ndim <= 4 and input.ndim != 3:
+    # ndim == 3 (k > 1)
+    #   => Batch Size: N, Input: (N, C, K), Target: (N, K)
+    if input.ndim <= 3:
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
 
-    batch_size = input.shape[0]
-    num_classes = input.shape[1]
-    out_size = [batch_size] + list(input.shape[2:])
-
+    # For ndim > 3, we reshape the input and target to 3-D case.
+    # Input (N batch-size, C classes, k-dimensions)
+    # Target (N batch-size, k-dimensions)
     utils.check(
         target.shape[1:] == input.shape[2:],
         lambda: f"Expected target shape {out_size} but got {target.shape}",
     )
 
-    if input.numel() > 0:
-        input = torch.reshape(input, [batch_size, num_classes, 1, -1])
-    else:
-        input = torch.reshape(input, [batch_size, num_classes, 0, 0])
+    batch_size = input.shape[0]
+    num_classes = input.shape[1]
+    out_size = [batch_size] + list(input.shape[2:])
 
-    if target.numel() > 0:
-        target = torch.reshape(target, [batch_size, 1, -1])
-    else:
-        target = torch.reshape(target, [batch_size, 0, 0])
-
+    input = torch.reshape(input, [batch_size, num_classes, -1])
+    target = torch.reshape(target, [batch_size, -1])
     if reduction != "none":
         return _nll_loss_nd(input, target, weight, reduction, ignore_index)
     else:
