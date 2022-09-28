@@ -256,21 +256,21 @@ at::Tensor clamp_jvp(
     const Tensor& min_t,
     const Tensor& max_p,
     const Tensor& max_t);
-at::SymIntArrayRef strides_or_error(
+at::IntArrayRef strides_or_error(
     const Tensor& input,
     c10::string_view const& input_name);
 at::Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
-    at::SymIntArrayRef mat1_sizes,
-    at::SymIntArrayRef mat1_strides,
+    at::IntArrayRef mat1_sizes,
+    at::IntArrayRef mat1_strides,
     c10::Layout mat1_layout,
     const Scalar& alpha);
 at::Tensor mm_mat2_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,
-    at::SymIntArrayRef sizes,
-    at::SymIntArrayRef strides,
+    at::IntArrayRef sizes,
+    at::IntArrayRef strides,
     c10::Layout layout,
     const at::Scalar& alpha);
 at::Tensor mm_mat1_sparse_backward(
