@@ -127,7 +127,7 @@ Tensor FunctionalInverses::_neg_view_copy_inverse(const Tensor& base, const Tens
     }
 }
 
-Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+Tensor FunctionalInverses::as_strided_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride, const c10::optional<c10::SymInt>& storage_offset) {
     // Pessimism: we can't reapply views for as_strided_scatter.
     return base.as_strided_scatter_symint(mutated_view, size, stride, storage_offset);
 }
@@ -172,7 +172,7 @@ Tensor FunctionalInverses::lift_fresh_copy_inverse(const Tensor& base, const Ten
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
+Tensor FunctionalInverses::slice_copy_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, const c10::optional<c10::SymInt>& start, const c10::optional<c10::SymInt>& end, c10::SymInt step) {
     // Pessimism: we can't reapply views for slice_scatter.
     return base.slice_scatter_symint(mutated_view, dim, start, end, step);
 }
