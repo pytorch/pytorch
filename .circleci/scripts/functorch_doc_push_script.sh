@@ -30,7 +30,7 @@ git clone https://github.com/pytorch/functorch -b gh-pages
 pushd functorch
 
 git rm -rf "$install_path" || true
-mv "$pt_checkout/functorch/docs/build/html" "$install_path"
+cp -r "$pt_checkout/functorch/docs/build/html" "$install_path"
 
 git add "$install_path" || true
 git status
