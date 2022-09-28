@@ -203,7 +203,8 @@ PyTypeObject* _initFunctionPyTypeObject(
   return &type;
 }
 
-static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
+static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types_map;
+static std::unordered_set<PyTypeObject*> cpp_function_types_set;
 
 struct DefaultFunctionType {
   DefaultFunctionType() : type() {
@@ -231,10 +232,10 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
     Py_INCREF(cdata->pyobj());
   } else {
     auto& fn = *cdata;
-    auto it = cpp_function_types.find(std::type_index(typeid(fn)));
+    auto it = cpp_function_types_map.find(std::type_index(typeid(fn)));
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     PyTypeObject* type;
-    if (it == cpp_function_types.end()) {
+    if (it == cpp_function_types_map.end()) {
       type = &default_type.type;
     } else {
       type = (PyTypeObject*)it->second.get();
@@ -255,7 +256,9 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
 
 void registerCppFunction(const std::type_info& type, PyTypeObject* pytype) {
   Py_INCREF((PyObject*)pytype);
-  cpp_function_types[std::type_index(type)] = THPObjectPtr((PyObject*)pytype);
+  cpp_function_types_map[std::type_index(type)] =
+      THPObjectPtr((PyObject*)pytype);
+  cpp_function_types_set.insert(pytype);
 }
 
 PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
@@ -315,6 +318,16 @@ PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   PyObject* handle = PyTuple_GET_ITEM(res.get(), 1);
   Py_INCREF(handle);
   return handle;
+}
+
+bool THPCppFunction_Check(PyObject* obj) {
+  THPObjectPtr type = THPObjectPtr(PyObject_Type(obj));
+  if (cpp_function_types_set.find((PyTypeObject*)type.get()) ==
+      cpp_function_types_set.end()) {
+    return false;
+  } else {
+    return true;
+  }
 }
 
 } // namespace autograd
