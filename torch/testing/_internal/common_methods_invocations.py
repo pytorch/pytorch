@@ -10623,6 +10623,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # AssertionError: Booleans mismatch: True is not False
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
            )
            ),
     OpInfo('nn.functional.cosine_similarity',
