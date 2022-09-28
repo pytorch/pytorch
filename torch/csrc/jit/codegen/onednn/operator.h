@@ -14,17 +14,17 @@ class Operator {
   Operator(const Node* node, dnnl::graph::op::kind kind)
       : n(node), o(getId(node), kind, node->kind().toQualString()), k(kind) {}
 
-  // Returns output (index + 1) if the Value is a graph output.
-  // Otherwise returns 0
-  int32_t isGraphOutput(Value* v) {
-    int32_t i = 1;
+  // Returns output index if the Value is a graph output.
+  // Otherwise returns -1
+  int32_t graphOutputIdx(Value* v) {
+    int32_t i = 0;
     for (const Value* output : v->owningGraph()->outputs()) {
       if (v == output) {
         return i;
       }
       i++;
     }
-    return 0;
+    return -1;
   }
 
   Operator& setInputValue(Value* v) {
@@ -56,13 +56,14 @@ class Operator {
   // setOutputValue & setOutput require a pointer to the LLGA graph, as output
   // logical tensors that are graph outputs should be connected to an End LLGA
   // op. A value of NULL can be provided for the graph pointer in order to
-  // maintain their legacy functionality.
+  // maintain the legacy functionality of this function.
   Operator& setOutputValue(Value* v, std::unique_ptr<dnnl::graph::graph>& g) {
     if (v->mustNotBeNone()) {
       auto output_tensor = createLogicalTensor(v);
       o.add_output(output_tensor);
       if (g) {
-        if (auto outputIndex = isGraphOutput(v)) {
+        int32_t outputIndex = graphOutputIdx(v);
+        if (outputIndex != -1) {
           dnnl::graph::op newEndNode(
               LONG_MAX - outputIndex,
               dnnl::graph::op::kind::End,

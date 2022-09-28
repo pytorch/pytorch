@@ -89,7 +89,7 @@ data_type LlgaTensorDesc::getLlgaDataType(at::ScalarType dt) const {
     case at::ScalarType::QUInt8:
       return data_type::u8;
     default:
-      return data_type::undef;
+      TORCH_CHECK(false, "oneDNN Graph does not support the dtype ", dt);
   }
 }
 

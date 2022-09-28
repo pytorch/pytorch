@@ -372,6 +372,10 @@ bool checkInputCompatibility(Node* node) {
       auto dtype = tensor.scalar_type();
       if ((dtype != at::ScalarType::BFloat16) &&
           (dtype != at::ScalarType::Float) && (dtype != at::ScalarType::Long)) {
+        // We've allowed Long dtype here although oneDNN Graph does not support
+        // Long dtype because oneDNN Graph might end up not handling the op that
+        // has an input with Long dtype. If that op would be mapped to oneDNN
+        // Graph, we'd throw a runtime error using TORCH_CHECK later.
         return false;
       }
     } else if (inputIValue.isScalar()) {

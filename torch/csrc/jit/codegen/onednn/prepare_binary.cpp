@@ -15,7 +15,7 @@ bool compareConstValue(Value* v, double d) {
        (ival->isDouble() && ival->toDouble() == d));
 }
 
-void mayConvertScalarInputToTensor(Node* node) {
+void handleBinaryOpInputs(Node* node) {
   // We do not handle binary ops with two scalar inputs,
   // and we assume scalar is always at the second place.
   if (node->input(0)->type()->isSubtypeOf(TensorType::get())) {
@@ -67,7 +67,6 @@ void mayConvertScalarInputToTensor(Node* node) {
       // are the same dtype, as oneDNN Graph requires both inputs to have the
       // same dtype. We'll follow PyTorch's type-promotion rules here.
       auto second_input_typeptr = node->input(1)->type()->expect<TensorType>();
-      // This aten::to node would be present at runtime for constants.
       c10::optional<at::ScalarType> second_input_type =
           second_input_typeptr->scalarType();
       if (second_input_type != c10::nullopt) {
@@ -112,7 +111,7 @@ static void ConvertScalarToTensor(Block* block) {
 
     if (node->kind() == aten::add || node->kind() == aten::mul ||
         node->kind() == aten::div) {
-      mayConvertScalarInputToTensor(node);
+      handleBinaryOpInputs(node);
     }
   }
 }

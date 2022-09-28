@@ -40,14 +40,12 @@ class JitLlgaTestCase(JitTestCase):
         # PyTorch has divergent op support for AMP in JIT & eager modes
         # so we disable AMP for JIT & leverage eager-mode AMP.
         # Ref: https://github.com/pytorch/pytorch/issues/75956
-        global original_autocast_mode
-        original_autocast_mode = torch._C._jit_set_autocast_mode(False)
+        self.original_autocast_mode = torch._C._jit_set_autocast_mode(False)
         torch.jit.enable_onednn_fusion(True)
 
     def tearDown(self):
-        global original_autocast_mode
         torch.jit.enable_onednn_fusion(False)
-        torch._C._jit_set_autocast_mode(original_autocast_mode)
+        torch._C._jit_set_autocast_mode(self.original_autocast_mode)
 
     def checkTrace(self, m, x, *args, **kwargs):
         if isinstance(m, torch.nn.Module):
@@ -766,7 +764,6 @@ for model_name, enabled in [
     ['squeezenet1_0', True],
     ['vgg16', True],
     ['alexnet', True],
-    ['shufflenet_v2_x1_0', True],
     ['wide_resnet50_2', True],
 ]:
     def _wrapper(mname, dtype):
