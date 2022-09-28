@@ -526,11 +526,7 @@ class TestPrims(TestCase):
 
             # Check that the graph can be executed with nvFuser
             out = execute(gm, sample.input, *sample.args, executor="strictly_nvfuser")
-            training = sample.args[4]
-            if training:
-                self.assertEqual(out, gm(sample.input, *sample.args))
-            else:
-                self.assertEqual(out[0], gm(sample.input, *sample.args)[0])
+            self.assertEqual(out, gm(sample.input, *sample.args))
 
     @dtypes(torch.float32, torch.float16)
     def test_batch_norm_backward_nvprims(self, device, dtype):
