@@ -435,6 +435,7 @@ class FakeTensorConstHandling(TestCase):
             self.assertNotConst(x)
 
     def test_fake_tensor_in_intlist_repro(self):
+
         def fn(tensors):
             max_size = torch.tensor([800, 1216], dtype=torch.int64)
             batch_shape = [len(tensors)] + list(tensors[0].shape[:-2]) + list(max_size)
