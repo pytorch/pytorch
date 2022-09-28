@@ -106,6 +106,7 @@ IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
 RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
 OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
+DISABLE_RUNNING_SCRIPT_CHK = os.getenv('PYTORCH_DISABLE_RUNNING_SCRIPT_CHK') == '1'
 MAX_NUM_RETRIES = 3
 
 DEFAULT_DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
@@ -488,7 +489,7 @@ def _get_test_report_path():
     return os.path.join('test-reports', test_source)
 
 is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
-parser = argparse.ArgumentParser(add_help=not is_running_via_run_test)
+parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
@@ -2919,13 +2920,6 @@ def noncontiguous_like(t):
     if not t.is_contiguous():
         return t
 
-    # Special-cases 0-dim tensors
-    zero_dim = t.ndim == 0
-    if zero_dim:
-        t = t.unsqueeze(0)
-
-    result = torch.repeat_interleave(t.detach(), 2, dim=-1)
-
     # Choose a "weird" value that won't be accessed
     if t.dtype.is_floating_point or t.dtype.is_complex:
         value = math.nan
@@ -2934,14 +2928,10 @@ def noncontiguous_like(t):
     else:
         value = 12
 
-    if zero_dim:
-        result[0] = value
-        result.set_(result.storage(), 1, (), ())
-    else:
-        result[..., 1::2] = value
-        strides = list(result.stride())
-        strides[-1] *= 2
-        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    result = t.new_empty(t.shape + (2,))
+    result[..., 0] = value
+    result[..., 1] = t.detach()
+    result = result[..., 1]
     result.requires_grad_(t.requires_grad)
     return result
 
@@ -3258,11 +3248,12 @@ def load_tests(loader, tests, pattern):
     set_running_script_path()
     test_suite = unittest.TestSuite()
     for test_group in tests:
-        for test in test_group:
-            check_test_defined_in_running_script(test)
-            test_suite.addTest(test)
+        if not DISABLE_RUNNING_SCRIPT_CHK:
+            for test in test_group:
+                check_test_defined_in_running_script(test)
+        if test_group._tests:
+            test_suite.addTest(test_group)
     return test_suite
-
 
 # FIXME: document this and move it to test_serialization
 class BytesIOContext(io.BytesIO):
