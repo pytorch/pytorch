@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/lower_divisible_split.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 
 #include <c10/util/irange.h>
@@ -96,13 +97,16 @@ size_t collectMaxVectorizeSizeWithContigMerge(
 
   // Assume no halo-related expression appears in the fusion. No
   // broadcast is merged, so indexability can be assumed to be true.
+  // This is expensive, as ContigIDs builds other things like CAMap,
+  // HaloInfo, and ConcreteBroadcast info. We should explicitly build and reuse
+  // these as they're compile time information.
   ContigIDs contigIds(
       {leaf_merged_domain},
       tv->getMaybeRFactorDomain(),
       tv->domain()->contiguity(),
       {},
+      getAllDivisibleSplits(tv->fusion()),
       {},
-      true,
       true);
 
   auto innermost_root_id = tv->getMaybeRFactorDomain().back();

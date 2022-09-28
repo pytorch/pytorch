@@ -224,7 +224,7 @@ void ReplayTransformations::runReplay() {
   // Switch outDomain to a vector to start the traversal
   std::vector<Val*> traversal_vals(
       target_domain_.begin(), target_domain_.end());
-  traverseFrom(traversal_vals[0]->fusion(), traversal_vals);
+  traverseTo(traversal_vals[0]->fusion(), traversal_vals);
 
   if (error_on_failure_)
     TORCH_INTERNAL_ASSERT(

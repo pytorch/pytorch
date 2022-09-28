@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_broadcast.h>

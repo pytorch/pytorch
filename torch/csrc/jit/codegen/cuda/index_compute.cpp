@@ -594,11 +594,7 @@ IndexCompute::IndexCompute(
           std::move(extent_map),
           std::move(zero_domains),
           std::move(zero_merged_in),
-          ContigIDs(
-              _td->domain(),
-              _td->getMaybeRFactorDomain(),
-              std::vector<bool>(_td->getMaybeRFactorDomain().size(), false),
-              {}),
+          ContigIDs({}, {}, {}, {}, {}),
           std::move(preferred_paths),
           std::move(halo_extent_map)) {}
 
@@ -755,7 +751,7 @@ void IndexCompute::run() {
   const std::vector<Val*> domain_vals(
       td_->domain().begin(), td_->domain().end());
 
-  traverseFrom(td_->fusion(), domain_vals, false);
+  traverseTo(td_->fusion(), domain_vals, false);
 }
 
 IterDomain* IndexCompute::maybeGetExactMapConcreteID(IterDomain* id) {
@@ -851,7 +847,7 @@ class UpdateLeafIndices : public IterVisitor {
     const std::vector<Val*> domain_vals(
         td_->domain().begin(), td_->domain().end());
 
-    traverseFrom(td_->fusion(), domain_vals, false);
+    traverseTo(td_->fusion(), domain_vals, false);
   }
 
   const std::unordered_map<IterDomain*, Val*>& indexMap() const {
@@ -2953,14 +2949,6 @@ std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
   }
 
   auto db_axis = gpu_lower->doubleBufferInfo().getDoubleBufferAxis(consumer_tv);
-
-  // Indexing is done without considering contig merging. Actual
-  // predicated domains are determined by considering contiguity.
-  const ContigIDs contig_finder(
-      consumer_tv->domain()->domain(),
-      consumer_tv->getMaybeRFactorDomain(),
-      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
-      {});
 
   // Generate start and stop indexing from idgraph.
   //

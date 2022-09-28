@@ -991,7 +991,7 @@ Val* PredicateElimination::getInitValue(TensorView* tv) const {
 }
 
 void PredicateElimination::build(Fusion* fusion) {
-  traverseFrom(fusion, fusion->outputs());
+  traverseTo(fusion, fusion->outputs());
 }
 
 std::string PredicateElimination::toString() const {

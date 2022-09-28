@@ -917,6 +917,10 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
       target_tv->getMaybeRFactorDomain(),
       target_tv->domain()->contiguity(),
       initial_indexable_map,
+      GpuLower::current()->divisbleSplitSet(),
+      GpuLower::current()->caMap(),
+      GpuLower::current()->haloInfo(),
+      GpuLower::current()->concretizedBroadcastDomains(),
       p2c_map);
 
   auto target_indexing = indexing.updateIndexCompute(
@@ -987,14 +991,11 @@ IndexFromIdGraph getPredicateIndexingFromIdGraph(
     index_update_map[exact_concrete_id] = consumer_id;
   }
 
-  // No contiguity info is used in the predicate indexing pass,
-  //  the predicate generation logic that uses the index math
-  //  generated here will take contiguity into account.
-  ContigIDs contig_finder(
-      consumer_tv->domain()->domain(),
-      consumer_tv->getMaybeRFactorDomain(),
-      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
-      {});
+  // No contiguity info is used in the predicate indexing pass, the predicate
+  // generation logic that uses the index math generated here will take
+  // contiguity into account. Send an empty ContigID class so nothing is marked
+  // as contiguous.
+  ContigIDs contig_finder({}, {}, {}, {}, {});
 
   // Run second backward traversal to map back to the consumer_tv
   auto target_indexing = indexing.updateIndexCompute(

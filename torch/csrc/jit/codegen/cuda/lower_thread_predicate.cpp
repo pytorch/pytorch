@@ -316,7 +316,7 @@ class RedundantUseAnalysis : BackwardVisitor {
  public:
   RedundantUseAnalysis(Fusion* fusion, const ThreadPredicateMap& pred_map)
       : fusion_(fusion), pred_map_(pred_map) {
-    traverseFrom(fusion, fusion->terminatingMathVals());
+    traverseTo(fusion, fusion->terminatingMathVals());
   }
 
   //! Returns a bit map signifying the parallel dimensions

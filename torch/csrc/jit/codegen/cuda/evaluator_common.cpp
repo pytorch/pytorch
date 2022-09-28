@@ -196,7 +196,13 @@ template <typename IRContext>
 void PrecomputedValuesBase<IRContext>::validate() {
   FUSER_PERF_SCOPE("PrecomputedValuess::Validate");
   for (auto it : binding_log_) {
-    TORCH_INTERNAL_ASSERT(values_[it.first] == it.second);
+    TORCH_INTERNAL_ASSERT(
+        values_[it.first] == it.second,
+        "Precomputed values failed to validate.",
+        "\nSomething unexpected changed between the compilation and execution.\n",
+        values_[it.first],
+        " != ",
+        it.second);
   }
   has_valid_values_ = true;
 }

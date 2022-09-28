@@ -3190,7 +3190,7 @@ class ForceHalfAnnotation : public IterVisitor {
                val->getDataType().value() == DataType::BFloat16);
         });
 
-    annotation.traverseFrom(fusion, fp16_outputs);
+    annotation.traverseTo(fusion, fp16_outputs);
     return annotation.force_fp16_tv_set_;
   }
 
