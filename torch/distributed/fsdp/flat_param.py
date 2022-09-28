@@ -675,7 +675,7 @@ class FlatParamHandle:
         """
         ret = False
         if self._use_orig_params:
-            ret = ret or self._writeback_orig_params()
+            ret = self._writeback_orig_params()
         if (
             self.uses_sharded_strategy
             and not self._config.offload_params

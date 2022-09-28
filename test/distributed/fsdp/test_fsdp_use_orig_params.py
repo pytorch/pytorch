@@ -177,11 +177,9 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
                     model.to(torch.device("cuda"))
             torch.testing.assert_close(iter_losses[0], iter_losses[1])
             iter_losses.clear()
-        atol = 1e-5 if self.world_size <= 2 else 1e-4
-        rtol = 1e-6 if self.world_size <= 2 else 1e-5
         with FSDP.summon_full_params(fsdp_model):
             for p1, p2 in zip(ddp_model.parameters(), fsdp_model.parameters()):
-                torch.testing.assert_close(p1, p2, atol=atol, rtol=rtol)
+                torch.testing.assert_close(p1, p2)
 
     def _get_sharding_strategy_from_str(
         self, sharding_strategy_str: str
@@ -378,14 +376,13 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
 
     def _check_fsdp_parameter_parity(self, fsdp1: FSDP, fsdp2: FSDP) -> None:
         """Checks that two FSDP instances have the same model parameters."""
-        with FSDP.summon_full_params(fsdp1):
-            with FSDP.summon_full_params(fsdp2):
-                for (n1, p1), (n2, p2) in zip(
-                    fsdp1.named_parameters(),
-                    fsdp2.named_parameters(),
-                ):
-                    self.assertEqual(n1, n2)
-                    torch.testing.assert_close(p1, p2)
+        with FSDP.summon_full_params(fsdp1), FSDP.summon_full_params(fsdp2):
+            for (n1, p1), (n2, p2) in zip(
+                fsdp1.named_parameters(),
+                fsdp2.named_parameters(),
+            ):
+                self.assertEqual(n1, n2)
+                torch.testing.assert_close(p1, p2)
 
     def _get_fsdp_parity_subtest_config(self):
         return {
