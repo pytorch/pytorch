@@ -159,7 +159,7 @@ static void resize_reduction_result(
 }
 
 inline Tensor create_reduction_result(
-  const Tensor& self, IntArrayRef dim, bool keepdim, ScalarType dtype
+  const Tensor& self, at::OptionalIntArrayRef dim, bool keepdim, ScalarType dtype
 ) {
   DimMask mask = make_dim_mask(dim, self.dim());
   auto shape = shape_from_dim_mask(self, mask, keepdim);
@@ -275,13 +275,16 @@ static void zero_numel_check_dims(const Tensor& self, const int64_t dim, const c
   }
 }
 
-static void zero_numel_check_dims(const Tensor& self, const IntArrayRef dim, const char *fn_name) {
-  TORCH_CHECK(
-    !dim.empty(),
-      fn_name, ": Expected reduction dim to be specified for input.numel() == 0. ",
-        "Specify the reduction dim with the 'dim' argument.");
-  for (const int64_t d : dim) {
-    zero_numel_check_dims(self, d, fn_name);
+static void zero_numel_check_dims(const Tensor& self, const at::OptionalIntArrayRef opt_dim, const char *fn_name) {
+  if (opt_dim.has_value()) {
+    const IntArrayRef dim = opt_dim.value();
+    TORCH_CHECK(
+      !dim.empty(),
+        fn_name, ": Expected reduction dim to be specified for input.numel() == 0. ",
+          "Specify the reduction dim with the 'dim' argument.");
+    for (const int64_t d : dim) {
+      zero_numel_check_dims(self, d, fn_name);
+    }
   }
 }
 

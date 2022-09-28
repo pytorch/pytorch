@@ -7,6 +7,16 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+MmaOp* MmaOptions::mmaOp() const {
+  TORCH_INTERNAL_ASSERT(
+      accumulator_tv != nullptr && accumulator_tv->definition() != nullptr,
+      "Invalid accumulator_tv.");
+  auto mma_op = dynamic_cast<MmaOp*>(accumulator_tv->definition());
+  TORCH_INTERNAL_ASSERT(
+      mma_op != nullptr, "accumulator tv not an output of mma op");
+  return mma_op;
+}
+
 MmaBuilder::MmaBuilder(
     MmaOptions::MacroType macro,
     MatMulTileOptions gemm_tile) {
@@ -21,6 +31,10 @@ MmaBuilder::MmaBuilder(
     case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       option_.accumulator_stride = outer_stride * 2;
+      break;
+    case MmaOptions::MacroType::Ampere_16_16_16:
+    case MmaOptions::MacroType::Turing_16_16_16:
+      option_.accumulator_stride = outer_stride * 4;
       break;
     default:
       TORCH_CHECK(false, "unsupported macro");
@@ -41,7 +55,7 @@ MmaBuilder& MmaBuilder::operand(MmaOptions::Operand a_or_b) {
 // TODO: validate op config
 MmaOptions MmaBuilder::build() const {
   TORCH_CHECK(
-      option_.mma_op != nullptr,
+      option_.accumulator_tv != nullptr,
       "Please configure accumulator tv before using swizzle options.")
   return option_;
 }
@@ -60,9 +74,10 @@ void MmaBuilder::accumulatorTv(TensorView* tv) {
   TORCH_CHECK(
       tv->getMemoryType() == MemoryType::Local, "Mma only outputs to register");
   TORCH_CHECK(tv->definition(), "Input cannot be accumulator tv");
-  auto mma = dynamic_cast<MmaOp*>(tv->definition());
-  TORCH_CHECK(mma, "Requires mma op output for reduction tv");
-  option_.mma_op = mma;
+  TORCH_CHECK(
+      tv->definition()->isA<MmaOp>(),
+      "Requires mma op output for reduction tv");
+  option_.accumulator_tv = tv;
 }
 
 namespace {
@@ -73,6 +88,8 @@ LoadStoreOpType getLdMatrixType(MmaOptions options) {
   switch (options.macro) {
     case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
+    case MmaOptions::MacroType::Turing_16_16_16:
       // Turing mma assumes TN as default
       transpose = (options.operand == MmaOptions::Operand::A &&
                    !isOperandTransposed(options)) ||
@@ -98,16 +115,20 @@ bool isVolta(MmaOptions::MacroType macro) {
 }
 
 bool isTuring(MmaOptions::MacroType macro) {
-  return macro == MmaOptions::MacroType::Turing_16_8_16;
+  return macro == MmaOptions::MacroType::Turing_16_8_16 ||
+      macro == MmaOptions::MacroType::Turing_16_16_16;
 }
 
 bool isAmpere(MmaOptions::MacroType macro) {
-  return macro == MmaOptions::MacroType::Ampere_16_8_16;
+  return macro == MmaOptions::MacroType::Ampere_16_8_16 ||
+      macro == MmaOptions::MacroType::Ampere_16_16_16;
 }
 
 int getOutputRegisterSize(MmaOptions::MacroType macro) {
   switch (macro) {
     case MmaOptions::MacroType::Volta_16_16_4:
+    case MmaOptions::MacroType::Ampere_16_16_16:
+    case MmaOptions::MacroType::Turing_16_16_16:
       return 8;
       break;
     case MmaOptions::MacroType::Turing_16_8_16:
@@ -127,7 +148,9 @@ int getInputARegisterSize(MmaOptions::MacroType macro) {
       return 4;
       break;
     case MmaOptions::MacroType::Turing_16_8_16:
+    case MmaOptions::MacroType::Turing_16_16_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
       return 8;
       break;
     default:
@@ -145,6 +168,9 @@ int getInputBRegisterSize(MmaOptions::MacroType macro) {
     case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       return 4;
+    case MmaOptions::MacroType::Turing_16_16_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
+      return 8;
     default:
       TORCH_INTERNAL_ASSERT(false, "unknown macro");
       break;
@@ -196,6 +222,10 @@ std::string toString(MmaOptions::MacroType mt) {
     case MmaOptions::MacroType::Turing_16_8_16:
     case MmaOptions::MacroType::Ampere_16_8_16:
       ss << "M16N8K16";
+      break;
+    case MmaOptions::MacroType::Turing_16_16_16:
+    case MmaOptions::MacroType::Ampere_16_16_16:
+      ss << "M16N16K16";
       break;
     default:
       TORCH_INTERNAL_ASSERT(false, "undefined mma type");

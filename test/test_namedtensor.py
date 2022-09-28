@@ -1176,17 +1176,28 @@ class TestNamedTensor(TestCase):
                 result = out + result
             return result.sum()
 
-        def test_simple_reduce(op, device, supports_none_complete_reduce):
+        def test_simple_reduce(op, device):
             t = torch.empty(2, 3, 5, names=('N', 'C', 'L'), device=device)
             check_output(op(t, 1), ['N', 'L'])
             check_output(op(t, -1), ['N', 'C'])
             check_output(op(t, 'C'), ['N', 'L'])
-            if supports_none_complete_reduce:
+            ops_support_dim_none = [
+                'sum',
+                'mean',
+                'std',
+                'var',
+                'std_mean',
+                'var_mean',
+                'nanmean',
+                'nansum',
+                'amax',
+                'amin',
+            ]
+            if op.__name__ in ops_support_dim_none:
                 check_output(op(t, None), [])
             else:
                 with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
                     op(t, None)
-
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
                 op(t, 'H')
 
@@ -1231,7 +1242,6 @@ class TestNamedTensor(TestCase):
 
         Case = namedtuple('Case', [
             'op',
-            'supports_none_complete_reduce',
             'supports_complete_reduce',
             'supports_multidim_reduce',
             'supports_out_variant',
@@ -1240,26 +1250,26 @@ class TestNamedTensor(TestCase):
         ])
 
         tests = [
-            Case(torch.sum, True, True, True, True, True, None),
-            Case(torch.prod, False, True, False, True, True, None),
-            Case(torch.mean, True, True, True, True, True, None),
-            Case(torch.var, True, True, True, True, True, None),
-            Case(torch.std, True, True, True, True, True, None),
-            Case(torch.std_mean, True, True, True, False, True, None),
-            Case(torch.var_mean, True, True, True, False, True, None),
-            Case(torch.min, False, True, False, True, True, values_and_indices),
-            Case(torch.max, False, True, False, True, True, values_and_indices),
-            Case(torch.unbind, False, False, False, False, False, None),
-            Case(torch.logsumexp, False, False, True, True, True, None),
-            Case(torch.mode, False, False, False, True, True, values_and_indices),
-            Case(kthvalue_wrapper, False, False, False, True, True, values_and_indices),
-            Case(torch.median, False, True, False, True, True, values_and_indices),
-            Case(torch.nanmedian, False, True, False, True, True, values_and_indices),
+            Case(torch.sum, True, True, True, True, None),
+            Case(torch.prod, True, False, True, True, None),
+            Case(torch.mean, True, True, True, True, None),
+            Case(torch.var, True, True, True, True, None),
+            Case(torch.std, True, True, True, True, None),
+            Case(torch.std_mean, True, True, False, True, None),
+            Case(torch.var_mean, True, True, False, True, None),
+            Case(torch.min, True, False, True, True, values_and_indices),
+            Case(torch.max, True, False, True, True, values_and_indices),
+            Case(torch.unbind, False, False, False, False, None),
+            Case(torch.logsumexp, False, True, True, True, None),
+            Case(torch.mode, False, False, True, True, values_and_indices),
+            Case(kthvalue_wrapper, False, False, True, True, values_and_indices),
+            Case(torch.median, True, False, True, True, values_and_indices),
+            Case(torch.nanmedian, True, False, True, True, values_and_indices),
         ]
 
         for testcase, device in itertools.product(tests, get_all_device_types()):
             op = testcase.op
-            test_simple_reduce(op, device, testcase.supports_none_complete_reduce)
+            test_simple_reduce(op, device)
             test_autograd_supports_dimname_overload(op, device)
 
             if testcase.supports_keepdim:

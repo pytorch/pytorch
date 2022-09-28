@@ -562,7 +562,7 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_USE_CUSPARSE_GENERIC_API()
+#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_52_API())
   addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);
@@ -663,7 +663,7 @@ void spmm(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
-#endif // !AT_USE_CUSPARSE_GENERIC_API()
+#endif // !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
 }
 
 void spgemm(
@@ -672,12 +672,18 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+#if (!defined(USE_ROCM)) && (defined(CUDA_VERSION) && CUDA_VERSION < 11000)
   TORCH_CHECK(
       false,
       "Calling addmm with sparse GPU tensors requires compiling ",
       "PyTorch with CUDA 11+. ",
       "Please use PyTorch built with newer CUDA version.");
+#elif defined(USE_ROCM) && ROCM_VERSION < 50200
+  TORCH_CHECK(
+      false,
+      "Calling addmm with sparse GPU tensors requires compiling ",
+      "PyTorch with ROCm 5.2+. ",
+      "Please use PyTorch built with newer ROCm version.");
 #else
   // older versions of cusparse on Windows segfault for complex128 dtype
 #if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
@@ -826,21 +832,110 @@ void addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat1.layout() == kSparseBsr && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return block_sparse_mm(mat1, mat2, beta, alpha, result);
+  TORCH_INTERNAL_ASSERT(
+      !((mat1.layout() == kStrided) && (mat2.layout() == kStrided) &&
+        (result.layout() == kStrided)),
+      "Expected at least one sparse input");
+
+  // Layout checks are nested mat1, mat2, result
+  // Conditions are ordered strided, csr, csc, bsr, bsc.
+  // Valid combinations terminate in a return
+  // Invalid combinations are omitted and will fall though to the TORCH check
+  // generating an informative error message
+  if (mat1.layout() == kStrided) {
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kStrided) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spmm(
+            mat2.transpose(0, 1).to_sparse_csr(),
+            mat1.transpose(0, 1),
+            beta,
+            alpha,
+            result.transpose(0, 1));
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kStrided) {
+        return spmm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
+    if (mat2.layout() == kSparseBsc) {
+      if (result.layout() == kStrided) {
+        return block_sparse_mm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
   }
-  if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
-    return spmm(mat1, mat2, beta, alpha, result);
+  if (mat1.layout() == kSparseCsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        return spmm(mat1, mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kSparseCsr) {
+        return spgemm(mat1, mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kSparseCsr) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        // CSR @ CSC kernel would be very fast due to format alignment
+        return spgemm(mat1, mat2.to_sparse_csr(), beta, alpha, result);
+      }
+    }
   }
-  if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
-    // TODO: Add native CSC support via cuSPARSE if supported.
-    return spmm(mat2.transpose(0, 1).to_sparse_csr(), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+  if (mat1.layout() == kSparseCsc) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spmm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+      }
+    }
+    if (mat2.layout() == kSparseCsr) {
+      if (result.layout() == kSparseCsr)
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spgemm(mat1.to_sparse_csr(), mat2, beta, alpha, result);
+    }
+    if (mat2.layout() == kSparseCsc) {
+      if (result.layout() == kSparseCsr) {
+        // TODO: Add native CSC support via cuSPARSE if supported.
+        return spgemm(
+            mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
+      }
+      if (result.layout() == kSparseCsc) {
+        return spgemm(
+            mat2.transpose(-2, -1),
+            mat1.transpose(-2, -1),
+            beta,
+            alpha,
+            result.transpose(-2, -1));
+      }
+    }
   }
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    return spgemm(mat1, mat2, beta, alpha, result);
+  if (mat1.layout() == kSparseBsr) {
+    if (mat2.layout() == kStrided) {
+      if (result.layout() == kStrided)
+        return block_sparse_mm(mat1, mat2, beta, alpha, result);
+    }
   }
-  TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
-              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
+  TORCH_CHECK(
+      false,
+      "addmm: computation on CUDA is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
 }
 
 /*
@@ -862,7 +957,7 @@ void addmv_out_sparse_csr(
   if (mat.layout() == kSparseBsr) {
     return block_sparse_mv(mat, vec, beta, alpha, result);
   }
-#if !AT_USE_CUSPARSE_GENERIC_API()
+#if !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
   TORCH_CHECK(
       false,
       "Calling addmv on a sparse GPU tensor requires compiling ",
@@ -936,7 +1031,7 @@ void addmv_out_sparse_csr(
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
-#endif
+#endif // !(AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API())
 }
 
 /*

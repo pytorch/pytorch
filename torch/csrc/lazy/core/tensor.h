@@ -2,8 +2,8 @@
 
 #include <c10/core/SymIntNodeImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/lazy/backend/backend_data.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
-#include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
@@ -211,7 +211,7 @@ class TORCH_API LazyTensor : public c10::intrusive_ptr_target {
 // skips
 //       the LazyTensor wrappers, assuming that the list of underlying IR nodes
 //       is actually more useful for downstream computations.  TBD.
-TORCH_API torch::lazy::Value GetTensorList(c10::ArrayRef<at::Tensor> tensors);
+TORCH_API torch::lazy::Value GetTensorList(at::ITensorListRef tensors);
 
 // Section 1: at::Tensor => LazyTensor.
 // Extracts the LazyTensor out of an at::Tensor. Returns a null LazyTensor
