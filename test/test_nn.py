@@ -10770,20 +10770,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # input wrong dimension
 
         unfold = nn.Unfold(kernel_size=(2, 3))
-        with self.assertRaisesRegex(NotImplementedError, r"Only 4D input Tensors are supported"):
-            unfold(torch.randn(1, 5, 2))
 
         # calculated output shape is too small
-
-        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
             unfold = nn.Unfold(kernel_size=(2, 3))
             unfold(torch.randn(1, 2, 2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
             unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
             unfold(torch.randn(1, 2, 2, 3))
 
-        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
             unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
             unfold(torch.randn(1, 2, 2, 2))
 

@@ -185,7 +185,26 @@ class TestMetaConverter(TestCase):
         del m
         self.assertIs(ref(), None)
 
-def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
+CHECK_STRIDES = {
+    torch.Tensor.__getitem__,
+}
+
+def should_check_strides(func):
+    if func in CHECK_STRIDES:
+        return True
+    if not isinstance(func, torch._ops.OpOverload):
+        return False
+    # Prims are expected to model strides correctly
+    if func.namespace == "prims":
+        return True
+    # Check if it's a view, by testing if any of the returns have
+    # a non-empty alias set
+    if any(r.alias_info.before_set for r in func._schema.returns if r.alias_info):
+        return True
+    # TODO: check for TensorIterator
+    return False
+
+def assert_ref_meta_equal(test_case, func, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
     flat_rs, _ = tree_flatten(rs)
     test_case.assertEqual(len(flat_meta_rs), len(flat_rs))
@@ -200,8 +219,9 @@ def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
         test_assert(meta_r.shape == r.shape, f"but real shape was {r.shape}")
         # NOTE: stride checking is currently disabled
         # See https://github.com/pytorch/pytorch/issues/78050
-        # same_strides, _ = prims.utils.check_significant_strides(meta_r, r)
-        # test_assert(same_strides, f"but real stride was {r.stride()}")
+        if should_check_strides(func):
+            same_strides, _ = torch._prims_common.check_significant_strides(meta_r, r)
+            test_assert(same_strides, f"but real stride was {r.stride()}")
         test_assert(
             meta_r.storage_offset() == r.storage_offset(),
             f"but real storage_offset was {r.storage_offset()}")
@@ -363,7 +383,7 @@ failed to run: {resolve_name(func)}(
         else:
             try:
                 delim = ',\n  '
-                assert_ref_meta_equal(test_case, meta_rs, rs, lambda msg: f"""\
+                assert_ref_meta_equal(test_case, func, meta_rs, rs, lambda msg: f"""\
 meta disagrees with real impl:
 {resolve_name(func)}(
   {delim.join(map(verbose_print, meta_args))},
@@ -664,7 +684,6 @@ meta_dispatch_expected_failures = {
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.col2im.default : {c64, f32, f64, c128},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
     aten.grid_sampler_3d.default : {f32, f64},
