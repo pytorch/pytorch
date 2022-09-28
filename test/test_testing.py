@@ -28,6 +28,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_modules import modules, module_db
+from torch.testing._internal.opinfo.core import SampleInput
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -1814,6 +1815,7 @@ class TestImports(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
         self.assertEquals(out, "")
 
+class TestOpInfos(TestCase):
     def test_sample_input(self) -> None:
         a, b, c, d, e = [object() for _ in range(5)]
 
