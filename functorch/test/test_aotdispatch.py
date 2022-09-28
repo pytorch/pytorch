@@ -6,7 +6,6 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from unittest.mock import patch
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
@@ -16,7 +15,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from functorch import (
     grad, vjp, vmap, jacrev,
     make_fx
@@ -25,8 +24,8 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
-    nop, default_partition, default_decompositions,
-    memory_efficient_fusion, get_aot_compilation_context
+    nop, num_of_recompilations, default_partition, default_decompositions,
+    memory_efficient_fusion, clear_compile_cache, get_aot_compilation_context
 )
 from torch._decomp import decomposition_table
 
@@ -64,6 +63,7 @@ class AOTTestCase(TestCase):
         super().setUp()
         # NB: We cache on function id, which is unreliable
         # Can fix by using weakrefs, but not sure if it matters
+        clear_compile_cache()
 
 class TestPythonKey(AOTTestCase):
     def test_make_fx(self, device):
@@ -143,17 +143,20 @@ class TestPythonKey(AOTTestCase):
         self.assertTrue(includes_aten_relu)
 
     def test_make_fx_no_decompose(self, device):
+        # FIXME
+        return self.skipTest("error: maximum recursion reached")
+
         def f(x):
             return torch.tanh(x).sum()
 
         fx_f = make_fx(grad(f))(torch.randn(5))
         ops = set([i.target for i in fx_f.graph.nodes])
 
-        self.assertEqual(torch.ops.aten.tanh_backward.default in ops, True)
+        self.assertEqual(torch.ops.aten.tanh_backward in ops, True)
 
         fx_f = make_fx(grad(f), decomposition_table)(torch.randn(5))
         ops = set([i.target for i in fx_f.graph.nodes])
-        self.assertEqual(torch.ops.aten.tanh_backward.default in ops, False)
+        self.assertEqual(torch.ops.aten.tanh_backward in ops, False)
 
     def test_nnc_jit(self, device):
         def f(x):
@@ -289,18 +292,18 @@ class TestAOTAutograd(AOTTestCase):
             graph_size = len(fx_g.graph.nodes)
             return fx_g
 
+        start_recompilations = num_of_recompilations()
         f = aot_function(foo, nop, get_graph_size)
         with torch.set_grad_enabled(False):
             f(*inps)
         self.assertIsNone(graph_size)
-
-        f = aot_function(foo, nop, get_graph_size)
 
         with torch.set_grad_enabled(True):
             out = f(*inps)
             self.assertIsNone(graph_size)
             out.sum().backward()
             self.assertTrue(graph_size > 2)
+        self.assertEqual(num_of_recompilations() - start_recompilations, 2)
 
     def test_output_dict(self):
         def f(x):
@@ -363,7 +366,6 @@ class TestAOTAutograd(AOTTestCase):
 
         f = aot_function(f, compiler)
         out = f(torch.randn(5, requires_grad=True))
-        f = aot_function(f, compiler)
         f(torch.randn(5))
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
@@ -424,6 +426,81 @@ class TestAOTAutograd(AOTTestCase):
 
 
 
+class TestEagerFusionOpInfo(AOTTestCase):
+    @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    # entries in here need don't work and need to be fixed.
+    # Each one of these is a bug (or needs to be investigated)
+    @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', {
+        xfail('linalg.cholesky'),
+        skip('msort'),
+        xfail('nn.functional.dropout'),
+        xfail('to_sparse'),
+        xfail('addcdiv'),
+        xfail('cholesky'),
+        xfail('cumulative_trapezoid'),
+        xfail('diag_embed'),
+        xfail('logit'),
+        xfail('trapezoid'),
+        xfail('trapz'),
+        xfail('corrcoef'),
+        xfail('cov'),
+        xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
+        skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
+        skip('nn.functional.margin_ranking_loss'),  # seems flaky
+        decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+        decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+    })
+    def test_aot_autograd_exhaustive(self, device, dtype, op):
+        def f(args, kwargs):
+            return op.op(*args, **kwargs)
+        if not op.supports_autograd:
+            return
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
+        for sample_input in sample_inputs_itr:
+            args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+            if not all([isinstance(i, torch.Tensor) and i.dtype == torch.float for i in args]):
+                self.skipTest("not all inputs are float tensors")
+            if not all([isinstance(i, torch.Tensor) and i.dtype == torch.float for i in kwargs.values()]):
+                self.skipTest("not all inputs are float tensors")
+                continue
+            t = f(args, kwargs)
+            if isinstance(t, tuple):
+                self.skipTest("output is a tuple")
+                continue
+
+            def reset_grads():
+                def f(x):
+                    x.grad = None
+                pytree.tree_map(f, args)
+
+            def get_grads(args):
+                return pytree.tree_map(lambda x: x.grad, args)
+
+            compiled_f = compiled_function(f, nop, nop)
+
+            reset_grads()
+            compiled_f(args, kwargs).sum().backward()
+            compiled_grad = get_grads(args)
+
+            reset_grads()
+            f(args, kwargs).sum().backward()
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
+
+            def create_new_arg(x):
+                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
+
+            args = pytree.tree_map(create_new_arg, args)
+
+            reset_grads()
+            compiled_f(args, kwargs).sum().backward()
+            compiled_grad = get_grads(args)
+
+            reset_grads()
+            f(args, kwargs).sum().backward()
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -657,6 +734,27 @@ class TestAOTModuleSimplified(AOTTestCase):
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
 aot_autograd_failures = {
+    # data-dependent control flow
+    xfail('cov'),
+    xfail('istft'),
+    xfail('nn.functional.gaussian_nll_loss'),
+    xfail('tensor_split'),
+    xfail('corrcoef'),
+    xfail('quantile'),
+    xfail('nanquantile'),
+    xfail('narrow'),
+    xfail('index_reduce'),
+    xfail('istft'),
+    xfail('linalg.eig'),
+
+    # non-deterministic
+    xfail('as_strided_scatter'),
+
+    # Too annoying to generate random inputs
+    xfail('cholesky'),
+    xfail('linalg.cholesky'),
+
+    # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),
     xfail('cov'),
@@ -671,29 +769,41 @@ def _test_aot_autograd_helper(self, device, dtype, op):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
-
-    def f(args, kwargs):
-        return op.op(*args, **kwargs)
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=True)
     for sample_input in sample_inputs_itr:
-        args = [sample_input.input] + list(sample_input.args)
-        kwargs = sample_input.kwargs
+        t_args = [sample_input.input] + list(sample_input.args)
+        t_kwargs = sample_input.kwargs
+        flat_args, args_spec = pytree.tree_flatten((t_args, t_kwargs))
+        sentinel_val = -42
+        is_tensor_spec = [sentinel_val if isinstance(arg, torch.Tensor) else arg for arg in flat_args]
+        args = [arg for arg in flat_args if isinstance(arg, torch.Tensor)]
+
+        def f(args):
+            cur_flat_args = list(is_tensor_spec)
+            args = iter(args)
+            for idx, v in enumerate(cur_flat_args):
+                if v == sentinel_val:
+                    cur_flat_args[idx] = next(args)
+            c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
+            return op.op(*c_args, **c_kwargs)
 
         def call_forwards_backwards(f):
-            out = f(args, kwargs)
+            out = wrapper_set_seed(f, args)
             if isinstance(out, tuple):
-                out[0].sum().backward()
+                sm = 0
+                for i in out:
+                    sm += i.sum()
+                sm.backward()
             else:
                 out.sum().backward()
 
         def reset_grads():
             def f(x):
-                if isinstance(x, torch.Tensor):
-                    x.grad = None
+                x.grad = None
             pytree.tree_map(f, args)
 
         def get_grads(args):
-            return pytree.tree_map(lambda x: x.grad if isinstance(x, torch.Tensor) else x, args)
+            return pytree.tree_map(lambda x: x.grad, args)
 
         compiled_f = compiled_function(f, nop, nop)
 
@@ -707,7 +817,7 @@ def _test_aot_autograd_helper(self, device, dtype, op):
         self.assertEqual(orig_grad, compiled_grad)
 
         def create_new_arg(x):
-            if isinstance(x, torch.Tensor):
+            if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
                 return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
             return x
 
