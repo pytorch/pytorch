@@ -7,10 +7,10 @@ static methods.
 `default_collate` and `default_convert` are exposed to users via 'dataloader.py'.
 """
 
-import functools
-import torch
-import re
 import collections
+import contextlib
+import re
+import torch
 
 from typing import Callable, Dict, Optional, Tuple, Type, Union
 from torch._six import string_classes
@@ -87,15 +87,30 @@ default_collate_err_msg_format = (
 
 def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     r"""
-    General collate function that handles collection type of element within each batch
-    and opens function registy to deal with specific element types.
+        General collate function that handles collection type of element within each batch
+        and opens function registry to deal with specific element types. `default_collate_fn_map`
+        provides default collate functions for tensors, numpy arrays, numbers and strings.
 
-    Args:
-        batch: a single batch to be collated
-        collate_fn_map: Optional dictionary mapping from element type to the corresponding collate function.
-          If the element type isn't present in this dictionary,
-          collate function will go through each key from the dictionary in the insertion order
-          to invoke the collate function if the element type is a subclass of the key.
+        Args:
+            batch: a single batch to be collated
+            collate_fn_map: Optional dictionary mapping from element type to the corresponding collate function.
+              If the element type isn't present in this dictionary,
+              this function will go through each key of the dictionary in the insertion order to
+              invoke the corresponding collate function if the element type is a subclass of the key.
+
+        Examples:
+            >>> # Extend this function to handle batch of tensors
+            >>> def collate_tensor_fn(batch, *, collate_fn_map):
+            ...     return torch.stack(batch, 0)
+            >>> def custom_collate(batch):
+            ...     collate_map = {torch.Tensor: collate_tensor_fn}
+            ...     return collate(batch, collate_fn_map=collate_map)
+            >>> # Extend `default_collate` by in-place modifying `default_collate_fn_map`
+            >>> default_collate_fn_map.update({torch.Tensor: collate_tensor_fn})
+
+        Notes:
+            Each collate function requires a positional argument for batch and a keyword argument
+            for the dictionary of collate functions as `collate_fn_map`.
     """
     elem = batch[0]
     elem_type = type(elem)
@@ -136,7 +151,7 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
     raise TypeError(default_collate_err_msg_format.format(elem_type))
 
 
-def _collate_tensor_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+def collate_tensor_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     elem = batch[0]
     out = None
     if torch.utils.data.get_worker_info() is not None:
@@ -148,7 +163,7 @@ def _collate_tensor_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple
     return torch.stack(batch, 0, out=out)
 
 
-def _collate_numpy_array_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+def collate_numpy_array_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     elem = batch[0]
     # array of string classes and object
     if np_str_obj_array_pattern.search(elem.dtype.str) is not None:
@@ -157,38 +172,36 @@ def _collate_numpy_array_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, 
     return collate([torch.as_tensor(b) for b in batch], collate_fn_map=collate_fn_map)
 
 
-def _collate_numpy_scalar_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+def collate_numpy_scalar_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     return torch.as_tensor(batch)
 
 
-def _collate_float_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+def collate_float_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     return torch.tensor(batch, dtype=torch.float64)
 
 
-def _collate_int_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+def collate_int_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     return torch.tensor(batch)
 
 
-def _collate_str_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
+def collate_str_fn(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]], Callable]] = None):
     return batch
 
 
-_default_collate_fn_map = {torch.Tensor: _collate_tensor_fn}
-try:
+default_collate_fn_map: Dict[Union[Type, Tuple[Type, ...]], Callable] = {torch.Tensor: collate_tensor_fn}
+with contextlib.suppress(ImportError):
     import numpy as np
     # For both ndarray and memmap (subclass of ndarray)
-    _default_collate_fn_map[np.ndarray] = _collate_numpy_array_fn
+    default_collate_fn_map[np.ndarray] = collate_numpy_array_fn
     # See scalars hierarchy: https://numpy.org/doc/stable/reference/arrays.scalars.html
     # Skip string scalars
-    _default_collate_fn_map[(np.bool_, np.number, np.object_)] = _collate_numpy_scalar_fn
-except ImportError:
-    pass
-_default_collate_fn_map[float] = _collate_float_fn
-_default_collate_fn_map[int] = _collate_int_fn
-_default_collate_fn_map[string_classes] = _collate_str_fn
+    default_collate_fn_map[(np.bool_, np.number, np.object_)] = collate_numpy_scalar_fn
+default_collate_fn_map[float] = collate_float_fn
+default_collate_fn_map[int] = collate_int_fn
+default_collate_fn_map[string_classes] = collate_str_fn
 
 
-_default_collate_doc = \
+def default_collate(batch):
     r"""
         Function that takes in a batch of data and puts the elements within the batch
         into a tensor with an additional outer dimension - batch size. The exact output type can be
@@ -236,7 +249,4 @@ _default_collate_doc = \
             >>> default_collate([[0, 1], [2, 3]])
             [tensor([0, 2]), tensor([1, 3])]
     """
-
-default_collate = functools.partial(collate, collate_fn_map=_default_collate_fn_map)
-default_collate.__name__ = "default_collate"
-default_collate.__doc__ = _default_collate_doc
+    return collate(batch, collate_fn_map=default_collate_fn_map)
