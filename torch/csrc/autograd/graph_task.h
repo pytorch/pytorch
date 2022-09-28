@@ -31,6 +31,8 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   std::unordered_map<Node*, InputBuffer> not_ready_;
   std::unordered_map<Node*, int> dependencies_;
 
+  // Records the nodes that are in the graph
+  std::unordered_set<Node*> nodes_in_graph_;
   // Note [Exec info]
   // Exec info is created for each GraphTask, which allows filtering paths on
   // the graph that are not needed. It has a bit complicated semantics. If it's
@@ -186,6 +188,8 @@ class GraphTaskGuard {
 
 TORCH_API const std::unordered_map<Node*, GraphTask::ExecInfo>*
 get_current_graph_task_exec_info();
+TORCH_API const std::unordered_set<Node*>*
+get_current_graph_task_nodes_in_graph();
 TORCH_API bool get_current_graph_task_keep_graph();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
