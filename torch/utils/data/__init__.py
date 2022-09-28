@@ -31,6 +31,7 @@ from torch.utils.data.dataloader import (
     default_convert,
 )
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data._utils.collate import collate
 from torch.utils.data.datapipes._decorator import (
     argument_validation,
     functional_datapipe,
@@ -63,6 +64,7 @@ __all__ = ['BatchSampler',
            'WeightedRandomSampler',
            '_DatasetKind',
            'argument_validation',
+           'collate',
            'communication',
            'default_collate',
            'default_convert',
