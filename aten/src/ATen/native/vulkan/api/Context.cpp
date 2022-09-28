@@ -21,7 +21,7 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
       fences_(device_),
 // Diagnostics
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
-      querypool_(device_, config_.queryPoolConfig),
+      querypool_(config_.queryPoolConfig, adapter_p_),
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
