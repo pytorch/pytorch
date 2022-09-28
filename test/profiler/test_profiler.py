@@ -1346,7 +1346,6 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(c_id, c_id_new)
         self.assertEqual(d_id, c_id_new)
 
-
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
@@ -1502,17 +1501,31 @@ class TestTorchTidyProfiler(TestCase):
         expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
 
+    def _flat_out_extrafields(self, nodes, out=None):
+        if out is None:
+            out = []
+        for node in nodes:
+            if (isinstance(node.extra_fields, _ExtraFields_PyCall) and
+                    node.extra_fields.opt and node.extra_fields.opt.param_addrs):
+                # avoiding OptInfo duplicates from iterations
+                addr = node.extra_fields.opt.param_addrs[0]
+                if not [o for o in out if addr in o.param_addrs]:
+                    out.append(node.extra_fields.opt)
+            self._flat_out_extrafields(node.children, out)
+        return out
+
+    def _check_results(self, opt, opts, check_items=False):
+        self.assertEqual(len(opts), 1, "Expected 1 optimizer")
+        self.assertEqual(id(opt), opts[0].self, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self})")
+        if check_items:
+            self.assertEqual(len(opt.param_groups), len(opts))
+            for group, opt_ in zip(opt.param_groups, opts):
+                self.assertEqual(
+                    [(v.storage().data_ptr()) for v in group.get("params", [])],
+                    opt_.param_addrs
+                )
+
     def test_optimizer(self):
-
-        def flat_out_extrafields(nodes, out=None):
-            if out is None:
-                out = []
-            for node in nodes:
-                if isinstance(node.extra_fields, _ExtraFields_PyCall) and node.extra_fields.opt:
-                    out.append(node.extra_fields.opt.self)
-                flat_out_extrafields(node.children, out)
-            return out
-
         inputs = torch.rand(10)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
             net = SimpleNet()
@@ -1523,10 +1536,26 @@ class TestTorchTidyProfiler(TestCase):
             loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
             loss.backward()
             opt.step()
+        self._check_results(opt, self._flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree()), False)
 
-        opts = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
-        self.assertEqual(len(opts), 1, f"Expected 1 optimizer, got {len(opts)}")
-        self.assertEqual(id(opt), opts[0], f"Optimizer addr ({id(opt)}) vs. Profiled optimizer addr ({opts[0]})")
+    def _test_optimizer_parameters(self, optimizer_factory):
+        inputs = torch.rand(10)
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
+            net = SimpleNet()
+            opt = optimizer_factory(net.parameters())
+            for _ in range(2):
+                opt.zero_grad()
+                out = net(inputs)
+                loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+                loss.backward()
+                opt.step()
+        self._check_results(opt, self._flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree()), True)
+
+    def test_optimizer_parameters_sgd(self):
+        self._test_optimizer_parameters(lambda params: torch.optim.SGD(params, lr=0.01, momentum=0.9))
+
+    def test_optimizer_parameters_adam(self):
+        self._test_optimizer_parameters(lambda params: torch.optim.Adam(params, foreach=True))
 
     def test_allocations(self):
         gc.collect()
