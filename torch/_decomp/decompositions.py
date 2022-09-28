@@ -1365,7 +1365,7 @@ def var_correction(
 def std_decomposition(
     x: Tensor,
     dim: Optional[List[int]] = None,
-    correction: int = 0,
+    correction: Optional[int] = None,
     keepdim: bool = False,
 ):
     return torch.sqrt(torch.var(x, dim, correction=correction, keepdim=keepdim))
