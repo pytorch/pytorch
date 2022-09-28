@@ -37,8 +37,8 @@ namespace torch {
 namespace profiler {
 namespace impl {
 namespace {
-enum CallType { PyCall = 0, PyModuleCall, PyCCall };
-static constexpr size_t CallTypeSize = 3;
+enum CallType { PyCall = 0, PyModuleCall, PyCCall, PyOptimizerCall };
+static constexpr size_t CallTypeSize = 4;
 using no_ephemeral_t = std::tuple<>;
 
 // ============================================================================
@@ -63,7 +63,11 @@ struct CodeLocation {
   int line_number_{0};
 };
 
-PyCodeObject* nnModuleCode() {
+template <CallType C>
+PyCodeObject* getCode();
+
+template <>
+PyCodeObject* getCode<CallType::PyModuleCall>() {
   static auto module_call_code = []() {
     pybind11::gil_scoped_acquire gil;
     auto res = py::module::import("torch.nn")
@@ -75,14 +79,21 @@ PyCodeObject* nnModuleCode() {
     return (PyCodeObject*)res;
   }();
   return module_call_code;
-}
-
-template <CallType C>
-PyCodeObject* getCode();
+};
 
 template <>
-PyCodeObject* getCode<CallType::PyModuleCall>() {
-  return nnModuleCode();
+PyCodeObject* getCode<CallType::PyOptimizerCall>() {
+  static auto optimizer_step_code = []() {
+    pybind11::gil_scoped_acquire gil;
+    auto res = py::module::import("torch.optim")
+                   .attr("Optimizer")
+                   .attr("_optimizer_step_code")
+                   .attr("__code__")
+                   .ptr();
+    TORCH_INTERNAL_ASSERT(PyCode_Check(res));
+    return (PyCodeObject*)res;
+  }();
+  return optimizer_step_code;
 };
 
 } // namespace
@@ -215,6 +226,25 @@ struct Config<CallType::PyCCall> {
   static constexpr EventType event_type = EventType::PyCCall;
 };
 
+template <>
+struct Config<CallType::PyOptimizerCall> {
+  using key_t = PyOptimizerSelf;
+  using cls_t = PyOptimizerCls;
+  using ephemeral_t = PyFrameObject*;
+  struct info_t {
+    cls_t cls_;
+    std::vector<void*> params_;
+    std::vector<std::pair<std::string, void*>> states_;
+  };
+  struct cache_t {
+    c10::optional<CodeLocation>
+        location_; // optim.Optimizer._optimizer_step_code;
+    ska::flat_hash_map<key_t, info_t> optimizer_data_;
+    ska::flat_hash_map<cls_t, at::StringView> cls_names_;
+  };
+  static constexpr EventType event_type = EventType::PyCall;
+};
+
 // ============================================================================
 // == Callsite & ValueCache: Storage during profiling =========================
 // ============================================================================
@@ -245,6 +275,7 @@ class Callsite {
 using PyCallKey = Config<CallType::PyCall>::key_t;
 using PyModuleCallKey = Config<CallType::PyModuleCall>::key_t;
 using PyCCallKey = Config<CallType::PyCCall>::key_t;
+using PyOptimizerCallKey = Config<CallType::PyOptimizerCall>::key_t;
 
 class ValueCache {
  public:
@@ -254,11 +285,11 @@ class ValueCache {
   template <CallType C>
   auto load(const Callsite<C>& callsite, size_t python_tid) const {
     auto caller = load<CallType::PyCall>(callsite.caller_);
-    TORCH_INTERNAL_ASSERT(!caller.second.has_value());
+    TORCH_INTERNAL_ASSERT(!caller.module_info_.has_value());
     return ExtraFields<Config<C>::event_type>{
         /*end_time_ns=*/std::numeric_limits<time_t>::min(),
         python_tid,
-        caller.first,
+        caller.frame_state_,
         load<C>(callsite.value_)};
   }
 
@@ -353,6 +384,39 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
           cls,
           cache.cls_names_.at(cls),
           cache.modules_and_params_.at(key).second}};
+}
+template <>
+void ValueCache::store<CallType::PyOptimizerCall>(
+    const PyOptimizerCallKey& key,
+    Config<CallType::PyOptimizerCall>::ephemeral_t frame) {
+  auto& cache = std::get<CallType::PyOptimizerCall>(state_);
+  if (C10_UNLIKELY(
+          cache.optimizer_data_.find(key) == cache.optimizer_data_.end())) {
+    auto cls = set_class<CallType::PyOptimizerCall>(this, cache, key, frame);
+    py::list param_groups_handle =
+        py::handle((PyObject*)key).attr("param_groups");
+    std::vector<void*> params_;
+    std::vector<std::pair<std::string, void*>> states_;
+
+    cache.optimizer_data_[key] = {cls, params_, states_};
+  }
+}
+
+template <>
+ExtraFields<EventType::PyCall>::args_t ValueCache::load<
+    CallType::PyOptimizerCall>(const PyOptimizerCallKey& key) const {
+  auto& cache = std::get<CallType::PyOptimizerCall>(state_);
+  auto cls = cache.optimizer_data_.at(key).cls_;
+  auto frame_state = std::get<CallType::PyCall>(state_).at(*cache.location_);
+  return {
+      frame_state,
+      c10::nullopt,
+      OptimizerInfo{
+          key,
+          cls,
+          cache.cls_names_.at(cls),
+          cache.optimizer_data_.at(key).params_,
+          cache.optimizer_data_.at(key).states_}};
 }
 
 template <>
@@ -565,13 +629,16 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
 
   torch::profiler::impl::RecordQueue* queue_;
   PyCodeObject* module_call_code_;
+  PyCodeObject* optimizer_hook_;
 
   std::deque<ThreadLocalResults> thread_local_results_;
   ValueCache value_cache_;
 };
 
 PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
-    : queue_(queue), module_call_code_(nnModuleCode()) {
+    : queue_(queue),
+      module_call_code_(getCode<CallType::PyModuleCall>()),
+      optimizer_hook_(getCode<CallType::PyOptimizerCall>()) {
   TORCH_CHECK(queue_ != nullptr);
 
   bool expected{false};
@@ -681,6 +748,14 @@ void PythonTracer::recordPyCall(ThreadLocalResults& tls, PyFrameObject* frame) {
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
       TORCH_INTERNAL_ASSERT(back != nullptr);
       return tls.intern<CallType::PyModuleCall, E>(
+          frame, self.get(), back.get());
+    } else if (code.get() == optimizer_hook_) {
+      auto locals = THPObjectPtr(PyFrame_GetLocals(frame));
+      auto self = THPObjectPtr(PyDict_GetItemString(locals, "self"));
+      Py_INCREF(self.get());
+      auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
+      TORCH_INTERNAL_ASSERT(back != nullptr);
+      return tls.intern<CallType::PyOptimizerCall, E>(
           frame, self.get(), back.get());
     } else {
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
