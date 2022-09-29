@@ -3,15 +3,15 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Union
 
-from torch.onnx._internal.diagnostics.infra import sarif_om
+from torch.onnx._internal.diagnostics.infra import sarif
 
-# A list of types in the SARIF OM to support pretty printing.
+# A list of types in the SARIF module to support pretty printing.
 # This is solely for type annotation for the functions below.
 _SarifClass = Union[
-    sarif_om.SarifLog,
-    sarif_om.Run,
-    sarif_om.ReportingDescriptor,
-    sarif_om.Result,
+    sarif.SarifLog,
+    sarif.Run,
+    sarif.ReportingDescriptor,
+    sarif.Result,
 ]
 
 

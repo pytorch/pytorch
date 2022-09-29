@@ -6,7 +6,7 @@ import dataclasses
 import enum
 from typing import Any, FrozenSet, List, Optional, Sequence, Set, Tuple, Type, TypeVar
 
-from torch.onnx._internal.diagnostics.infra import formatter, sarif_om
+from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
 
 class Level(enum.Enum):
@@ -55,19 +55,19 @@ class Rule:
         )
         return rule
 
-    def sarif(self) -> sarif_om.ReportingDescriptor:
+    def sarif(self) -> sarif.ReportingDescriptor:
         """Returns a SARIF reporting descriptor of this Rule."""
         short_description = (
-            sarif_om.MultiformatMessageString(text=self.short_description)
+            sarif.MultiformatMessageString(text=self.short_description)
             if self.short_description is not None
             else None
         )
         full_description = (
-            sarif_om.MultiformatMessageString(text="", markdown=self.full_description)
+            sarif.MultiformatMessageString(text="", markdown=self.full_description)
             if self.full_description is not None
             else None
         )
-        return sarif_om.ReportingDescriptor(
+        return sarif.ReportingDescriptor(
             id=self.id,
             name=self.name,
             short_description=short_description,
@@ -84,19 +84,19 @@ class Location:
     start_column: Optional[int] = None
     end_column: Optional[int] = None
 
-    def sarif(self) -> sarif_om.Location:
+    def sarif(self) -> sarif.Location:
         """Returns the SARIF representation of this location."""
-        return sarif_om.Location(
-            physical_location=sarif_om.PhysicalLocation(
-                artifact_location=sarif_om.ArtifactLocation(uri=self.uri),
-                region=sarif_om.Region(
+        return sarif.Location(
+            physical_location=sarif.PhysicalLocation(
+                artifact_location=sarif.ArtifactLocation(uri=self.uri),
+                region=sarif.Region(
                     start_line=self.line,
                     start_column=self.start_column,
                     end_line=self.line,
                     end_column=self.end_column,
                 ),
             ),
-            message=sarif_om.Message(text=self.message),
+            message=sarif.Message(text=self.message),
         )
 
 
@@ -104,12 +104,11 @@ class Location:
 class Stack:
     frame_locations: List[Location] = dataclasses.field(default_factory=list)
 
-    def sarif(self) -> sarif_om.Stack:
+    def sarif(self) -> sarif.Stack:
         """Returns the SARIF representation of this stack."""
-        return sarif_om.Stack(
+        return sarif.Stack(
             frames=[
-                sarif_om.StackFrame(location=loc.sarif())
-                for loc in self.frame_locations
+                sarif.StackFrame(location=loc.sarif()) for loc in self.frame_locations
             ]
         )
 
@@ -146,15 +145,15 @@ class Diagnostic:
     stacks: List[Stack] = dataclasses.field(default_factory=list)
     additional_message: Optional[str] = None
 
-    def sarif(self) -> sarif_om.Result:
+    def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
         if self.message_args is None:
             self.message_args = tuple()
         message = self.rule.message_default_template.format(*self.message_args)
         if self.additional_message is not None:
             message = f"{message}\n{self.additional_message}"
-        sarif_result = sarif_om.Result(
-            message=sarif_om.Message(text=message),
+        sarif_result = sarif.Result(
+            message=sarif.Message(text=message),
             level=self.level.value,
             rule_id=self.rule.id,
         )
@@ -232,10 +231,10 @@ class DiagnosticTool:
                 f"but got {self.diagnostic_type}"
             )
 
-    def sarif(self) -> sarif_om.Tool:
+    def sarif(self) -> sarif.Tool:
         """Returns the SARIF Tool representation."""
-        return sarif_om.Tool(
-            driver=sarif_om.ToolComponent(
+        return sarif.Tool(
+            driver=sarif.ToolComponent(
                 name=self.name,
                 version=self.version,
                 rules=[rule.sarif() for rule in self._triggered_rules],
@@ -298,9 +297,9 @@ class DiagnosticContext:
     def __exit__(self, exc_type, exc_val, exc_tb):
         return True
 
-    def sarif(self) -> sarif_om.Run:
+    def sarif(self) -> sarif.Run:
         """Returns the SARIF Run object."""
-        return sarif_om.Run(
+        return sarif.Run(
             tool=self.tool.sarif(),
             results=[diagnostic.sarif() for diagnostic in self._diagnostics],
         )

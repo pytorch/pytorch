@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import List, Optional
 
 from torch.onnx._internal.diagnostics import infra
-from torch.onnx._internal.diagnostics.infra import formatter, sarif_om
-from torch.onnx._internal.diagnostics.infra.sarif_om import version as sarif_version
+from torch.onnx._internal.diagnostics.infra import formatter, sarif
+from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_version
 
 
 class DiagnosticEngine:
@@ -56,8 +56,8 @@ class DiagnosticEngine:
     def __init__(self) -> None:
         self._contexts = []
 
-    def sarif_log(self) -> sarif_om.SarifLog:
-        return sarif_om.SarifLog(
+    def sarif_log(self) -> sarif.SarifLog:
+        return sarif.SarifLog(
             version=sarif_version.SARIF_VERSION,
             schema_uri=sarif_version.SARIF_SCHEMA_LINK,
             runs=[context.sarif() for context in self._contexts],
