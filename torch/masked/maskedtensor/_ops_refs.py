@@ -289,16 +289,6 @@ def is_non_overlapping_and_dense(func, *args, **kwargs):
     return func(data, *args[1:], **kwargs)
 
 
-@register_dispatch_func([torch.ops.aten.is_contiguous])
-def is_contiguous(func, *args, **kwargs):
-    data = _get_data(args[0])
-    if data.is_sparse:
-        raise ValueError(
-            "MaskedTensors with sparse data do not have is_contiguous"
-        )
-    return data.is_contiguous()
-
-
 @register_dispatch_func([torch.ops.aten.contiguous])
 def contiguous(func, *args, **kwargs):
     if _get_data(args[0]).is_sparse:
