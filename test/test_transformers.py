@@ -748,7 +748,7 @@ class TestTransformers(NNTestCase):
     def test_scaled_dot_product_attention_fused_kernels(self, type: str):
         def rand_nt(shape):
             batch, seq_len, num_heads, head_dim = shape
-            return torch.nested_tensor([torch.randn(seq_len, num_heads, head_dim, device="cuda", dtype=torch.float16) for _ in range(batch)])
+            return torch.nested.nested_tensor([torch.randn(seq_len, num_heads, head_dim, device="cuda", dtype=torch.float16) for _ in range(batch)])
 
         def rand_tensor(shape):
             batch, seq_len, num_heads, head_dim = shape
