@@ -474,7 +474,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
 }
 
 void Reducer::set_forward_pass_work_handle(
-    c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+    c10::intrusive_ptr<c10d::Work> forwardPassWorkHandle,
     bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);

@@ -13,10 +13,10 @@ architectures:
 from typing import Dict, List, Tuple, Optional
 
 
-CUDA_ARCHES = ["10.2", "11.3", "11.6", "11.7"]
+CUDA_ARCHES = ["10.2", "11.6", "11.7"]
 
 
-ROCM_ARCHES = ["5.0", "5.1.1"]
+ROCM_ARCHES = ["5.1.1", "5.2"]
 
 
 def arch_type(arch_version: str) -> str:
@@ -209,6 +209,32 @@ def generate_wheels_matrix(os: str,
             # Skip rocm 3.11 binaries for now as the docker image are not correct
             if python_version == "3.11" and gpu_arch_type == "rocm":
                 continue
+
+            # special 11.7 wheels package without dependencies
+            # dependency downloaded via pip install
+            if arch_version == "11.7" and os == "linux":
+                ret.append(
+                    {
+                        "python_version": python_version,
+                        "gpu_arch_type": gpu_arch_type,
+                        "gpu_arch_version": gpu_arch_version,
+                        "desired_cuda": translate_desired_cuda(
+                            gpu_arch_type, gpu_arch_version
+                        ),
+                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                        "package_type": package_type,
+                        "pytorch_extra_install_requirements":
+                        "nvidia-cuda-runtime-cu11;"
+                        "nvidia-cudnn-cu11==8.5.0.96;"
+                        "nvidia-cublas-cu11==11.10.3.66",
+                        "build_name":
+                        f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-with-pypi-cudnn"
+                        .replace(
+                            ".", "_"
+                        ),
+                    }
+                )
+
             ret.append(
                 {
                     "python_version": python_version,

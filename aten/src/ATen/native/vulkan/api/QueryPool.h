@@ -80,6 +80,7 @@ class QueryPool final {
   void extract_results();
   void print_results();
   uint64_t get_total_op_ns(std::string op_name);
+  void shader_log_for_each(std::function<void(const ShaderDuration&)> fn);
 };
 
 } // namespace api

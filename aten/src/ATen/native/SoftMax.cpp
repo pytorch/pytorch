@@ -131,7 +131,18 @@ void host_softmax(
     Tensor output,
     const Tensor& input,
     const int64_t dim,
-    bool* mask = nullptr) {
+    bool* mask = nullptr,
+    const c10::optional<int64_t> mask_type_ = NULL) {
+
+  if (MaskedSoftMax) {
+    TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
+    int64_t mask_type = mask_type_.value();
+    TORCH_CHECK((mask_type == 0) || (mask_type == 1), "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask)");
+
+    // TODO: Add support for TxT src_mask
+    TORCH_CHECK(mask_type != 0, "src_mask not currently supported on CPU");
+  }
+
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
   int64_t inner_size = 1;
@@ -541,7 +552,7 @@ Tensor log_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dtype) 
   return at::log_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_) {
+Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
   TORCH_CHECK(
       input_.sizes() == mask_.sizes(), "Mask shape should match input shape");
   TORCH_CHECK(
@@ -564,7 +575,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
             scalar_t,
             false /* LogSoftMax */,
             true /* MaskedSoftMax */>(
-            output, input, dim, mask.data_ptr<bool>());
+            output, input, dim, mask.data_ptr<bool>(), mask_type_);
       });
   return output;
 }

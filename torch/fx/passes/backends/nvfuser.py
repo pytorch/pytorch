@@ -26,7 +26,7 @@ def aten_to_dtype(self, dtype: torch.dtype, **kwargs):
     return torch._prims.convert_element_type(self, dtype)
 
 # decomposition_table currently contains both aten2aten and aten2prim decomposition
-# this is a hack to seperate them, as we only need aten2prim decomposition for nvfuser-supported aten graph lowering
+# this is a hack to separate them, as we only need aten2prim decomposition for nvfuser-supported aten graph lowering
 aten2aten_decomp = {}
 aten2prim_decomp = {}
 

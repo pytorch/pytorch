@@ -1387,13 +1387,19 @@ class TestTEFuser(JitTestCase):
                 F.hardsigmoid,
                 F.hardswish,
                 F.softplus,
+                F.silu,
+                F.mish,
+                F.elu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,
-                torch.ceil,
-                torch.floor,
-                torch.round,
-                torch.trunc,
+                # TODO broken on int8 since
+                # https://github.com/pytorch/pytorch/pull/85144
+                # RuntimeError: Invalid integral op_type: 23
+                # torch.ceil,
+                # torch.floor,
+                # torch.round,
+                # torch.trunc,
                 torch.frac,
                 # TODO: broken on ROCm?
                 # F.hardshrink,
@@ -2342,6 +2348,32 @@ class TestTEFuser(JitTestCase):
         scr(x)
         self.assertLastGraphAllFused()
 
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    def test_to_dtype(self):
+        def f(x):
+            y = torch.sigmoid(x)
+            z = y._autocast_to_reduced_precision(True, True, torch.half, torch.bfloat16)
+            h = z._autocast_to_full_precision(True, True)
+            i = h.to(dtype=torch.bfloat16)
+            j = i.to(dtype=torch.float32)
+            return j
+
+        x = torch.rand((2, 2), dtype=torch.float32)
+        scr = torch.jit.trace(f, x)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+        self.assertEqual(f(x), scr(x), atol=4e-3, rtol=4e-3)
+
+        bf_x = torch.rand((2, 2), dtype=torch.bfloat16)
+        bf_scr = torch.jit.trace(f, bf_x)
+        bf_scr(bf_x)
+        bf_scr(bf_x)
+        graph = bf_scr.graph_for(bf_x)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 2)
+        self.assertEqual(f(bf_x), bf_scr(bf_x), atol=4e-3, rtol=4e-3)
+
     def test_with_strict_fusion(self):
 
         def success(x):
@@ -2673,7 +2705,9 @@ def f({', '.join(param_names)}):
                 trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
                 val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-                self.assertEqual(ref, val)
+                atol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                rtol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                self.assertEqual(ref, val, atol=atol, rtol=rtol)
 
             # https://github.com/pytorch/pytorch/issues/35600
             # each torch.jit.trace adds state to the _python_cu compilation unit

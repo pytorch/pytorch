@@ -28,6 +28,8 @@ TORCH_API void registerPythonTensorClass(
     const std::string& device,
     PyObject* python_tensor_class);
 
+TORCH_API void activateCUDATrace();
+
 TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;
 

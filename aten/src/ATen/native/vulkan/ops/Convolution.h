@@ -10,14 +10,13 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
+Tensor rearrange_weights_dw(const Tensor& weight_in);
+Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv);
+
 enum Conv2dMethod {
   Conv2dDepthwise,
   Conv2dPointwise,
   Conv2dSlidingWindow,
-  TConv2dSlidingWindow,
-  QConv2dDepthwise,
-  QConv2dPointwise,
-  QConv2dSlidingWindow,
 };
 
 class Conv2dPackedContext final : virtual public VulkanPackedContext,
@@ -39,9 +38,52 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
       const c10::optional<Scalar>& output_min = c10::nullopt,
       const c10::optional<Scalar>& output_max = c10::nullopt);
 
+  /*
+   * Assigns a name to each index in the unpacked list.
+   */
+  struct Unpacked final {
+    static constexpr uint32_t Weight = 0u;
+    static constexpr uint32_t Bias = 1u;
+    static constexpr uint32_t Stride = 2u;
+    static constexpr uint32_t Padding = 3u;
+    static constexpr uint32_t Dilation = 4u;
+    static constexpr uint32_t isTransposed = 5u;
+    static constexpr uint32_t isQuantized = 6u;
+    static constexpr uint32_t OutputPadding = 7u;
+    static constexpr uint32_t Groups = 8u;
+    static constexpr uint32_t OutputMin = 9u;
+    static constexpr uint32_t OutputMax = 10u;
+
+    static constexpr uint32_t NumArgs = 11u;
+  };
+
+  /*
+   * Assigns a name to each index in the packed list.
+   */
+  struct Packed final {
+    static constexpr uint32_t Weight = 0u;
+    static constexpr uint32_t Bias = 1u;
+    static constexpr uint32_t FilterSizes = 2u;
+    static constexpr uint32_t Stride = 3u;
+    static constexpr uint32_t Padding = 4u;
+    static constexpr uint32_t OutputPadding = 5u;
+    static constexpr uint32_t Dilation = 6u;
+    static constexpr uint32_t isTransposed = 7u;
+    static constexpr uint32_t isQuantized = 8u;
+    static constexpr uint32_t Groups = 9u;
+    static constexpr uint32_t OutputMin = 10u;
+    static constexpr uint32_t OutputMax = 11u;
+    static constexpr uint32_t ConvMethod = 12u;
+    static constexpr uint32_t WeightSizes = 13u;
+
+    static constexpr uint32_t NumArgs = 14u;
+  };
+
   static Conv2dPackedContext pack(c10::impl::GenericList);
 
   const c10::impl::GenericList unpack() const override {
+    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+
     return unpacked_;
   }
 };

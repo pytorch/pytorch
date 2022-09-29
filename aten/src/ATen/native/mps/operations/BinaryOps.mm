@@ -72,16 +72,37 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
 
           // this type inference is only required at the time of graph creation
           const ScalarType common_dtype = c10::promoteTypes(self.scalar_type(), other.scalar_type());
-          if (self.scalar_type() != common_dtype) {
-            primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
+
+          // Condition -
+          // 1. Division operation
+          // 2. Inputs are not float
+          bool div_condition = op_name.rfind("div", 0) == 0
+                                  && (!(common_dtype == ScalarType::Float || common_dtype == ScalarType::Half));
+
+          auto compute_type = ScalarType::Float;
+
+          if(div_condition) {
+
+            if(output_.scalar_type() == ScalarType::Float || output_.scalar_type() == ScalarType::Half)
+              compute_type = output_.scalar_type();
+
+            primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, compute_type);
+            secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, compute_type);
           }
-          if (other.scalar_type() != common_dtype) {
-            secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
+          else  {
+            if (self.scalar_type() != common_dtype) {
+              primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
+            }
+            if (other.scalar_type() != common_dtype) {
+              secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
+            }
           }
           newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
           // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to int32 tensor
           // Output tensor should have been promoted but it remains an int32 tensor
-          if (output_.scalar_type() != common_dtype) {
+
+          if ((div_condition && compute_type != output_.scalar_type()) ||
+              output_.scalar_type() != common_dtype) {
             newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output_.scalar_type());
           }
         }
@@ -138,7 +159,11 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     MPSGraphTensor* divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
                                                      secondaryTensor:secondaryCastTensor
                                                                 name:nil];
-    if (!rounding_mode.has_value()) {
+    // Rounding is a no-op for integral types, and also a reasonable workaround
+    // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
+    // See https://github.com/pytorch/pytorch/issues/84995
+    bool isFloatOutput = ([divTensor dataType] & MPSDataTypeFloatBit) != 0;
+    if (!rounding_mode.has_value() || !isFloatOutput) {
       return divTensor;
     } else if (*rounding_mode == "trunc") {
       return trunc_tensor(mpsGraph, divTensor);

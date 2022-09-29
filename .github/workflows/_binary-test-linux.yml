@@ -139,13 +139,6 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: ${{ inputs.build_name }}
-          path: "${{ runner.temp }}/artifacts/"
-
-
       - name: Checkout PyTorch to pytorch dir
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -171,8 +164,14 @@ jobs:
           git clean -fxd
         working-directory: builder
 
+      - uses: actions/download-artifact@v3
+        name: Download Build Artifacts
+        with:
+          name: ${{ inputs.build_name }}
+          path: "${{ runner.temp }}/artifacts/"
+
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: nick-fields/retry@7d4a37704547a311dbb66ebdf5b23ec19374a767
         if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
         with:
           timeout_minutes: 10
@@ -192,21 +191,10 @@ jobs:
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
 
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
+      - name: Teardown Linux
         if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
+        uses: ./pytorch/.github/actions/teardown-linux
+
       - name: Chown workspace
         if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+        uses: ./pytorch/.github/actions/chown-workspace

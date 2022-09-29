@@ -78,7 +78,7 @@ if(USE_CUDA)
 endif()
 
 # ---[ Custom Protobuf
-if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND (NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE))
+if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
   enable_ubsan()
@@ -823,12 +823,8 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
       # See https://github.com/pytorch/pytorch/issues/74352
-      target_compile_options(asmjit PRIVATE -Wno-deprecated-copy)
-      if(("${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.1.6)
-        OR("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0.0))
-        # -Wno-unused-but-set-variable doesn't exist in Apple clang version 13.0.0 (clang-1300.0.29.30)
-        target_compile_options(asmjit PRIVATE -Wno-unused-but-set-variable)
-      endif()
+      target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
+      target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     endif()
   endif()
 
@@ -1340,7 +1336,7 @@ if(USE_ROCM)
 endif()
 
 # ---[ ROCm
-if(USE_ROCM)
+if(USE_ROCM AND ROCM_VERSION_DEV VERSION_LESS "5.2.0")
   # We check again for USE_ROCM because it might have been set to OFF
   # in the if above
   include_directories(SYSTEM ${HIP_PATH}/include)

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <unordered_set>
 
 namespace torch {
 namespace jit {
@@ -103,13 +104,16 @@ DataType getTypeFromComplexType(DataType dtype);
 
 enum class ExprType {
   Invalid,
+  ARangeOp,
   UnaryOp,
   BinaryOp,
   TernaryOp,
+  RNGOp,
   ReductionOp,
   GroupedReductionOp,
   BroadcastOp,
   WelfordOp,
+  GroupedWelfordOp,
   MmaOp,
   TransposeOp,
   ExpandOp,
@@ -127,6 +131,7 @@ enum class ExprType {
   BlockSync,
   GridSync,
   CpAsyncWait,
+  CpAsyncCommit,
   InitMagicZero,
   UpdateMagicZero,
   ForLoop,
@@ -135,6 +140,7 @@ enum class ExprType {
   GroupedGridReduction,
   GridBroadcast,
   GridWelford,
+  GroupedGridWelford,
   AllocateFusedReduction
 };
 
@@ -165,7 +171,6 @@ enum class UnaryOpType {
   Log2,
   BitCast,
   Neg,
-  RandLike,
   Real,
   Reciprocal,
   Relu,
@@ -179,6 +184,9 @@ enum class UnaryOpType {
   Tan,
   Tanh,
   Trunc,
+
+  // Tools to help debugging
+  Print,
 
   // Might be a bitwise operator or boolean operator.
   Not,
@@ -235,6 +243,10 @@ enum class BinaryOpType {
   Xor
 };
 
+enum class RNGOpType {
+  Uniform,
+};
+
 // Return if output of operator should be a boolean
 bool isIntegerOp(const BinaryOpType bopt);
 
@@ -262,6 +274,9 @@ enum class ParallelType {
   Group,
   Serial
 };
+
+TORCH_CUDA_CU_API std::unordered_set<ParallelType> allParallelTypesExcept(
+    const std::unordered_set<ParallelType>& except);
 
 static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
     ParallelType::BIDx,
@@ -326,10 +341,14 @@ enum class DoubleBufferLoopStage { NotApplicable, Prolog, Main, Epilog };
 //!    doesn't have the same type.
 enum class Swizzle2DType { NoSwizzle = 0, ZShape, Transpose, XOR, Scatter };
 
+//! Modes of swizzle, see [Note on swizzle mode].
+enum class SwizzleMode { NoSwizzle = 0, Data, Loop };
+
 // Returns if function needs an f suffix on the operator when operating on a
 // float value i.e. sin->sinf
 bool needFloatSuffix(UnaryOpType t);
 bool needFloatSuffix(BinaryOpType t);
+bool needFloatSuffix(RNGOpType t);
 
 ValType promote_type(const ValType& t1, const ValType& t2);
 DataType promote_type(const DataType& t1, const DataType& t2);
@@ -346,6 +365,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const RNGOpType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
@@ -357,6 +377,7 @@ TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream&,
     const DoubleBufferLoopStage);
 TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const Swizzle2DType&);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const SwizzleMode&);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);
@@ -377,6 +398,7 @@ TORCH_CUDA_CU_API bool isParallelTypeVectorize(ParallelType);
 
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const RNGOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 TORCH_CUDA_CU_API c10::optional<std::string> bool_op_str(const BinaryOpType);
 

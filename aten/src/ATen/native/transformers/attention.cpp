@@ -1,5 +1,4 @@
 #include <type_traits>
-
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -118,14 +117,10 @@ Tensor bmm_nt(const Tensor& a, const Tensor& b) {
 Tensor masked_softmax(
     Tensor& attn_scores,
     c10::optional<Tensor> attn_mask,
-    const Tensor& query) {
+    const Tensor& query,
+    c10::optional<int64_t> mask_type = NULL) {
   if (query.is_nested() && !attn_mask) {
-    if (attn_scores.is_cpu()) {
-      NestedTensor_softmax_dropout(query, attn_scores);
-      return attn_scores;
-    }
-    attn_mask = NestedTensor_to_mask(query, 2, attn_scores.size(2));
-    attn_mask = attn_mask->to(query.device(), /*non-blocking=*/true);
+    return at::_nested_tensor_softmax_with_shape(attn_scores, query);
   }
   if (attn_mask && attn_mask->dtype() != at::kBool) {
     TORCH_WARN(
@@ -143,7 +138,7 @@ Tensor masked_softmax(
     attn_mask = at::expand_inplace(attn_scores, *attn_mask)->contiguous();
   }
   if (attn_mask) {
-    return _masked_softmax(attn_scores, *attn_mask);
+    return _masked_softmax(attn_scores, *attn_mask, attn_scores.dim() - 1, mask_type);
   } else {
     return _softmax_out(attn_scores, attn_scores, attn_scores.dim() - 1, false);
   }
@@ -329,7 +324,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
     const Tensor& proj_bias,
     const c10::optional<Tensor>& mask,
     bool need_weights,
-    bool average_attn_weights) {
+    bool average_attn_weights,
+    const c10::optional<int64_t> mask_type) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
 
@@ -445,7 +441,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
   // shape: [B, num_head, T, T]
   // TODO: long-term, have a kernel that works with
   // NestedTensor directly if there is no mask passed
-  qkt = masked_softmax(qkt, mask, query);
+  qkt = masked_softmax(qkt, mask, query, mask_type);
 #ifdef DEBUG_PRINT_EACH_STEP
   std::cerr << "qkt after softmax: " << qkt << std::endl;
 #endif
@@ -690,9 +686,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
     auto attn_mask = attn_mask_;
-    TORCH_CHECK(!attn_mask.has_value() || attn_mask->dtype() == at::kBool,
-            "_scaled_dot_product_attention: Only boolean attention masks are currently supported, but found: ",
-            attn_mask->dtype())
     // Naive, composite implementation defined here.
     const auto embed_size = query_.size(-1);
     const auto query = query_ * (1. / ::sqrt(static_cast<double>(embed_size)));
@@ -711,9 +704,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported "
                 "when an explicit attn_mask is set");
         // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
-        auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
-        new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
-        attn_mask = new_attn_mask;
+        if (attn_mask->dtype() == at::kBool){
+          auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
+          new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
+          attn_mask = new_attn_mask;
+        }
+        // Otherwise, attn_mask represents an additive attention tensor
     }
     auto attn = at::matmul(query, key.transpose(-2, -1));
     if (attn_mask.has_value()) {
@@ -721,10 +717,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
-        at::dropout_(attn, dropout_p, true);
+      attn = at::dropout(attn, dropout_p, true);
     }
     const auto output = at::matmul(attn, value);
-    return (need_attn_weights ? std::make_tuple(output, attn) : std::make_tuple(output, Tensor()));
+    return std::make_tuple(output, attn);
 }
 
 Tensor triton_multi_head_attention(

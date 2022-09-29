@@ -17,11 +17,11 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, StepLR, \
     MultiStepLR, ConstantLR, LinearLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
+    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, PolynomialLR, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests, gradcheck
+    parametrize, instantiate_parametrized_tests, gradcheck, skipIfRocm
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -311,10 +311,9 @@ class TestOptim(TestCase):
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
 
-        for i in range(3):
+        for _ in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
-
             complex_opt.step()
             real_opt.step()
 
@@ -331,7 +330,7 @@ class TestOptim(TestCase):
         optim1 = optimizer_constructor([a1])
         optim2 = optimizer_constructor([a1_real, a1_imag])
 
-        for i in range(10):
+        for _ in range(10):
             optim1.zero_grad()
             optim2.zero_grad()
             a2 = torch.complex(a1_real, a1_imag)
@@ -426,16 +425,21 @@ class TestOptim(TestCase):
                 optimizer([weight, bias], nesterov=True, lr=1e-3, momentum=0.5, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
+                constructor_accepts_maximize=True
+            )
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
                 optimizer(None, lr=1e-2, momentum=-0.5)
 
     def test_sgd_sparse(self):
         for optimizer in [optim.SGD, optim_mt.SGD]:
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=5e-3)
+                lambda params: optimizer(params, lr=4.8e-3)
             )
             self._test_rosenbrock_sparse(
-                lambda params: optimizer(params, lr=0.005),
+                lambda params: optimizer(params, lr=0.0048),
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
@@ -599,6 +603,14 @@ class TestOptim(TestCase):
                     lr=1e-3, amsgrad=True, maximize=maximize),
                 [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
                  lambda opt: ReduceLROnPlateau(opt)],
+                constructor_accepts_maximize=True
+            )
+
+            self._test_basic_cases(
+                lambda weight, bias, maximize: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, maximize=maximize),
+                [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
                 constructor_accepts_maximize=True
             )
             self._test_complex_2d(optimizer)
@@ -858,6 +870,14 @@ class TestOptim(TestCase):
                     lr=1e-2, momentum=0.1, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            self._test_complex_2d(optimizer)
+            self._test_complex_2d(lambda param: optimizer(param, centered=True))
+            self._test_complex_2d(lambda param: optimizer(param, momentum=0.1))
+            self._test_complex_2d(lambda param: optimizer(param, maximize=True))
+            self._test_complex_optimizer(lambda param: optimizer([param]))
+            self._test_complex_optimizer(lambda param: optimizer([param], centered=True))
+            self._test_complex_optimizer(lambda param: optimizer([param], momentum=0.1))
+            self._test_complex_optimizer(lambda param: optimizer([param], maximize=True))
             with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
                 optimizer(None, lr=1e-2, momentum=-1.0)
 
@@ -879,18 +899,36 @@ class TestOptim(TestCase):
                     lr=1e-3, weight_decay=1, maximize=maximize),
                 constructor_accepts_maximize=True
             )
+            # Ref: https://github.com/pytorch/pytorch/issues/84560
+            # self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(lambda params: optimizer([params]))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=True, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], maximize=False, weight_decay=0.9))
+            self._test_complex_optimizer(lambda params: optimizer([params], weight_decay=0.9))
+
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
                 optimizer(None, lr=1e-2, weight_decay=-0.5)
 
+    @skipIfRocm
     def test_rprop(self):
         for optimizer in [optim.Rprop, optim_mt.Rprop]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=2e-4, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                    lr=2e-4, maximize=maximize),
+                constructor_accepts_maximize=True
+            )
+            self._test_complex_2d(optimizer)
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, maximize=True)
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 optimizer(None, lr=1e-2, etas=(1.0, 0.5))
@@ -1211,6 +1249,10 @@ class TestLRScheduler(TestCase):
         scheduler = LinearLR(self.opt)
         self._test_lr_is_constant_for_constant_epoch(scheduler)
 
+    def test_polynomial_lr_is_constant_for_constant_epoch(self):
+        scheduler = PolynomialLR(self.opt, power=0.9)
+        self._test_lr_is_constant_for_constant_epoch(scheduler)
+
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
         # lr = 0.005    if 30 <= epoch < 6
@@ -1343,6 +1385,15 @@ class TestLRScheduler(TestCase):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         self._test(scheduler, targets, epochs)
 
+    def test_poly_lr(self):
+        epochs = 10
+        power = 0.9
+        total_iters = 5
+        single_targets = [(1.0 - x / total_iters) ** power * 0.05 for x in range(total_iters)] + [0.0] * (epochs - total_iters)
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        scheduler = PolynomialLR(self.opt, power=power, total_iters=total_iters)
+        self._test(scheduler, targets, epochs)
+
     def test_cos_anneal_lr(self):
         epochs = 10
         eta_min = 1e-10
@@ -1376,6 +1427,11 @@ class TestLRScheduler(TestCase):
     def test_closed_form_exp_lr(self):
         scheduler = ExponentialLR(self.opt, gamma=0.9)
         closed_form_scheduler = ExponentialLR(self.opt, gamma=0.9)
+        self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
+
+    def test_closed_form_poly_lr(self):
+        scheduler = PolynomialLR(self.opt, power=0.9)
+        closed_form_scheduler = PolynomialLR(self.opt, power=0.9)
         self._test_against_closed_form(scheduler, closed_form_scheduler, 20)
 
     def test_closed_form_cos_anneal_lr(self):
@@ -1591,6 +1647,25 @@ class TestLRScheduler(TestCase):
         schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
+
+    def test_chained_lr5(self):
+        def poly_lr(lr: float):
+            return [
+                (lr * ((1.0 - x / total_iters) ** power)) for x in range(total_iters)
+            ] + [0.0] * (epochs - total_iters)
+
+        schedulers = [None] * 2
+        epochs = 10
+        power = 0.9
+        total_iters = 5
+        const_factor = 0.1
+        single_targets = [x * const_factor for x in poly_lr(lr=0.05)]
+        targets = [single_targets, [x * const_factor for x in poly_lr(0.5)]]
+        schedulers[0] = PolynomialLR(self.opt, power=power, total_iters=total_iters)
+        schedulers[1] = ConstantLR(self.opt, factor=const_factor)
+        scheduler = ChainedScheduler(schedulers)
+        self._test(scheduler, targets, epochs)
         self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_compound_step_and_multistep_lr(self):
@@ -1994,6 +2069,20 @@ class TestLRScheduler(TestCase):
         with self.assertRaises(ValueError):
             adam_opt = optim.Adam(self.net.parameters())
             scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=True)
+
+    def test_cycle_lr_removed_after_out_of_scope(self):
+        import gc
+        import weakref
+        gc.disable()
+
+        def test():
+            adam_opt = optim.Adam(self.net.parameters())
+            scheduler = CyclicLR(adam_opt, base_lr=1, max_lr=5, cycle_momentum=False)
+            return weakref.ref(scheduler)
+
+        ref = test()
+        assert ref() is None
+        gc.enable()
 
     def test_onecycle_lr_invalid_anneal_strategy(self):
         with self.assertRaises(ValueError):
@@ -2715,11 +2804,15 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     # dict
     p = p.clone()
     p.grad = grad
-    opt_differentiable_state = {k: v.clone() for k, v in opt_differentiable_state.items()}
+    opt_differentiable_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v
+        for k, v in opt_differentiable_state.items()
+    }
     opt = opt_class([p], **kwargs)
-    opt.state.update(opt_differentiable_state)
+    opt.state[p].update(opt_differentiable_state)
     opt.step()
-    return (p,) + tuple(opt_differentiable_state.values())
+    return (p,) + tuple(
+        v for v in opt_differentiable_state.values() if isinstance(v, torch.Tensor) and v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -2730,6 +2823,38 @@ class TestDifferentiableOptimizer(TestCase):
         mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
         state = {'momentum_buffer': mbuff}
         gradcheck(_diff_fn, (p, grad, state, torch.optim.SGD, {'lr': 0.9, 'differentiable': True}, *state.values()))
+
+    def test_adam(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['exp_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['max_exp_avg_sq'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Adam,
+             {'lr': 0.9, 'differentiable': True, 'amsgrad': True}, *state.values())
+        )
+
+    def test_rmsprop(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['step'] = 0
+        state['square_avg'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['momentum_buffer'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # This can cause issues with large values and nan due to sqrt ops
+        state['grad_avg'] = 1e-2 * torch.rand(10, requires_grad=True, dtype=torch.float64)
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.RMSprop,
+             {'lr': 0.9, 'maximize': True, 'momentum': 0.9, 'differentiable': True, 'centered': True, 'weight_decay': 0.1},
+             *state.values()))
 
 
 if __name__ == '__main__':

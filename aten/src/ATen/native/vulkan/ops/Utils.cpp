@@ -32,10 +32,10 @@ namespace utils {
  *    tensor would be {NC_aligned/4, H, W, 4}
  */
 Tensor nchw_to_nc4hw(const Tensor& src) {
-  uint32_t N = batch_size(src.sizes());
-  uint32_t C = channels_size(src.sizes());
-  uint32_t H = height_size(src.sizes());
-  uint32_t W = width_size(src.sizes());
+  uint32_t N = get_dim<Dim4D::Batch>(src.sizes());
+  uint32_t C = get_dim<Dim4D::Channel>(src.sizes());
+  uint32_t H = get_dim<Dim4D::Height>(src.sizes());
+  uint32_t W = get_dim<Dim4D::Width>(src.sizes());
 
   uint32_t NC4 = api::utils::div_up(N * C, 4u);
   uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
@@ -57,10 +57,10 @@ Tensor nchw_to_nc4hw(const Tensor& src) {
  * same as the tensor produced by a call to format_src_tensor().
  */
 Tensor create_staging_tensor(const vTensor& v_in) {
-  uint32_t N = batch_size(v_in.sizes());
-  uint32_t C = channels_size(v_in.sizes());
-  uint32_t H = height_size(v_in.sizes());
-  uint32_t W = width_size(v_in.sizes());
+  uint32_t N = get_dim<Dim4D::Batch>(v_in.sizes());
+  uint32_t C = get_dim<Dim4D::Channel>(v_in.sizes());
+  uint32_t H = get_dim<Dim4D::Height>(v_in.sizes());
+  uint32_t W = get_dim<Dim4D::Width>(v_in.sizes());
 
   uint32_t NC4 = api::utils::div_up(N * C, 4u);
 
@@ -82,10 +82,10 @@ Tensor create_staging_tensor(const vTensor& v_in) {
  * the properties of the original tensor.
  */
 Tensor nc4hw_to_nchw(const Tensor& t_in, IntArrayRef sizes) {
-  uint32_t N = batch_size(sizes);
-  uint32_t C = channels_size(sizes);
-  uint32_t H = height_size(sizes);
-  uint32_t W = width_size(sizes);
+  uint32_t N = get_dim<Dim4D::Batch>(sizes);
+  uint32_t C = get_dim<Dim4D::Channel>(sizes);
+  uint32_t H = get_dim<Dim4D::Height>(sizes);
+  uint32_t W = get_dim<Dim4D::Width>(sizes);
 
   uint32_t NC_aligned = api::utils::align_up(N * C, 4u);
 
@@ -235,17 +235,21 @@ void pack_vtensor_to_staging(
       },
   };
 
+  bool is_quantized = v_self.is_quantized();
+
+  api::utils::uvec3 pack_extents = extents;
+  if (is_quantized) {
+    pack_extents.data[0u] = 1;
+    pack_extents.data[1u] = 1;
+    pack_extents.data[2u] =
+        api::utils::safe_downcast<uint32_t>(v_self.numtexels());
+  }
+
   api::UniformParamsBuffer params(context, block);
   api::PipelineBarrier pipeline_barrier{};
-  bool is_quantized = v_self.is_quantized();
-  api::utils::uvec3 copy_extents;
-  copy_extents.data[0u] = 1;
-  copy_extents.data[1u] = 1;
-  copy_extents.data[2u] =
-      ((v_self.sizes()[1] * v_self.sizes()[2] * v_self.sizes()[3]) / 4);
+
   api::ShaderSource kernel = is_quantized ? VK_KERNEL(image_to_nchw_quantized)
                                           : VK_KERNEL(image_to_nchw);
-  api::utils::uvec3 extents_to_use = is_quantized ? copy_extents : extents;
 
   context->submit_compute_job(
       // shader descriptor
@@ -253,9 +257,9 @@ void pack_vtensor_to_staging(
       // pipeline barrier
       pipeline_barrier,
       // global work group size
-      extents_to_use,
+      pack_extents,
       // local work group size
-      adaptive_work_group_size(extents_to_use),
+      adaptive_work_group_size(pack_extents),
       // fence handle
       fence_handle,
       // shader arguments

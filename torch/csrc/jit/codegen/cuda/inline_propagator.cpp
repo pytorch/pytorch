@@ -10,22 +10,10 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-bool InlinePropagatorSelector::allowC2P(TensorView* from, TensorView* to) {
-  return selected_.count(to) > 0;
-}
-
-bool InlinePropagatorSelector::allowP2C(TensorView* from, TensorView* to) {
-  // If the producer is in the selected set, then the consumer must also be
-  // replayed to obtain a compatible loop structure so that this producer
-  // can be consumed in this loop.
-  return selected_.count(from) > 0 || selected_.count(to) > 0;
-}
-
-bool InlinePropagatorSelector::allowSibling(TensorView* from, TensorView* to) {
-  return true;
-}
-
-MaxPosCalculator::MaxPosCalculator(ComputeAtMode mode) : mode_(mode) {
+MaxPosCalculator::MaxPosCalculator(
+    ComputeAtMode mode,
+    std::unordered_set<IterDomain*> uninlinable_ids)
+    : mode_(mode), uninlinable_ids_(std::move(uninlinable_ids)) {
   buildUnmappableDims();
 }
 
@@ -63,6 +51,10 @@ bool MaxPosCalculator::isAllowedID(
 
   if (!allow_reduction) {
     allowed = allowed && !id->isReduction();
+  }
+
+  if (uninlinable_ids_.count(id)) {
+    return false;
   }
 
   if (!allow_vectorize) {
@@ -121,6 +113,13 @@ size_t MaxPosCalculator::getMaxProducerPosFromConsumer(
 
   for (size_t producer_pos = 0; producer_pos < producer->nDims();
        producer_pos++) {
+    // If the producer position is mismatching with the consumer, then we can
+    // not inline into this position, otherwise the max producer position of
+    // the consumer will become invalid and expression sort will fail.
+    if (TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+            consumer, producer, producer_pos + 1) < 0) {
+      return producer_pos;
+    }
     auto map_it = p2c_replay_map.find(producer->axis(producer_pos));
     if (map_it != p2c_replay_map.end()) {
       auto c_id = map_it->second;
@@ -147,9 +146,17 @@ size_t InlinePropagator::getMaxPosAll(TensorView* tv, bool check_siblings) {
 }
 
 void InlinePropagator::setCAPos(TensorView* tv) {
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
   size_t pos = mapped_reference_pos_.at(tv);
+  if (debug) {
+    std::cout << "  Setting CA pos of " << tv << ":" << std::endl;
+    std::cout << "    mapped position: " << pos << std::endl;
+  }
   if ((selected_.empty() || selected_.count(tv)) && !tv->isFusionInput()) {
     auto max_pos = getMaxPosAll(tv);
+    if (debug) {
+      std::cout << "    max inlinable position: " << max_pos << std::endl;
+    }
     if (mode_ == ComputeAtMode::Standard) {
       TORCH_INTERNAL_ASSERT(
           pos <= max_pos,
@@ -159,14 +166,32 @@ void InlinePropagator::setCAPos(TensorView* tv) {
           pos,
           ",  max position that's allowed is ",
           max_pos);
-    } else {
+    } else if (mode_ == ComputeAtMode::BestEffort) {
       pos = std::min<size_t>(pos, max_pos);
+    } else {
+      pos = max_pos;
     }
     // hoist inner most broadcast
     while (pos > 0 && tv->axis(pos - 1)->isBroadcast()) {
       pos--;
     }
-    tv->setComputeAt(pos);
+    auto current_ca_pos = tv->getComputeAtPosition();
+    if (debug) {
+      std::cout << "    current CA position: " << current_ca_pos << std::endl;
+    }
+    if (pos > current_ca_pos) {
+      if (debug) {
+        std::cout << "    new CA position: " << pos << std::endl;
+      }
+      tv->setComputeAt(pos);
+      for (auto consumer_tv : ir_utils::consumerTvsOf(tv)) {
+        needs_update_max_producer_.insert(consumer_tv);
+      }
+    } else if (debug) {
+      std::cout << "    CA position not changed" << std::endl;
+    }
+  } else if (debug) {
+    std::cout << "    tensor not selected, skip" << std::endl;
   }
 }
 
@@ -174,8 +199,9 @@ InlinePropagator::InlinePropagator(
     TensorView* reference,
     int64_t reference_pos,
     ComputeAtMode mode,
-    std::unordered_set<TensorView*> selected)
-    : max_pos_calc(mode),
+    std::unordered_set<TensorView*> selected,
+    std::unordered_set<IterDomain*> uninlinable_ids)
+    : max_pos_calc(mode, std::move(uninlinable_ids)),
       selected_(std::move(selected)),
       reference_(reference),
       mode_(mode) {
@@ -194,69 +220,150 @@ InlinePropagator::InlinePropagator(
   reference_pos_ = reference_pos;
 }
 
+void InlinePropagator::setUp() {
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
+  mapped_reference_pos_[reference_] = reference_pos_;
+  if (debug) {
+    std::cout << "InlinePropagator::setUp" << std::endl;
+    std::cout << "  reference: " << reference_ << " @ " << reference_pos_
+              << std::endl;
+  }
+  setCAPos(reference_);
+}
+
+namespace {
+
+// Try to find the aligned position on consumer's domain corresponding to the
+//  compute at position of producer domain. Used in InlinePropagator pass only.
+//  No checking on actual producer-consumer relationship.
+unsigned int getConsumerPosAlignedToProducerCA(
+    TensorView* consumer,
+    TensorView* producer) {
+  // Locate consumer's position that aligns with
+  //  the producer's new compute at axis. We need broadcast axes forwarded so we
+  //  need to replay PasC as CasP will not forward braodcast dims. For example
+  //  if we have:
+  // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
+  // produce_pos( 1) ) CasP will have the mapping iS1{3} -> iS2{3} and PasC will
+  // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
+  // NVFuserTest.FusionComplexBCast1_CUDA
+
+  auto disjoint_sets =
+      BestEffortReplay::replayPasC(
+          producer, consumer, -1, PairwiseRootDomainMap(producer, consumer))
+          .getDisjointSets();
+
+  // Find the innermost position of consumer that has
+  //  been mapped within the producer ca axis.
+  unsigned int consumer_pos = consumer->nDims();
+  while (consumer_pos > 0) {
+    auto consumer_id = consumer->axis((int)consumer_pos - 1);
+    auto p_dom = producer->domain()->domain();
+    if (std::any_of(
+            p_dom.begin(),
+            p_dom.begin() + producer->getComputeAtPosition(),
+            [&consumer_id, &disjoint_sets](IterDomain* p_id) {
+              return disjoint_sets.permissiveAreMapped(consumer_id, p_id);
+            })) {
+      break;
+    }
+    consumer_pos--;
+  }
+
+  return consumer_pos;
+}
+
+} // namespace
+
+void InlinePropagator::tearDown() {
+  for (auto consumer : needs_update_max_producer_) {
+    unsigned int consumer_pos = 0;
+    for (auto producer : ir_utils::producerTvsOf(consumer)) {
+      consumer_pos = std::max(
+          consumer_pos, getConsumerPosAlignedToProducerCA(consumer, producer));
+    }
+    consumer->setMaxProducer(consumer_pos);
+  }
+}
+
 void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
-  if (is_first_) {
-    is_first_ = false;
-    mapped_reference_pos_[reference_] = reference_pos_;
-    setCAPos(reference_);
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
+  if (debug) {
+    std::cout << "InlinePropagator::propagateC2P" << std::endl;
+    std::cout << "  from: " << from << std::endl;
+    std::cout << "  to: " << to << std::endl;
   }
   // Step 1: find mapped_reference_pos_[to]
-  int from_pos;
-  if (mode_ != ComputeAtMode::MostInlined) {
-    from_pos = mapped_reference_pos_.at(from);
-  } else {
-    from_pos = from->nDims();
-  }
+  int from_pos = mapped_reference_pos_.at(from);
   auto to_pos =
       TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, from_pos);
-  TORCH_CHECK(
-      to_pos >= 0,
-      "Unable to propagate CA position from consumer ",
-      from,
-      " at ",
-      from_pos,
-      " to producer ",
-      to,
-      " because this would require replay.");
+  if (mode_ == ComputeAtMode::Standard) {
+    TORCH_CHECK(
+        to_pos >= 0,
+        "Unable to propagate CA position from consumer ",
+        from,
+        " at ",
+        from_pos,
+        " to producer ",
+        to,
+        " because this would require replay.");
+  } else {
+    // For MostInlined and BestEffort inline propagation, we allow the DAG to
+    // be not replayed fully consistently. For such case, we just don't inline
+    // into the mismatched dimension.
+    while (to_pos < 0) {
+      from_pos--;
+      to_pos = TransformReplay::getMatchedLeafPosWithoutReplayPasC(
+          to, from, from_pos);
+    }
+  }
   mapped_reference_pos_[to] = to_pos;
   // Step 2: set CA position of `to`
   setCAPos(to);
 }
 
 void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
-  if (is_first_) {
-    is_first_ = false;
-    mapped_reference_pos_[reference_] = reference_pos_;
-    setCAPos(reference_);
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
+  if (debug) {
+    std::cout << "InlinePropagator::propagateP2C" << std::endl;
+    std::cout << "  from: " << from << std::endl;
+    std::cout << "  to: " << to << std::endl;
   }
   // Step 1: find mapped_reference_pos_[to]
-  int from_pos;
-  if (mode_ != ComputeAtMode::MostInlined) {
-    from_pos = mapped_reference_pos_.at(from);
-  } else {
-    from_pos = from->nDims();
-  }
+  int from_pos = mapped_reference_pos_.at(from);
   auto to_pos =
       TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, from_pos);
-  TORCH_CHECK(
-      to_pos >= 0,
-      "Unable to propagate CA position from producer ",
-      from,
-      " at ",
-      from_pos,
-      " to consumer ",
-      to,
-      " because this would require replay.");
+  if (mode_ == ComputeAtMode::Standard) {
+    TORCH_CHECK(
+        to_pos >= 0,
+        "Unable to propagate CA position from producer ",
+        from,
+        " at ",
+        from_pos,
+        " to consumer ",
+        to,
+        " because this would require replay.");
+  } else {
+    // For MostInlined and BestEffort inline propagation, we allow the DAG to
+    // be not replayed fully consistently. For such case, we just don't inline
+    // into the mismatched dimension.
+    while (to_pos < 0) {
+      from_pos--;
+      to_pos = TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+          to, from, from_pos);
+    }
+  }
   mapped_reference_pos_[to] = to_pos;
   // Step 2: set CA position of `to`
   setCAPos(to);
 }
 
 void InlinePropagator::propagateSibling(TensorView* from, TensorView* to) {
-  if (is_first_) {
-    is_first_ = false;
-    mapped_reference_pos_[reference_] = reference_pos_;
-    setCAPos(reference_);
+  bool debug = isDebugDumpEnabled(DebugDumpOption::InlinePropagator);
+  if (debug) {
+    std::cout << "InlinePropagator::propagateSibling" << std::endl;
+    std::cout << "  from: " << from << std::endl;
+    std::cout << "  to: " << to << std::endl;
   }
   // Step 1: find mapped_reference_pos_[to]
   auto from_pos = mapped_reference_pos_.at(from);
@@ -270,96 +377,6 @@ void InlinePropagator::propagateSibling(TensorView* from, TensorView* to) {
   mapped_reference_pos_[to] = from_pos;
   // Step 2: set CA position of `to`
   setCAPos(to);
-}
-
-namespace {
-
-// Try to find the aligned position on consumer's domain corresponding to the
-//  compute at position of producer domain. Used in computeAt pass only. No
-//  checking on actual producer-consumer relationship.
-unsigned int getConsumerPosAlignedToProducerCA(
-    TensorView* consumer,
-    TensorView* producer) {
-  // Locate consumer's position that aligns with
-  //  the producer's new compute at axis. We need broadcast axes forwarded so we
-  //  need to replay PasC as CasP will not forward braodcast dims. For example
-  //  if we have:
-  // T2[ iS22{( 3 * 1 )} ] ca_pos( 1 ) = broadcast( T1[ iS1{3} ] ca_pos( 1 )
-  // produce_pos( 1) ) CasP will have the mapping iS1{3} -> iS2{3} and PasC will
-  // have the mapping iS22{( 3 * 1 )} <- iS1{3} We need the latter. Refer to
-  // NVFuserTest.FusionComplexBCast1_CUDA
-
-  auto c2p_map =
-      BestEffortReplay::replayPasC(
-          producer,
-          consumer,
-          -1,
-          // Compute at root domain may not be valid here, as all
-          // producers don't have to be able to map into consumer at
-          // max producer position. Since computeAt should be valid
-          // and this mechanism is only intended to lower produce
-          // position of consumer, we can simply use the pairwise map.
-          PairwiseRootDomainMap(producer, consumer))
-          .getReplay();
-
-  // Find the innermost position of consumer that has
-  //  been mapped within the producer ca axis.
-  unsigned int consumer_pos = consumer->nDims();
-  while (consumer_pos > 0) {
-    auto consumer_id = consumer->axis((int)consumer_pos - 1);
-    auto p_dom = producer->domain()->domain();
-    if (std::any_of(
-            p_dom.begin(),
-            p_dom.begin() + producer->getComputeAtPosition(),
-            [&consumer_id, &c2p_map](IterDomain* p_id) {
-              auto c_id_it = c2p_map.find(consumer_id);
-              if (c_id_it != c2p_map.end()) {
-                return c_id_it->second == p_id;
-              }
-              return false;
-            })) {
-      break;
-    }
-    consumer_pos--;
-  }
-
-  return consumer_pos;
-}
-
-} // namespace
-
-// Try to find the aligned position on consumer's domain corresponding to the
-// compute at position of producer domain.
-void MaxProducerPosUpdater::handle(TensorView* consumer) {
-  unsigned int consumer_pos = 0;
-  for (auto producer : ir_utils::producerTvsOf(consumer)) {
-    consumer_pos = std::max(
-        consumer_pos, getConsumerPosAlignedToProducerCA(consumer, producer));
-  }
-  consumer->setMaxProducer(consumer_pos);
-}
-
-void MaxProducerPosUpdater::propagateC2P(TensorView* from, TensorView* to) {
-  if (updated_.empty()) {
-    // handle the reference tensor
-    updated_.insert(nullptr);
-    propagateC2P(nullptr, from);
-  }
-  for (auto consumer_tv : ir_utils::consumerTvsOf(to)) {
-    if (updated_.count(consumer_tv) > 0) {
-      continue;
-    }
-    handle(consumer_tv);
-    updated_.insert(consumer_tv);
-  }
-}
-
-void MaxProducerPosUpdater::propagateP2C(TensorView* from, TensorView* to) {
-  propagateC2P(from, to);
-}
-
-void MaxProducerPosUpdater::propagateSibling(TensorView* from, TensorView* to) {
-  propagateC2P(from, to);
 }
 
 } // namespace cuda
