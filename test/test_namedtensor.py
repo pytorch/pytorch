@@ -1190,8 +1190,6 @@ class TestNamedTensor(TestCase):
                 'var_mean',
                 'nanmean',
                 'nansum',
-                'amax',
-                'amin',
             ]
             op_requires_correction_arg = [
                 'std',
