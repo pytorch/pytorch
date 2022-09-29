@@ -1342,17 +1342,15 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
-  py_module.def("_add_meta_to_tls_dispatch_include", []() {
+  py_module.def("_set_add_meta_to_tls_dispatch_include", [](bool meta_in_tls) {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});
-    local_keyset.included_ = local_keyset.included_ | key_set;
-    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
-  });
-  py_module.def("_remove_meta_from_tls_dispatch_include", []() {
-    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
-    auto k = key_set.highestBackendKey();
-    local_keyset.included_ = local_keyset.included_.remove_backend(k);
+    if (meta_in_tls) {
+      local_keyset.included_ = local_keyset.included_ | key_set;
+    } else {
+      auto k = key_set.highestBackendKey();
+      local_keyset.included_ = local_keyset.included_.remove_backend(k);
+    }
     c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
   });
 
@@ -1362,7 +1360,6 @@ Call this whenever a new thread is created in order to propagate values from
     auto k = key_set.highestBackendKey();
     return local_keyset.included_.has_backend(k);
   });
-
 
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();

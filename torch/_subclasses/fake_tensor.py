@@ -115,6 +115,19 @@ def get_schema_info(func):
     return torch._C._SchemaInfo(func._schema)  # type: ignore[attr-defined]
 
 
+# many of the prims do not at the moment model aliasing or strides,
+# but as an incremenetal step, enable aten-aten decomp. these decomps
+# are used for aot autograd tracing so we would like to unify and add
+# additional testing to them
+@functools.lru_cache(None)
+def aten_to_aten_decomposition(decomp_fn):
+    decompositions = torch._decomp.decompositions
+    decomp_attrs = [
+        getattr(decompositions, attr) for attr in dir(decompositions)
+    ]
+    return decomp_fn in decomp_attrs
+
+
 def tree_flatten_only(ty: Type[T], pytree: PyTree):
     flat_vals, _ = tree_flatten(pytree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
@@ -415,20 +428,19 @@ def nyi(fake_mode, func, *args, **kwargs):
 
 
 @contextlib.contextmanager
-def in_kernel_invocation_manager(fake_mode):
+def in_kernel_invocation_manager(fake_mode, *, in_kernel=True):
     # See: note [Fake Tensor Dispatch Keys]
+    prev_in_kernel = fake_mode.in_kernel_invocation
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    prev = fake_mode.in_kernel_invocation
+    assert meta_in_tls == prev_in_kernel
 
-    fake_mode.in_kernel_invocation = True
-    if not meta_in_tls:
-        torch._C._add_meta_to_tls_dispatch_include()
+    fake_mode.in_kernel_invocation = in_kernel
+    torch._C._set_add_meta_to_tls_dispatch_include(in_kernel)
     try:
         yield
     finally:
-        fake_mode.in_kernel_invocation = prev
-        if not meta_in_tls:
-            torch._C._remove_meta_from_tls_dispatch_include()
+        fake_mode.in_kernel_invocation = prev_in_kernel
+        torch._C._set_add_meta_to_tls_dispatch_include(prev_in_kernel)
 
 
 class FakeTensor(torch.Tensor):
@@ -738,6 +750,12 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
+        from torch._decomp import decomposition_table, _disabled_meta_decomps
+
+        with self, in_kernel_invocation_manager(self, in_kernel=False):
+            if func in decomposition_table and aten_to_aten_decomposition(decomposition_table[func]) and func not in _disabled_meta_decomps:
+                return decomposition_table[func](*args, **kwargs)
+
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
@@ -745,7 +763,6 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             # TODO: Find better approach for this
             # Avoid circular import
-            from torch._decomp import decomposition_table
             from torch._meta_registrations import meta_table
 
             with no_dispatch():
