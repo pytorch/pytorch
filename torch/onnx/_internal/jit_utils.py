@@ -7,8 +7,6 @@ import dataclasses
 import re
 from typing import Any, Dict, Iterable, Sequence, Tuple, Union
 
-from typing_extensions import Protocol, runtime_checkable
-
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
@@ -19,22 +17,8 @@ _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 _SKIP_NODE_ATTRIBUTES = {"inplace", "aten"}
 
 
-@runtime_checkable
-class _WithOp(Protocol):
-    """A protocol for classes that implements the op method for create a node in a graph."""
-
-    def op(
-        self,
-        opname: str,
-        *raw_args: Union[torch.Tensor, _C.Value],
-        outputs: int = 1,
-        **kwargs,
-    ):
-        ...
-
-
 @dataclasses.dataclass
-class GraphContext(_WithOp):
+class GraphContext:
     """Extra context for symbolic functions with all methods from torch.Graph.
 
     NOTE: This class is not meant for external consumption. Please do not depend on
