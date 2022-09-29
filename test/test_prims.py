@@ -171,7 +171,7 @@ class TestPrims(TestCase):
         # nvprims counterparts.
         from torch._prims.context import NvfuserPrimsMode
 
-        a = torch.randn(5, 5, device=device)
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
 
         def func(a):
             return torch.ops.prims.sin.default(a)
@@ -196,7 +196,7 @@ class TestPrims(TestCase):
         # it to nvprims.
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
-        a = torch.randn(5, 5, device=device)
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
 
         def func(a):
             return torch.sin(a)
