@@ -17,7 +17,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
-from functorch._C import CompileCache
+from torch._C._functorch import CompileCache
 from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config

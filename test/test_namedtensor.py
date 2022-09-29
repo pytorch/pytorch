@@ -1190,6 +1190,8 @@ class TestNamedTensor(TestCase):
                 'var_mean',
                 'nanmean',
                 'nansum',
+                'amax',
+                'amin',
             ]
             if op.__name__ in ops_support_dim_none:
                 check_output(op(t, None), [])

@@ -315,7 +315,7 @@ inline ScalarType get_dtype_from_self(
 
 TORCH_IMPL_FUNC(amax_out_mps)
    (const Tensor& input_t,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim,
     const Tensor& output_t) {
 
@@ -324,7 +324,7 @@ TORCH_IMPL_FUNC(amax_out_mps)
 
 TORCH_IMPL_FUNC(amin_out_mps)
    (const Tensor& input_t,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim,
     const Tensor& output_t) {
 
@@ -354,7 +354,7 @@ Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
 }
 
 
-Tensor count_nonzero_mps(const Tensor& self, IntArrayRef dims){
+Tensor count_nonzero_mps(const Tensor& self, OptionalIntArrayRef dims){
   NSMutableArray<NSNumber*> *axes = nil;
   NSMutableArray<NSNumber*> *apparent_input_shape = nil;
   NSMutableArray<NSNumber*> *apparent_output_shape = nil;
@@ -395,7 +395,7 @@ TORCH_IMPL_FUNC(mean_out_mps)
 TORCH_IMPL_FUNC(norm_out_mps)
 (const Tensor& input_tensor,
  const OptionalScalarRef opt_p,
- IntArrayRef dim,
+ OptionalIntArrayRef opt_dim,
  bool keepdim,
  const Tensor& output_t)
 {
@@ -406,10 +406,13 @@ TORCH_IMPL_FUNC(norm_out_mps)
 
   IntArrayRef input_shape = input_t.sizes();
 
-  for(int i = 0; i < dim.size(); i++) {
-    auto wrap_dim = maybe_wrap_dim(dim[i], input_shape.size());
-    TORCH_CHECK(wrap_dim < input_shape.size(),
-    "norm_out_mps: reduction dim must be in the range of input shape")
+  if (opt_dim.has_value()) {
+    IntArrayRef dim = opt_dim.value();
+    for(int i = 0; i < dim.size(); i++) {
+      auto wrap_dim = maybe_wrap_dim(dim[i], input_shape.size());
+      TORCH_CHECK(wrap_dim < input_shape.size(),
+      "norm_out_mps: reduction dim must be in the range of input shape")
+    }
   }
   namespace native_mps = at::native::mps;
 
@@ -424,7 +427,7 @@ TORCH_IMPL_FUNC(norm_out_mps)
   bool pIsNegInf = (p == -numeric_limits<double>::infinity());
 
   int64_t num_input_dims = input_shape.size();
-  int64_t num_reduce_dims = dim.size();
+  int64_t num_reduce_dims = opt_dim.has_value() ? opt_dim.value().size() : 0;
   int64_t num_output_dims;
 
   // For output shape calculation, assume that keepdim is true
@@ -434,7 +437,7 @@ TORCH_IMPL_FUNC(norm_out_mps)
 
   // Reduction axes
   NSMutableArray<NSNumber *> *axes;
-  set_axes(axes, num_reduce_dims, dim, input_shape.size());
+  set_axes(axes, num_reduce_dims, opt_dim, input_shape.size());
 
   set_apparent_shapes(apparent_output_shape,
                       apparent_input_shape,
@@ -589,7 +592,7 @@ Tensor std_var_common_impl_mps(
   NSMutableArray<NSNumber *> *axes = nil;
   NSMutableArray<NSNumber*> *apparent_output_shape = nil;
   NSMutableArray<NSNumber*> *apparent_input_shape = nil;
-  int64_t* output_shape = nil;
+  std::vector<int64_t> output_shape;
 
   if ((!keepdim && !use_dim) || (!keepdim && use_dim && dim_value.size() <= 0))
   {
@@ -629,7 +632,6 @@ Tensor std_var_common_impl_mps(
                            axes);
 
       num_output_dims = (num_input_dims >= num_reduce_dims) ? (num_input_dims - num_reduce_dims) : 0; //num_input_dims;
-      output_shape = (int64_t *)malloc(num_output_dims  * sizeof(int64_t));
 
       unsigned int curr_i = 0;
       for (int i = 0; i < num_input_dims; i++)
@@ -644,13 +646,17 @@ Tensor std_var_common_impl_mps(
               }
           }
           if (found) continue;
-          output_shape[curr_i] = input_shape[i];
+          output_shape.push_back(input_shape[i]);
           curr_i += 1;
+          // End loop when output shape is filled
+          if (curr_i == num_output_dims)
+            break;
       }
 
       for(int i = 0; i < num_reduce_dims; i++)
       {
-          correction_n *= input_shape[dim_value[i]];
+          auto wrap_dim = maybe_wrap_dim(dim_value[i], input_shape.size());
+          correction_n *= input_shape[wrap_dim];
       }
       // (3, 4, 5) --> (3, 5)
   }
@@ -667,10 +673,9 @@ Tensor std_var_common_impl_mps(
                            input_shape,
                            axes);
       num_output_dims = num_input_dims;
-      output_shape = (int64_t *)malloc(num_output_dims  * sizeof(int64_t));
       for (int i = 0; i < num_input_dims; i++)
       {
-          output_shape[i] = (int64_t) 1;
+          output_shape.push_back((int64_t) 1);
           correction_n *= input_shape[i];
       }
       // scalar --> vector case [[1.0034567]]
@@ -690,21 +695,22 @@ Tensor std_var_common_impl_mps(
                            axes);
 
       num_output_dims = num_input_dims;//(num_input_dims >= num_reduce_dims) ? (num_input_dims - num_reduce_dims) : 0;
-      output_shape = (int64_t *)malloc(num_output_dims  * sizeof(int64_t));
 
       for(int i = 0; i < num_reduce_dims; i++)
       {
-          correction_n *= input_shape[dim_value[i]];
+          auto wrap_dim = maybe_wrap_dim(dim_value[i], input_shape.size());
+          correction_n *= input_shape[wrap_dim];
       }
 
       for (int i = 0; i < num_input_dims; i++)
       {
-          output_shape[i] = [apparent_output_shape[i] longValue];
+          output_shape.push_back([apparent_output_shape[i] longValue]);
       }
   }
 
+
   Tensor output_t = at::native::empty_mps(
-                      IntArrayRef(output_shape, num_output_dims),
+                      IntArrayRef(output_shape.data(), num_output_dims),
                       input_t.scalar_type(),
                       c10::nullopt,
                       kMPS,
@@ -789,7 +795,7 @@ Tensor std_var_common_impl_mps(
   };
   native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
-  free(output_shape);
+
   return output_t;
 }
 

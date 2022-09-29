@@ -32,35 +32,7 @@ from torch.onnx._internal import _beartype, registration
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
-# see Note [Edit Symbolic Files] in symbolic_helper.py
-
-# Note [Pointwise by scalar]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~
-# What happens if you add a tensor with a constant (e.g., x + 2)?  There are
-# some moving parts to implementing the ONNX translation in this case:
-#
-#   - By the time we get the scalar in a symbolic function here, it is no longer
-#     a Python long/float, but a PyTorch tensor with numel == 1 (eventually, we
-#     want it to be a zero dim tensor but this change has not happened yet.)
-#     However, the type of this scalar is *exactly* what the user wrote in
-#     Python, which may not match the tensor it is being added to.  PyTorch
-#     will do implicit conversions on scalars; however, ONNX will not, so
-#     we must do the conversion ourselves.  This is what _if_scalar_type_as
-#     does.
-#
-#   - Dispatch to these functions takes advantage an outrageous coincidence
-#     between the tensor and scalar name.  When we add two tensors together,
-#     you get the dispatch:
-#
-#       add(*[self, other], **{"alpha": alpha})
-#
-#     When you add a tensor and a scalar, you get the dispatch:
-#
-#       add(*[self], **{"other": other, "alpha": alpha})
-#
-#     By having the argument name line up with the name of the scalar attribute
-#     if it exists, we can write a single function for both overloads.
-#
+# see Note [Edit Symbolic Files] in README.md
 
 __all__ = [
     "abs",

@@ -6,7 +6,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
 import torch.utils._pytree as pytree
@@ -32,6 +32,7 @@ from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
+    decorate,
     xfail,
     skip,
     skipOps,
@@ -446,6 +447,8 @@ class TestEagerFusionOpInfo(AOTTestCase):
         xfail('chalf'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
+        decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
+        decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     })
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         def f(args, kwargs):
@@ -710,14 +713,14 @@ class TestAOTModuleSimplified(AOTTestCase):
             if node.op == 'output':
                 continue
             self.assertTrue(node.stack_trace is not None)
-            assert 'test_pythonkey.py' in node.stack_trace
+            assert 'test_aotdispatch.py' in node.stack_trace
 
         def assert_compiler(gm: torch.fx.GraphModule, _):
             for node in gm.graph.nodes:
                 if node.op == 'output' or node.op == 'placeholder':
                     continue
                 self.assertTrue(node.stack_trace is not None)
-                assert 'test_pythonkey.py' in node.stack_trace
+                assert 'test_aotdispatch.py' in node.stack_trace
             return gm.forward  # return a python callable
 
         aot_mod = aot_module_simplified(mod, fw_compiler=assert_compiler, bw_compiler=assert_compiler)
