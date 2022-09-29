@@ -4,18 +4,26 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _property_bag,
+    _reporting_configuration,
+    _reporting_descriptor_reference,
+)
 
 
 @dataclasses.dataclass
 class ConfigurationOverride(object):
     """Information about how a specific rule or notification was reconfigured at runtime."""
 
-    configuration: Any = dataclasses.field(
+    configuration: _reporting_configuration.ReportingConfiguration = dataclasses.field(
         metadata={"schema_property_name": "configuration"}
     )
-    descriptor: Any = dataclasses.field(metadata={"schema_property_name": "descriptor"})
-    properties: Any = dataclasses.field(
+    descriptor: _reporting_descriptor_reference.ReportingDescriptorReference = (
+        dataclasses.field(metadata={"schema_property_name": "descriptor"})
+    )
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

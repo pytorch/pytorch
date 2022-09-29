@@ -4,26 +4,32 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _exception,
+    _property_bag,
+    _stack,
+)
 
 
 @dataclasses.dataclass
 class Exception(object):
     """Describes a runtime exception encountered during the execution of an analysis tool."""
 
-    inner_exceptions: Any = dataclasses.field(
+    inner_exceptions: Optional[List[_exception.Exception]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "innerExceptions"}
     )
-    kind: Any = dataclasses.field(
+    kind: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "kind"}
     )
-    message: Any = dataclasses.field(
+    message: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    stack: Any = dataclasses.field(
+    stack: Optional[_stack.Stack] = dataclasses.field(
         default=None, metadata={"schema_property_name": "stack"}
     )
 

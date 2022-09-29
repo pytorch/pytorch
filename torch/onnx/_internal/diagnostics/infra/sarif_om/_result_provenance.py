@@ -4,32 +4,39 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _physical_location,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class ResultProvenance(object):
     """Contains information about how and when a result was detected."""
 
-    conversion_sources: Any = dataclasses.field(
+    conversion_sources: Optional[
+        List[_physical_location.PhysicalLocation]
+    ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "conversionSources"}
     )
-    first_detection_run_guid: Any = dataclasses.field(
+    first_detection_run_guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "firstDetectionRunGuid"}
     )
-    first_detection_time_utc: Any = dataclasses.field(
+    first_detection_time_utc: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "firstDetectionTimeUtc"}
     )
-    invocation_index: Any = dataclasses.field(
+    invocation_index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "invocationIndex"}
     )
-    last_detection_run_guid: Any = dataclasses.field(
+    last_detection_run_guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "lastDetectionRunGuid"}
     )
-    last_detection_time_utc: Any = dataclasses.field(
+    last_detection_time_utc: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "lastDetectionTimeUtc"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

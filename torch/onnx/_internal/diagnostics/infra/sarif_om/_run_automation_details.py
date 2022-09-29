@@ -4,24 +4,28 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _message, _property_bag
 
 
 @dataclasses.dataclass
 class RunAutomationDetails(object):
     """Information that describes a run's identity and role within an engineering system process."""
 
-    correlation_guid: Any = dataclasses.field(
+    correlation_guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "correlationGuid"}
     )
-    description: Any = dataclasses.field(
+    description: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    guid: Any = dataclasses.field(
+    guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    id: Any = dataclasses.field(default=None, metadata={"schema_property_name": "id"})
-    properties: Any = dataclasses.field(
+    id: Optional[str] = dataclasses.field(
+        default=None, metadata={"schema_property_name": "id"}
+    )
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

@@ -4,24 +4,33 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _property_bag,
+    _tool_component_reference,
+)
 
 
 @dataclasses.dataclass
 class ReportingDescriptorReference(object):
     """Information about how to locate a relevant reporting descriptor."""
 
-    guid: Any = dataclasses.field(
+    guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    id: Any = dataclasses.field(default=None, metadata={"schema_property_name": "id"})
-    index: Any = dataclasses.field(
+    id: Optional[str] = dataclasses.field(
+        default=None, metadata={"schema_property_name": "id"}
+    )
+    index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    tool_component: Any = dataclasses.field(
+    tool_component: Optional[
+        _tool_component_reference.ToolComponentReference
+    ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "toolComponent"}
     )
 

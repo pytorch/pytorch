@@ -4,24 +4,28 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _property_bag
 
 
 @dataclasses.dataclass
 class Message(object):
     """Encapsulates a message intended to be read by the end user."""
 
-    arguments: Any = dataclasses.field(
+    arguments: Optional[List[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "arguments"}
     )
-    id: Any = dataclasses.field(default=None, metadata={"schema_property_name": "id"})
-    markdown: Any = dataclasses.field(
+    id: Optional[str] = dataclasses.field(
+        default=None, metadata={"schema_property_name": "id"}
+    )
+    markdown: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "markdown"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    text: Any = dataclasses.field(
+    text: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "text"}
     )
 

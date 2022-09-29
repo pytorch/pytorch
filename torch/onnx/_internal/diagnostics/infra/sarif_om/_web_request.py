@@ -4,38 +4,43 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _artifact_content,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class WebRequest(object):
     """Describes an HTTP request."""
 
-    body: Any = dataclasses.field(
+    body: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
         default=None, metadata={"schema_property_name": "body"}
     )
     headers: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "headers"}
     )
-    index: Any = dataclasses.field(
+    index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    method: Any = dataclasses.field(
+    method: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "method"}
     )
     parameters: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "parameters"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    protocol: Any = dataclasses.field(
+    protocol: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "protocol"}
     )
-    target: Any = dataclasses.field(
+    target: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "target"}
     )
-    version: Any = dataclasses.field(
+    version: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "version"}
     )
 

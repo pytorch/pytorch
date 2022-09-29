@@ -4,26 +4,30 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from typing_extensions import Literal
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _property_bag
 
 
 @dataclasses.dataclass
 class ReportingConfiguration(object):
     """Information about a rule or notification that can be configured at runtime."""
 
-    enabled: Any = dataclasses.field(
+    enabled: bool = dataclasses.field(
         default=True, metadata={"schema_property_name": "enabled"}
     )
-    level: Any = dataclasses.field(
+    level: Literal["none", "note", "warning", "error"] = dataclasses.field(
         default="warning", metadata={"schema_property_name": "level"}
     )
-    parameters: Any = dataclasses.field(
+    parameters: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "parameters"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    rank: Any = dataclasses.field(
+    rank: float = dataclasses.field(
         default=-1.0, metadata={"schema_property_name": "rank"}
     )
 

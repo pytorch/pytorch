@@ -4,26 +4,34 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _artifact_location,
+    _message,
+    _property_bag,
+    _rectangle,
+    _region,
+)
 
 
 @dataclasses.dataclass
 class Attachment(object):
     """An artifact relevant to a result."""
 
-    artifact_location: Any = dataclasses.field(
+    artifact_location: _artifact_location.ArtifactLocation = dataclasses.field(
         metadata={"schema_property_name": "artifactLocation"}
     )
-    description: Any = dataclasses.field(
+    description: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    rectangles: Any = dataclasses.field(
+    rectangles: Optional[List[_rectangle.Rectangle]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "rectangles"}
     )
-    regions: Any = dataclasses.field(
+    regions: Optional[List[_region.Region]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "regions"}
     )
 

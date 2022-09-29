@@ -4,30 +4,39 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _multiformat_message_string,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class TranslationMetadata(object):
     """Provides additional metadata related to translation."""
 
-    name: Any = dataclasses.field(metadata={"schema_property_name": "name"})
-    download_uri: Any = dataclasses.field(
+    name: str = dataclasses.field(metadata={"schema_property_name": "name"})
+    download_uri: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "downloadUri"}
     )
-    full_description: Any = dataclasses.field(
+    full_description: Optional[
+        _multiformat_message_string.MultiformatMessageString
+    ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullDescription"}
     )
-    full_name: Any = dataclasses.field(
+    full_name: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullName"}
     )
-    information_uri: Any = dataclasses.field(
+    information_uri: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "informationUri"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    short_description: Any = dataclasses.field(
+    short_description: Optional[
+        _multiformat_message_string.MultiformatMessageString
+    ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "shortDescription"}
     )
 

@@ -4,53 +4,64 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, List, Optional
+
+from typing_extensions import Literal
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _location,
+    _property_bag,
+    _reporting_descriptor_reference,
+    _stack,
+    _web_request,
+    _web_response,
+)
 
 
 @dataclasses.dataclass
 class ThreadFlowLocation(object):
     """A location visited by an analysis tool while simulating or monitoring the execution of a program."""
 
-    execution_order: Any = dataclasses.field(
+    execution_order: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "executionOrder"}
     )
-    execution_time_utc: Any = dataclasses.field(
+    execution_time_utc: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "executionTimeUtc"}
     )
-    importance: Any = dataclasses.field(
+    importance: Literal["important", "essential", "unimportant"] = dataclasses.field(
         default="important", metadata={"schema_property_name": "importance"}
     )
-    index: Any = dataclasses.field(
+    index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    kinds: Any = dataclasses.field(
+    kinds: Optional[List[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "kinds"}
     )
-    location: Any = dataclasses.field(
+    location: Optional[_location.Location] = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    module: Any = dataclasses.field(
+    module: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "module"}
     )
-    nesting_level: Any = dataclasses.field(
+    nesting_level: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "nestingLevel"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    stack: Any = dataclasses.field(
+    stack: Optional[_stack.Stack] = dataclasses.field(
         default=None, metadata={"schema_property_name": "stack"}
     )
     state: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "state"}
     )
-    taxa: Any = dataclasses.field(
-        default=None, metadata={"schema_property_name": "taxa"}
-    )
-    web_request: Any = dataclasses.field(
+    taxa: Optional[
+        List[_reporting_descriptor_reference.ReportingDescriptorReference]
+    ] = dataclasses.field(default=None, metadata={"schema_property_name": "taxa"})
+    web_request: Optional[_web_request.WebRequest] = dataclasses.field(
         default=None, metadata={"schema_property_name": "webRequest"}
     )
-    web_response: Any = dataclasses.field(
+    web_response: Optional[_web_response.WebResponse] = dataclasses.field(
         default=None, metadata={"schema_property_name": "webResponse"}
     )
 

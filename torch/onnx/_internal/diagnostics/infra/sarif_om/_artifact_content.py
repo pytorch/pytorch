@@ -4,23 +4,28 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _multiformat_message_string,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class ArtifactContent(object):
     """Represents the contents of an artifact."""
 
-    binary: Any = dataclasses.field(
+    binary: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "binary"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    rendered: Any = dataclasses.field(
-        default=None, metadata={"schema_property_name": "rendered"}
-    )
-    text: Any = dataclasses.field(
+    rendered: Optional[
+        _multiformat_message_string.MultiformatMessageString
+    ] = dataclasses.field(default=None, metadata={"schema_property_name": "rendered"})
+    text: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "text"}
     )
 

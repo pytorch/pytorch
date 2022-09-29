@@ -4,32 +4,34 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _property_bag
 
 
 @dataclasses.dataclass
 class LogicalLocation(object):
     """A logical location of a construct that produced a result."""
 
-    decorated_name: Any = dataclasses.field(
+    decorated_name: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "decoratedName"}
     )
-    fully_qualified_name: Any = dataclasses.field(
+    fully_qualified_name: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "fullyQualifiedName"}
     )
-    index: Any = dataclasses.field(
+    index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    kind: Any = dataclasses.field(
+    kind: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "kind"}
     )
-    name: Any = dataclasses.field(
+    name: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "name"}
     )
-    parent_index: Any = dataclasses.field(
+    parent_index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "parentIndex"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

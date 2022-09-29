@@ -4,24 +4,26 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _message, _property_bag
 
 
 @dataclasses.dataclass
 class Edge(object):
     """Represents a directed edge in a graph."""
 
-    id: Any = dataclasses.field(metadata={"schema_property_name": "id"})
-    source_node_id: Any = dataclasses.field(
+    id: str = dataclasses.field(metadata={"schema_property_name": "id"})
+    source_node_id: str = dataclasses.field(
         metadata={"schema_property_name": "sourceNodeId"}
     )
-    target_node_id: Any = dataclasses.field(
+    target_node_id: str = dataclasses.field(
         metadata={"schema_property_name": "targetNodeId"}
     )
-    label: Any = dataclasses.field(
+    label: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "label"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

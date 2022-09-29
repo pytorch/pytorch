@@ -4,22 +4,34 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from typing_extensions import Literal
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _external_properties,
+    _property_bag,
+    _run,
+)
 
 
 @dataclasses.dataclass
 class SarifLog(object):
     """Static Analysis Results Format (SARIF) Version 2.1.0 JSON Schema: a standard format for the output of static analysis tools."""
 
-    runs: Any = dataclasses.field(metadata={"schema_property_name": "runs"})
-    version: Any = dataclasses.field(metadata={"schema_property_name": "version"})
-    schema_uri: Any = dataclasses.field(
+    runs: List[_run.Run] = dataclasses.field(metadata={"schema_property_name": "runs"})
+    version: Literal["2.1.0"] = dataclasses.field(
+        metadata={"schema_property_name": "version"}
+    )
+    schema_uri: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "$schema"}
     )
-    inline_external_properties: Any = dataclasses.field(
+    inline_external_properties: Optional[
+        List[_external_properties.ExternalProperties]
+    ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "inlineExternalProperties"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

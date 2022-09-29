@@ -4,24 +4,31 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _location,
+    _message,
+    _node,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class Node(object):
     """Represents a node in a graph."""
 
-    id: Any = dataclasses.field(metadata={"schema_property_name": "id"})
-    children: Any = dataclasses.field(
+    id: str = dataclasses.field(metadata={"schema_property_name": "id"})
+    children: Optional[List[_node.Node]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "children"}
     )
-    label: Any = dataclasses.field(
+    label: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "label"}
     )
-    location: Any = dataclasses.field(
+    location: Optional[_location.Location] = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 
