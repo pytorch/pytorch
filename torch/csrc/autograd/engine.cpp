@@ -815,7 +815,7 @@ static void maybe_capture_grads(
     std::lock_guard<std::mutex> lock(graph_task->mutex_);
     for (const auto& capture : *capture_vec) {
       auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
-      captured_grad = inputs[capture.input_idx_];
+      captured_grad = inputs.at(capture.input_idx_);
       for (auto& hook : capture.hooks_) {
         captured_grad = (*hook)(captured_grad);
       }
@@ -848,12 +848,11 @@ static variable_list call_function(
     // skip execution of the node and also:
     // - capture grads now that we've finished pre-hooks
     // - run tensor hooks because those are special
-    // TODO:
-    // Assert that this is accumulate grad (if possible)
-    // Assert that there should only be a single tensor
+    // TODO: Assert that this is accumulate grad (if possible)
     const at::Tensor& variable = ((AccumulateGrad*)func)->variable;
     auto hooks = impl::hooks(variable);
     at::Tensor new_grad = inputs.at(0);
+    TORCH_INTERNAL_ASSERT(inputs.size() == 1);
     for (auto& hook : impl::hooks(variable)) {
       new_grad = (*hook)({new_grad})[0];
     }
@@ -908,9 +907,9 @@ void Engine::evaluate_function(
 
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
-  auto& fn_info = exec_info_.at(func);
   bool only_call_hooks = false;
   if (!exec_info_.empty()) {
+    auto& fn_info = exec_info_.at(func);
     if (!fn_info.needed_) {
       // Either return immediately OR slightly delayed return in case we still
       // want to execute the next node's hooks (always accumulate grad)
@@ -920,7 +919,6 @@ void Engine::evaluate_function(
         return;
       }
     } else {
-      // In the other branch, we delay the capture so we can run hooks first
       maybe_capture_grads(graph_task, func, inputs.buffer);
     }
   }
