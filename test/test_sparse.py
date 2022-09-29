@@ -3985,12 +3985,12 @@ class TestSparseMaskedReductions(TestCase):
         torch.testing._internal.common_methods_invocations._generate_reduction_kwargs
         is made to generate samples with `dim=()` for non-scalar
         inputs. With this and after gh-29137 is resolved, this test
-        can be deleted. See also `torch._masked._canonical_dim`
+        can be deleted. See also `torch.masked._canonical_dim`
         implementation about changing the `dim=()` behavior.
         """
 
         samples = op.sample_inputs_func(op, device, dtype, requires_grad=False)
-        op_name = op.name.replace('_masked.', '')
+        op_name = op.name.replace('masked.', '')
         for sample_input in samples:
             if sample_input.kwargs.get('dim') != 0:
                 continue
@@ -4002,7 +4002,7 @@ class TestSparseMaskedReductions(TestCase):
             if mask is None and op_name in {'prod', 'amax', 'amin'}:
                 # FIXME: for now reductions with non-zero reduction identity and
                 # unspecified mask are not supported for sparse COO
-                # tensors, see torch._masked.prod implementation
+                # tensors, see torch.masked.prod implementation
                 # for details.
                 continue
             sparse_op_kwargs = dict(sample_input_kwargs)

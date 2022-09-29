@@ -54,6 +54,25 @@ using StorageImplData = strong::type<
     strong::hashable,
     strong::boolean>;
 
+// Identity is a complex concept in PyTorch. A Tensor might not have a
+// an associated storage, multiple Tensors might share the same underlying
+// storage, the storage of a Tensor might change over time, etc.
+//
+// For the purpose of profiling we're mostly interested in data flow
+// analysis. As a result, we can take an expansive view of identity:
+// Tensors share an ID if they share a TensorImpl or storage data.
+//
+// This identity equality is transitive; If Tensors T0 and T1 share a storage
+// S0 and T1 later points to a different storage S1 then all Tensors which
+// point to either S0 or S1 are considered to have the same identity. (Since
+// profiler cannot reason beyond that.)
+//
+// The profiler will handle lifetime analysis to ensure that identities do
+// not run afoul of the ABA problem. This does, however, mean that identities
+// can only be assigned when memory profiling is enabled. (And we cannot
+// handle ABA for TensorImpl as those allocations are not instrumented.)
+using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
+
 struct RawTensorMetadata {
   TensorImplAddress impl_;
   StorageImplData data_;
@@ -75,24 +94,7 @@ struct TensorMetadata : public RawTensorMetadata {
     return {device_type_, device_index_};
   }
 
-  // Identity is a complex concept in PyTorch. A Tensor might not have a
-  // an associated storage, multiple Tensors might share the same underlying
-  // storage, the storage of a Tensor might change over time, etc.
-  //
-  // For the purpose of profiling we're mostly interested in data flow
-  // analysis. As a result, we can take an expansive view of identity:
-  // Tensors share an ID if they share a TensorImpl or storage data.
-  //
-  // This identity equality is transitive; If Tensors T0 and T1 share a storage
-  // S0 and T1 later points to a different storage S1 then all Tensors which
-  // point to either S0 or S1 are considered to have the same identity. (Since
-  // profiler cannot reason beyond that.)
-  //
-  // The profiler will handle lifetime analysis to ensure that identities do
-  // not run afoul of the ABA problem. This does, however, mean that identities
-  // can only be assigned when memory profiling is enabled. (And we cannot
-  // handle ABA for TensorImpl as those allocations are not instrumented.)
-  c10::optional<size_t> id_;
+  c10::optional<TensorID> id_;
 };
 
 struct Inputs {
@@ -219,6 +221,8 @@ using strong_t = strong::
 using PyModuleSelf = strong_t<PyObject*, struct PyModuleSelf_>;
 using PyModuleCls = strong_t<PyObject*, struct PyModuleCls_>;
 using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
+using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
+using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
 
 struct NNModuleInfo {
   PyModuleSelf self_;
@@ -228,6 +232,15 @@ struct NNModuleInfo {
   std::vector<std::pair<std::string, void*>> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
+};
+
+struct OptimizerInfo {
+  PyOptimizerSelf self_;
+  PyOptimizerCls opt_;
+  at::StringView opt_name_;
+
+  std::vector<void*> params_addr_;
+  std::vector<std::pair<std::string, void*>> opt_state_;
 };
 
 struct PyExtraFieldsBase {
@@ -244,7 +257,11 @@ struct PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
-  using args_t = std::pair<PyFrameState, c10::optional<NNModuleInfo>>;
+  using args_t = struct {
+    PyFrameState frame_state_;
+    c10::optional<NNModuleInfo> module_info_;
+    c10::optional<OptimizerInfo> opt_info_;
+  };
 
   ExtraFields(
       time_t end_time_ns,
@@ -252,11 +269,13 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       PyFrameState caller,
       args_t args)
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
-        callsite_{args.first},
-        module_{args.second} {}
+        callsite_{args.frame_state_},
+        module_{args.module_info_},
+        opt_{args.opt_info_} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
+  c10::optional<OptimizerInfo> opt_;
 };
 
 template <>
