@@ -8,7 +8,7 @@
 #   pip install jschema_to_python
 set -e -x
 ROOT=$(pwd)/../../..
-SARIF_DIR=torch/onnx/_internal/diagnostics/infra/sarif_om
+SARIF_DIR=torch/onnx/_internal/diagnostics/infra/sarif
 
 # SARIF version
 SARIF_VERSION=2.1.0
@@ -21,7 +21,7 @@ wget -O $sarif_schema_file_path $SARIF_SCHEMA_LINK
 
 python -m jschema_to_python \
     --schema-path $sarif_schema_file_path \
-    --module-name torch.onnx._internal.diagnostics.infra.sarif_om \
+    --module-name torch.onnx._internal.diagnostics.infra.sarif \
     --output-directory $ROOT/$SARIF_DIR \
     --root-class-name SarifLog \
     --hints-file-path code-gen-hints.json \
