@@ -1340,7 +1340,7 @@ def var_correction(
         return var_real + var_imag
 
     if correction is None:
-        correction = 0
+        correction = 1
 
     if len(dims) == 0:
         n = prod(x.shape)  # type: ignore[arg-type]
