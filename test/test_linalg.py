@@ -4951,6 +4951,25 @@ class TestLinalg(TestCase):
                         self.assertEqual(B_left, X @ A_adj)
 
 
+    @onlyCPU
+    @dtypes(*floating_and_complex_types())
+    def test_linalg_lu_solve_cpu_errors(self, device, dtype):
+        sample = torch.rand(3, 2, 2, device=device, dtype=dtype)
+        B = torch.rand(3, 2, 2, device=device, dtype=dtype)
+        LU, pivots = torch.linalg.lu_factor(sample)
+
+        # This should run without issues
+        torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+
+        with self.assertRaisesRegex(RuntimeError, "greater than 1"):
+            pivots[0] = 0
+            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+
+        with self.assertRaisesRegex(RuntimeError, "smaller or equal to LU.size\(-1\)"):
+            pivots[0] = 3
+            torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+
+
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
     @dtypes(torch.double)
