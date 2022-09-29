@@ -7,6 +7,7 @@
 
 #include <c10/util/irange.h>
 
+
 namespace at { namespace native {
 
 namespace {
@@ -1101,9 +1102,13 @@ void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
       const auto pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
 
       for (const auto i : c10::irange(dim_size)) {
+        auto new_idx = pivots_data[i] - 1;
+        TORCH_CHECK(new_idx >= 0 && new_idx < dim_size,
+                    "pivots passed to lu_unpack must be between 1 and LU.size(-1)."
+                    "Did you properly pass the result of lu_factor?");
         std::swap(
           perm_data[i],
-          perm_data[pivots_data[i] - 1]
+          perm_data[new_idx]
         );
       }
 

@@ -4953,21 +4953,26 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @dtypes(*floating_and_complex_types())
-    def test_linalg_lu_solve_cpu_errors(self, device, dtype):
-        sample = torch.rand(3, 2, 2, device=device, dtype=dtype)
-        B = torch.rand(3, 2, 2, device=device, dtype=dtype)
+    def test_linalg_lu_cpu_errors(self, device, dtype):
+        sample = torch.randn(3, 2, 2, device=device, dtype=dtype)
+        B = torch.randn(3, 2, 2, device=device, dtype=dtype)
         LU, pivots = torch.linalg.lu_factor(sample)
 
         # This should run without issues
         torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        torch.lu_unpack(LU, pivots)
 
-        with self.assertRaisesRegex(RuntimeError, "greater than 1"):
-            pivots[0] = 0
+        pivots[0] = 0
+        with self.assertRaisesRegex(RuntimeError, r"greater than 1"):
             torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-1\)."):
+            torch.lu_unpack(LU, pivots)
 
-        with self.assertRaisesRegex(RuntimeError, "smaller or equal to LU.size\(-1\)"):
-            pivots[0] = 3
+        pivots[0] = 3
+        with self.assertRaisesRegex(RuntimeError, r"smaller or equal to LU.size\(-1\)"):
             torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-1\)."):
+            torch.lu_unpack(LU, pivots)
 
 
     @skipCPUIfNoLapack
