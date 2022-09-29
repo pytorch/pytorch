@@ -60,8 +60,8 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
-  ncclResult_t error,
-  c10::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    ncclResult_t error,
+    c10::optional<std::string> processGroupFailureReason /* = c10::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
@@ -78,9 +78,11 @@ std::string getNcclErrorDetailStr(
       interpret = "ncclUnhandledCudaError: Call to CUDA function failed.";
       break;
     case ncclSystemError:
-      interpret = "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. ";
+      interpret =
+          "ncclSystemError: System call (e.g. socket, malloc) or external library call failed or device error. ";
 #ifndef NCCL_REMOTE_ERROR
-      // Before ncclRemoteError was created, unexpected remote disconnect was categorized as ncclSystemError
+      // Before ncclRemoteError was created, unexpected remote disconnect was
+      // categorized as ncclSystemError
       interpret += "It can be also caused by unexpected exit of a remote peer.";
 #endif
       break;
@@ -91,11 +93,13 @@ std::string getNcclErrorDetailStr(
       interpret = "ncclInvalidArgument: Invalid value for an argument.";
       break;
     case ncclInvalidUsage:
-      interpret = "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
+      interpret =
+          "ncclInvalidUsage: This usually reflects invalid usage of NCCL library.";
       break;
 #ifdef NCCL_REMOTE_ERROR
     case ncclRemoteError:
-      interpret = "ncclRemoteError: A call failed possibly due to a network error or a remote process exiting prematurely.";
+      interpret =
+          "ncclRemoteError: A call failed possibly due to a network error or a remote process exiting prematurely.";
       break;
 #endif
     default:
