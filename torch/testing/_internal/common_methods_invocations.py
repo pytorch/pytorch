@@ -3316,25 +3316,25 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
         SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 2)), make_arg((1,))),
                     kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
-    # error inputs for bias shape equal to the output channels
+    # error inputs for bias shape not equal to the output channels
     yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 3)), make_arg((2,)))),
                      error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for weight.ndim < 3
+    # error inputs for input.ndim == 3 should be weight.ndim == 3 not < 3
     yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2)), make_arg((1,)))),
                      error_regex="weight should have at least three dimensions")
 
-    # error inputs for groups should be divisible by weight size
+    # error inputs for groups not divisible by the number of input channels
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
 
-    # error inputs for valid groups
+    # error inputs for invalid groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
 
-    # error inputs for valid groups
+    # error inputs for invalid groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
@@ -3358,26 +3358,26 @@ def error_inputs_conv2d(opinfo, device, **kwargs):
         SampleInput(make_arg((1, 1, 4, 2)), args=(make_arg((1, 1, 2, 5)), make_arg((1,))),
                     kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
-    # error inputs for bias shape equal to the output channels
+    # error inputs for bias shape not equal to the output channels
     yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 1, 3, 2)), make_arg((2,)))),
                      error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for weight.ndim < 4
+    # error inputs for input.ndim == 4 should be weight.ndim == 4 not < 4
     yield ErrorInput(
         SampleInput(make_arg((1, 1, 4, 3)), args=(make_arg((1, 2, 2)), make_arg((1,))),
                     kwargs={'padding': 'same'}), error_regex="Expected 3-dimensional input for 3-dimensional weight")
 
-    # error inputs for groups should be divisible by weight size
+    # error inputs for groups not divisible by the number of input channels
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 1, 3)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
 
-    # error inputs for valid groups
+    # error inputs for invalid groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4, 5)), args=(make_arg((2, 2, 1, 4)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': -1}), error_regex="non-positive groups is not supported")
 
-    # error inputs for valid groups
+    # error inputs for invalid groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 4, 3)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': 0}), error_regex="non-positive groups is not supported")
@@ -3442,6 +3442,8 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
         ((1, 1, 10, 11, 12), (1, 1, 1, 2, 5), None, {'padding': 'same', 'dilation': 2}),
         ((1, 1, 10, 11, 12), (1, 1, 4, 4, 4), None, {'padding': 'same', 'dilation': 3}),
         ((1, 1, 1, 1, 10), (1, 1, 1, 1, 4), None, {'padding': 'valid'}),
+        ((18, 27, 9, 1, 9), (9, 9, 9, 1, 9), (9,), {'groups': 3}),
+        ((18, 27, 9, 1, 9), (9, 9, 9, 1, 9), (9,), {'stride': (2, 2, 2), 'dilation': 1, 'groups': 3}),
     )
 
     for input_shape, weight, bias, kwargs in cases:
@@ -3473,13 +3475,13 @@ def error_inputs_conv3d(opinfo, device, **kwargs):
     # error inputs for negative dilation
     yield ErrorInput(
         SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 2, 2, 2)), make_arg((1,))),
-                    kwargs={'dilation': (-1,), 'padding': (1,)}), error_regex="dilation should be greater than zero")
+                    kwargs={'dilation': (-1,)}), error_regex="dilation should be greater than zero")
 
-    # error inputs for bias shape equal to the output channels
+    # error inputs for bias shape not equal to the output channels
     yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 3, 3, 3)), make_arg((2,)))),
                      error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for weight.ndim < 5
+    # error inputs for input.ndim == 5 should be weight.ndim == 5 not < 5
     yield ErrorInput(
         SampleInput(make_arg((1, 1, 3, 4, 5)), args=(make_arg((1, 1, 4, 3)), make_arg((1,))),
                     kwargs={'padding': 'same'}), error_regex="Expected 4-dimensional input for 4-dimensional weight")
@@ -3489,17 +3491,23 @@ def error_inputs_conv3d(opinfo, device, **kwargs):
         SampleInput(make_arg((1, 1, 3, 4, 5)), args=(make_arg((1, 1, 4, 3, 3)), make_arg((1,))),
                     kwargs={'padding': 'same', 'groups': 2}), error_regex="expected weight to be at least 2 at dimension 0")
 
-    # error inputs for groups should be divisible by weight size
+    # error inputs for groups not divisible by the number of input channels
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
                     make_arg((2,))), kwargs={'padding': 'same', 'groups': 3}),
         error_regex="expected weight to be at least 3 at dimension 0")
 
-    # error inputs for valid groups
+    # error inputs for invalid groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
                     make_arg((2,))), kwargs={'padding': 'same', 'groups': 0}),
         error_regex="non-positive groups is not supported")
+
+    # error inputs for padding='same' not supported by strided convolutions
+    yield ErrorInput(
+        SampleInput(make_arg((18, 27, 9, 1, 9)), args=(make_arg((9, 9, 9, 1, 9)),
+                    make_arg((9,))), kwargs={'stride': 2, 'padding': 'same', 'groups': 3}),
+        error_regex="padding='same' is not supported for strided convolutions")
 
 
 def sample_inputs_group_norm(opinfo, device, dtype, requires_grad, **kwargs):
