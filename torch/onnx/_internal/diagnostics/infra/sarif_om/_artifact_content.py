@@ -11,10 +11,18 @@ from typing import Any
 class ArtifactContent(object):
     """Represents the contents of an artifact."""
 
-    binary: Any
-    properties: Any
-    rendered: Any
-    text: Any
+    binary: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "binary"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    rendered: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "rendered"}
+    )
+    text: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "text"}
+    )
 
 
 # flake8: noqa

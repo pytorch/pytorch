@@ -11,11 +11,19 @@ from typing import Any
 class Node(object):
     """Represents a node in a graph."""
 
-    id: Any
-    children: Any
-    label: Any
-    location: Any
-    properties: Any
+    id: Any = dataclasses.field(metadata={"schema_property_name": "id"})
+    children: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "children"}
+    )
+    label: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "label"}
+    )
+    location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "location"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

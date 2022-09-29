@@ -11,10 +11,16 @@ from typing import Any
 class Conversion(object):
     """Describes how a converter transformed the output of a static analysis tool from the analysis tool's native output format into the SARIF format."""
 
-    tool: Any
-    analysis_tool_log_files: Any
-    invocation: Any
-    properties: Any
+    tool: Any = dataclasses.field(metadata={"schema_property_name": "tool"})
+    analysis_tool_log_files: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "analysisToolLogFiles"}
+    )
+    invocation: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "invocation"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

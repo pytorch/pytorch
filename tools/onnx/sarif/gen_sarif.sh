@@ -26,6 +26,7 @@ python -m jschema_to_python \
     --root-class-name SarifLog \
     --hints-file-path code-gen-hints.json \
     --force \
+    --library dataclasses \
     -vv
 
 # Generate SARIF version file

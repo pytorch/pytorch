@@ -11,9 +11,13 @@ from typing import Any
 class ConfigurationOverride(object):
     """Information about how a specific rule or notification was reconfigured at runtime."""
 
-    configuration: Any
-    descriptor: Any
-    properties: Any
+    configuration: Any = dataclasses.field(
+        metadata={"schema_property_name": "configuration"}
+    )
+    descriptor: Any = dataclasses.field(metadata={"schema_property_name": "descriptor"})
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

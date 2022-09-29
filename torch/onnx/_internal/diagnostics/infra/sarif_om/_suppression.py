@@ -11,12 +11,22 @@ from typing import Any
 class Suppression(object):
     """A suppression that is relevant to a result."""
 
-    kind: Any
-    guid: Any
-    justification: Any
-    location: Any
-    properties: Any
-    state: Any
+    kind: Any = dataclasses.field(metadata={"schema_property_name": "kind"})
+    guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "guid"}
+    )
+    justification: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "justification"}
+    )
+    location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "location"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    state: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "state"}
+    )
 
 
 # flake8: noqa

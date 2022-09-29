@@ -11,10 +11,16 @@ from typing import Any
 class LocationRelationship(object):
     """Information about the relation of one location to another."""
 
-    target: Any
-    description: Any
-    kinds: Any
-    properties: Any
+    target: Any = dataclasses.field(metadata={"schema_property_name": "target"})
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    kinds: Any = dataclasses.field(
+        default_factory=lambda: ["relevant"], metadata={"schema_property_name": "kinds"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

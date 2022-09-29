@@ -11,9 +11,13 @@ from typing import Any
 class Tool(object):
     """The analysis tool that was run."""
 
-    driver: Any
-    extensions: Any
-    properties: Any
+    driver: Any = dataclasses.field(metadata={"schema_property_name": "driver"})
+    extensions: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "extensions"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

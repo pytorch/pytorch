@@ -11,9 +11,15 @@ from typing import Any
 class ArtifactChange(object):
     """A change to a single artifact."""
 
-    artifact_location: Any
-    replacements: Any
-    properties: Any
+    artifact_location: Any = dataclasses.field(
+        metadata={"schema_property_name": "artifactLocation"}
+    )
+    replacements: Any = dataclasses.field(
+        metadata={"schema_property_name": "replacements"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

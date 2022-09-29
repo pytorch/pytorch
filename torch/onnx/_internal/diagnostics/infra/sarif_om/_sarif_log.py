@@ -11,11 +11,17 @@ from typing import Any
 class SarifLog(object):
     """Static Analysis Results Format (SARIF) Version 2.1.0 JSON Schema: a standard format for the output of static analysis tools."""
 
-    runs: Any
-    version: Any
-    schema_uri: Any
-    inline_external_properties: Any
-    properties: Any
+    runs: Any = dataclasses.field(metadata={"schema_property_name": "runs"})
+    version: Any = dataclasses.field(metadata={"schema_property_name": "version"})
+    schema_uri: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "$schema"}
+    )
+    inline_external_properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "inlineExternalProperties"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa
