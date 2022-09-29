@@ -129,6 +129,8 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
         if kwargs is None:
             kwargs = {}
 
+        # If the function is in the skip list, then we don't want to
+        # remap it to the nvprims.
         if torch.overrides.resolve_name(orig_func) in self.skip_ops:
             return orig_func(*args, **kwargs)
 
