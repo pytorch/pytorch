@@ -1372,6 +1372,18 @@ class TestMPS(TestCase):
         for op in ["<=", "<", ">=", ">", "==", "!="]:
             helper(op)
 
+    def test_slice_of_slice(self):
+        x = torch.tensor([0.5, 0.5], device="cpu")
+        x_mps = torch.tensor([0.5, 0.5], device="mps")
+
+        tensor = x[1][None]
+        tensor_mps = x_mps[1][None]
+
+        res = tensor.ne(0)
+        res_mps = tensor_mps.ne(0)
+
+        self.assertEqual(res, res_mps)
+
     def test_index_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/78107
 
