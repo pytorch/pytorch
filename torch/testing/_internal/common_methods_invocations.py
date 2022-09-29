@@ -820,6 +820,8 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=(hi, lo))
 
 def sample_inputs_ones_zeros(op, device, dtype, requires_grad, **kwargs):
+    # this is a bit messy, as we want the args to be tuples
+    # so if we pass size as a tuple, we have a tuple containing a tuple
     sizes = (
         (M,),
         (S, S),
@@ -7226,6 +7228,18 @@ def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
         d['delta'] = random.uniform(1e-3, 9)
         yield SampleInput(input, args=(target, ), kwargs=d)
 
+def error_inputs_huber_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction value
+    err = 'is not a valid value for reduction'
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'reduction': 'abc'}),
+                     error_type=ValueError, error_regex=err)
+    # delta <= 0
+    for delta in (0, -1):
+        err = 'huber_loss does not support non-positive values for delta.'
+        yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'delta': delta}),
+                         error_type=RuntimeError, error_regex=err)
+
 def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11267,6 +11281,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_leaky_relu,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           inplace_variant=lambda x, negative_slope=0.01:
+               torch.nn.functional.leaky_relu(x, negative_slope, inplace=True),
            supports_autograd=True,
            assert_autodiffed=True,
            supports_gradgrad=True,
@@ -11466,7 +11482,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -11939,14 +11955,16 @@ op_db: List[OpInfo] = [
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        inplace_variant=lambda x, threshold, value:
+            torch.nn.functional.threshold(x, threshold, value, inplace=True),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'threshold': 0.123,
+        sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9},
-                                                    {'threshold': 0.123,
+                                                    {'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9}),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
@@ -12405,6 +12423,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
@@ -13269,7 +13288,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.bfloat16]),
                    ),),
     OpInfo('lerp',
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
@@ -14169,6 +14188,7 @@ op_db: List[OpInfo] = [
     OpInfo('ones',
            op=torch.ones,
            supports_autograd=False,
+           supports_varargs=True,
            is_factory_function=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=True,
@@ -16115,6 +16135,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
+        error_inputs_func=error_inputs_huber_loss,
         skips=(
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -16971,6 +16992,13 @@ python_ref_db = [
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.huber_loss",
+        torch_opinfo_name="nn.functional.huber_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
@@ -17990,8 +18018,8 @@ sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) an
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
-reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('_masked.')]
-sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('_masked.')]
+reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
+sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):

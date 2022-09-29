@@ -467,6 +467,7 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
     "torch/csrc/distributed/c10d/Ops.cpp",
+    "torch/csrc/distributed/c10d/OpsImpl.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
     "torch/csrc/distributed/c10d/ProcessGroup.cpp",
@@ -897,7 +898,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/functorch/init.cpp",
-    "torch/csrc/functorch/CompileCache.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.cpp",
     "torch/csrc/jit/python/init.cpp",
@@ -1461,6 +1461,7 @@ aten_cuda_cu_source_list = [
     "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp",
     "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp",
+    "aten/src/ATen/native/transformers/cuda/flash_attn/fmha_api.cpp",
 ]
 
 # Files using thrust::sort_by_key need to be linked last

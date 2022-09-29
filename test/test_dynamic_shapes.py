@@ -11,6 +11,7 @@ import operator
 import itertools
 from torch.utils._pytree import tree_map
 from torch.fx.experimental.symbolic_shapes import ShapeEnv, PySymInt, sym_float
+from torch.utils._python_dispatch import TorchDispatchMode
 
 aten = torch.ops.aten
 
@@ -79,13 +80,12 @@ def create_contiguous(shape):
 
 class FakeSymbolicTensor(torch.Tensor):
     @staticmethod
-    def __new__(cls, sym_shape, sym_strides, dtype, layout, requires_grad, device):
-        offset = 0
+    def __new__(cls, sym_shape, sym_strides, dtype, layout, requires_grad, device, storage_offset=0):
         # TODO: this is wrong in general
         sym_stride = create_contiguous(sym_shape)
         r = torch.Tensor._make_wrapper_subclass(
             cls, sym_shape,
-            sym_stride, offset,
+            sym_stride, storage_offset,
             dtype=dtype, layout=layout, requires_grad=requires_grad,
             device=device,
         )
@@ -109,10 +109,10 @@ class FakeSymbolicTensor(torch.Tensor):
         raise RuntimeError(f"operator {func_overload} not supported")
 
 
-def create_symbolic_tensor(name, arg, shape_env):
+def create_symbolic_tensor(name, arg, shape_env, storage_offset=0):
     sym_shapes = tuple([shape_env.create_symint(f"{name}_{idx}", val) for idx, val in enumerate(arg.size())])
     sym_strides = tuple([shape_env.create_symint(f"{name}_{idx}_stride", val) for idx, val in enumerate(arg.stride())])
-    return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device)
+    return FakeSymbolicTensor(sym_shapes, sym_strides, arg.dtype, arg.layout, arg.requires_grad, arg.device, storage_offset)
 
 
 CPP_SYMINT_CLASS = type(torch.SymIntNode.new_symint(1))
@@ -151,6 +151,7 @@ class TestPySymInt(TestCase):
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
+
         self.assertTrue(not isinstance(x.shape[0], PySymInt))
         self.assertTrue(isinstance(x.shape[0], CPP_SYMINT_CLASS))
 
@@ -167,6 +168,16 @@ class TestPySymInt(TestCase):
         self.assertTrue(x.size(1) == 4)
         self.assertTrue(x.size(2) == 3)
         self.assertTrue(isinstance(x.size(2), CPP_SYMINT_CLASS))
+
+        offset = shape_env.create_symint("offset", 2)
+        y = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env, offset)
+        self.assertTrue(isinstance(y.storage_offset(), CPP_SYMINT_CLASS))
+        self.assertTrue(y.storage_offset() == 2)
+
+        offset = 2
+        z = create_symbolic_tensor("z", torch.randn(5, 4, 3), shape_env, offset)
+        self.assertTrue(isinstance(z.storage_offset(), int))
+        self.assertTrue(z.storage_offset() == 2)
 
     @skipIfNoSympy
     def test_binary(self):
@@ -321,6 +332,27 @@ class TestPySymInt(TestCase):
         a0 = shape_env.create_symint("a0", 2)
         self.assertRaisesRegex(RuntimeError, "Trying to extract", lambda: int(a0))
 
+    @skipIfNoSympy
+    def test_symint_as_scalar(self):
+        shape_env = ShapeEnv()
+        a0 = shape_env.create_symint("a0", 2)
+
+        sym_int_encountered = False
+
+        class TestSymInt(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                assert func == torch.ops.aten.add.Tensor
+
+                nonlocal sym_int_encountered
+                sym_int_encountered = kwargs["alpha"] is a0
+                kwargs["alpha"] = 0
+                return func(*args)
+
+        x = torch.rand([4, 4])
+        with TestSymInt():
+            y = torch.add(x, x, alpha=a0)
+
+        self.assertTrue(sym_int_encountered)
 
 if __name__ == '__main__':
     run_tests()
