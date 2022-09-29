@@ -559,6 +559,9 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const c10::
   TORCH_CHECK(
       mask_.scalar_type() == ScalarType::Bool,
       "Mask should be a boolean tensor");
+  if (mask_type_.has_value()) {
+    TORCH_CHECK((mask_type_ != 2) || (input_.sizes() == mask_.sizes()))
+  }
 
   Tensor output = at::empty_like(input_, input_.options());
   auto input = input_.contiguous();
