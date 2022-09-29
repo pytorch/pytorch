@@ -428,6 +428,34 @@ class TestAOTAutograd(AOTTestCase):
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
 
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_output_op_depending_on_symint(self):
+        """
+        It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
+        focused unit test.
+
+        An issue with the following program was the expand op would end up depending on a symint whose proxy was
+        incorrectly associated with one of the grad tensors rather than input tensors.  It broke partitioner logic
+        and the net result was aot_function failed to produce a function and threw an exception instead.
+        """
+        inp = torch.randn(5, requires_grad=True)
+
+        def f(x):
+            return x.expand(x.shape)
+
+        # TODO(whc) make this work (test setup is wrong somehow)
+        # joint_forward_backward = create_joint_forward_backward(f)
+        # out = f(inp)
+        # joint_inputs =  ([inp], [out.detach().contiguous()])
+        # fx_g = make_fx(joint_forward_backward)(*joint_inputs)
+        # TODO: assert outputs of fwd graph trace to correct symint
+
+        # e2e test that fails without symint clone fix
+        af = aot_function(f, nop, partition_fn=partial(min_cut_rematerialization_partition, compiler="inductor"))
+        out = af(inp)
+        self.assertEqual(out, f(inp))
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
@@ -709,7 +737,6 @@ symbolic_aot_autograd_failures = {
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('broadcast_tensors', ''),  # InvalidNode (needs symint clone?)
     xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('cat', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -737,7 +764,6 @@ symbolic_aot_autograd_failures = {
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('dstack', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('einsum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('expand_as', ''),  # InvalidNode (needs symint clone?)
     xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -759,7 +785,6 @@ symbolic_aot_autograd_failures = {
     xfail('fft.rfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.rfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fill', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
-    xfail('flatten', ''),  # InvalidNode (needs symint clone?)
     xfail('fmax', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('fmin', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition

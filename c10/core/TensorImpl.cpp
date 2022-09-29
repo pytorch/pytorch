@@ -912,6 +912,14 @@ bool _compute_contiguous(const ExtraMeta& extra_meta) {
   return _compute_contiguous(extra_meta, order);
 }
 
+void clone_symvec(SymIntArrayRef src, SymDimVector& dst) {
+  dst.clear();
+  dst.reserve(src.size());
+  for (size_t i = 0; i < src.size(); i++) {
+    dst.emplace_back(src[i].clone());
+  }
+}
+
 // NB: this doesn't check that the sizes/strides/offset are in bound for the
 // storage, and furthermore, it CANNOT do so as in some cases we temporarily
 // violate invariants by first setting sizes/strides, and then updating the
@@ -939,10 +947,11 @@ void TensorImpl::set_sizes_and_strides(
       extra_meta_->storage_offset_ = storage_offset_;
     }
   }
-  extra_meta_->sizes_ = sizes;
-  extra_meta_->strides_ = strides;
+  clone_symvec(sizes, extra_meta_->sizes_);
+  clone_symvec(strides, extra_meta_->strides_);
   if (storage_offset.has_value())
-    extra_meta_->storage_offset_ = std::move(*storage_offset);
+    extra_meta_->storage_offset_ = storage_offset->clone();
+
   SymInt numel = 1;
   for (const auto& s : sizes) {
     numel *= s;
