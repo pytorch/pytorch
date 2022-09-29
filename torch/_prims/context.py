@@ -219,6 +219,24 @@ def _is_node_supported_nvfuser(node):
 def _is_func_unsupported_nvfuser(
     torch_function_mode, orig_func, func, args, kwargs, *, skip_ops=()
 ):
+    """
+    This function traces the `func` under `torch_function_mode` and checks if
+    any of the traced nodes are not supported by nvFuser. If so, we should
+    fallback to the original function.
+
+    `skip_ops` argument is expected to be a list of strings of function names
+    that would match with `torch.overrides.resolve_name`.
+
+    Args:
+        torch_function_mode: The torch_function_mode context manager. orig_func:
+        The original function, its name will be used to check if
+                   it should be skipped.
+        func: The function to be traced. args: The args to be passed to the
+        function. kwargs: The kwargs to be passed to the function.
+    Keyword args:
+        skip_ops: A list of ops to skip when checking if the function is
+        supported.
+    """
     # One supported case is easy to check: if the resolved name of the original
     # function in the skip list, skip it.
     if torch.overrides.resolve_name(orig_func) in skip_ops:
