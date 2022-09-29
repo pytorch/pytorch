@@ -369,8 +369,8 @@ If you're making an ensemble of models, you may find
 For more documentation, see [our docs website](https://pytorch.org/functorch).
 
 ## Debugging
-`functorch._C.dump_tensor`: Dumps dispatch keys on stack
-`functorch._C._set_vmap_fallback_warning_enabled(False)` if the vmap warning spam bothers you.
+`torch._C._functorch.dump_tensor`: Dumps dispatch keys on stack
+`torch._C._functorch._set_vmap_fallback_warning_enabled(False)` if the vmap warning spam bothers you.
 
 ## Future Plans
 
