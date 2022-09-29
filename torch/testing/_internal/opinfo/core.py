@@ -144,17 +144,17 @@ class SampleInput(object):
             assert (
                 not var_args and not var_kwargs
             ), """
-            A SampleInput can be constructed "naturally" with *args and **kwargs or by
-            explicitly setting the "args" and "kwargs" paremeters, but the two
-            methods of construction cannot be mixed!"""
+A SampleInput can be constructed "naturally" with *args and **kwargs or by
+explicitly setting the "args" and "kwargs" paremeters, but the two
+methods of construction cannot be mixed!"""
         elif len(var_args) or len(var_kwargs):
             assert (
                 output_process_fn_grad is None
                 and broadcasts_input is None
                 and name is None
             ), """
-                A SampleInput constructed "naturally" with *args and **kwargs
-                cannot specify additional metadata in keyword arguments"""
+A SampleInput constructed "naturally" with *args and **kwargs
+cannot specify additional metadata in keyword arguments"""
 
         self.args = args if args is not None else var_args
         assert isinstance(self.args, tuple)
