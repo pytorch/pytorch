@@ -129,9 +129,9 @@ class SampleInput(object):
         *var_args,
         args=None,
         kwargs=None,
-        output_process_fn_grad=lambda x: x,
-        broadcasts_input=False,
-        name="",
+        output_process_fn_grad=None,
+        broadcasts_input=None,
+        name=None,
         **var_kwargs,
     ):
         # input is the first input to the op and is typically either a Tensor or TensorList (Sequence[Tensor]).
@@ -140,32 +140,33 @@ class SampleInput(object):
 
         # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
         # SampleInput(input, *args, **kwargs) but not to mix the two forms
-        if args is None:
-            self.args = var_args
-        else:
+        if args is not None or kwargs is not None:
             assert (
-                len(var_args) == 0
-            ), "SampleInput cannot be constructed with args and var_args"
+                not var_args and not var_kwargs
+            ), """
+            A SampleInput can be constructed "naturally" with *args and **kwargs or by
+            explicitly setting the "args" and "kwargs" paremeters, but the two
+            methods of construction cannot be mixed!"""
+        elif len(var_args) or len(var_kwargs):
             assert (
-                len(var_kwargs) == 0
-            ), "SampleInput cannot be constructed with args and var_kwargs"
-            self.args = args
-        assert isinstance(self.args, tuple)
+                output_process_fn_grad is None
+                and broadcasts_input is None
+                and name is None
+            ), """
+                A SampleInput constructed "naturally" with *args and **kwargs
+                cannot specify additional metadata in keyword arguments"""
 
-        if kwargs is None:
-            self.kwargs = var_kwargs
-        else:
-            assert (
-                len(var_args) == 0
-            ), "SampleInput cannot be constructed with kwargs and var_args"
-            assert (
-                len(var_kwargs) == 0
-            ), "SampleInput cannot be constructed with kwargs and var_kwargs"
-            self.kwargs = kwargs
+        self.args = args if args is not None else var_args
+        assert isinstance(self.args, tuple)
+        self.kwargs = kwargs if kwargs is not None else var_kwargs
         assert isinstance(self.kwargs, dict)
 
-        self.output_process_fn_grad = output_process_fn_grad
-        self.name = name
+        self.output_process_fn_grad = (
+            output_process_fn_grad
+            if output_process_fn_grad is not None
+            else lambda x: x
+        )
+        self.name = name if name is not None else ""
 
         # Specifies if `self.input` is broadcasted or not,
         # given that the operator supports broadcasting.
@@ -175,7 +176,9 @@ class SampleInput(object):
         # it is verified that we get a `RuntimeError` with this sample,
         # and inplace variant. Also inplace grad{grad} tests are skipped,
         # for such inputs (as they will error out otherwise).
-        self.broadcasts_input = broadcasts_input
+        self.broadcasts_input = (
+            broadcasts_input if broadcasts_input is not None else False
+        )
 
     def _repr_helper(self, formatter):
         # Helper function to return the details of the SampleInput as `str`

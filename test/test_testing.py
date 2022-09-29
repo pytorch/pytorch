@@ -1844,6 +1844,22 @@ class TestOpInfos(TestCase):
         with self.assertRaises(AssertionError):
             s = SampleInput(a, b, c=c, kwargs=dict(d=d, e=e))
 
+        # Mixing metadata into "natural" construction will error
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, name="foo")
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, output_process_fn_grad=lambda x: x)
+
+        with self.assertRaises(AssertionError):
+            s = SampleInput(a, b, broadcasts_input=True)
+
+        # But when only input is given, metadata is allowed for backward
+        # compatibility
+        s = SampleInput(a, broadcasts_input=True)
+        assert s.input is a
+        assert s.broadcasts_input
+
 
 if __name__ == '__main__':
     run_tests()
