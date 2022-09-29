@@ -715,6 +715,7 @@ def _im2col_col2im_indices_along_dim(
 
 @register_decomposition(aten.im2col)
 @out_wrapper()
+@pw_cast_for_opmath
 def im2col(
     input: Tensor,
     kernel_size: List[int],
@@ -793,8 +794,9 @@ def im2col(
     return output
 
 
-@register_decomposition(torch.ops.aten.col2im)
+@register_decomposition(aten.col2im)
 @out_wrapper()
+@pw_cast_for_opmath
 def col2im(
     input: Tensor,
     output_size: List[int],
