@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import unittest
 from unittest.mock import patch
 import math
+from torch.backends.cuda import sdp_kernel
 
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -722,6 +723,62 @@ class TestTransformers(NNTestCase):
         self.assertEqual(result.shape, ref_output.shape)
         torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
+    def sdp_ref(self,
+                q,
+                k,
+                v,
+                attn_mask=None,
+                dropout_p=0.0):
+        E = q.size(-1)
+        q = q / math.sqrt(E)
+        # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
+        if attn_mask is not None:
+            attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
+        else:
+            attn = torch.bmm(q, k.transpose(-2, -1))
+
+        attn = torch.nn.functional.softmax(attn, dim=-1)
+        if dropout_p > 0.0:
+            attn = torch.nn.functional.dropout(attn, p=dropout_p)
+        # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
+        output = torch.bmm(attn, v)
+        return output, attn
+
+    @parametrize("type",["dense", "nested"])
+    def test_scaled_dot_product_attention_fused_kernels(self, type: str):
+        def rand_nt(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.nested_tensor([torch.randn(seq_len, num_heads, head_dim, device="cuda", dtype=torch.float16) for _ in range(batch)])
+
+        def rand_tensor(shape):
+            batch, seq_len, num_heads, head_dim = shape
+            return torch.randn(batch, seq_len, num_heads, head_dim, device="cuda", dtype=torch.float16)
+
+        shape = (32, 64, 16, 128)
+        if type == "dense":
+            query = rand_tensor(shape)
+            key = rand_tensor(shape)
+            value = rand_tensor(shape)
+        elif type == "nested":
+            query = rand_nt(shape)
+            key = rand_nt(shape)
+            value = rand_nt(shape)
+
+        query = query.transpose(1, 2)
+        key = key.transpose(1, 2)
+        value = value.transpose(1, 2)
+
+        with sdp_kernel(enable_math=False):
+            # Lets switch seq_len and num_heads
+            # B x S X H X D -> B x H x S x D
+            actual = torch.nn.functional._scaled_dot_product_attention(
+                            query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+        with sdp_kernel(enable_fused=False):
+            math_ref = torch.nn.functional._scaled_dot_product_attention(
+                            query.contiguous(), key.contiguous(), value.contiguous(), attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
+
+        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
+
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
                   (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
@@ -731,28 +788,9 @@ class TestTransformers(NNTestCase):
                          if attn_dim is not None else "no_attn_mask")))
     @parametrize("dropout_p", [0.0, 0.2, 0.5])
     @parametrize("device", device_list)
+    @sdp_kernel(enable_fused=False)
     def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
         # TODO: Support cross-device / dtype testing properly when instantiate_device_type_tests() is used.
-        def sdp_ref(q,
-                    k,
-                    v,
-                    attn_mask=None,
-                    dropout_p=0.0):
-            B, Nt, E = q.shape
-            q = q / math.sqrt(E)
-            # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-            if attn_mask is not None:
-                attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
-            else:
-                attn = torch.bmm(q, k.transpose(-2, -1))
-
-            attn = torch.nn.functional.softmax(attn, dim=-1)
-            if dropout_p > 0.0:
-                attn = torch.nn.functional.dropout(attn, p=dropout_p)
-            # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
-            output = torch.bmm(attn, v)
-            return output, attn
-
         dtypes = [torch.double, torch.float]
         for dtype in dtypes:
 
@@ -789,7 +827,7 @@ class TestTransformers(NNTestCase):
                 a = attn_mask_float
                 if a is not None and attn_mask_dim > 3:
                     a = a.view(-1, L, S)
-                expected = sdp_ref(q, k, v, attn_mask=a, dropout_p=dropout_p)
+                expected = self.sdp_ref(q, k, v, attn_mask=a, dropout_p=dropout_p)
                 if input_dim > 3:
                     expected = (expected[0].view(-1, N_prime, L, E), expected[1].view(-1, N_prime, L, S))
 

@@ -22,6 +22,7 @@ struct sdp_params {
   const at::Tensor& value;
   bool has_attn_mask;
   double dropout;
+  bool need_attn_weights;
   bool is_causal;
 };
 
@@ -86,6 +87,16 @@ inline bool check_tensor_dtype(
   return true;
 }
 
+inline bool check_for_attn_weights(sdp_params params, bool debug) {
+  // This can be returned form flash attention but care is needed
+  // to convert from flash_attn format to attn_weights
+  if (params.need_attn_weights) {
+    TORCH_CHECK(debug, "Flash Attention does not support need attn weights");
+    return false;
+  }
+  return true;
+}
+
 inline bool check_for_attn_mask(sdp_params params, bool debug) {
   if (params.has_attn_mask) {
     TORCH_CHECK(debug, "Flash Attention does not support attention mask.");
@@ -95,54 +106,54 @@ inline bool check_for_attn_mask(sdp_params params, bool debug) {
 }
 
 inline bool check_tensor_shapes(sdp_params params, bool debug) {
-  if (params.query.dim() != 5 && params.query.dim() != 4) {
+  if (params.query.dim() != 4) {
     TORCH_CHECK(
         debug,
-        "Query is not a 4 or 5 dimensional tensor. Query dim: ",
+        "Query is not a 4 dimensional tensor. Query dim: ",
         params.query.dim());
     return false;
   }
-  if (params.key.dim() != 5 && params.key.dim() != 4) {
+  if (params.key.dim() != 4) {
     TORCH_CHECK(
         debug,
-        "Key is not a 4 or 5 dimensional tensor. Key dim: ",
+        "Key is not a 4 dimensional tensor. Key dim: ",
         params.key.dim());
     return false;
   }
-  if (params.value.dim() != 5 && params.value.dim() != 4) {
+  if (params.value.dim() != 4) {
     TORCH_CHECK(
         debug,
-        "Value is not a 4 or 5 dimensional tensor. Value dim: ",
+        "Value is not a 4 dimensional tensor. Value dim: ",
         params.value.dim());
     return false;
   }
   return true;
 }
 
-inline bool check_packed_projection_shape(sdp_params params, bool debug) {
-  if (params.query.dim() == 5 && params.query.size(2) != 3) {
-    TORCH_CHECK(
-        debug,
-        "Query is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Query.size(2): ",
-        params.query.size(2));
-    return false;
-  }
-  if (params.key.dim() == 5 && params.key.size(2) != 3) {
-    TORCH_CHECK(
-        debug,
-        "Key is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Key.size(2): ",
-        params.key.size(2));
-    return false;
-  }
-  if (params.value.dim() == 5 && params.value.size(2) != 3) {
-    TORCH_CHECK(
-        debug,
-        "Value is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Value.size(2): ",
-        params.value.size(2));
-    return false;
-  }
-  return true;
-}
+// inline bool check_packed_projection_shape(sdp_params params, bool debug) {
+//   if (params.query.dim() == 5 && params.query.size(2) != 3) {
+//     TORCH_CHECK(
+//         debug,
+//         "Query is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Query.size(2): ",
+//         params.query.size(2));
+//     return false;
+//   }
+//   if (params.key.dim() == 5 && params.key.size(2) != 3) {
+//     TORCH_CHECK(
+//         debug,
+//         "Key is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Key.size(2): ",
+//         params.key.size(2));
+//     return false;
+//   }
+//   if (params.value.dim() == 5 && params.value.size(2) != 3) {
+//     TORCH_CHECK(
+//         debug,
+//         "Value is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Value.size(2): ",
+//         params.value.size(2));
+//     return false;
+//   }
+//   return true;
+// }
 
 inline bool check_head_dim_size(
     sdp_params params,
@@ -211,7 +222,8 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   std::vector<std::function<bool(sdp_params, bool)>> constraints{
       check_runtime_disabled,
       check_tensor_shapes,
-      check_packed_projection_shape,
+      // check_packed_projection_shape,
+      check_for_attn_weights,
       check_for_attn_mask,
       compiled_with_fused_kernels,
       check_gpu_sm75_or_greater};
