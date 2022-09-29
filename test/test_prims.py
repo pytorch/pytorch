@@ -166,6 +166,9 @@ class TestPrims(TestCase):
             "while there exists nvfuser implementations for them.")
 
     def test_skip_ops_nvfuser_prims_mode(self, device):
+        # This test verifies that the NvfuserPrimsMode skips the specified
+        # functions. Skipping a function means that it's not converted into
+        # nvprims counterparts.
         from torch._prims.context import NvfuserPrimsMode
 
         a = torch.randn(5, 5, device=device)
@@ -187,6 +190,10 @@ class TestPrims(TestCase):
         self.assertFalse(include_any_nvprims_sin)
 
     def test_skip_ops_nvfuser_capability_mode(self, device):
+        # This test verifies that the NvfuserCapabilityMode skips the specified
+        # functions. Skipping a function means that specific
+        # reference/decomposition is not traced and there's no attempt to lower
+        # it to nvprims.
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
         a = torch.randn(5, 5, device=device)
