@@ -2779,8 +2779,9 @@ def _get_unfold_shape_stride(
     strides = list(a_stride)
     shape.append(size)
     strides.append(last_stride)
-    shape[dim] = (shape[dim] - size) // step + 1
-    strides[dim] *= step
+    if dim < a_ndim:
+        shape[dim] = (shape[dim] - size) // step + 1
+        strides[dim] *= step
     return shape, strides
 
 
@@ -3568,8 +3569,7 @@ def unfold(
 @register_decomposition(torch.ops.aten.unfold_copy)
 @out_wrapper()
 def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
-    # nb. It's not clear to me what's the difference between this function and torch.unfold
-    return self.unfold(dimension, size, step)
+    return self.unfold(dimension, size, step).contiguous()
 
 
 @register_decomposition(torch.ops.aten.unsqueeze, disable_meta=True)
