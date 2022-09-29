@@ -879,7 +879,9 @@ def col2im(
     )
 
     output_padded_size = [o + 2 * p for o, p in zip(output_size, padding)]
-    output = input.new_zeros([shape[0], shape[1] // prod(kernel_size)] + output_padded_size)
+    output = input.new_zeros(
+        [shape[0], shape[1] // prod(kernel_size)] + output_padded_size
+    )
     idx = (None, None, indices_row, indices_col)
     output = torch.ops.aten.index_put(output, idx, input, accumulate=True)
     output = F.pad(output, (-padding_h, -padding_h, -padding_w, -padding_w))
