@@ -33,27 +33,29 @@ class TestFunctionalization(TestCase):
         input_clone = inpt.clone()
         input_clone2 = inpt.clone()
         input_clone3 = inpt.clone()
-        input_clone4 = inpt.clone()
-        input_clone5 = inpt.clone()
 
         # Compare outputs (and mutated inputs), with and without functionalization.
-        out_ref = func(inpt)
+        out_ref = func(input_clone)
         reapply_views_str = 'mutations' if reapply_views else 'mutations_and_views'
-        out_functional = functionalize(func, remove=reapply_views_str)(input_clone)
+        functional_func = make_fx(functionalize(func, remove=reapply_views_str))(inpt.clone())
+        out_functional = functional_func(input_clone2)
+
         # The reinplacing pass is only valid to run with reapply_views=True.
-        functional_func = make_fx(functionalize(func))(input_clone2)
-        reinplace_func = reinplace(make_fx(functionalize(func))(input_clone3), input_clone4)
+        functional_func = make_fx(functionalize(func))(inpt.clone())
+        # TODO: reinplace() shouldn't require input args once we're guaranteed that
+        # fake inputs are stored in the graph.
+        reinplace_func = reinplace(make_fx(functionalize(func))(inpt.clone()), inpt.clone())
 
         # NOTE: for now, need to pass in fresh inputs here, because make_fx
         # will directly mutate the inputs that you trace with.
         # Once this is fixed we can clean this up.
-        out_reinplace = reinplace_func(input_clone5)
+        out_reinplace = reinplace_func(input_clone3)
 
         # functionalize() deficiency: input metadata mutations aren't propagated properly,
         # so we just need to skip checks here for the tests that exercise that.
         if not mutated_input_metadata:
-            self.assertEqual(inpt, input_clone)  # input mutations should still occur
-            self.assertEqual(inpt, input_clone5)
+            self.assertEqual(input_clone, input_clone2)  # input mutations should still occur
+            self.assertEqual(input_clone, input_clone3)
 
         # Handle tests with multi-tensor outputs
         if isinstance(out_ref, tuple):

@@ -21,7 +21,7 @@ from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
 from .named_members_polyfill import _named_buffers, _named_parameters
-from .partitioners import default_partition
+from .partitioners import default_partition, move_input_mutations_into_epilogue
 
 try:
     from torchdynamo import disable as disable_torchdynamo
@@ -37,7 +37,6 @@ except ImportError:
 
     def dynamo_timed(x):
         return x
-
 
 pytree._register_pytree_node(
     immutable_collections.immutable_list,
@@ -260,6 +259,12 @@ def call_func_with_args(f, args, steal_args=False):
         out = normalize_as_list(f(*args))
     return out
 
+def assert_functional_graph(fx_g: torch.fx.Graph):
+    for n in fx_g.nodes:
+        if isinstance(n.target, torch._ops.OpOverload):
+            assert not n.target._schema.is_mutable, \
+                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+
 
 @dataclasses.dataclass
 class AOTConfig:
@@ -359,6 +364,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     joint_inputs = (deduped_flat_args, out)
 
+    _num_mutated_inputs = 0
     if config.use_functionalize:
         # Trace once without decompositions, into a graph of ATen ops.
         # NB: tracing_mode is real, as it's assumed the calling context setup
@@ -375,6 +381,21 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # Eventually, functionalization should support primtorch view/inplace ops,
         # which will make it ok to run decompositions before functionalization.
         fx_g = make_fx(functionalize(fake_fn), aot_config.decompositions)(*joint_inputs)
+
+        # If the original user's program mutated any tensor inputs,
+        # when functinalization is turned on, we want to move
+        # these mutations into an opaque epilogue
+        # so our graph infra can assume a functional graph.
+        input_mutation_epilogue, mutated_inputs_map = move_input_mutations_into_epilogue(fx_g)
+        _num_mutated_inputs = len([x for x in mutated_inputs_map if x])
+        original_inputs_needing_mutation = []
+        for is_mutated, x in zip(mutated_inputs_map, flat_args):
+            if is_mutated:
+                original_inputs_needing_mutation.append(x)
+
+        # There should be *NO* mutating ops in the graph at this point.
+        assert_functional_graph(fx_g.graph)
+        # Finally, run DCE *after* moving input mutations out of the graph.
         fx_g.graph.eliminate_dead_code()
         fx_g.recompile()
     else:
@@ -386,7 +407,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
 
     with torch.no_grad():
         with track_graph_compiling("joint"):
-            fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs)
+            num_fwd_outputs = _num_outs + _num_mutated_inputs
+            fw_module, bw_module = aot_config.partition_fn(fx_g, joint_inputs, num_fwd_outputs)
 
         if config.debug_graphs:
             print("====== Forward graph ======")
@@ -409,21 +431,27 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         compiled_fw = compiled_fw_func
         compiled_bw = None
         num_outs = _num_outs
+        num_mutated_inputs = _num_mutated_inputs
 
         @staticmethod
         @disable_torchdynamo
         def forward(ctx, *deduped_flat_tensor_args):
+            # Calling convention: returns flat list of [mutated_inputs, outputs, saved_tensors_for_bwd]
             fw_outs = call_func_with_args(
                 CompiledFunction.compiled_fw, deduped_flat_tensor_args
             )
+
             num_outs = CompiledFunction.num_outs
-            ctx.save_for_backward(*fw_outs[num_outs:])
-            return tuple(fw_outs[0:num_outs])
+            num_mutated_inputs = CompiledFunction.num_mutated_inputs
+            ctx.save_for_backward(*fw_outs[num_mutated_inputs + num_outs:])
+            return tuple(fw_outs[0:num_mutated_inputs + num_outs])
 
         @staticmethod
         @disable_torchdynamo
         def backward(ctx, *flat_args):
-            contiguous_args = [t.contiguous() for t in flat_args]
+            # The forward() returned a tuple of [mutated inputs, fwd_outputs]
+            # We only want to pass the grad_inputs corresponding to fwd_outputs to the backward.
+            contiguous_args = [t.contiguous() for t in flat_args][CompiledFunction.num_mutated_inputs:]
             all_args = list(ctx.saved_tensors) + list(contiguous_args)
             if CompiledFunction.compiled_bw is None:
                 with track_graph_compiling("backward", True):
@@ -441,7 +469,45 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     def compiled_function(*args):
         return CompiledFunction.apply(*remove_dupe_args(args))
 
-    return compiled_function
+    # Note: [Calling Convention for AOTAUtograd forward/backward]
+    # The function returned by AOTAutograd has a few moving parts
+    # that require an internal calling convention.
+    # In order to handle input mutations, the function that AOTAutograd returns
+    # consists of:
+    # - A purely functional Autograd.Function
+    # - An opaque epilogue that runs after the forward, performing any input mutations.
+    #
+    # Let's say we have a function that takes in N inputs, returns M outputs,
+    # and also performs input mutations on K of its N inputs.
+    # The calling convention is:
+    #
+    # CompiledFunction.forward(inputs) -> mutated_inputs, outputs
+    # CompiledFunction.backward(grad_outputs) -> grad_inputs
+    # Epilogue(inp1, mutated_inp1, inp2, mutated_inp2, ...) -> ()
+    #
+    # TODO: Doesn't aot_dispatch_base need the epilogue too?
+    # ... it probably needs to run functionalization as well?
+    @disable_torchdynamo
+    def compiled_function_with_epilogue(*args):
+        # First, call the custom autograd fn
+        fw_outs = compiled_function(*args)
+
+        # Then, perform the opaque epilogue to mutate any inputs.
+        # This needs to happen *outside** of the autograd.function,
+        # because torch.autograd.function can't handle input mutations in some cases.
+        if config.use_functionalize:
+            # Call the input mutation submodule with the mutated inputs
+            mutated_inputs = fw_outs[:_num_mutated_inputs]
+            fw_outs = fw_outs[_num_mutated_inputs:]
+            # The input mutation epilogue expects inputs in the same order as the original graph,
+            # but in the order (inpt1_old, inpt1_new, inpt2_old, inpt2_new, ...)
+            mutated_input_args = [x for pair in zip(original_inputs_needing_mutation, mutated_inputs) for x in pair]
+            # TODO: this epilogue should also be responsible for generating outputs
+            # that are aliases of inputs.
+            input_mutation_epilogue(*mutated_input_args)
+        return fw_outs
+
+    return compiled_function_with_epilogue
 
 
 @dynamo_timed
