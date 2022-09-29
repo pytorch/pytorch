@@ -3,9 +3,11 @@ import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast
 import operator
 import functools
-from functools import lru_cache
+from functools import lru_cache, partial
 import traceback
 import collections
+import textwrap
+from torch._subclasses.meta_utils import MetaConverter
 
 try:
     import sympy  # type: ignore[import]
@@ -63,11 +65,7 @@ class SymDispatchMode:
         SYM_FUNCTION_MODE = self.inner
 
 def has_symbolic_sizes_strides(elem):
-    return (
-        any([isinstance(i, torch.SymIntNode) for i in elem.shape])
-        or any([isinstance(i, torch.SymIntNode) for i in elem.stride()])
-        or isinstance(elem.storage_offset(), torch.SymIntNode)
-    )
+    return elem._has_symbolic_sizes_strides
 
 def create_contiguous(shape):
     strides = [1]
@@ -90,6 +88,8 @@ def _handle_sym_dispatch(func, args, kwargs):
 def sym_float(a):
     if hasattr(a, '__sym_float__'):
         return a.__sym_float__()
+    elif isinstance(a, torch._C.SymFloatNode):
+        return a
     return float(a)
 
 # TODO: An incomplete list
@@ -165,6 +165,11 @@ if HAS_SYMPY:
                 return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
 
 # Methods that have a `__foo__` as well as `__rfoo__`
 reflectable_magic_methods = {
@@ -172,6 +177,7 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
+    'truediv': lambda a, b: a / b,
     'floordiv': lambda a, b: FloorDiv(a, b)
 }
 
@@ -184,29 +190,44 @@ magic_methods = {
     'ge': lambda a, b: sympy.Ge(a, b),
 }
 
-for method, _func in magic_methods.items():
-    def _create_magic_impl(func):
-        method_name = method
+float_magic_methods = {"add", "sub", "mul", "truediv"}
 
-        def magic_impl(self, other):
-            if SYM_FUNCTION_MODE:
-                return _handle_sym_dispatch(getattr(operator, method_name), (self, other), {})
-            if isinstance(other, PySymInt):
-                other = other.expr
-            # TODO: consider constant prop here
-            expr = self.shape_env.replace(self.expr)
-            other = self.shape_env.replace(other)
-            out = func(expr, other)
-            out = sympy.expand(out)
-            return PySymInt(out, self.shape_env)
-        return magic_impl
+def _make_magic(method, func, py_type):
+    func = lru_cache(256)(func)
 
-    _func = lru_cache(256)(_func)
+    def magic_impl(self, other):
+        if SYM_FUNCTION_MODE:
+            return _handle_sym_dispatch(getattr(operator, method), (self, other), {})
+        if isinstance(other, py_type):
+            other = other.expr
+        # TODO: consider constant prop here
+        expr = self.shape_env.replace(self.expr)
+        other = self.shape_env.replace(other)
+        out = func(expr, other)
+        out = sympy.expand(out)
+        if method in ["truediv"]:
+            return PySymFloat(out, self.shape_env)
+        else:
+            # TODO: relational operators actually technically return a
+            # PySymBool, this is a type error
+            return py_type(out, self.shape_env)
+
     # this should be wrapped transparently into torch.SymIntNode
-    setattr(PySymInt, method, _create_magic_impl(_func))
-    setattr(PySymInt, f"__{method}__", _create_magic_impl(_func))
+    setattr(py_type, method, magic_impl)
+    setattr(py_type, f"__{method}__", magic_impl)
     if method in reflectable_magic_methods:
-        setattr(PySymInt, f"__r{method}__", _create_magic_impl(_func))
+        setattr(py_type, f"__r{method}__", magic_impl)
+
+for method, func in magic_methods.items():
+    _make_magic(method, func, PySymInt)
+
+for method, func in magic_methods.items():
+    if method not in float_magic_methods:
+        continue
+    _make_magic(method, func, PySymFloat)
+
+del method
+del func
 
 def _lru_cache(fn, maxsize=None):
     """
@@ -245,6 +266,9 @@ class ShapeEnv(object):
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
+        # Duck-shaping says that if two input tensors have the same size,
+        # they get assigned the same symbolic variable
+        self.val_to_symint: Dict[int, torch.SymIntNode] = {}
 
     def _get_key(self):
         """
@@ -253,39 +277,55 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
+    # NB: This is only called for input symbolic sizes; intermediate symbolic
+    # sizes are allocated via a different mechanism
     def create_symint(self, name, val):
+        assert val >= 0
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
 
-        # Currently we don't put 0/1 specialization in guards but perhaps we should
+        # TODO: Put 0/1 specialization in guards
         if val == 0 or val == 1:
             return val
+        # This implements duck-shaping: input sizes that match are assigned
+        # the same symint
+        # TODO: Create a guard whenever this happens
+        # TODO: But how do I represent the guard in this case?
+        if val in self.val_to_symint:
+            return self.val_to_symint[val]
         sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         self.var_to_val[sympy_expr] = sympy.Integer(val)
+        self.val_to_symint[val] = cpp_sym_int
         return cpp_sym_int
-
-    def create_shapes_for_args(self, args):
-        arg_cnt = 0
-
-        def create_shape(x):
-            nonlocal arg_cnt
-            if not isinstance(x, torch.Tensor):
-                return x
-
-            out_shape = [self.create_symint(f"s_{arg_cnt}[{idx}]", sz) for idx, sz in enumerate(x.shape)]
-            arg_cnt += 1
-            return out_shape
-        return list(map(create_shape, pytree.tree_flatten(args)[0]))
 
     def evaluate_guards_for_args(self, *args):
         new_env = ShapeEnv()
-        _ = new_env.create_shapes_for_args(args)
+        # NB: This must be kept in sync with create_aot_dispatcher_function
+        # and wrap_fake_symbolic
+        meta_converter = MetaConverter()
+        pytree.tree_map_only(torch.Tensor, partial(meta_converter, shape_env=new_env), args)
         return all(guard.xreplace(new_env.var_to_val) == value for guard, value, _ in self.guards)
 
     def get_nontrivial_guards(self):
         return [(self.simplify(guard), val) for guard, val, _ in self.guards if self._maybe_evaluate_static(guard) is None]
+
+    def format_guards(self, verbose=False):
+        def format_val(guard, val):
+            if val is sympy.true:
+                return str(guard)
+            elif val is sympy.false:
+                return f"Not({guard})"
+            else:
+                return f"Eq({guard}, {val})"
+
+        def format_tb(tb):
+            if not verbose:
+                return ""
+            return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
+
+        return '\n'.join(f" - {format_val(guard, val)}{format_tb(tb)}" for guard, val, tb in self.guards)
 
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
@@ -370,6 +410,7 @@ class ShapeEnv(object):
         self.replacements[a] = self.replacements[a].xreplace(cur_replace)
         return self.replacements[a]
 
+    @lru_cache(256)
     def _maybe_guard_eq(self, expr: "sympy.Eq") -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
@@ -422,6 +463,9 @@ class ShapeEnv(object):
             self._maybe_guard_eq(expr)
         concrete_val = self.size_hint(expr)
 
-        stack = ''.join(traceback.format_stack())
+        # TODO: optimize this; avoid formatting traces until we need them
+        # NB: drop two frames; evaluate_expr and the Sym* function that
+        # actually called us
+        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
         self.guards.append((expr, concrete_val, stack))
         return concrete_val
