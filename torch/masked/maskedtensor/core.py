@@ -51,7 +51,7 @@ def _tensors_match(a, b, exact=True):
         )
     if exact:
         return (a.dim() == b.dim()) and torch.eq(a, b).all().item()
-    return (a.dim() == b.dim()) and torch.allclose(a, b)
+    return (a.dim() == b.dim()) and torch.allclose(a, b, atol=1e-4)
 
 
 def _masks_match(a, b):
