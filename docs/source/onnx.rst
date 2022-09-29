@@ -434,7 +434,7 @@ ONNX operators that represent the function's behavior in ONNX. For example::
             return g.op("Clip", input, g.op("Constant", value_t=torch.tensor(0, dtype=torch.float)))
 
 .. FIXME(justinchuby): PythonOps are too complicated and the example below
-..  uses private methods we do not expose. We are looking look to
+..  uses private methods we do not expose. We are looking to
 ..  improve the experience. Since SymbolicContext is deprecated, we think
 ..  defining a symbolic staticmethod is a better way to go for now.
 
