@@ -14,7 +14,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     run_tests,
     skipIfSlowGradcheckEnv,
-    dtype_abbrs
+    dtype_abbrs,
+    setLinalgBackendsToDefaultFinally,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -849,7 +850,10 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
+    @setLinalgBackendsToDefaultFinally
     def test_meta(self, device, dtype, op):
+        if torch.version.hip is not None:
+            torch.backends.cuda.preferred_linalg_library('magma')
         # run the OpInfo sample inputs, cross-referencing them with the
         # meta implementation and check the results are the same.  All
         # the heavy lifting happens in MetaCrossRefFunctionMode
@@ -868,7 +872,10 @@ class TestMeta(TestCase):
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
+    @setLinalgBackendsToDefaultFinally
     def test_dispatch_meta(self, device, dtype, op):
+        if torch.version.hip is not None:
+            torch.backends.cuda.preferred_linalg_library('magma')
         func = op.get_op()
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample_input in samples:

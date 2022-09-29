@@ -1176,6 +1176,17 @@ def wrapDeterministicFlagAPITest(fn):
                 fn(*args, **kwargs)
     return wrapper
 
+# Reverts the linalg backend back to default to make sure potential failures in one
+# test do not affect other tests
+def setLinalgBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        finally:
+            torch.backends.cuda.preferred_linalg_library('default')
+        return _fn
+
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
     # build, numpy tests will fail

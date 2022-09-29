@@ -35,6 +35,7 @@ from torch.testing._internal.common_utils import (
     first_sample,
     parametrize,
     skipIfSlowGradcheckEnv,
+    setLinalgBackendsToDefaultFinally,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -71,6 +72,7 @@ from torch.testing._internal import composite_compliance
 
 from torch.utils._pytree import tree_flatten
 from torch.utils._python_dispatch import TorchDispatchMode
+
 
 # TODO: fixme https://github.com/pytorch/pytorch/issues/68972
 torch.set_default_dtype(torch.float32)
@@ -533,8 +535,13 @@ class TestCommon(TestCase):
     #   incorrectly sized out parameter warning properly yet
     # Cases test here:
     #   - out= with the correct dtype and device, but the wrong shape
-    @ops(_ops_and_refs, dtypes=OpDTypes.none)
+    @ops(op_db, dtypes=OpDTypes.none)
+    @setLinalgBackendsToDefaultFinally
     def test_out_warning(self, device, op):
+        if torch.version.hip is not None:
+            if op.name == "linalg.svdvals":
+                torch.backends.cuda.preferred_linalg_library('magma')
+
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         supported_dtypes = op.supported_dtypes(self.device_type)
         if len(supported_dtypes) == 0:
@@ -661,8 +668,13 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @ops(_ops_and_refs, dtypes=OpDTypes.any_one)
-    def test_out(self, device, dtype, op):
+    @ops(op_db, dtypes=OpDTypes.none)
+    @setLinalgBackendsToDefaultFinally
+    def test_out(self, device, op):
+        if torch.version.hip is not None:
+            if op.name == "linalg.svdvals":
+                torch.backends.cuda.preferred_linalg_library('magma')
+
         # Prefers running in float32 but has a fallback for the first listed supported dtype
         samples = op.sample_inputs(device, dtype)
         for sample in samples:
