@@ -93,3 +93,8 @@ fi
 if [ -d .coverage ]; then
   mv .coverage test/.coverage
 fi
+
+# Upload coverage report to codecov
+curl -Os https://uploader.codecov.io/latest/linux/codecov
+chmod +x codecov
+./codecov --flags torch.onnx
