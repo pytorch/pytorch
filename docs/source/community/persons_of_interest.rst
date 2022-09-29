@@ -289,6 +289,8 @@ TorchVision
 
 -  Francisco Massa (`fmassa <https://github.com/fmassa>`__)
 -  Vasilis Vryniotis (`datumbox <https://github.com/datumbox>`__)
+-  Philip Meier (`pmeier <https://github.com/pmeier>`__)
+-  Victor Fomin (`vfdev-5 <https://github.com/vfdev-5>`__)
 
 TorchText
 ~~~~~~~~~
