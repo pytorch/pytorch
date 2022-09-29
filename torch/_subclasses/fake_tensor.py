@@ -122,10 +122,9 @@ def get_schema_info(func):
 @functools.lru_cache(None)
 def aten_to_aten_decomp(func):
     from torch._decomp import decomposition_table
+
     decompositions = torch._decomp.decompositions
-    decomp_attrs = [
-        getattr(decompositions, attr) for attr in dir(decompositions)
-    ]
+    decomp_attrs = [getattr(decompositions, attr) for attr in dir(decompositions)]
     return decomposition_table[func] in decomp_attrs
 
 
@@ -436,12 +435,12 @@ def in_kernel_invocation_manager(fake_mode, *, in_kernel=True):
     assert meta_in_tls == prev_in_kernel
 
     fake_mode.in_kernel_invocation = in_kernel
-    torch._C._set_add_meta_to_tls_dispatch_include(in_kernel)
+    torch._C._set_meta_in_tls_dispatch_include(in_kernel)
     try:
         yield
     finally:
         fake_mode.in_kernel_invocation = prev_in_kernel
-        torch._C._set_add_meta_to_tls_dispatch_include(prev_in_kernel)
+        torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
 
 
 class FakeTensor(torch.Tensor):
@@ -751,7 +750,7 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        from torch._decomp import decomposition_table, _disabled_meta_decomps
+        from torch._decomp import _disabled_meta_decomps, decomposition_table
 
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
@@ -783,9 +782,12 @@ class FakeTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
-
         with self, in_kernel_invocation_manager(self, in_kernel=False):
-            if func in decomposition_table and aten_to_aten_decomp(func) and func not in _disabled_meta_decomps:
+            if (
+                func in decomposition_table
+                and aten_to_aten_decomp(func)
+                and func not in _disabled_meta_decomps
+            ):
                 return decomposition_table[func](*args, **kwargs)
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
