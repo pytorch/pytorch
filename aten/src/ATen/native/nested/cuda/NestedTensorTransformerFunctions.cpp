@@ -322,7 +322,7 @@ std::tuple<Tensor, Tensor> flash_attention_helper_nested_unpacked(
   return std::tie(attention, std::get<1>(attention_and_weights));
 }
 
-std::tuple<Tensor, Tensor> flash_attention_helper(
+std::tuple<Tensor, Tensor> flash_attention_helper_packed(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -338,78 +338,47 @@ std::tuple<Tensor, Tensor> flash_attention_helper(
   Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q);
   int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q);
 
-  if (key.is_same(value) || query.is_same(key) || query.is_same(value)) {
-    int64_t Nnz_q{cumulative_sequence_length_q[-1].item<int64_t>()};
+  TORCH_CHECK(
+      key.is_same(key) && query.is_same(value),
+      "Key and Value must be the same tensor");
 
-    // For the packed case we need to set the output size for dim 2 to 1
-    auto atten_size = get_nested_size_tensor(query).clone();
-    atten_size.index({at::indexing::Slice(), 1}) = 1;
-
-    auto qkv_buffer_reshaped =
-        get_buffer(query).view({Nnz_q, 3, num_heads, head_dim}).transpose(0, 1).contiguous();
-
-    auto q = qkv_buffer_reshaped[0];
-    auto k = qkv_buffer_reshaped[1];
-    auto v = qkv_buffer_reshaped[2];
-
-    TORCH_CHECK(q.is_contiguous());
-    TORCH_CHECK(k.is_contiguous());
-    TORCH_CHECK(v.is_contiguous());
-
-    // If we are passing in query, key, value all the same tensors then we have
-    // packed them into one tensor and need to slice for flash attention
-    std::tuple<Tensor,Tensor> attention_and_weights = at::_flash_scaled_dot_product_attention(
-        q,
-        k,
-        v,
-        cumulative_sequence_length_q,
-        cumulative_sequence_length_q,
-        max_seqlen_batch_q,
-        max_seqlen_batch_q,
-        dropout_p,
-        need_atten_weights,
-        is_causal);
-    // Output of flash_attention is a regular tensor lets wrap it back up to
-    // form a nested tensor
-    std::get<0>(attention_and_weights) = wrap_buffer(std::get<0>(attention_and_weights).view(-1), atten_size);
-    return attention_and_weights;
-  }
-
-  // Query, Key, and Value are not all the same tensor and therefore need to
-  // calculate K meta data
-
-  // The nested tensors will be of shape {Batch_size x ragged_seq_len x
-  // num_heads * head_dim }
-  auto cumulative_and_max_k = cumulative_and_max_seq_len(key);
-  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k);
-  int64_t max_seqlen_batch_k = std::get<1>(cumulative_and_max_k);
-
-  // K and V have to have the same Nnz, should probably torch_check before now
-  // assume in order to not iterate over v
   int64_t Nnz_q{cumulative_sequence_length_q[-1].item<int64_t>()};
-  int64_t Nnz_kv{cumulative_sequence_length_k[-1].item<int64_t>()};
 
-  auto query_buffer_reshaped =
-      get_buffer(query).view({Nnz_q, num_heads, head_dim}).contiguous();
-  auto key_buffer_reshaped =
-      get_buffer(key).view({Nnz_kv, num_heads, head_dim}).contiguous();
-  auto value_buffer_reshaped =
-      get_buffer(value).view({Nnz_kv, num_heads, head_dim}).contiguous();
+  // For the packed case we need to set the output size for dim 2 to 1
+  auto atten_size = get_nested_size_tensor(query).clone();
+  atten_size.index({at::indexing::Slice(), 1}) = 1;
 
-  std::tuple<Tensor,Tensor> attention_and_weights = at::_flash_scaled_dot_product_attention(
-      query_buffer_reshaped,
-      key_buffer_reshaped,
-      value_buffer_reshaped,
-      cumulative_sequence_length_q,
-      cumulative_sequence_length_k,
-      max_seqlen_batch_q,
-      max_seqlen_batch_k,
-      dropout_p,
-      need_atten_weights,
-      is_causal);
+  auto qkv_buffer_reshaped = get_buffer(query)
+                                 .view({Nnz_q, 3, num_heads, head_dim})
+                                 .transpose(0, 1)
+                                 .contiguous();
+
+  auto q = qkv_buffer_reshaped[0];
+  auto k = qkv_buffer_reshaped[1];
+  auto v = qkv_buffer_reshaped[2];
+
+  TORCH_CHECK(q.is_contiguous());
+  TORCH_CHECK(k.is_contiguous());
+  TORCH_CHECK(v.is_contiguous());
+
+  // If we are passing in query, key, value all the same tensors then we have
+  // packed them into one tensor and need to slice for flash attention
+  std::tuple<Tensor, Tensor> attention_and_weights =
+      at::_flash_scaled_dot_product_attention(
+          q,
+          k,
+          v,
+          cumulative_sequence_length_q,
+          cumulative_sequence_length_q,
+          max_seqlen_batch_q,
+          max_seqlen_batch_q,
+          dropout_p,
+          need_atten_weights,
+          is_causal);
   // Output of flash_attention is a regular tensor lets wrap it back up to
-  // form a nested tensor, the size of which should match the query tensor
-  std::get<0>(attention_and_weights) = wrap_buffer(std::get<0>(attention_and_weights).view(-1), get_nested_size_tensor(query).clone());
+  // form a nested tensor
+  std::get<0>(attention_and_weights) =
+      wrap_buffer(std::get<0>(attention_and_weights).view(-1), atten_size);
   return attention_and_weights;
 }
 
