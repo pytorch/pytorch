@@ -294,16 +294,16 @@ Tensor unwrapIfDead(const Tensor& tensor) {
 void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func) {
    auto func_with_bool = [&](const Tensor& tensor, bool unused) { return func(tensor); };
-   foreachTensorInplaceWithFlag(args, begin, end, 0, func_with_bool);
+   foreachTensorInplaceWithFlag(args, begin, end, std::bitset<64>(), func_with_bool);
 }
 
 void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
-    const int64_t use_flag_relative, std::function<Tensor(const Tensor&, bool)> func){
+    const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func){
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);
   TORCH_INTERNAL_ASSERT(begin <= end);
   for (int64_t relative_idx = 0; relative_idx < end - begin; relative_idx++) {
-    const bool flag = ((use_flag_relative >> relative_idx) & 1) == 1;
+    const bool flag = use_flag_relative[relative_idx] == 1;
 
     const auto idx = relative_idx + begin;
     auto ivalue = args[idx];
@@ -379,21 +379,13 @@ bool isInplaceOp(const FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
-int64_t findAliasedOutputs(const FunctionSchema& schema, const int64_t immutable_inputs) {
-  int64_t immutable_returns = 0;
-  for (size_t input_idx = 0; input_idx != schema.arguments().size(); ++ input_idx) {
-    const auto cur_input = immutable_inputs >> input_idx; // bit for input_idx is now the rightmost bit
-    if (!(cur_input & 1)) {
-      break;
-    }
-    for (size_t res_idx = 0; res_idx != schema.returns().size(); ++res_idx) {
-      if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, input_idx), SchemaArgument(SchemaArgType::output, res_idx))) {
-        immutable_returns = immutable_returns ^ (1 << res_idx);
-        break;  // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
-      }
+c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input_idx) {
+  for (size_t res_idx = 0; res_idx != schema.returns().size(); ++res_idx) {
+    if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, immutable_input_idx), SchemaArgument(SchemaArgType::output, res_idx))) {
+      return res_idx; // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
     }
   }
-  return immutable_returns;
+  return nullopt;
 }
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
@@ -502,6 +494,9 @@ TORCH_LIBRARY_IMPL(_, FuncTorchDynamicLayerBackMode, m) {
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&dynamicLayerBackGradSpecialCase>());
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerBackMode, m) {
+  // lift_fresh: it's must be freshly allocated and should be wrapped. User shouldn't have access to input version
+  // alias: this is needed for the CompositeImplicit instance norm (running_mean/var get set to be a wrapped value)
+  //        It's not a user facing function, but is more prone to possible errors
   SPECIAL_GRAD_CASE(lift_fresh);
   SPECIAL_GRAD_CASE(alias);
 }

@@ -105,7 +105,7 @@ TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 TORCH_API bool isInplaceOp(const c10::FunctionSchema& schema);
 
 // Given the indices of unwrapped inputs and the schema, this returns the indices of any outputs that should remain unwrapped
-TORCH_API int64_t findAliasedOutputs(const FunctionSchema& schema, const int64_t immutable_inputs);
+TORCH_API c10::optional<size_t> findAliasedOutput(const FunctionSchema& schema, const int64_t immutable_input);
 
 TORCH_API Tensor unwrapIfDead(const Tensor& tensor);
 

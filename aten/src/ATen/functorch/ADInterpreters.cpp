@@ -114,26 +114,31 @@ static void autogradBasedTransformSendToNext(
 
   // Step 1 & 2
   auto args_size = op.schema().arguments().size();
+  const auto ret_size = op.schema().returns().size();
   // Step 1
   auto front = stack->size() - args_size;
   for (const auto arg_idx : c10::irange(0, args_size)) {
     stack->push_back((*stack)[front + arg_idx]);
   }
 
-  int64_t immutable_inputs = 0;  // a bitset of the immutable inputs
-  for (auto idx = stack->size() - args_size; idx < stack->size(); idx++) {
-    const auto ivalue = (*stack)[idx];
-    if (!ivalue.isTensor()) {
-      continue; // only input that can be aliased is a tensor, not a tensor list (expect in ops without returns)
-    }
-    const auto tensor = ivalue.toTensor();
-    auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
-    if (!maybe_tensor_wrapper || maybe_tensor_wrapper->is_immutable()) {
-      // if the input is immutable, we flip the bit at its relative position, noting that
-      // args are in reverse order on stack, so the last arg is at the top of the stack
-      const auto relative_pos = idx - (stack->size() - args_size);
-      const auto mask = 1 << relative_pos;
-      immutable_inputs = immutable_inputs | mask;
+  std::bitset<64> outputs_aliasing_immutable; // set = 1 for all bits
+  if(!grad_special_case) {
+    for (auto idx = stack->size() - args_size; idx < stack->size(); idx++) {
+      const auto ivalue = (*stack)[idx];
+      if (!ivalue.isTensor()) {
+        continue; // only input that can be aliased is a tensor, not a tensor list (expect in ops without returns)
+      }
+      const auto tensor = ivalue.toTensor();
+      auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
+      if (!maybe_tensor_wrapper || maybe_tensor_wrapper->is_immutable()) {
+        // if the input is immutable, we find if it aliases anything, noting that
+        // args are in reverse order on stack, so the last arg is at the top of the stack
+        const auto relative_pos = idx - (stack->size() - args_size);
+        const auto aliased_out = findAliasedOutput(op.schema(), relative_pos);
+        if (aliased_out.has_value()) {
+          outputs_aliasing_immutable.flip(*aliased_out); // each output aliases at most one input, so we can only hit this once
+        }
+      }
     }
   }
 
@@ -157,17 +162,9 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Step 4, 5, 6
-  auto ret_size = op.schema().returns().size();
 
   op.callBoxed(stack);
 
-  // lift_fresh: it's must be freshly allocated and should be wrapped. User shouldn't have access to input version
-  // alias: this is needed for the CompositeImplicit instance norm (running_mean/var get set to be a wrapped value)
-  //        It's not a user facing function, but is more prone to possible errors
-  int64_t outputs_aliasing_immutable = 0;
-  if (!grad_special_case || immutable_inputs == 0) {
-    outputs_aliasing_immutable = findAliasedOutputs(op.schema(), immutable_inputs);
-  }
   // Step 4
   foreachTensorInplaceWithFlag(*stack, stack->size() - ret_size, stack->size(), outputs_aliasing_immutable, wrap);
 
