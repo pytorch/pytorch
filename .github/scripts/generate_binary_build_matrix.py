@@ -90,7 +90,7 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
     python_versions = FULL_PYTHON_VERSIONS
-    if os == "linux":
+    if os == "linux" or "windows":
         arches += CUDA_ARCHES
     elif os == "macos-arm64":
         python_versions = list_without(python_versions, ["3.7"])
@@ -125,6 +125,8 @@ def generate_libtorch_matrix(os: str, abi_version: str,
         if os == "linux":
             arches += CUDA_ARCHES
             arches += ROCM_ARCHES
+        elif os == "windows":
+            arches += CUDA_ARCHES
 
     if libtorch_variants is None:
         libtorch_variants = [
@@ -191,6 +193,8 @@ def generate_wheels_matrix(os: str,
         arches = ["cpu"]
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES
+        elif os == "windows":
+            arches += CUDA_ARCHES
 
     ret: List[Dict[str, str]] = []
     for python_version in python_versions:
