@@ -1,7 +1,9 @@
 # Owner(s): ["module: onnx"]
 
 import copy
+import functools
 import io
+from typing import Callable
 
 import onnx
 
@@ -65,22 +67,71 @@ class _BaseTestCase(common_utils.TestCase):
         return graph, params_dict, torch_out
 
 
-class TestUtilityFuns_opset_independent(_BaseTestCase):
-    def test_unconvertible_ops(self):
-        class MyModule(torch.nn.Module):
+@common_utils.instantiate_parametrized_tests
+class TestUnconvertibleOps(common_utils.TestCase):
+    """Unit tests for the `unconvertible_ops` function."""
+
+    def setUp(self):
+        class EinsumModule(torch.nn.Module):
             def forward(self, x):
-                return torch.cumsum(x, dim=0)
+                return torch.einsum("ii", x)
 
-        model = MyModule()
-        x = torch.randn(2, 3, 4)
+        self.einsum_module = EinsumModule()
 
-        graph, unconvertible_ops = utils.unconvertible_ops(model, (x,), opset_version=9)
-        iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "prim::Constant")
-        self.assertEqual(next(iter).kind(), "aten::cumsum")
-        self.assertEqual(len(unconvertible_ops), 1)
-        self.assertEqual(unconvertible_ops, ["aten::cumsum"])
+    def test_it_returns_graph_and_unconvertible_ops_at_lower_opset_version(self):
+        x = torch.randn(4, 4)
+
+        # Einsum is supported since opset 12. It should be unconvertible at opset 9.
+        graph, unconvertible_ops = utils.unconvertible_ops(
+            self.einsum_module, (x,), opset_version=9
+        )
+        nodes = graph.nodes()
+        self.assertEqual(next(nodes).kind(), "prim::Constant")
+        self.assertEqual(next(nodes).kind(), "prim::ListConstruct")
+        self.assertEqual(next(nodes).kind(), "prim::Constant")
+        self.assertEqual(next(nodes).kind(), "aten::einsum")
+        self.assertEqual(unconvertible_ops, ["aten::einsum"])
+
+    @common_utils.parametrize(
+        "jit_function",
+        [
+            common_utils.subtest(
+                functools.partial(torch.jit.trace, example_inputs=torch.randn(4, 4)),
+                name="traced",
+            ),
+            common_utils.subtest(torch.jit.script, name="scripted"),
+        ],
+    )
+    def test_it_returns_unconvertible_ops_at_lower_opset_version_for_jit_module(
+        self, jit_function: Callable
+    ):
+        module = jit_function(self.einsum_module)
+        x = torch.randn(4, 4)
+
+        # Einsum is supported since opset 12. It should be unconvertible at opset 9.
+        _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=9)
+        self.assertEqual(unconvertible_ops, ["aten::einsum"])
+
+    @common_utils.parametrize(
+        "jit_function",
+        [
+            common_utils.subtest(lambda x: x, name="nn_module"),
+            common_utils.subtest(
+                functools.partial(torch.jit.trace, example_inputs=torch.randn(4, 4)),
+                name="traced",
+            ),
+            common_utils.subtest(torch.jit.script, name="scripted"),
+        ],
+    )
+    def test_it_returns_empty_list_when_all_ops_convertible(
+        self, jit_function: Callable
+    ):
+        module = jit_function(self.einsum_module)
+        x = torch.randn(4, 4)
+
+        # Einsum is supported since opset 12
+        _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=12)
+        self.assertEqual(unconvertible_ops, [])
 
 
 class TestUtilityFuns_opset9(_BaseTestCase):
