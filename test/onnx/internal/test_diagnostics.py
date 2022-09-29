@@ -164,7 +164,9 @@ class TestONNXDiagnostics(common_utils.TestCase):
                 opset_version=9,
             )
 
-    def test_diagnose_outside_export_is_recorded_in_background(self):
+    def test_diagnostics_engine_records_diagnosis_reported_outside_of_export(
+        self,
+    ):
         sample_rule = diagnostics.rules.missing_custom_symbolic_function
         sample_level = diagnostics.levels.ERROR
         with assert_diagnostic(
@@ -201,7 +203,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
 
-    def test_diagnose_raises_value_error_with_nonexistent_rule(self):
+    def test_diagnose_raises_value_error_when_rule_not_supported(self):
         rule_id = "0"
         rule_name = "nonexistent-rule"
         with self.assertRaisesRegex(
@@ -214,7 +216,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                 infra.Level.WARNING,
             )
 
-    def test_diagnostics_records_accordingly_in_nested_runs(self):
+    def test_diagnostics_engine_records_diagnosis_reported_in_nested_contexts(
+        self,
+    ):
         with self.engine.create_diagnostic_context(self.diagnostic_tool) as context:
             context.diagnose(self.rules.rule_without_message_args, infra.Level.WARNING)
             sarif_log = self.engine.sarif_log()
@@ -227,7 +231,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
         self.assertEqual(len(sarif_log.runs[0].results), 1)
         self.assertEqual(len(sarif_log.runs[1].results), 1)
 
-    def test_diagnose_with_custom_rules(self):
+    def test_diagnostics_engine_records_diagnosis_with_custom_rules(self):
         custom_rules = infra.RuleCollection.custom_collection_from_list(
             "CustomRuleCollection",
             [
@@ -264,7 +268,9 @@ class TestDiagnosticsInfra(common_utils.TestCase):
                     custom_rules.custom_rule_2, infra.Level.ERROR  # type: ignore[attr-defined]
                 )
 
-    def test_invalid_diagnostic_type_raises_type_error(self):
+    def test_diagnostic_tool_raises_type_error_when_diagnostic_type_is_invalid(
+        self,
+    ):
         with self.assertRaisesRegex(
             TypeError,
             "Expected diagnostic_type to be a subclass of Diagnostic, " "but got",
