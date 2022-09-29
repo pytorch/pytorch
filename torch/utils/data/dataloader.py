@@ -41,7 +41,6 @@ from . import _utils
 __all__ = [
     "DataLoader",
     "get_worker_info",
-    "collate",
     "default_collate",
     "default_convert",
 ]
