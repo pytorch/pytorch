@@ -142,7 +142,7 @@ jobs:
           export PR_BODY="${PR_BODY//[\'\"]}"
           arch
 
-          ${CONDA_RUN} python3 -mpip install dist/*.whl
+          ${CONDA_RUN} python3 -mpip install $(echo dist/*.whl)[opt-einsum]
           ${CONDA_RUN} .jenkins/pytorch/macos-test.sh
 
       - name: Get workflow job id

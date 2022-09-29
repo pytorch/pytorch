@@ -970,6 +970,10 @@ def main():
         'typing_extensions',
     ]
 
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
+
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -988,10 +992,6 @@ def main():
     extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
 
     install_requires += extra_install_requires
-
-    extras_require = {
-        'opt-einsum': ['opt-einsum>=3.3']
-    }
 
     # Read in README.md for our long_description
     with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
