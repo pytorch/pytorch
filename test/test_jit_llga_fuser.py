@@ -53,11 +53,7 @@ class JitLlgaTestCase(JitTestCase):
             if dtype == torch.bfloat16:
                 # We rely upon eager-mode AMP support for BF16
                 with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16):
-                    # https://pytorch.org/docs/stable/generated/torch.jit.trace.html
-                    # suggests that it's known that fusion causes greater divergence
-                    # in results. We observed that for BF16, so we are using custom
-                    # tolerance.
-                    traced = torch.jit.trace(m, x, check_tolerance=1e-2)
+                    traced = torch.jit.trace(m, x)
                     if isinstance(m, torch.nn.Module):
                         traced = torch.jit.freeze(traced)
                     warmup_forward(traced, *x)
@@ -72,10 +68,7 @@ class JitLlgaTestCase(JitTestCase):
                 fwd_graph = traced.graph_for(*x)
 
             jit_o = traced(*x)
-            if x[0].dtype == torch.bfloat16:
-                self.assertEqual(jit_o, ref_o, atol=1e-2, rtol=1.6e-2)
-            else:
-                self.assertEqual(jit_o, ref_o)
+            self.assertEqual(jit_o, ref_o)
             return traced, fwd_graph
 
 
@@ -295,6 +288,9 @@ class TestOp(JitLlgaTestCase):
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
     def test_addmm(self, dtype):
+        # Just a sidenote - comparison of eager-mode & oneDNN Graph JIT outputs of
+        # addmm (which entails matmul-bias-add fusion) might require higher tolerance
+        # bounds for BF16. This is subject to change in the near future.
         def addmm(x, y, z):
             # alpha and beta are 1, by default
             return torch.addmm(z, x, y)
