@@ -1630,15 +1630,13 @@ class Module:
             # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
-        def load(module, local_state_dict, prefix=''):
+        def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             module._load_from_state_dict(
-                local_state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
-                    child_prefix = prefix + name + '.'
-                    child_state_dict = {k: v for k, v in local_state_dict.items() if k.startswith(child_prefix)}
-                    load(child, child_state_dict, child_prefix)
+                    load(child, prefix + name + '.')
 
             # Note that the hook can modify missing_keys and unexpected_keys.
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
@@ -1650,7 +1648,7 @@ class Module:
                     "it should be done inplace."
                 )
 
-        load(self, state_dict)
+        load(self)
         del load
 
         if strict:

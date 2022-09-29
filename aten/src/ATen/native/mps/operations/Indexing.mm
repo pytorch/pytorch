@@ -30,11 +30,7 @@ namespace at {
 namespace native {
 
 static
-bool dispatchIndexKernel(TensorIteratorBase& iter,
-                         IntArrayRef index_size,
-                         IntArrayRef index_stride,
-                         bool index_select,
-                         bool accumulate) {
+bool dispatchIndexSelectKernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   using namespace mps;
 
  if (iter.numel() == 0)
@@ -97,7 +93,7 @@ bool dispatchIndexKernel(TensorIteratorBase& iter,
       MTLFunctionConstantValues* constantValues = [[MTLFunctionConstantValues new] autorelease];
       [constantValues setConstantValue: &num_indices type:MTLDataTypeUInt atIndex:0];
 
-      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), index_select, accumulate);
+      std::string indexFunction = getIndexFunctionName(inputTensor.scalar_type(), true, false);
       id<MTLFunction> indexKernelFunction = MPSDevice::getInstance()->metalIndexingFunction(indexFunction, constantValues);
       id<MTLArgumentEncoder> argumentEncoder = [[indexKernelFunction newArgumentEncoderWithBufferIndex:0] autorelease];
       NSUInteger argumentBufferLength = argumentEncoder.encodedLength;
@@ -146,43 +142,21 @@ bool dispatchIndexKernel(TensorIteratorBase& iter,
   return true;
 }
 
-
-static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const std::string& op, bool accumulate) {
+void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   using namespace mps;
 
-  int64_t num_indices = index_size.size();
-  TORCH_CHECK(num_indices <= 16, "Current limit allows up to 16 indices to be used in MPS indexing kernels");
+  @autoreleasepool {
+    int64_t num_indices = index_size.size();
 
-  AT_ASSERT(num_indices == index_stride.size());
-  AT_ASSERT(num_indices == iter.ntensors() - 2);
-  const Tensor& inputTensor = iter.tensor(1);
+    AT_ASSERT(num_indices == index_stride.size());
+    AT_ASSERT(num_indices == iter.ntensors() - 2);
+    const Tensor& inputTensor = iter.tensor(1);
 
-  if (accumulate) {
-    // No atomic support for the rest of dtypes
-    TORCH_CHECK(inputTensor.scalar_type() == ScalarType::Float ||
-                inputTensor.scalar_type() == ScalarType::Int   ||
-                inputTensor.scalar_type() == ScalarType::Bool);
-  } else {
     TORCH_CHECK(c10::isIntegralType(inputTensor.scalar_type(), /*includesBool=*/true) ||
                 inputTensor.scalar_type() == ScalarType::Float ||
                 inputTensor.scalar_type() == ScalarType::Half,
                 getMPSTypeString(inputTensor.scalar_type()) + std::string(" not supported for index.Tensor_out"));
-  }
-}
-
-void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  using namespace mps;
-  @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
-    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
-  }
-}
-
-void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
-  using namespace mps;
-  @autoreleasepool {
-    validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
-    dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
+    dispatchIndexSelectKernel(iter, index_size, index_stride);
   }
 }
 
@@ -200,7 +174,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   auto total_dims = self.dim();
   // It wraps the dims and checks that there are no repeated dims
   auto flip_dims_b = at::dim_list_to_bitset(dims, total_dims);
-  NSMutableArray<NSNumber*> * ns_dims = [[NSMutableArray<NSNumber*> new] autorelease];
+  NSMutableArray<NSNumber*> * ns_dims = [NSMutableArray<NSNumber*> new];
 
   for (const auto i : c10::irange(total_dims)) {
     if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
@@ -653,6 +627,6 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Tensor & valu
 }
 
 REGISTER_DISPATCH(index_stub, &index_kernel_mps);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel_mps);
+
 } // native
 } // at

@@ -749,10 +749,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
            use_relu=st.booleans(),
            eps=st.sampled_from([1e-5, 1e-4, 1e-3]),
            momentum=st.sampled_from([0.1, 0.2, 0.3]),
-           freeze_bn=st.booleans(),
-           zero_gamma=st.booleans(),
-           has_bias=st.booleans(),
-           use_slow_fusion=st.booleans())
+           freeze_bn=st.booleans())
     def test_conv_bn_relu(
             self,
             batch_size,
@@ -772,10 +769,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             use_relu,
             eps,
             momentum,
-            freeze_bn,
-            zero_gamma,
-            has_bias,
-            use_slow_fusion,
+            freeze_bn
     ):
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
@@ -789,7 +783,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            has_bias,
+            False,  # No bias
             padding_mode
         ).to(dtype=torch.double)
         bn_op = BatchNorm2d(output_channels, eps, momentum).to(dtype=torch.double)
@@ -804,19 +798,13 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             (pad_h, pad_w),
             (dilation_h, dilation_w),
             groups,
-            has_bias,
+            None,  # bias
             padding_mode,
             eps,
             momentum,
             freeze_bn=True,
             qconfig=default_qat_qconfig
         ).to(dtype=torch.double)
-        qat_op._enable_slow_path_for_better_numerical_stability = use_slow_fusion
-
-        # the approximate fusion will not work if bn.weight has 0
-        if zero_gamma and use_slow_fusion:
-            torch.nn.init.zeros_(qat_op.bn.weight)
-
         qat_op.apply(torch.ao.quantization.disable_fake_quant)
         if freeze_bn:
             qat_op.apply(torch.nn.intrinsic.qat.freeze_bn_stats)
@@ -826,8 +814,6 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         # align inputs and internal parameters
         input = torch.randn(batch_size, input_channels, height, width, dtype=torch.double, requires_grad=True)
         conv_op.weight = torch.nn.Parameter(qat_op.weight.detach())
-        if has_bias:
-            conv_op.bias = torch.nn.Parameter(qat_op.bias.detach())
         bn_op.running_mean = qat_op.bn.running_mean.clone()
         bn_op.running_var = qat_op.bn.running_var.clone()
         bn_op.weight = torch.nn.Parameter(qat_op.bn.weight.detach())

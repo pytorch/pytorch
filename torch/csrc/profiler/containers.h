@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <forward_list>
-#include <new>
 #include <utility>
 #include <vector>
 
@@ -64,7 +63,7 @@ class AppendOnlyList {
   template <class... Args>
   T* emplace_back(Args&&... args) {
     maybe_grow();
-    ::new ((void*)next_) T{std::forward<Args>(args)...};
+    *next_ = {std::forward<Args>(args)...};
     return next_++;
   }
 

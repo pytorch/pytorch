@@ -283,16 +283,14 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "new_empty"),
     (None, None, "empty_like"),
     (None, None, "empty"),
+    # decomp has problem even with opmath
+    # doesn't work
+    ("cuda", torch.bfloat16, "nn.functional.embedding"),
 
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
     (None, None, "meshgrid"),
-}
-
-CROSS_REF_BACKWARD_EXCLUDE_SET = {
-    # Backward formula is not as precise as the custom CUDA kernel
-    ("cuda", torch.bfloat16, "nn.functional.embedding"),
 }
 
 all_decomposed = set()
@@ -369,15 +367,13 @@ class TestDecomp(TestCase):
 
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
-        test_keys = [
-            (torch.device(device).type, dtype, op.name),
-            (None, dtype, op.name),
-            (None, None, op.name),
-        ]
-        if any(key in CROSS_REF_EXCLUDE_SET for key in test_keys):
+        if (torch.device(device).type, dtype, op.name) in CROSS_REF_EXCLUDE_SET or (
+            None,
+            dtype,
+            op.name,
+        ) in CROSS_REF_EXCLUDE_SET or (None, None, op.name) in CROSS_REF_EXCLUDE_SET:
             self.skipTest(f"{op.name} in {dtype} not supported")
 
-        skip_decomp_vjp = any(key in CROSS_REF_BACKWARD_EXCLUDE_SET for key in test_keys)
         test_dtype = dtype
 
         # We check the correctness of each decomposition right after running it.
@@ -495,7 +491,7 @@ class TestDecomp(TestCase):
                 if aten_name in decomposition_names:
                     check_decomposed(aten_name)
 
-                if not skip_decomp_vjp and (op.aten_backward_name in decomposition_names or run_all):
+                if op.aten_backward_name in decomposition_names or run_all:
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
                     decomposed.clear()
@@ -518,41 +514,8 @@ class TestDecomp(TestCase):
                     "only backwards is decomposed, but dtype doesn't support AD"
                 )
 
+
 instantiate_device_type_tests(TestDecomp, globals())
-
-class DecompContiguousTests(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
-    @skipIfCrossRef
-    def test_contiguous_softmax(self, device):
-        size = (2, 4, 3, 3)
-        stride = (9, 18, 3, 1)
-        dtype = torch.float32
-
-        x = torch.randn(size, dtype=dtype, device=device)
-        x = torch.as_strided(x, size, stride)
-
-        ref = torch.ops.aten._softmax(x, -1, False)
-        res = torch._decomp.decompositions._softmax(x, -1, False)
-        self.assertEqual(ref.stride(), res.stride())
-
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
-    @skipIfCrossRef
-    def test_contiguous_log_softmax(self, device):
-        size = (2, 4, 3, 3)
-        stride = (9, 18, 3, 1)
-
-        dtype = torch.float32
-        x = torch.randn(size, dtype=dtype, device=device)
-        x = torch.as_strided(x, size, stride)
-
-        ref = torch.ops.aten._log_softmax(x, -1, False)
-        res = torch._decomp.decompositions._log_softmax(x, -1, False)
-        self.assertEqual(ref.stride(), res.stride())
-
-instantiate_device_type_tests(DecompContiguousTests, globals())
-
 
 if __name__ == "__main__":
     run_tests()

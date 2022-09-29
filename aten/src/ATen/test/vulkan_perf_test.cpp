@@ -63,7 +63,6 @@ static void add_op_benchmark(benchmark::State& state) {
   const auto in_vulkan2 = in_cpu2.vulkan();
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -113,7 +112,6 @@ static void add_op_q_benchmark(benchmark::State& state) {
       in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -195,7 +193,6 @@ static void conv2d_op_benchmark(benchmark::State& state) {
       {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -298,7 +295,6 @@ static void conv2d_op_q_benchmark(benchmark::State& state) {
       in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -389,7 +385,6 @@ static void conv2dpw_op_benchmark(benchmark::State& state) {
       {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -491,7 +486,6 @@ static void conv2dpw_op_q_benchmark(benchmark::State& state) {
       in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -581,7 +575,6 @@ static void conv2ddw_op_benchmark(benchmark::State& state) {
       {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -682,7 +675,6 @@ static void conv2ddw_op_q_benchmark(benchmark::State& state) {
       in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -738,7 +730,6 @@ static void sub_op_benchmark(benchmark::State& state) {
   const auto in_vulkan2 = in_cpu2.vulkan();
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -788,7 +779,6 @@ static void sub_op_q_benchmark(benchmark::State& state) {
       in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -834,7 +824,6 @@ static void mul_op_benchmark(benchmark::State& state) {
   const auto in_vulkan2 = in_cpu2.vulkan();
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -884,7 +873,6 @@ static void mul_op_q_benchmark(benchmark::State& state) {
       in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -930,7 +918,6 @@ static void div_op_benchmark(benchmark::State& state) {
   const auto in_vulkan2 = in_cpu2.vulkan();
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 
@@ -980,7 +967,6 @@ static void div_op_q_benchmark(benchmark::State& state) {
       in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
 #if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
-  at::native::vulkan::api::context()->enable_op_profiling();
   at::native::vulkan::api::context()->reset_querypool();
 #endif
 

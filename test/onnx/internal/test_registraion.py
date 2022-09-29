@@ -36,8 +36,7 @@ class TestGlobalHelpers(common_utils.TestCase):
             ([], 16, None),
             ([], 9, None),
             ([], 8, None),
-            # Ops registered at opset 1 found as a fallback when target >= 9
-            ([1], 16, 1),
+            ([8], 16, None),  # Ops lower than 9 are not supported by versions >= 9
         ],
     )
     def test_dispatch_opset_version_returns_correct_version(

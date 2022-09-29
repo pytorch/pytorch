@@ -39,7 +39,7 @@ transforms comes from the [JAX framework](https://github.com/google/jax).
 
 There are two ways to install functorch:
 1. functorch from source
-2. functorch beta (compatible with recent PyTorch releases)
+2. functorch beta (compatible with PyTorch 1.11)
 
 We recommend trying out the functorch beta first.
 
@@ -54,11 +54,37 @@ Follow the instructions [in this Colab notebook](https://colab.research.google.c
 
 #### Locally
 
-As of 9/21/2022, `functorch` comes installed alongside a nightly PyTorch binary.
-Please install a Preview (nightly) PyTorch binary; see  https://pytorch.org/
-for instructions.
+First, set up an environment. We will be installing a nightly PyTorch binary
+as well as functorch. If you're using conda, create a conda environment:
+```bash
+conda create --name functorch
+conda activate functorch
+```
+If you wish to use `venv` instead:
+```bash
+python -m venv functorch-env
+source functorch-env/bin/activate
+```
 
-Once you've done that, run a quick sanity check in Python:
+Next, install one of the following following PyTorch nightly binaries.
+```bash
+# For CUDA 10.2
+pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu102/torch_nightly.html --upgrade
+# For CUDA 11.3
+pip install --pre torch -f https://download.pytorch.org/whl/nightly/cu113/torch_nightly.html --upgrade
+# For CPU-only build
+pip install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html --upgrade
+```
+If you already have a nightly of PyTorch installed and wanted to upgrade it
+(recommended!), append `--upgrade` to one of those commands.
+
+Install functorch:
+```bash
+pip install ninja  # Makes the build go faster
+pip install --user "git+https://github.com/pytorch/functorch.git"
+```
+
+Run a quick sanity check in python:
 ```py
 import torch
 from functorch import vmap
@@ -69,20 +95,28 @@ assert torch.allclose(y, x.sin())
 
 #### functorch development setup
 
-As of 9/21/2022, `functorch` comes installed alongside PyTorch and is in the
-PyTorch source tree. Please install
-[PyTorch from source](https://github.com/pytorch/pytorch#from-source), then,
-you will be able to `import functorch`.
+`functorch` is a PyTorch C++ Extension module. To install,
 
-Try to run some tests to make sure all is OK:
+- Install [PyTorch from source](https://github.com/pytorch/pytorch#from-source).
+`functorch` usually runs on the latest development version of PyTorch.
+- Run `python setup.py install`. You can use `DEBUG=1` to compile in debug mode.
+
+Then, try to run some tests to make sure all is OK:
 ```bash
 pytest test/test_vmap.py -v
 pytest test/test_eager_transforms.py -v
 ```
 
-AOTAutograd has some additional optional requirements. You can install them via:
+To do devel install:
+
 ```bash
-pip install networkx
+pip install -e .
+```
+
+To install with optional dependencies, e.g. for AOTAutograd:
+
+```bash
+pip install -e .[aot]
 ```
 
 To run functorch tests, please install our test dependencies (`expecttest`, `pyyaml`).
@@ -91,7 +125,7 @@ To run functorch tests, please install our test dependencies (`expecttest`, `pyy
 </p>
 </details>
 
-### Installing functorch beta (compatible with recent PyTorch releases)
+### Installing functorch beta (compatible with PyTorch 1.11)
 
 <details><summary>Click to expand</summary>
 <p>
@@ -102,7 +136,7 @@ Follow the instructions [here](https://colab.research.google.com/drive/1GNfb01W_
 
 #### pip
 
-Prerequisite: [Install PyTorch](https://pytorch.org/get-started/locally/)
+Prerequisite: [Install PyTorch 1.11](https://pytorch.org/get-started/locally/)
 
 
 ```bash

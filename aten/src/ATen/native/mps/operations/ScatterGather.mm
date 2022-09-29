@@ -358,13 +358,13 @@ void scatter_mps_general
             // 2. Flatten the values
             // 3. Scatter into input with add mode
 
-            std::vector<int> shape_data(num_input_dims);
+            int shape_data[num_input_dims];
 
             for(int i = 0; i < num_input_dims; i++) {
               shape_data[i] = {[scatterInputShape[i] intValue]};
             }
 
-            MPSGraphTensor* scatterInputShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shape_data.data() length:num_input_dims * sizeof(int)]
+            MPSGraphTensor* scatterInputShapeTensor = [mpsGraph constantWithData:[NSData dataWithBytes:shape_data length:num_input_dims * sizeof(int)]
                                                                            shape:@[[NSNumber numberWithInt:num_input_dims]]
                                                                         dataType:MPSDataTypeInt32];
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
@@ -634,17 +634,6 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     return shape if shape is not None else scalar_shape
 
 
-# Extracts dimensions that might be passed either as a list/tuple or as varargs.
-# A typical case is Tensor.permute .
-def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
-    if dims and isinstance(dims[0], Sequence):
-        assert len(dims) == 1
-        dims = cast(Tuple[DimsSequenceType], dims)
-        return dims[0]
-    else:
-        return cast(DimsSequenceType, dims)
-
-
 def extract_shape_from_varargs(
     shape: Union[ShapeType, Tuple[ShapeType]],
     validate=True,
@@ -947,14 +936,6 @@ def get_higher_dtype(
             return a
 
     raise RuntimeError("Unexpected termination!")
-
-
-def check_pin_memory(pin_memory: bool):
-    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
-
-
-def check_layout(layout: torch.layout):
-    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
 
 
 # TODO: maybe unify with can_cast_to?

@@ -1,6 +1,6 @@
 
 import torch
-import torch.ao.nn.intrinsic
+import torch.nn.intrinsic
 import torch.nn.intrinsic.qat
 import torch.nn.functional as F
 import torch.ao.nn.quantized as nnq
