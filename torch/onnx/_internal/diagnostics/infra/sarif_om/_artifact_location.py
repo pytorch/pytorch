@@ -4,24 +4,28 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _message, _property_bag
 
 
 @dataclasses.dataclass
 class ArtifactLocation(object):
     """Specifies the location of an artifact."""
 
-    description: Any = dataclasses.field(
+    description: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    index: Any = dataclasses.field(
+    index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    uri: Any = dataclasses.field(default=None, metadata={"schema_property_name": "uri"})
-    uri_base_id: Any = dataclasses.field(
+    uri: Optional[str] = dataclasses.field(
+        default=None, metadata={"schema_property_name": "uri"}
+    )
+    uri_base_id: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "uriBaseId"}
     )
 

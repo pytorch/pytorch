@@ -4,20 +4,26 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _message,
+    _property_bag,
+    _thread_flow,
+)
 
 
 @dataclasses.dataclass
 class CodeFlow(object):
     """A set of threadFlows which together describe a pattern of code execution relevant to detecting a result."""
 
-    thread_flows: Any = dataclasses.field(
+    thread_flows: List[_thread_flow.ThreadFlow] = dataclasses.field(
         metadata={"schema_property_name": "threadFlows"}
     )
-    message: Any = dataclasses.field(
+    message: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

@@ -4,29 +4,33 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _message, _property_bag
 
 
 @dataclasses.dataclass
 class Rectangle(object):
     """An area within an image."""
 
-    bottom: Any = dataclasses.field(
+    bottom: Optional[float] = dataclasses.field(
         default=None, metadata={"schema_property_name": "bottom"}
     )
-    left: Any = dataclasses.field(
+    left: Optional[float] = dataclasses.field(
         default=None, metadata={"schema_property_name": "left"}
     )
-    message: Any = dataclasses.field(
+    message: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    right: Any = dataclasses.field(
+    right: Optional[float] = dataclasses.field(
         default=None, metadata={"schema_property_name": "right"}
     )
-    top: Any = dataclasses.field(default=None, metadata={"schema_property_name": "top"})
+    top: Optional[float] = dataclasses.field(
+        default=None, metadata={"schema_property_name": "top"}
+    )
 
 
 # flake8: noqa

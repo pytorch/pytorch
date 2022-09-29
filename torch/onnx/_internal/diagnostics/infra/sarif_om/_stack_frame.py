@@ -4,26 +4,28 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _location, _property_bag
 
 
 @dataclasses.dataclass
 class StackFrame(object):
     """A function call within a stack trace."""
 
-    location: Any = dataclasses.field(
+    location: Optional[_location.Location] = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    module: Any = dataclasses.field(
+    module: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "module"}
     )
-    parameters: Any = dataclasses.field(
+    parameters: Optional[List[str]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "parameters"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    thread_id: Any = dataclasses.field(
+    thread_id: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "threadId"}
     )
 

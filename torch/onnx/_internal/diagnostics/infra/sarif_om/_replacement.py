@@ -4,20 +4,26 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _artifact_content,
+    _property_bag,
+    _region,
+)
 
 
 @dataclasses.dataclass
 class Replacement(object):
     """The replacement of a single region of an artifact."""
 
-    deleted_region: Any = dataclasses.field(
+    deleted_region: _region.Region = dataclasses.field(
         metadata={"schema_property_name": "deletedRegion"}
     )
-    inserted_content: Any = dataclasses.field(
+    inserted_content: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
         default=None, metadata={"schema_property_name": "insertedContent"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 
