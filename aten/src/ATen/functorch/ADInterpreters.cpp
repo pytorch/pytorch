@@ -31,14 +31,14 @@ static Tensor materializeGradWrappers(const Tensor& tensor, int64_t current_leve
   }
   auto* wrapper = maybeGetTensorWrapper(tensor);
   if (!wrapper) {
-    return makeTensorWrapper(tensor, current_level, true);
+    return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
   }
   TORCH_INTERNAL_ASSERT(wrapper->level().value() <= current_level, "escaped?");
   if (wrapper->level().value() == current_level) {
     TORCH_INTERNAL_ASSERT(tensor.defined());
     return tensor;
   }
-  return makeTensorWrapper(tensor, current_level, true);
+  return makeTensorWrapper(tensor, current_level, /*is_immutable=*/true);
 }
 
 static void autogradBasedTransformProcess(
@@ -120,7 +120,7 @@ static void autogradBasedTransformSendToNext(
     stack->push_back((*stack)[front + arg_idx]);
   }
 
-  std::vector<int64_t> immutable_inputs;  // all immutable inputs, sorted
+  int64_t immutable_inputs = 0;  // a bitset of the immutable inputs
   for (auto idx = stack->size() - args_size; idx < stack->size(); idx++) {
     const auto ivalue = (*stack)[idx];
     if (!ivalue.isTensor()) {
@@ -129,10 +129,11 @@ static void autogradBasedTransformSendToNext(
     const auto tensor = ivalue.toTensor();
     auto* maybe_tensor_wrapper = maybeGetTensorWrapper(tensor);
     if (!maybe_tensor_wrapper || maybe_tensor_wrapper->is_immutable()) {
-      // if the input is immutable, we note its relative position in schema, noting that
+      // if the input is immutable, we flip the bit at its relative position, noting that
       // args are in reverse order on stack, so the last arg is at the top of the stack
       const auto relative_pos = idx - (stack->size() - args_size);
-      immutable_inputs.push_back(relative_pos);
+      const auto mask = 1 << relative_pos;
+      immutable_inputs = immutable_inputs | mask;
     }
   }
 
@@ -163,11 +164,9 @@ static void autogradBasedTransformSendToNext(
   // lift_fresh: it's must be freshly allocated and should be wrapped. User shouldn't have access to input version
   // alias: this is needed for the CompositeImplicit instance norm (running_mean/var get set to be a wrapped value)
   //        It's not a user facing function, but is more prone to possible errors
-  std::vector<int64_t> outputs_aliasing_immutable;
-  if (!grad_special_case) {
+  int64_t outputs_aliasing_immutable = 0;
+  if (!grad_special_case || immutable_inputs == 0) {
     outputs_aliasing_immutable = findAliasedOutputs(op.schema(), immutable_inputs);
-    // sorting (O(N logN)) lets us avoid an O(N) check for every immutable input (O(N^2))
-    std::sort(outputs_aliasing_immutable.begin(), outputs_aliasing_immutable.end());
   }
   // Step 4
   foreachTensorInplaceWithFlag(*stack, stack->size() - ret_size, stack->size(), outputs_aliasing_immutable, wrap);

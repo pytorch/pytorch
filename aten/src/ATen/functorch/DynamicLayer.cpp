@@ -294,23 +294,18 @@ Tensor unwrapIfDead(const Tensor& tensor) {
 void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func) {
    auto func_with_bool = [&](const Tensor& tensor, bool unused) { return func(tensor); };
-   foreachTensorInplaceWithFlag(args, begin, end, std::vector<int64_t>(), func_with_bool);
+   foreachTensorInplaceWithFlag(args, begin, end, 0, func_with_bool);
 }
 
 void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
-    std::vector<int64_t> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func){
+    const int64_t use_flag_relative, std::function<Tensor(const Tensor&, bool)> func){
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);
   TORCH_INTERNAL_ASSERT(begin <= end);
-  int64_t use_flag_idx = 0;
-  for (int64_t idx = begin; idx < end; idx++) {
-    bool flag = false;
-    // until we're at the end of relative_skips, check if the current idx is in relative skips (offset by begin)
-    // and if it is, we skip this element and look at the next element in relative_skips. relative_skips must be sorted
-    if (use_flag_idx <static_cast<int64_t>(use_flag_relative.size()) && idx == begin + use_flag_relative[use_flag_idx]) {
-      use_flag_idx++;
-      flag = true;
-    }
+  for (int64_t relative_idx = 0; relative_idx < end - begin; relative_idx++) {
+    const bool flag = ((use_flag_relative >> relative_idx) & 1) == 1;
+
+    const auto idx = relative_idx + begin;
     auto ivalue = args[idx];
     // Tensor?[] translates to a c10::List<IValue> so we need to peek inside List
     if (ivalue.isList()) {
@@ -384,19 +379,21 @@ bool isInplaceOp(const FunctionSchema& schema) {
   return return_alias_info && return_alias_info->isWrite();
 }
 
-std::vector<int64_t> findAliasedOutputs(const FunctionSchema& schema, std::vector<int64_t> unwrapped_inputs) {
-  const auto inputs = schema.arguments();
-  const auto returns = schema.returns();
-  std::vector<int64_t> aliased_returns;
-  for (const auto input_idx : unwrapped_inputs) {
-    for (size_t res = 0; res != returns.size(); ++res) {
-      if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, input_idx), SchemaArgument(SchemaArgType::output, res))) {
-        aliased_returns.push_back(res);
+int64_t findAliasedOutputs(const FunctionSchema& schema, const int64_t immutable_inputs) {
+  int64_t immutable_returns = 0;
+  for (size_t input_idx = 0; input_idx != schema.arguments().size(); ++ input_idx) {
+    const auto cur_input = immutable_inputs >> input_idx; // bit for input_idx is now the rightmost bit
+    if (!(cur_input & 1)) {
+      break;
+    }
+    for (size_t res_idx = 0; res_idx != schema.returns().size(); ++res_idx) {
+      if (schema.may_contain_alias(SchemaArgument(SchemaArgType::input, input_idx), SchemaArgument(SchemaArgType::output, res_idx))) {
+        immutable_returns = immutable_returns ^ (1 << res_idx);
         break;  // for everything currently in native_functions, each input aliases at most one output (tensor list counts as one output)
       }
     }
   }
-  return aliased_returns;
+  return immutable_returns;
 }
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
