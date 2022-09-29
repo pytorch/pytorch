@@ -6,6 +6,7 @@
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <c10/util/irange.h>
+#include <cpuinfo.h>
 
 #include <tuple>
 
@@ -329,6 +330,37 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   TORCH_INTERNAL_ASSERT(other_flags == 0, "Unexpected flags set in ", flags, ".");
 
   auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::X86) {
+#if AT_MKLDNN_ENABLED()
+    bool use_onednn = onednn_utils::should_use_onednn_quant(
+        weight.value(), transpose, groups, output_padding);
+    if (use_onednn) {
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose
+      );
+    }
+#endif
+    return PackedConvWeight<kSpatialDim>::prepack(
+      weight.value(),
+      bias,
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      transpose
+    );
+  } // x86
+#endif
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {

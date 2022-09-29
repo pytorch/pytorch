@@ -22,6 +22,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
     qengine_is_fbgemm,
     qengine_is_onednn,
+    qengine_is_x86,
 )
 
 # TODO: Once more test files are created, move the contents to a ao folder.
@@ -48,8 +49,8 @@ class TestQuantizedSparseKernels(TestCase):
         # to other higher priority works.
         if qengine_is_qnnpack() and not (row_block_size == 1 and col_block_size == 4):
             return
-        # ONEDNN does not support this yet
-        if qengine_is_onednn():
+        # ONEDNN and X86 do not support this yet
+        if qengine_is_onednn() or qengine_is_x86():
             return
 
         dense_prepack = torch.ops.quantized.linear_prepack
