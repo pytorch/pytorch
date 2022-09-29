@@ -1147,7 +1147,6 @@ class DistributedTest:
         @require_world_size(4)
         @skip_if_lt_x_gpu(4)
         def test_3_level_hierarchical_model_averager(self):
-            from torch.distributed.distributed_c10d import _pg_group_ranks
             rank = dist.get_rank()
             world_size = dist.get_world_size()
             rank_to_GPU = init_multigpu_helper(world_size, BACKEND)
@@ -1178,8 +1177,8 @@ class DistributedTest:
             subgroup1 = averager.period_process_group_dict[subgroup_avg_period1]
             subgroup2 = averager.period_process_group_dict[subgroup_avg_period2]
 
-            real_group_ranks_res1 = list(_pg_group_ranks[subgroup1].keys())
-            real_group_ranks_res2 = list(_pg_group_ranks[subgroup2].keys())
+            real_group_ranks_res1 = dist.get_process_group_ranks(subgroup1)
+            real_group_ranks_res2 = dist.get_process_group_ranks(subgroup2)
             expect_group_ranks_res1 = (rank // subgroup_size1 * subgroup_size1 + np.array(list(range(subgroup_size1)))).tolist()
             expect_group_ranks_res2 = (rank // subgroup_size2 * subgroup_size2 + np.array(list(range(subgroup_size2)))).tolist()
             self.assertEqual(real_group_ranks_res1, expect_group_ranks_res1)
@@ -3177,6 +3176,68 @@ class DistributedTest:
                 self.assertEqual(out_tensor, expected_tensor)
             self._barrier()
 
+        # Test all_gather accepting single tensor as output
+        def _all_gather_into_tensor_helper(
+            self, tensor_out, tensor_in,
+            group_id, rank, cuda=True, rank_to_GPU=None
+        ):
+            if cuda:
+                tensor_in = tensor_in.cuda(rank_to_GPU[rank][0])
+                tensor_out = tensor_out.cuda(rank_to_GPU[rank][0])
+            if tensor_out.dtype == torch.complex64:
+                tensor_shapes = [torch.view_as_real(tensor_in).shape]
+            else:
+                tensor_shapes = [tensor_in.shape]
+            self.call_dist_op(
+                ":all_gather_into_tensor",
+                False,
+                dist.all_gather_into_tensor,
+                tensor_out,
+                tensor_in,
+                group_id,
+                False,
+                expect_event=False,
+                tensor_shapes=tensor_shapes,
+            )
+            return tensor_out
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_gather_into_tensor")
+        @skip_if_no_gpu
+        def test_all_gather_into_cat_tensor_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            size = 2
+            tensor_in = torch.ones([size, size]) * rank
+            # Concatenated output
+            tensor_out = torch.ones([len(group) * size, size]) * (-1)
+            tensor_out = self._all_gather_into_tensor_helper(tensor_out, tensor_in, group_id, rank, True, rank_to_GPU)
+
+            # Check result
+            # Concatenate all blocks into a bigger tensor
+            expected_tensor = torch.cat([
+                torch.ones([size, size]) * i for i in group
+            ])
+            self.assertEqual(tensor_out, expected_tensor)
+            self._barrier()
+
+        @sandcastle_skip_if(BACKEND != "nccl", "Only Nccl supports CUDA all_gather_into_tensor")
+        @skip_if_no_gpu
+        def test_all_gather_into_stack_tensor_cuda(self):
+            group, group_id, rank = self._init_global_test()
+            rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
+            size = 2
+            tensor_in = torch.ones([size, size]) * rank
+            # Stacked output
+            tensor_out = torch.ones([len(group), size, size]) * (-1)
+            tensor_out = self._all_gather_into_tensor_helper(tensor_out, tensor_in, group_id, rank, True, rank_to_GPU)
+
+            # Check result
+            # Stack all blocks into a bigger tensor
+            expected_tensor = torch.stack([
+                torch.ones([size, size]) * i for i in group
+            ])
+            self.assertEqual(tensor_out, expected_tensor)
+            self._barrier()
 
         def _run_all_gather_coalesced_and_verify(
             self, output_tensor_lists, input_tensors, expected_tensors, group_id
