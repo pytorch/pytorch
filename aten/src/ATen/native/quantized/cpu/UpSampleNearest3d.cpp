@@ -220,5 +220,15 @@ Tensor upsample_nearest3d_quantized_cpu(
       input, osize, scale_d, scale_h, scale_w);
 }
 
+Tensor _upsample_nearest_exact3d_quantized_cpu(
+    const Tensor& input,
+    IntArrayRef osize,
+    c10::optional<double> scale_d,
+    c10::optional<double> scale_h,
+    c10::optional<double> scale_w) {
+  return _upsample_nearest3d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(
+      input, osize, scale_d, scale_h, scale_w);
+}
+
 } // namespace native
 } // namespace at
