@@ -671,7 +671,7 @@ class TestNestedTensorDeviceType(TestCase):
         # Failure when calling backward on a chunk
         a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
         b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
-        nt_grad = torch.nested.nested_tensor([a, b])
+        nt_grad = torch.nested.as_nested_tensor([a, b])
         chunked = torch.chunk(nt_grad, 2, dim=-1)
         self.assertRaisesRegex(RuntimeError, "derivative for aten::chunk is not implemented",
                                lambda: chunked[0].backward(chunked[0].clone()))
