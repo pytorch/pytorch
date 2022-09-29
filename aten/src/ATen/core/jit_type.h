@@ -1922,6 +1922,14 @@ struct getMaybeFakeTypePtr_<c10::List<T>, fake> final {
     return type;
   }
 };
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<c10::IListRef<T>, fake> final {
+  static const auto& call() {
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto type = ListType::get("List", inner_type);
+    return type;
+  }
+};
 template <class T, size_t N, bool fake>
 struct getMaybeFakeTypePtr_<std::array<T, N>, fake> final {
   static const auto& call() {
