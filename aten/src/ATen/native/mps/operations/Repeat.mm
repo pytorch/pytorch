@@ -108,17 +108,16 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
                       num_repeat_dims);
 
   // Set output shape
-  std::vector<int64_t> output_shape(num_repeat_dims);
+  int64_t output_shape[num_repeat_dims];
   bool zero_tensor = false;
-  for(auto i : c10::irange(num_repeat_dims)) {
+  for(int i = 0; i < num_repeat_dims; i++) {
     output_shape[i] = repeats[i] * [apparent_input_shape[i] intValue];
-    if(output_shape[i] == 0) {
+    if(output_shape[i] == 0)
       zero_tensor = true;
-    }
   }
 
   Tensor output = at::native::empty_mps(
-                      IntArrayRef(output_shape),
+                      IntArrayRef(output_shape, num_repeat_dims),
                       self.scalar_type(),
                       c10::nullopt,
                       kMPS,

@@ -127,16 +127,6 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
-        # Only testing that emit_itt runs when
-        # record_shapes option is enabled.
-        with torch.autograd.profiler.emit_itt(record_shapes=True) as prof:
-            x = torch.randn(10, 10, requires_grad=True)
-            y = torch.randn(10, 10, requires_grad=True)
-            z = x + y
-            s = custom_layer(z)
-            q = s.sum()
-            q.backward()
-
 class TestRecordFunction(TestCase):
     def _record_function_with_param(self):
         u = torch.randn(3, 4, 5, requires_grad=True)
@@ -1248,7 +1238,7 @@ class TestProfiler(TestCase):
         a = torch.randn(4, 4)
         b = torch.randn(4, 4)
         c = torch.randn(4, 4)
-        inp = torch.nested.nested_tensor([a, b])
+        inp = torch.nested_tensor([a, b])
         with torch.profiler.profile(record_shapes=True) as prof:
             torch.nn.functional.linear(inp, c, None)
         for e in prof.events():
@@ -1259,6 +1249,7 @@ class TestProfiler(TestCase):
                 self.assertTrue(len(e.input_shapes[0]) > 0)
 
 
+
 def find_node_with_name(nodes, name):
     for node in nodes:
         if node.name() == name:
@@ -1266,17 +1257,6 @@ def find_node_with_name(nodes, name):
         result = find_node_with_name(node.children, name)
         if result is not None:
             return result
-
-
-class SimpleNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(10, 5)
-        self.fc2 = nn.Linear(5, 2)
-
-    def forward(self, x):
-        return self.fc2(self.fc1(x))
-
 
 class TestTorchTidyProfiler(TestCase):
 
@@ -1487,10 +1467,18 @@ class TestTorchTidyProfiler(TestCase):
                 flat_out_extrafields(node.children, out)
             return out
 
+        class simpleNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(10, 5)
+                self.fc2 = nn.Linear(5, 2)
+
+            def forward(self, x):
+                return self.fc2(self.fc1(x))
 
         inputs = torch.rand(10)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = SimpleNet()
+            net = simpleNet()
             out = net(inputs)
 
         modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
@@ -1500,67 +1488,6 @@ class TestTorchTidyProfiler(TestCase):
         expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
         expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
-
-    def _flat_out_extrafields(self, nodes, out=None):
-        if out is None:
-            out = []
-        for node in nodes:
-            if (isinstance(node.extra_fields, _ExtraFields_PyCall) and
-                    node.extra_fields.opt and node.extra_fields.opt.param_addrs):
-                # avoiding OptInfo duplicates from iterations
-                addr = node.extra_fields.opt.param_addrs[0]
-                if not [o for o in out if addr in o.param_addrs]:
-                    out.append(node.extra_fields.opt)
-            self._flat_out_extrafields(node.children, out)
-        return out
-
-    def _check_results(self, opt, opts, check_items=False):
-        self.assertEqual(len(opts), 1, "Expected 1 optimizer")
-        self.assertEqual(id(opt), opts[0].self, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self})")
-        if check_items:
-            self.assertEqual(len(opt.param_groups), len(opts))
-            for group, opt_ in zip(opt.param_groups, opts):
-                self.assertEqual(
-                    [(v.storage().data_ptr()) for v in group.get("params", [])],
-                    opt_.param_addrs
-                )
-            for opt_ in opts:
-                self.assertEqual(
-                    [(name, val.storage().data_ptr()) for dic in opt.state.values() for name, val in dic.items()],
-                    opt_.opt_state
-                )
-
-    def test_optimizer(self):
-        inputs = torch.rand(10)
-        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = SimpleNet()
-            opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
-
-            opt.zero_grad()
-            out = net(inputs)
-            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
-            loss.backward()
-            opt.step()
-        self._check_results(opt, self._flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree()), False)
-
-    def _test_optimizer_parameters(self, optimizer_factory):
-        inputs = torch.rand(10)
-        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = SimpleNet()
-            opt = optimizer_factory(net.parameters())
-            for _ in range(2):
-                opt.zero_grad()
-                out = net(inputs)
-                loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
-                loss.backward()
-                opt.step()
-        self._check_results(opt, self._flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree()), True)
-
-    def test_optimizer_parameters_sgd(self):
-        self._test_optimizer_parameters(lambda params: torch.optim.SGD(params, lr=0.01, momentum=0.9))
-
-    def test_optimizer_parameters_adam(self):
-        self._test_optimizer_parameters(lambda params: torch.optim.Adam(params, foreach=True))
 
     def test_allocations(self):
         gc.collect()
@@ -1642,46 +1569,8 @@ class MockProfilerEvent():
         object.__setattr__(self, "parent", parent)
         object.__setattr__(self, "children", children)
 
-class MockNode:
-    def __init__(self, name, children) -> None:
-        self.name = name
-        self.children = [MockNode(name, i) for name, i in children.items()]
-
 
 class TestExperimentalUtils(TestCase):
-
-    def make_tree(self) -> List[MockNode]:
-        tree = {
-            "root_0": {
-                "1": {
-                    "2": {}
-                },
-                "3": {
-                    "4": {},
-                    "5": {},
-                },
-            },
-            "root_1": {
-                "6": {},
-                "7": {},
-                "8": {
-                    "9": {
-                        "10": {}
-                    },
-                },
-            },
-        }
-        return [MockNode(name, i) for name, i in tree.items()]
-
-    def test_dfs(self) -> None:
-        self.assertEqual(
-            " ".join(i.name for i in _utils.traverse_dfs(self.make_tree())),
-            "root_0 1 2 3 4 5 root_1 6 7 8 9 10")
-
-    def test_bfs(self) -> None:
-        self.assertEqual(
-            " ".join(i.name for i in _utils.traverse_bfs(self.make_tree())),
-            "root_0 root_1 1 3 6 7 8 2 4 5 9 10")
 
     @staticmethod
     def generate_mock_profile():

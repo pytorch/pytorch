@@ -66,7 +66,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
+from ._shard_utils import _create_chunk_sharded_tensor
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -2279,11 +2279,11 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _ext_chunk_tensor(
+                state_dict[f"{prefix}{fqn}"] = _create_chunk_sharded_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
-                    num_devices_per_node=torch.cuda.device_count(),
+                    device_per_node=torch.cuda.device_count(),
                     pg=self.process_group
                 )  # type: ignore[assignment]
         state_dict.pop(f"{prefix}{FLAT_PARAM}")
@@ -2527,24 +2527,16 @@ class FullyShardedDataParallel(nn.Module):
             param = state_dict.pop(fqn)
 
             # All-gather the param (ShardedTensor)
-            param, shards = _ext_pre_load_state_dict_transform(param)
-            assert len(shards) < 2, (
-                f"Expects 0 or 1 shard per rank but got {len(shards)} shards on rank {self.rank}"
-            )
-            param_numel = param.size().numel()
+            shards = param.local_shards()
+            local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
             dim_0_size = param.size()[0]
+            param_numel = param.size().numel()
             chunk_size = (
                 math.ceil(dim_0_size / self.world_size) * param_numel // dim_0_size
             )
-            if shards:
-                local_tensor = cast(torch.Tensor, shards[0].tensor).flatten()
-                if not local_tensor.is_cuda:
-                    local_tensor = local_tensor.cuda()
-                num_padding = chunk_size - local_tensor.numel()
-                if num_padding > 0:
-                    local_tensor = F.pad(local_tensor, [0, num_padding])
-            else:
-                local_tensor = torch.zeros(chunk_size, dtype=param.dtype).cuda()
+            num_padding = chunk_size - local_tensor.numel()
+            if num_padding > 0:
+                local_tensor = F.pad(local_tensor, [0, num_padding])
             tensor = torch.empty(
                 chunk_size * self.world_size, dtype=local_tensor.dtype
             ).cuda()
@@ -2560,7 +2552,6 @@ class FullyShardedDataParallel(nn.Module):
         loaded_flat_param, num_to_pad = FlatParamHandle._get_shard(
             loaded_flat_param, self.rank, self.world_size,
         )
-        loaded_flat_param.to(flat_param.device)
         assert flat_param.numel() == loaded_flat_param.numel(), (
             f"The loaded local chunk has different numel({flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."

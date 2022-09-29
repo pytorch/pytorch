@@ -162,8 +162,7 @@ def run_frozen_optimizations(
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
-    if mod._c._has_method("forward"):
-        torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
+    torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
 
     if preserved_methods is None:
         preserved_methods = []

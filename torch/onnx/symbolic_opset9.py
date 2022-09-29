@@ -24,8 +24,11 @@ from torch.onnx import (  # noqa: F401
     errors,
     symbolic_helper,
 )
+from torch.onnx._exporter_states import (
+    SymbolicContext,  # Special case class import for readability
+)
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import _beartype, registration
 from torch.types import Number
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -314,13 +317,13 @@ def unused(g):
 
 @_onnx_symbolic("aten::_shape_as_tensor")
 @_beartype.beartype
-def _shape_as_tensor(g: jit_utils.GraphContext, input):
+def _shape_as_tensor(g, input):
     return g.op("Shape", input)
 
 
 @_onnx_symbolic("aten::_reshape_from_tensor")
 @_beartype.beartype
-def _reshape_from_tensor(g: jit_utils.GraphContext, input, shape):
+def _reshape_from_tensor(g, input, shape):
     if isinstance(shape, list):
         shape = g.op("Concat", *shape, axis_i=0)
     return reshape(g, input, shape)
@@ -329,21 +332,21 @@ def _reshape_from_tensor(g: jit_utils.GraphContext, input, shape):
 @_onnx_symbolic("aten::reshape")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def reshape(g: jit_utils.GraphContext, self, shape):
+def reshape(g, self, shape):
     return symbolic_helper._reshape_helper(g, self, shape)
 
 
 @_onnx_symbolic("aten::reshape_as")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def reshape_as(g: jit_utils.GraphContext, self, other):
+def reshape_as(g, self, other):
     shape = g.op("Shape", other)
     return reshape(g, self, shape)
 
 
 @_onnx_symbolic("aten::add")
 @_beartype.beartype
-def add(g: jit_utils.GraphContext, self, other, alpha=None):
+def add(g, self, other, alpha=None):
     if symbolic_helper._is_value(self) and symbolic_helper._is_tensor_list(self):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "Add", 9, 11, "Add between list of tensors not supported", self
@@ -355,7 +358,7 @@ def add(g: jit_utils.GraphContext, self, other, alpha=None):
 
 @_onnx_symbolic("aten::sub")
 @_beartype.beartype
-def sub(g: jit_utils.GraphContext, self, other, alpha=None):
+def sub(g, self, other, alpha=None):
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
         other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
@@ -363,13 +366,13 @@ def sub(g: jit_utils.GraphContext, self, other, alpha=None):
 
 @_onnx_symbolic("aten::rsub")
 @_beartype.beartype
-def rsub(g: jit_utils.GraphContext, self, other, alpha=None):
+def rsub(g, self, other, alpha=None):
     return sub(g, other, self, alpha=alpha)
 
 
 @_onnx_symbolic("aten::mul")
 @_beartype.beartype
-def mul(g: jit_utils.GraphContext, self, other):
+def mul(g, self, other):
     if symbolic_helper._is_bool(self) and symbolic_helper._is_bool(other):
         # ONNX Mul doesn't support Boolean, so use And as an equivalent operator.
         return g.op("And", self, other)
@@ -379,7 +382,7 @@ def mul(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::div")
 @_beartype.beartype
-def div(g: jit_utils.GraphContext, self, other, *args):
+def div(g, self, other, *args):
     if len(args) == 0:
         return true_divide(g, self, other)
     else:
@@ -389,14 +392,14 @@ def div(g: jit_utils.GraphContext, self, other, *args):
 @_onnx_symbolic("aten::addcmul")
 @symbolic_helper.parse_args("v", "v", "v", "f")
 @_beartype.beartype
-def addcmul(g: jit_utils.GraphContext, self, tensor1, tensor2, value=1.0):
+def addcmul(g, self, tensor1, tensor2, value=1.0):
     value_tens = g.op("Constant", value_t=torch.tensor([value]))
     return add(g, self, mul(g, mul(g, tensor1, tensor2), value_tens))
 
 
 @symbolic_helper.parse_args("v", "v", "s")
 @_beartype.beartype
-def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
+def _div_rounding_mode(g, self, other, rounding_mode):
     if rounding_mode is None:
         return true_divide(g, self, other)
     elif rounding_mode == "floor":
@@ -411,7 +414,7 @@ def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
 
 
 @_beartype.beartype
-def _trunc_divide(g: jit_utils.GraphContext, self, other):
+def _trunc_divide(g, self, other):
     out = g.op("Div", self, other)
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
@@ -446,7 +449,7 @@ def _trunc_divide(g: jit_utils.GraphContext, self, other):
 
 
 @_beartype.beartype
-def _floor_divide(g: jit_utils.GraphContext, self, other):
+def _floor_divide(g, self, other):
     if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
         out = true_divide(g, self, other)
         return g.op("Floor", out)
@@ -472,20 +475,20 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::floor_divide")
 @_beartype.beartype
-def floor_divide(g: jit_utils.GraphContext, self, other):
+def floor_divide(g, self, other):
     # Deprecated behavior, floor_divide actually truncates
     return _trunc_divide(g, self, other)
 
 
 @_onnx_symbolic("aten::floordiv")
 @_beartype.beartype
-def floordiv(g: jit_utils.GraphContext, self, other):
+def floordiv(g, self, other):
     return floor_divide(g, self, other)
 
 
 @_onnx_symbolic("aten::true_divide")
 @_beartype.beartype
-def true_divide(g: jit_utils.GraphContext, self, other):
+def true_divide(g, self, other):
     """Division where both inputs are cast to floating types
 
     If both inputs are floating, performs div as usual
@@ -514,7 +517,7 @@ def true_divide(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::reciprocal")
 @_beartype.beartype
-def reciprocal(g: jit_utils.GraphContext, self):
+def reciprocal(g, self):
     # torch.reciprocal implicitly casts to float, so we do the same.
     if not symbolic_helper._is_fp(self):
         self = g.op("Cast", self, to_i=_C_onnx.TensorProtoDataType.FLOAT)
@@ -524,7 +527,7 @@ def reciprocal(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::cat")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def cat(g: jit_utils.GraphContext, tensor_list, dim):
+def cat(g, tensor_list, dim):
     tensors = symbolic_helper._unpack_list(tensor_list)
     return g.op("Concat", *tensors, axis_i=dim)
 
@@ -532,7 +535,7 @@ def cat(g: jit_utils.GraphContext, tensor_list, dim):
 @_onnx_symbolic("aten::stack")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def stack(g: jit_utils.GraphContext, tensor_list, dim):
+def stack(g, tensor_list, dim):
     unsqueezed = [
         symbolic_helper._unsqueeze_helper(g, t, [dim])
         for t in symbolic_helper._unpack_list(tensor_list)
@@ -542,13 +545,13 @@ def stack(g: jit_utils.GraphContext, tensor_list, dim):
 
 @_onnx_symbolic("aten::list")
 @_beartype.beartype
-def _list(g: jit_utils.GraphContext, self):
+def _list(g, self):
     return self
 
 
 @_onnx_symbolic("aten::mm")
 @_beartype.beartype
-def mm(g: jit_utils.GraphContext, self, other):
+def mm(g, self, other):
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
     C = g.op("Constant", value_t=torch.tensor([1]))
@@ -557,20 +560,20 @@ def mm(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::bmm")
 @_beartype.beartype
-def bmm(g: jit_utils.GraphContext, self, other):
+def bmm(g, self, other):
     return g.op("MatMul", self, other)
 
 
 @_onnx_symbolic("aten::matmul")
 @_beartype.beartype
-def matmul(g: jit_utils.GraphContext, self, other):
+def matmul(g, self, other):
     return g.op("MatMul", self, other)
 
 
 @_onnx_symbolic("aten::addmm")
 @symbolic_helper.parse_args("v", "v", "v", "t", "t")
 @_beartype.beartype
-def addmm(g: jit_utils.GraphContext, self, mat1, mat2, beta, alpha):
+def addmm(g, self, mat1, mat2, beta, alpha):
     dtype = None
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     mat1_dtype = symbolic_helper._try_get_scalar_type(mat1)
@@ -627,21 +630,21 @@ def addmm(g: jit_utils.GraphContext, self, mat1, mat2, beta, alpha):
 
 @_onnx_symbolic("aten::neg")
 @_beartype.beartype
-def neg(g: jit_utils.GraphContext, self):
+def neg(g, self):
     return g.op("Neg", self)
 
 
 @_onnx_symbolic("aten::sqrt")
 @_beartype.beartype
-def sqrt(g: jit_utils.GraphContext, self):
+def sqrt(g, self):
     return g.op("Sqrt", self)
 
 
 @_onnx_symbolic("aten::rsqrt")
 @_beartype.beartype
-def rsqrt(g: jit_utils.GraphContext, self):
+def rsqrt(g, self):
     return g.op(
-        "Div", symbolic_helper._if_scalar_type_as(torch.ones(1), self), sqrt(g, self)
+        "Div", symbolic_helper._if_scalar_type_as(g, torch.ones(1), self), sqrt(g, self)
     )
 
 
@@ -649,43 +652,43 @@ def rsqrt(g: jit_utils.GraphContext, self):
 # Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qtanh.cpp
 @symbolic_helper.quantized_args(True, scale=2.0 / 256.0, zero_point=128)
 @_beartype.beartype
-def tanh(g: jit_utils.GraphContext, self):
+def tanh(g, self):
     return g.op("Tanh", self)
 
 
 @_onnx_symbolic("aten::sin")
 @_beartype.beartype
-def sin(g: jit_utils.GraphContext, self):
+def sin(g, self):
     return g.op("Sin", self)
 
 
 @_onnx_symbolic("aten::cos")
 @_beartype.beartype
-def cos(g: jit_utils.GraphContext, self):
+def cos(g, self):
     return g.op("Cos", self)
 
 
 @_onnx_symbolic("aten::tan")
 @_beartype.beartype
-def tan(g: jit_utils.GraphContext, self):
+def tan(g, self):
     return g.op("Tan", self)
 
 
 @_onnx_symbolic("aten::asin")
 @_beartype.beartype
-def asin(g: jit_utils.GraphContext, self):
+def asin(g, self):
     return g.op("Asin", self)
 
 
 @_onnx_symbolic("aten::acos")
 @_beartype.beartype
-def acos(g: jit_utils.GraphContext, self):
+def acos(g, self):
     return g.op("Acos", self)
 
 
 @_onnx_symbolic("aten::atan")
 @_beartype.beartype
-def atan(g: jit_utils.GraphContext, self):
+def atan(g, self):
     return g.op("Atan", self)
 
 
@@ -693,19 +696,19 @@ def atan(g: jit_utils.GraphContext, self):
 # Fixed scale and zero_point, discovered from aten/src/ATen/native/quantized/cpu/qsigmoid.cpp
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @_beartype.beartype
-def sigmoid(g: jit_utils.GraphContext, self):
+def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
 @_onnx_symbolic("aten::sign")
 @_beartype.beartype
-def sign(g: jit_utils.GraphContext, self):
+def sign(g, self):
     return g.op("Sign", self)
 
 
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
+def _slice(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
     if len(starts) == 1 and starts[0] == 0 and ends[0] == _INT64_MAX:
         return input
@@ -713,7 +716,7 @@ def _slice(g: jit_utils.GraphContext, input, axes, starts, ends):
 
 
 @_beartype.beartype
-def _maybe_cast_reduce_op_input(g: jit_utils.GraphContext, self):
+def _maybe_cast_reduce_op_input(g, self):
     dtype = self.type().scalarType()
     # This check only covers traced modules where dtype is present
     if dtype is not None:
@@ -809,7 +812,7 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
 @_onnx_symbolic("aten::cumsum")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
-def cumsum(g: jit_utils.GraphContext, input, dim, dtype):
+def cumsum(g, input, dim, dtype):
     if symbolic_helper.is_caffe2_aten_fallback():
         if dtype.node().kind() != "prim::Constant":
             return symbolic_helper._unimplemented("cumsum", "dtype", dtype)
@@ -820,7 +823,7 @@ def cumsum(g: jit_utils.GraphContext, input, dim, dtype):
 
 @_onnx_symbolic("aten::_sample_dirichlet")
 @_beartype.beartype
-def _sample_dirichlet(g: jit_utils.GraphContext, self, generator):
+def _sample_dirichlet(g, self, generator):
     if symbolic_helper.is_caffe2_aten_fallback():
         if not symbolic_helper._is_none(generator):
             return symbolic_helper._unimplemented(
@@ -832,7 +835,7 @@ def _sample_dirichlet(g: jit_utils.GraphContext, self, generator):
 
 @_onnx_symbolic("aten::_standard_gamma")
 @_beartype.beartype
-def _standard_gamma(g: jit_utils.GraphContext, self, generator):
+def _standard_gamma(g, self, generator):
     if symbolic_helper.is_caffe2_aten_fallback():
         if not symbolic_helper._is_none(generator):
             return symbolic_helper._unimplemented(
@@ -845,14 +848,14 @@ def _standard_gamma(g: jit_utils.GraphContext, self, generator):
 
 @_onnx_symbolic("aten::t")
 @_beartype.beartype
-def t(g: jit_utils.GraphContext, self):
+def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
 @_onnx_symbolic("aten::numpy_T")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def numpy_T(g: jit_utils.GraphContext, input):
+def numpy_T(g, input):
     ndim = symbolic_helper._get_tensor_rank(input)
     assert ndim is not None
     perm = list(reversed(range(0, ndim)))
@@ -862,7 +865,7 @@ def numpy_T(g: jit_utils.GraphContext, input):
 @_onnx_symbolic("aten::expand")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def expand(g: jit_utils.GraphContext, self, size, implicit):
+def expand(g, self, size, implicit):
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
@@ -883,7 +886,7 @@ def expand(g: jit_utils.GraphContext, self, size, implicit):
 @_onnx_symbolic("aten::expand_as")
 @symbolic_helper.quantized_args(True, True)
 @_beartype.beartype
-def expand_as(g: jit_utils.GraphContext, self, other):
+def expand_as(g, self, other):
     self_t = symbolic_helper._maybe_get_const(self, "t")
     if isinstance(self_t, torch.Tensor):
         orig_type = self_t.dtype
@@ -902,14 +905,7 @@ def expand_as(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "i", "b", "v")
 @_beartype.beartype
-def embedding(
-    g: jit_utils.GraphContext,
-    weight,
-    indices,
-    padding_idx,
-    scale_grad_by_freq,
-    sparse,
-):
+def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     if scale_grad_by_freq and GLOBALS.export_training:
         raise errors.SymbolicValueError(
             "Unsupported: ONNX export of embedding with scale_grad_by_freq=True "
@@ -931,7 +927,7 @@ def embedding(
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "i", "v", "i", "i")
 @_beartype.beartype
 def embedding_bag(
-    g: jit_utils.GraphContext,
+    g,
     embedding_matrix,
     indices,
     offsets,
@@ -965,7 +961,7 @@ def embedding_bag(
 
 @_onnx_symbolic("aten::size")
 @_beartype.beartype
-def size(g: jit_utils.GraphContext, self, dim=None):
+def size(g, self, dim=None):
     if dim is None:
         return g.op("Shape", self)
     if symbolic_helper._maybe_get_const(dim, "i") < 0:
@@ -980,7 +976,7 @@ def size(g: jit_utils.GraphContext, self, dim=None):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
+def transpose(g, self, dim0, dim1):
     if dim0 == dim1:  # micro-optimization
         return self
 
@@ -1004,7 +1000,7 @@ def transpose(g: jit_utils.GraphContext, self, dim0, dim1):
 @_onnx_symbolic("aten::permute")
 @symbolic_helper.parse_args("v", "is")
 @_beartype.beartype
-def permute(g: jit_utils.GraphContext, self, dims):
+def permute(g, self, dims):
     if dims == list(range(0, len(dims))):
         return self
     return g.op("Transpose", self, perm_i=dims)
@@ -1013,13 +1009,13 @@ def permute(g: jit_utils.GraphContext, self, dims):
 @_onnx_symbolic("aten::view")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def view(g: jit_utils.GraphContext, self, size):
+def view(g, self, size):
     return reshape(g, self, size)
 
 
 @_onnx_symbolic("aten::view_as")
 @_beartype.beartype
-def view_as(g: jit_utils.GraphContext, self, other):
+def view_as(g, self, other):
     shape = g.op("Shape", other)
     return reshape(g, self, shape)
 
@@ -1027,7 +1023,7 @@ def view_as(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::unsafe_chunk")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
-def unsafe_chunk(g: jit_utils.GraphContext, self, chunks, dim, _outputs=None):
+def unsafe_chunk(g, self, chunks, dim, _outputs=None):
     if _outputs is None:
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "unsafe_chunk", 9, 11, "Dynamic number of outputs not supported", self
@@ -1048,7 +1044,7 @@ def unsafe_chunk(g: jit_utils.GraphContext, self, chunks, dim, _outputs=None):
 @_onnx_symbolic("aten::split")
 @symbolic_helper.parse_args("v", "v", "i", "i")
 @_beartype.beartype
-def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=None):
+def split(g, self, split_size_or_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_size_or_sizes, _outputs):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split", 9, 11, "Dynamic number of outputs not supported", self
@@ -1075,16 +1071,14 @@ def split(g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=No
 
 @_onnx_symbolic("aten::unsafe_split")
 @_beartype.beartype
-def unsafe_split(
-    g: jit_utils.GraphContext, self, split_size_or_sizes, dim, _outputs=None
-):
+def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
     return split(g, self, split_size_or_sizes, dim, _outputs)
 
 
 @_onnx_symbolic("aten::split_with_sizes")
 @symbolic_helper.parse_args("v", "is", "i", "i")
 @_beartype.beartype
-def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs=None):
+def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     if not symbolic_helper._is_split_static(split_sizes, _outputs):
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "split_with_sizes", 9, 11, "Dynamic number of outputs not supported", self
@@ -1094,16 +1088,14 @@ def split_with_sizes(g: jit_utils.GraphContext, self, split_sizes, dim, _outputs
 
 @_onnx_symbolic("aten::unsafe_split_with_sizes")
 @_beartype.beartype
-def unsafe_split_with_sizes(
-    g: jit_utils.GraphContext, self, split_sizes, dim, _outputs=None
-):
+def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
     return split_with_sizes(g, self, split_sizes, dim, _outputs)
 
 
 @_onnx_symbolic("aten::unbind")
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def unbind(g: jit_utils.GraphContext, self, dim=0, _outputs=None):
+def unbind(g, self, dim=0, _outputs=None):
     if _outputs is None:
         return symbolic_helper._onnx_opset_unsupported_detailed(
             "unbind", 9, 11, "Dynamic number of outputs not supported", self
@@ -1121,7 +1113,7 @@ def unbind(g: jit_utils.GraphContext, self, dim=0, _outputs=None):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "i", "v")
 @_beartype.beartype
-def select(g: jit_utils.GraphContext, self, dim, index):
+def select(g, self, dim, index):
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
         if index == -1:
@@ -1139,13 +1131,13 @@ def select(g: jit_utils.GraphContext, self, dim, index):
 
 @_onnx_symbolic("aten::square")
 @_beartype.beartype
-def square(g: jit_utils.GraphContext, self):
+def square(g, self):
     return g.op("Mul", self, self)
 
 
 @_onnx_symbolic("aten::squeeze")
 @_beartype.beartype
-def squeeze(g: jit_utils.GraphContext, self, dim=None):
+def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
 
@@ -1209,7 +1201,7 @@ def squeeze(g: jit_utils.GraphContext, self, dim=None):
 
 @_onnx_symbolic("aten::prelu")
 @_beartype.beartype
-def prelu(g: jit_utils.GraphContext, self, weight):
+def prelu(g, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
     weight_sizes = symbolic_helper._get_tensor_sizes(weight)
     weight_rank = len(weight_sizes)
@@ -1233,18 +1225,18 @@ def prelu(g: jit_utils.GraphContext, self, weight):
 
 @_onnx_symbolic("aten::silu")
 @_beartype.beartype
-def silu(g: jit_utils.GraphContext, input):
+def silu(g, input):
     return g.op("Mul", input, g.op("Sigmoid", input))
 
 
 @_onnx_symbolic("aten::mish")
 @_beartype.beartype
-def mish(g: jit_utils.GraphContext, input):
+def mish(g, input):
     return g.op("Mul", input, g.op("Tanh", g.op("Softplus", input)))
 
 
 @_beartype.beartype
-def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kwargs):
+def _op_with_optional_float_cast(g, op_name, *args, **kwargs):
     """Some PyTorch operators (e.g., Clip/Min/ReLU/Pad) are super set of ONNX in terms of data types.
     This function maximizes the exportability of PyTorch-ONNX by allowing ONNX-unsupported PyTorch
     operator data type. For example, `Cast<int>(Clip<float>(Cast<float>(INPUT)))` can be used to mimic
@@ -1301,33 +1293,33 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 @_onnx_symbolic("aten::relu")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def relu(g: jit_utils.GraphContext, input):
+def relu(g, input):
     return _op_with_optional_float_cast(g, "Relu", input, opset_before=14)
 
 
 @_onnx_symbolic("aten::relu6")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def relu6(g: jit_utils.GraphContext, input):
+def relu6(g, input):
     relu = _op_with_optional_float_cast(g, "Relu", input, opset_before=14)
     return clamp_max(g, relu, 6)
 
 
 @_onnx_symbolic("aten::ceil")
 @_beartype.beartype
-def ceil(g: jit_utils.GraphContext, input):
+def ceil(g, input):
     return g.op("Ceil", input)
 
 
 @_onnx_symbolic("aten::floor")
 @_beartype.beartype
-def floor(g: jit_utils.GraphContext, input):
+def floor(g, input):
     return g.op("Floor", input)
 
 
 @_onnx_symbolic("aten::len")
 @_beartype.beartype
-def _len(g: jit_utils.GraphContext, self):
+def _len(g, self):
     sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
     return symbolic_helper._squeeze_helper(g, sz_0, [0])
 
@@ -1335,7 +1327,7 @@ def _len(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::threshold")
 @symbolic_helper.parse_args("v", "t", "t")
 @_beartype.beartype
-def threshold(g: jit_utils.GraphContext, self, threshold, value):
+def threshold(g, self, threshold, value):
     # See Note [Export inplace]
     if symbolic_helper._scalar(threshold) != 0:
         return symbolic_helper._unimplemented("threshold", "non-zero threshold", self)
@@ -1348,12 +1340,7 @@ def threshold(g: jit_utils.GraphContext, self, threshold, value):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "b")
 @_beartype.beartype
-def leaky_relu(
-    g: jit_utils.GraphContext,
-    input: _C.Value,
-    negative_slope: float,
-    inplace: bool = False,
-):
+def leaky_relu(g, input: _C.Value, negative_slope: float, inplace: bool = False):
     # See Note [Export inplace]
     return g.op("LeakyRelu", input, alpha_f=negative_slope)
 
@@ -1361,7 +1348,7 @@ def leaky_relu(
 @_onnx_symbolic("aten::glu")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def glu(g: jit_utils.GraphContext, input, dim):
+def glu(g, input, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(input, dim)
     if dim_size is not None:
         assert dim_size % 2 == 0
@@ -1373,7 +1360,7 @@ def glu(g: jit_utils.GraphContext, input, dim):
 @_onnx_symbolic("aten::softmax")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
-def softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
+def softmax(g, input, dim, dtype=None):
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
     # Thus dim and axis have different meanings.
@@ -1437,7 +1424,7 @@ def softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
 
 @_onnx_symbolic("aten::softplus")
 @_beartype.beartype
-def softplus(g: jit_utils.GraphContext, self, beta, threshold):
+def softplus(g, self, beta, threshold):
     beta_const = symbolic_helper._maybe_get_const(beta, "f")
     if beta_const != 1:
         return g.op("Div", g.op("Softplus", g.op("Mul", self, beta)), beta)
@@ -1830,7 +1817,7 @@ def _convert_padding_node(input):
 
 @_onnx_symbolic("aten::constant_pad_nd")
 @_beartype.beartype
-def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
+def constant_pad_nd(g, input, padding, value):
     mode = "constant"
     try:
         value = symbolic_helper._get_const(value, "f", "value")
@@ -1850,7 +1837,7 @@ def constant_pad_nd(g: jit_utils.GraphContext, input, padding, value):
 
 @_onnx_symbolic("aten::_pad_circular")
 @_beartype.beartype
-def _pad_circular(g: jit_utils.GraphContext, input, pad):
+def _pad_circular(g, input, pad):
     padding = _convert_padding_node(pad)
     assert len(padding) % 2 == 0
     ndim = len(padding) // 2
@@ -1894,7 +1881,7 @@ def _pad_circular(g: jit_utils.GraphContext, input, pad):
 @_onnx_symbolic("aten::reflection_pad2d")
 @_onnx_symbolic("aten::reflection_pad3d")
 @_beartype.beartype
-def reflection_pad(g: jit_utils.GraphContext, input, padding):
+def reflection_pad(g, input, padding):
     mode = "reflect"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
@@ -1907,7 +1894,7 @@ def reflection_pad(g: jit_utils.GraphContext, input, padding):
 @_onnx_symbolic("aten::replication_pad2d")
 @_onnx_symbolic("aten::replication_pad3d")
 @_beartype.beartype
-def replication_pad(g: jit_utils.GraphContext, input, padding):
+def replication_pad(g, input, padding):
     mode = "edge"
     padding = _convert_padding_node(padding)
     paddings = _prepare_onnx_paddings(symbolic_helper._get_tensor_rank(input), padding)
@@ -1918,7 +1905,7 @@ def replication_pad(g: jit_utils.GraphContext, input, padding):
 
 @_onnx_symbolic("aten::pad")
 @_beartype.beartype
-def pad(g: jit_utils.GraphContext, input, pad, mode, value):
+def pad(g, input, pad, mode, value):
     mode = symbolic_helper._parse_arg(mode, "s")
     if mode == "replicate":
         return replication_pad(g, input, pad)
@@ -1996,14 +1983,7 @@ def _interpolate(name: str, dim: int, interpolate_mode: str):
 @_onnx_symbolic("aten::__interpolate")
 @_beartype.beartype
 def __interpolate(
-    g: jit_utils.GraphContext,
-    input,
-    size,
-    scale_factor,
-    mode,
-    align_corners,
-    recompute_scale_factor,
-    antialias,
+    g, input, size, scale_factor, mode, align_corners, recompute_scale_factor, antialias
 ):
     scales, mode = symbolic_helper._interpolate_get_scales_and_mode(
         g, input, size, scale_factor, mode, align_corners
@@ -2013,7 +1993,7 @@ def __interpolate(
 
 @_onnx_symbolic("aten::bitwise_not")
 @_beartype.beartype
-def bitwise_not(g: jit_utils.GraphContext, input):
+def bitwise_not(g, input):
     if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise Not "
@@ -2047,7 +2027,7 @@ def wrap_logical_op_with_negation(func: Callable) -> Callable:
 
 @_onnx_symbolic("aten::__not_")
 @_beartype.beartype
-def __not_(g: jit_utils.GraphContext, self):
+def __not_(g, self):
     if not symbolic_helper._is_bool(self):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise Not "
@@ -2060,7 +2040,7 @@ def __not_(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::eq")
 @symbolic_helper.quantized_args(True, True)
 @_beartype.beartype
-def eq(g: jit_utils.GraphContext, self, other):
+def eq(g, self, other):
     if isinstance(self.type(), _C.DeviceObjType) and isinstance(
         other.type(), _C.DeviceObjType
     ):
@@ -2074,19 +2054,19 @@ def eq(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 @_beartype.beartype
-def ne(g: jit_utils.GraphContext, self, other):
+def ne(g, self, other):
     return eq(g, self, other)
 
 
 @_onnx_symbolic("aten::gt")
 @symbolic_helper.quantized_args(True, True)
 @_beartype.beartype
-def gt(g: jit_utils.GraphContext, input, other):
+def gt(g, input, other):
     return _gt_impl(g, input, other)
 
 
 @_beartype.beartype
-def _gt_impl(g: jit_utils.GraphContext, input, other):
+def _gt_impl(g, input, other):
     if (
         input.type().scalarType() is not None
         and symbolic_helper._is_bool(input)
@@ -2101,12 +2081,12 @@ def _gt_impl(g: jit_utils.GraphContext, input, other):
 @_onnx_symbolic("aten::lt")
 @symbolic_helper.quantized_args(True, True)
 @_beartype.beartype
-def lt(g: jit_utils.GraphContext, input, other):
+def lt(g, input, other):
     return _lt_impl(g, input, other)
 
 
 @_beartype.beartype
-def _lt_impl(g: jit_utils.GraphContext, input, other):
+def _lt_impl(g, input, other):
     if (
         input.type().scalarType() is not None
         and symbolic_helper._is_bool(input)
@@ -2122,7 +2102,7 @@ def _lt_impl(g: jit_utils.GraphContext, input, other):
 @symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 @_beartype.beartype
-def ge(g: jit_utils.GraphContext, input, other):
+def ge(g, input, other):
     return _lt_impl(g, input, other)
 
 
@@ -2130,13 +2110,13 @@ def ge(g: jit_utils.GraphContext, input, other):
 @symbolic_helper.quantized_args(True, True)
 @wrap_logical_op_with_negation
 @_beartype.beartype
-def le(g: jit_utils.GraphContext, input, other):
+def le(g, input, other):
     return _gt_impl(g, input, other)
 
 
 @_onnx_symbolic("aten::__and_")
 @_beartype.beartype
-def __and_(g: jit_utils.GraphContext, input, other):
+def __and_(g, input, other):
     if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise AND "
@@ -2154,7 +2134,7 @@ def __and_(g: jit_utils.GraphContext, input, other):
 
 @_onnx_symbolic("aten::__or_")
 @_beartype.beartype
-def __or_(g: jit_utils.GraphContext, input, other):
+def __or_(g, input, other):
     if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise OR "
@@ -2172,7 +2152,7 @@ def __or_(g: jit_utils.GraphContext, input, other):
 
 @_onnx_symbolic("aten::__xor_")
 @_beartype.beartype
-def __xor_(g: jit_utils.GraphContext, input, other):
+def __xor_(g, input, other):
     if not symbolic_helper._is_bool(input):
         raise errors.SymbolicValueError(
             "ONNX export does NOT support exporting bitwise XOR "
@@ -2191,27 +2171,27 @@ def __xor_(g: jit_utils.GraphContext, input, other):
 @_onnx_symbolic("aten::logical_and")
 @wrap_logical_op_with_cast_to("Bool")
 @_beartype.beartype
-def logical_and(g: jit_utils.GraphContext, input, other):
+def logical_and(g, input, other):
     return g.op("And", input, other)
 
 
 @_onnx_symbolic("aten::logical_or")
 @wrap_logical_op_with_cast_to("Bool")
 @_beartype.beartype
-def logical_or(g: jit_utils.GraphContext, input, other):
+def logical_or(g, input, other):
     return g.op("Or", input, other)
 
 
 @_onnx_symbolic("aten::logical_xor")
 @wrap_logical_op_with_cast_to("Bool")
 @_beartype.beartype
-def logical_xor(g: jit_utils.GraphContext, input, other):
+def logical_xor(g, input, other):
     return g.op("Xor", input, other)
 
 
 @_onnx_symbolic("aten::__rshift_")
 @_beartype.beartype
-def __rshift_(g: jit_utils.GraphContext, self, other):
+def __rshift_(g, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     if other.type().scalarType() != self.type().scalarType():
@@ -2239,7 +2219,7 @@ def __rshift_(g: jit_utils.GraphContext, self, other):
 
 @_onnx_symbolic("aten::__lshift_")
 @_beartype.beartype
-def __lshift_(g: jit_utils.GraphContext, self, other):
+def __lshift_(g, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
     if other.type().scalarType() != self.type().scalarType():
@@ -2268,7 +2248,7 @@ def __lshift_(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::where")
 @symbolic_helper.parse_args("v", "v", "v", "i")
 @_beartype.beartype
-def where(g: jit_utils.GraphContext, condition, self=None, other=None, _outputs=None):
+def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if not symbolic_helper._is_bool(condition):
         condition = g.op("Cast", condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
@@ -2283,7 +2263,7 @@ def where(g: jit_utils.GraphContext, condition, self=None, other=None, _outputs=
 @_onnx_symbolic("aten::log_softmax")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
-def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
+def log_softmax(g, input, dim, dtype=None):
     # PyTorch dim and ONNX axis have different meanings.
     # See Softmax comment for details.
     # TODO: remove this as onnx opset 11 spec allows negative axes
@@ -2317,7 +2297,7 @@ def log_softmax(g: jit_utils.GraphContext, input, dim, dtype=None):
 @_onnx_symbolic("aten::_log_softmax")
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def _log_softmax(g: jit_utils.GraphContext, input, dim, half_to_float):
+def _log_softmax(g, input, dim, half_to_float):
     if half_to_float and input.type().scalarType() == "Half":
         input = g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
     return log_softmax(g, input, dim)
@@ -2329,7 +2309,7 @@ def _log_softmax(g: jit_utils.GraphContext, input, dim, half_to_float):
 )
 @_beartype.beartype
 def _convolution(
-    g: jit_utils.GraphContext,
+    g,
     input,
     weight,
     bias,
@@ -2399,7 +2379,7 @@ def _convolution(
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is", "i")
 @_beartype.beartype
 def convolution(
-    g: jit_utils.GraphContext,
+    g,
     input,
     weight,
     bias,
@@ -2431,9 +2411,7 @@ def convolution(
 @_onnx_symbolic("aten::conv1d")
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
 @_beartype.beartype
-def conv1d(
-    g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
-):
+def conv1d(g, input, weight, bias, stride, padding, dilation, groups):
     return _convolution(
         g,
         input,
@@ -2455,9 +2433,7 @@ def conv1d(
 @_onnx_symbolic("aten::conv2d")
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
 @_beartype.beartype
-def conv2d(
-    g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
-):
+def conv2d(g, input, weight, bias, stride, padding, dilation, groups):
     return _convolution(
         g,
         input,
@@ -2479,9 +2455,7 @@ def conv2d(
 @_onnx_symbolic("aten::conv3d")
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i")
 @_beartype.beartype
-def conv3d(
-    g: jit_utils.GraphContext, input, weight, bias, stride, padding, dilation, groups
-):
+def conv3d(g, input, weight, bias, stride, padding, dilation, groups):
     return _convolution(
         g,
         input,
@@ -2504,15 +2478,7 @@ def conv3d(
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is")
 @_beartype.beartype
 def conv_transpose1d(
-    g: jit_utils.GraphContext,
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    output_padding,
-    groups,
-    dilation,
+    g, input, weight, bias, stride, padding, output_padding, groups, dilation
 ):
     return _convolution(
         g,
@@ -2536,15 +2502,7 @@ def conv_transpose1d(
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is")
 @_beartype.beartype
 def conv_transpose2d(
-    g: jit_utils.GraphContext,
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    output_padding,
-    groups,
-    dilation,
+    g, input, weight, bias, stride, padding, output_padding, groups, dilation
 ):
     return _convolution(
         g,
@@ -2568,15 +2526,7 @@ def conv_transpose2d(
 @symbolic_helper.parse_args("v", "v", "v", "is", "is", "is", "i", "is")
 @_beartype.beartype
 def conv_transpose3d(
-    g: jit_utils.GraphContext,
-    input,
-    weight,
-    bias,
-    stride,
-    padding,
-    output_padding,
-    groups,
-    dilation,
+    g, input, weight, bias, stride, padding, output_padding, groups, dilation
 ):
     return _convolution(
         g,
@@ -2600,7 +2550,7 @@ def conv_transpose3d(
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "i", "f", "f", "i")
 @_beartype.beartype
 def batch_norm(
-    g: jit_utils.GraphContext,
+    g,
     input,
     weight,
     bias,
@@ -2656,7 +2606,7 @@ def batch_norm(
 
 @_beartype.beartype
 def _layer_norm_returns_normalized_input_mean_rstd(
-    g: jit_utils.GraphContext,
+    g,
     input: _C.Value,
     normalized_shape: Sequence[int],
     weight: _C.Value,
@@ -2704,9 +2654,7 @@ def _layer_norm_returns_normalized_input_mean_rstd(
 @symbolic_helper.quantized_args(True, False, False, False)
 @symbolic_helper.parse_args("v", "is", "v", "v", "f")
 @_beartype.beartype
-def native_layer_norm(
-    g: jit_utils.GraphContext, input, normalized_shape, weight, bias, eps
-):
+def native_layer_norm(g, input, normalized_shape, weight, bias, eps):
     return _layer_norm_returns_normalized_input_mean_rstd(
         g, input, normalized_shape, weight, bias, eps, False, True
     )
@@ -2716,15 +2664,7 @@ def native_layer_norm(
 @symbolic_helper.quantized_args(True, False, False, False)
 @symbolic_helper.parse_args("v", "is", "v", "v", "f", "b")
 @_beartype.beartype
-def layer_norm(
-    g: jit_utils.GraphContext,
-    input,
-    normalized_shape,
-    weight,
-    bias,
-    eps,
-    cudnn_enable,
-):
+def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
     normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
         g, input, normalized_shape, weight, bias, eps, cudnn_enable, False
     )
@@ -2735,7 +2675,7 @@ def layer_norm(
 @symbolic_helper.parse_args("v", "v", "v", "v", "v", "b", "f", "f", "b")
 @_beartype.beartype
 def instance_norm(
-    g: jit_utils.GraphContext,
+    g,
     input,
     weight,
     bias,
@@ -2836,7 +2776,7 @@ def instance_norm(
 @_onnx_symbolic("aten::unfold")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
-def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
+def unfold(g, input, dimension, size, step):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("unfold", input, dimension_i=dimension, size_i=size, step_i=step)
     sizes = symbolic_helper._get_tensor_sizes(input)
@@ -2876,7 +2816,7 @@ def unfold(g: jit_utils.GraphContext, input, dimension, size, step):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "t", "t", "t")
 @_beartype.beartype
-def elu(g: jit_utils.GraphContext, input, alpha, scale, input_scale):
+def elu(g, input, alpha, scale, input_scale):
     if scale and scale != 1.0:
         return symbolic_helper._unimplemented(
             "scale", "does not support scale in Elu", scale
@@ -2892,14 +2832,14 @@ def elu(g: jit_utils.GraphContext, input, alpha, scale, input_scale):
 @_onnx_symbolic("aten::selu")
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
-def selu(g: jit_utils.GraphContext, input):
+def selu(g, input):
     return g.op("Selu", input)
 
 
 @_onnx_symbolic("aten::index_select")
 @symbolic_helper.parse_args("v", "i", "v")
 @_beartype.beartype
-def index_select(g: jit_utils.GraphContext, self, dim, index):
+def index_select(g, self, dim, index):
     # In case of a scalar index, index_select returns a tensor with the same rank as the input.
     # To match this behavior in ONNX, we make index a 1D tensor so that the following gather
     # also produces a tensor with the same rank as the input.
@@ -2908,7 +2848,7 @@ def index_select(g: jit_utils.GraphContext, self, dim, index):
 
 @_onnx_symbolic("aten::index_put")
 @_beartype.beartype
-def index_put(g: jit_utils.GraphContext, self, indices_list_value, values, accumulate):
+def index_put(g, self, indices_list_value, values, accumulate):
     if symbolic_helper._is_packed_list(indices_list_value):
         indices_list = symbolic_helper._unpack_list(indices_list_value)
     else:
@@ -2928,7 +2868,7 @@ def index_put(g: jit_utils.GraphContext, self, indices_list_value, values, accum
 
 @_onnx_symbolic("aten::index_fill")
 @_beartype.beartype
-def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
+def index_fill(g, self, dim, index, value):
     dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
@@ -2944,7 +2884,7 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
         g, self, dim, index
     )
     value = symbolic_helper._maybe_get_scalar(value)
-    value = symbolic_helper._if_scalar_type_as(value, self)
+    value = symbolic_helper._if_scalar_type_as(g, value, self)
     expanded_value = expand(g, value, expanded_index_shape, None)
 
     return scatter(g, self, dim, expanded_index, expanded_value)
@@ -2952,7 +2892,7 @@ def index_fill(g: jit_utils.GraphContext, self, dim, index, value):
 
 @_onnx_symbolic("aten::index_copy")
 @_beartype.beartype
-def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
+def index_copy(g, self, dim, index, source):
     dim_value = symbolic_helper._parse_arg(dim, "i")
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("index_copy", self, index, source, dim_i=dim_value)
@@ -2965,9 +2905,7 @@ def index_copy(g: jit_utils.GraphContext, self, dim, index, source):
 @_onnx_symbolic("aten::bucketize")
 @symbolic_helper.parse_args("v", "v", "b", "b")
 @_beartype.beartype
-def bucketize(
-    g: jit_utils.GraphContext, self, boundaries, out_int32=False, right=False
-):
+def bucketize(g, self, boundaries, out_int32=False, right=False):
     out_type = _C_onnx.TensorProtoDataType.INT64
     if out_int32:
         out_type = _C_onnx.TensorProtoDataType.INT32
@@ -3002,7 +2940,7 @@ def bucketize(
 
 @_onnx_symbolic("aten::type_as")
 @_beartype.beartype
-def type_as(g: jit_utils.GraphContext, self, other):
+def type_as(g, self, other):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     other_dtype = symbolic_helper._try_get_scalar_type(other)
     if self_dtype == other_dtype and self_dtype is not None:
@@ -3029,7 +2967,7 @@ def type_as(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::cosine_similarity")
 @symbolic_helper.parse_args("v", "v", "i", "f")
 @_beartype.beartype
-def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps):
+def cosine_similarity(g, x1, x2, dim, eps):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("cosine_similarity", x1, x2, dim_i=dim, eps_f=eps)
     cross = symbolic_helper._reducesum_helper(
@@ -3049,7 +2987,7 @@ def cosine_similarity(g: jit_utils.GraphContext, x1, x2, dim, eps):
 
 @_onnx_symbolic("aten::pairwise_distance")
 @_beartype.beartype
-def pairwise_distance(g: jit_utils.GraphContext, input1, input2, p, eps, keepdim):
+def pairwise_distance(g, input1, input2, p, eps, keepdim):
     if not symbolic_helper._is_value(eps):
         eps = g.op("Constant", value_t=torch.tensor([eps]))
     inv_p = div(
@@ -3069,38 +3007,40 @@ def pairwise_distance(g: jit_utils.GraphContext, input1, input2, p, eps, keepdim
 @_onnx_symbolic("aten::clone")
 # ignore clone operators that are inserted by PyTorch autograd
 @_beartype.beartype
-def clone(g: jit_utils.GraphContext, input, unused_memory_format):
+def clone(g, input, unused_memory_format):
     return input
 
 
 @_onnx_symbolic("aten::abs")
 @_beartype.beartype
-def abs(g: jit_utils.GraphContext, self):
+def abs(g, self):
     return g.op("Abs", self)
 
 
 @_onnx_symbolic("aten::log")
 @_beartype.beartype
-def log(g: jit_utils.GraphContext, self):
+def log(g, self):
     return g.op("Log", self)
 
 
 @_onnx_symbolic("aten::log1p")
 @_beartype.beartype
-def log1p(g: jit_utils.GraphContext, self):
-    return log(g, add(g, symbolic_helper._if_scalar_type_as(torch.ones(1), self), self))
+def log1p(g, self):
+    return log(
+        g, add(g, symbolic_helper._if_scalar_type_as(g, torch.ones(1), self), self)
+    )
 
 
 @_onnx_symbolic("aten::log10")
 @_beartype.beartype
-def log10(g: jit_utils.GraphContext, self):
+def log10(g, self):
     _ln10 = 2.30258509299404568401
     return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor([_ln10])))
 
 
 @_onnx_symbolic("aten::pow")
 @_beartype.beartype
-def pow(g: jit_utils.GraphContext, self, exponent):
+def pow(g, self, exponent):
     f_dtype = self_dtype = self.type().scalarType()
     if not symbolic_helper._is_fp(self):
         f_dtype = "Float"
@@ -3119,7 +3059,7 @@ def pow(g: jit_utils.GraphContext, self, exponent):
 
 @_onnx_symbolic("aten::clamp")
 @_beartype.beartype
-def clamp(g: jit_utils.GraphContext, self, min, max):
+def clamp(g, self, min, max):
     # min or max may be None that we need to dispatch to
     # Clip separately, as ONNX does not have None syntax
     if symbolic_helper._is_none(min):
@@ -3143,7 +3083,7 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
 @_onnx_symbolic("aten::clamp_min")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
-def clamp_min(g: jit_utils.GraphContext, self, min):
+def clamp_min(g, self, min):
     if symbolic_helper._is_constant(min):
         return _op_with_optional_float_cast(
             g, "Clip", self, min_f=symbolic_helper._parse_arg(min, "f"), opset_before=12
@@ -3159,7 +3099,7 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
 @_onnx_symbolic("aten::clamp_max")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
-def clamp_max(g: jit_utils.GraphContext, self, max):
+def clamp_max(g, self, max):
     if symbolic_helper._is_constant(max):
         return _op_with_optional_float_cast(
             g, "Clip", self, max_f=symbolic_helper._parse_arg(max, "f"), opset_before=12
@@ -3177,7 +3117,7 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 # TODO(justinchuby): Support multiple quantized args in output
 @_beartype.beartype
-def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+def max(g, self, dim_or_y=None, keepdim=None):
     # torch.max(input)
     if dim_or_y is None and keepdim is None:
         return g.op("ReduceMax", self, keepdims_i=0)
@@ -3196,14 +3136,14 @@ def max(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::maximum")
 @symbolic_helper.quantized_args(True, True)
 @_beartype.beartype
-def maximum(g: jit_utils.GraphContext, input, other):
+def maximum(g, input, other):
     return max(g, input, dim_or_y=other)
 
 
 @_onnx_symbolic("aten::min")
 # TODO(justinchuby): Support multiple quantized args in output
 @_beartype.beartype
-def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
+def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input)
     if dim_or_y is None and keepdim is None:
         return g.op("ReduceMin", self, keepdims_i=0)
@@ -3222,7 +3162,7 @@ def min(g: jit_utils.GraphContext, self, dim_or_y=None, keepdim=None):
 @_onnx_symbolic("aten::minimum")
 @symbolic_helper.quantized_args(True, True)
 @_beartype.beartype
-def minimum(g: jit_utils.GraphContext, input, other):
+def minimum(g, input, other):
     return min(g, input, dim_or_y=other)
 
 
@@ -3230,7 +3170,7 @@ def minimum(g: jit_utils.GraphContext, input, other):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
-def amax(g: jit_utils.GraphContext, self, dim, keepdim):
+def amax(g, self, dim, keepdim):
     return g.op("ReduceMax", self, axes_i=dim, keepdims_i=keepdim)
 
 
@@ -3238,7 +3178,7 @@ def amax(g: jit_utils.GraphContext, self, dim, keepdim):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
-def amin(g: jit_utils.GraphContext, self, dim, keepdim):
+def amin(g, self, dim, keepdim):
     return g.op("ReduceMin", self, axes_i=dim, keepdims_i=keepdim)
 
 
@@ -3246,7 +3186,7 @@ def amin(g: jit_utils.GraphContext, self, dim, keepdim):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "i")
 @_beartype.beartype
-def aminmax(g: jit_utils.GraphContext, self, dim, keepdim):
+def aminmax(g, self, dim, keepdim):
     reduce_kwargs = {"keepdims_i": keepdim}
     if not symbolic_helper._is_none(dim):
         dim = symbolic_helper._get_const(dim, "i", "dim")
@@ -3259,7 +3199,7 @@ def aminmax(g: jit_utils.GraphContext, self, dim, keepdim):
 
 @_onnx_symbolic("aten::exp")
 @_beartype.beartype
-def exp(g: jit_utils.GraphContext, self):
+def exp(g, self):
     return g.op("Exp", self)
 
 
@@ -3267,7 +3207,7 @@ def exp(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::dropout")
 @symbolic_helper.parse_args("v", "f", "i")
 @_beartype.beartype
-def dropout(g: jit_utils.GraphContext, input, p, train):
+def dropout(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
     # if train is False, dropout is no-op
     if not train:
@@ -3310,7 +3250,7 @@ def _unsupported_dropout(name: str):
 @_onnx_symbolic("aten::norm")
 @symbolic_helper.parse_args("v", "t", "is", "i")
 @_beartype.beartype
-def norm(g: jit_utils.GraphContext, self, p, dim, keepdim):
+def norm(g, self, p, dim, keepdim):
     if p == 1:
         f = _reduce_op_symbolic("ReduceL1")
     elif p == 2:
@@ -3325,7 +3265,7 @@ def norm(g: jit_utils.GraphContext, self, p, dim, keepdim):
 @_onnx_symbolic("aten::conv_tbc")
 @symbolic_helper.parse_args("v", "v", "v", "i")
 @_beartype.beartype
-def conv_tbc(g: jit_utils.GraphContext, input, weight, bias, pad):
+def conv_tbc(g, input, weight, bias, pad):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("conv_tbc", input, weight, bias, pad_i=pad)
     else:
@@ -3343,7 +3283,7 @@ def conv_tbc(g: jit_utils.GraphContext, input, weight, bias, pad):
 @_onnx_symbolic("aten::_unique")
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def _unique(g: jit_utils.GraphContext, input, sorted, return_inverse):
+def _unique(g, input, sorted, return_inverse):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "_unique",
@@ -3359,7 +3299,7 @@ def _unique(g: jit_utils.GraphContext, input, sorted, return_inverse):
 @_onnx_symbolic("aten::_unique2")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
-def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts):
+def _unique2(g, input, sorted, return_inverse, return_counts):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "_unique2",
@@ -3379,7 +3319,6 @@ def _cast_func_template(to_i, g, input, non_blocking):
     return g.op("Cast", input, to_i=to_i)
 
 
-# TODO(justinchuby): Use the decorator and _export for these operators
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_Byte` that instantiates an
 # ONNX cast node with `to` attribute "UINT8"
@@ -3423,15 +3362,7 @@ for scalar_type in (
 @_onnx_symbolic("aten::empty")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 @_beartype.beartype
-def empty(
-    g: jit_utils.GraphContext,
-    sizes,
-    dtype,
-    layout,
-    device,
-    pin_memory=False,
-    memory_format=None,
-):
+def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 
@@ -3439,22 +3370,14 @@ def empty(
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 @_beartype.beartype
 def empty_like(
-    g: jit_utils.GraphContext,
-    input,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=False,
-    memory_format=None,
+    g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None
 ):
     return zeros_like(g, input, dtype, layout, device, pin_memory)
 
 
 @_onnx_symbolic("aten::new_empty")
 @_beartype.beartype
-def new_empty(
-    g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
-):
+def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
@@ -3464,7 +3387,7 @@ def new_empty(
 
 @_onnx_symbolic("aten::scalar_tensor")
 @_beartype.beartype
-def scalar_tensor(g: jit_utils.GraphContext, scalar, dtype, *options):
+def scalar_tensor(g, scalar, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
         dtype = _type_utils.JitScalarType.FLOAT
@@ -3474,9 +3397,7 @@ def scalar_tensor(g: jit_utils.GraphContext, scalar, dtype, *options):
 
 @_onnx_symbolic("aten::tensor")
 @_beartype.beartype
-def tensor(
-    g: jit_utils.GraphContext, data, dtype=None, device=None, requires_grad=False
-):
+def tensor(g, data, dtype=None, device=None, requires_grad=False):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if symbolic_helper._is_packed_list(data):
         if dtype is None:
@@ -3503,14 +3424,14 @@ def tensor(
 
 @_onnx_symbolic("aten::as_tensor")
 @_beartype.beartype
-def as_tensor(g: jit_utils.GraphContext, data, dtype=None, device=None):
+def as_tensor(g, data, dtype=None, device=None):
     return tensor(g, data, dtype, device)
 
 
 @_onnx_symbolic("aten::zeros")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 @_beartype.beartype
-def zeros(g: jit_utils.GraphContext, sizes, dtype, layout, device, pin_memory=False):
+def zeros(g, sizes, dtype, layout, device, pin_memory=False):
     # NOTE: no way to set device, layout and pin_memory in ONNX, so we ignore it
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -3530,13 +3451,7 @@ def zeros(g: jit_utils.GraphContext, sizes, dtype, layout, device, pin_memory=Fa
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 @_beartype.beartype
 def zeros_like(
-    g: jit_utils.GraphContext,
-    input,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=False,
-    memory_format=None,
+    g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None
 ):
     shape = g.op("Shape", input)
     if dtype is None:
@@ -3552,9 +3467,7 @@ def zeros_like(
 
 @_onnx_symbolic("aten::new_zeros")
 @_beartype.beartype
-def new_zeros(
-    g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
-):
+def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = _type_utils.JitScalarType.from_name(self_dtype)
@@ -3564,7 +3477,7 @@ def new_zeros(
 @_onnx_symbolic("aten::ones")
 @symbolic_helper.parse_args("v", "i", "v", "v", "v")
 @_beartype.beartype
-def ones(g: jit_utils.GraphContext, sizes, dtype, layout, device, pin_memory=False):
+def ones(g, sizes, dtype, layout, device, pin_memory=False):
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
     else:
@@ -3583,13 +3496,7 @@ def ones(g: jit_utils.GraphContext, sizes, dtype, layout, device, pin_memory=Fal
 @symbolic_helper.parse_args("v", "i", "v", "v", "v", "v")
 @_beartype.beartype
 def ones_like(
-    g: jit_utils.GraphContext,
-    input,
-    dtype=None,
-    layout=None,
-    device=None,
-    pin_memory=False,
-    memory_format=None,
+    g, input, dtype=None, layout=None, device=None, pin_memory=False, memory_format=None
 ):
     shape = g.op("Shape", input)
     if dtype is None:
@@ -3605,9 +3512,7 @@ def ones_like(
 
 @_onnx_symbolic("aten::new_ones")
 @_beartype.beartype
-def new_ones(
-    g: jit_utils.GraphContext, self, sizes, dtype, layout, device, pin_memory=False
-):
+def new_ones(g, self, sizes, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
@@ -3617,9 +3522,7 @@ def new_ones(
 
 @_onnx_symbolic("aten::full")
 @_beartype.beartype
-def full(
-    g: jit_utils.GraphContext, sizes, value, dtype, layout, device, pin_memory=False
-):
+def full(g, sizes, value, dtype, layout, device, pin_memory=False):
     const_value = symbolic_helper._maybe_get_const(value, "t")
     if symbolic_helper._is_value(const_value):
         dtype = _type_utils.JitScalarType.FLOAT if dtype is None else dtype
@@ -3644,7 +3547,7 @@ def full(
 @_onnx_symbolic("aten::full_like")
 @_beartype.beartype
 def full_like(
-    g: jit_utils.GraphContext,
+    g,
     input,
     fill_value,
     dtype=None,
@@ -3674,16 +3577,7 @@ def full_like(
 
 @_onnx_symbolic("aten::new_full")
 @_beartype.beartype
-def new_full(
-    g: jit_utils.GraphContext,
-    self,
-    size,
-    fill_value,
-    dtype,
-    layout,
-    device,
-    pin_memory=False,
-):
+def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False):
     self_dtype = symbolic_helper._try_get_scalar_type(self)
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
@@ -3693,7 +3587,7 @@ def new_full(
 
 @_onnx_symbolic("aten::eye")
 @_beartype.beartype
-def eye(g: jit_utils.GraphContext, *args):
+def eye(g, *args):
     if len(args) == 5:
         # aten::eye(n, dtype, layout, device, pin_memory)
         n, dtype, layout, device, pin_memory = args
@@ -3718,7 +3612,7 @@ def eye(g: jit_utils.GraphContext, *args):
 
 @_onnx_symbolic("aten::slice")
 @_beartype.beartype
-def slice(g: jit_utils.GraphContext, self, *args):
+def slice(g, self, *args):
     if len(args) == 4:
         # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
         dim, start, end, step = args
@@ -3786,7 +3680,7 @@ def slice(g: jit_utils.GraphContext, self, *args):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
 @_beartype.beartype
-def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val: float):
+def hardtanh(g, self: _C.Value, min_val: float, max_val: float):
     return _op_with_optional_float_cast(
         g, "Clip", self, min_f=min_val, max_f=max_val, opset_before=12
     )
@@ -3796,7 +3690,7 @@ def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val:
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def hardswish(g: jit_utils.GraphContext, self):
+def hardswish(g, self):
     hs = hardsigmoid(g, self)
     return g.op("Mul", self, hs)
 
@@ -3806,7 +3700,7 @@ def hardswish(g: jit_utils.GraphContext, self):
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def hardsigmoid(g: jit_utils.GraphContext, self):
+def hardsigmoid(g, self):
     # Set alpha_f to 1 / 6 to make op equivalent to PyTorch's definition of Hardsigmoid.
     # See https://pytorch.org/docs/stable/generated/torch.nn.Hardsigmoid.html
     return g.op("HardSigmoid", self, alpha_f=1 / 6)
@@ -3815,14 +3709,14 @@ def hardsigmoid(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::tanhshrink")
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def tanhshrink(g: jit_utils.GraphContext, self):
+def tanhshrink(g, self):
     return g.op("Sub", self, tanh(g, self))
 
 
 @_onnx_symbolic("aten::hardshrink")
 @symbolic_helper.parse_args("v", "f")
 @_beartype.beartype
-def hardshrink(g: jit_utils.GraphContext, self, lambd):
+def hardshrink(g, self, lambd):
     dtype = self.type().scalarType()
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -3847,7 +3741,7 @@ def hardshrink(g: jit_utils.GraphContext, self, lambd):
 @_onnx_symbolic("aten::softshrink")
 @symbolic_helper.parse_args("v", "f")
 @_beartype.beartype
-def softshrink(g: jit_utils.GraphContext, self, lambd):
+def softshrink(g, self, lambd):
     dtype = self.type().scalarType()
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -3882,14 +3776,14 @@ def softshrink(g: jit_utils.GraphContext, self, lambd):
 
 @_onnx_symbolic("aten::alias")
 @_beartype.beartype
-def alias(g: jit_utils.GraphContext, self):
+def alias(g, self):
     return self
 
 
 @_onnx_symbolic("aten::unsqueeze")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def unsqueeze(g: jit_utils.GraphContext, self, dim):
+def unsqueeze(g, self, dim):
     # Handle negative dim
     if dim < 0:
         rank = symbolic_helper._get_tensor_rank(self)
@@ -3917,7 +3811,7 @@ def unsqueeze(g: jit_utils.GraphContext, self, dim):
 # TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "none")
 @_beartype.beartype
-def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
+def sort(g, self, dim, decending, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Sort", "Out parameter is not supported for sort", self
@@ -3938,7 +3832,7 @@ def sort(g: jit_utils.GraphContext, self, dim, decending, out=None):
 
 @_onnx_symbolic("aten::numel")
 @_beartype.beartype
-def numel(g: jit_utils.GraphContext, self):
+def numel(g, self):
     shape = g.op("Shape", self)
     return g.op("ReduceProd", shape, keepdims_i=0)
 
@@ -3947,7 +3841,7 @@ def numel(g: jit_utils.GraphContext, self):
 # TODO(justinchuby): Support multiple quantized args in output
 @symbolic_helper.parse_args("v", "i", "i", "i", "i", "none")
 @_beartype.beartype
-def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
+def topk(g, self, k, dim, largest, sorted, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "TopK", "Out parameter is not supported for topk", self
@@ -3960,7 +3854,7 @@ def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
 
 @_onnx_symbolic("aten::to")
 @_beartype.beartype
-def to(g: jit_utils.GraphContext, self, *args):
+def to(g, self, *args):
     @_beartype.beartype
     def is_aten_to_device_only(args):
         if len(args) == 4:
@@ -4037,7 +3931,7 @@ def to(g: jit_utils.GraphContext, self, *args):
 
 @_onnx_symbolic("aten::repeat")
 @_beartype.beartype
-def repeat(g: jit_utils.GraphContext, self, repeats):
+def repeat(g, self, repeats):
     dtype = _type_utils.JitScalarType.INT64
     shape_ = ones_like(g, repeats, dtype)
     self = g.op("Expand", self, shape_)
@@ -4046,9 +3940,7 @@ def repeat(g: jit_utils.GraphContext, self, repeats):
 
 @_onnx_symbolic("aten::repeat_interleave")
 @_beartype.beartype
-def repeat_interleave(
-    g: jit_utils.GraphContext, self, repeats, dim=None, output_size=None
-):
+def repeat_interleave(g, self, repeats, dim=None, output_size=None):
     input = self
     # if dim is None flatten
     # By default, use the flattened input array, and return a flat output array
@@ -4153,7 +4045,7 @@ def repeat_interleave(
 @_onnx_symbolic("aten::pixel_shuffle")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def pixel_shuffle(g: jit_utils.GraphContext, self, upscale_factor):
+def pixel_shuffle(g, self, upscale_factor):
     dims = symbolic_helper._get_tensor_sizes(self)
     if len(dims) != 4:
         return symbolic_helper._unimplemented(
@@ -4226,7 +4118,7 @@ def pixel_shuffle(g: jit_utils.GraphContext, self, upscale_factor):
 @_onnx_symbolic("aten::pixel_unshuffle")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def pixel_unshuffle(g: jit_utils.GraphContext, self, downscale_factor):
+def pixel_unshuffle(g, self, downscale_factor):
     dims = symbolic_helper._get_tensor_sizes(self)
     if len(dims) != 4:
         return symbolic_helper._unimplemented(
@@ -4295,7 +4187,7 @@ def pixel_unshuffle(g: jit_utils.GraphContext, self, downscale_factor):
 
 @_beartype.beartype
 def _generic_rnn(
-    g: jit_utils.GraphContext,
+    g,
     variant,
     input,
     initial_states,
@@ -4527,7 +4419,7 @@ def _generic_rnn(
 @symbolic_helper.parse_args("v", "v", "v", "i", "i", "f", "i", "i", "i")
 @_beartype.beartype
 def _lstm_full(
-    g: jit_utils.GraphContext,
+    g,
     input,
     hidden_v,
     weight_v,
@@ -4559,7 +4451,7 @@ def _lstm_full(
 @symbolic_helper.parse_args("v", "v", "v", "v", "i", "i", "f", "i", "i")
 @_beartype.beartype
 def _lstm_packed(
-    g: jit_utils.GraphContext,
+    g,
     input,
     batch_sizes,
     hidden_v,
@@ -4590,7 +4482,7 @@ def _lstm_packed(
 
 @_onnx_symbolic("aten::lstm")
 @_beartype.beartype
-def lstm(g: jit_utils.GraphContext, *args):
+def lstm(g, *args):
     if symbolic_helper._is_tensor_list(args[3]):
         return _lstm_packed(g, *args)
     else:
@@ -4599,7 +4491,7 @@ def lstm(g: jit_utils.GraphContext, *args):
 
 @_onnx_symbolic("aten::lstm_cell")
 @_beartype.beartype
-def lstm_cell(g: jit_utils.GraphContext, self, hidden, w_ih, w_hh, b_ih, b_hh):
+def lstm_cell(g, self, hidden, w_ih, w_hh, b_ih, b_hh):
     input = symbolic_helper._unsqueeze_helper(g, self, [0])
     hidden = symbolic_helper._unpack_list(hidden)
     hidden = [symbolic_helper._unsqueeze_helper(g, x, [0]) for x in hidden]
@@ -4702,7 +4594,7 @@ def _one_hidden_rnn(kind: str):
 @_onnx_symbolic("aten::_dim_arange")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def _dim_arange(g: jit_utils.GraphContext, like, dim):
+def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op(
         "Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0
@@ -4716,7 +4608,7 @@ def _dim_arange(g: jit_utils.GraphContext, like, dim):
 
 @_onnx_symbolic("aten::detach")
 @_beartype.beartype
-def detach(g: jit_utils.GraphContext, input):
+def detach(g, input):
     # Erase aten::detach nodes because ONNX is inference only
     return input
 
@@ -4724,7 +4616,7 @@ def detach(g: jit_utils.GraphContext, input):
 @_onnx_symbolic("aten::contiguous")
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
-def contiguous(g: jit_utils.GraphContext, input, memory_format):
+def contiguous(g, input, memory_format):
     if memory_format > 2:  # allower values are any, preserve and contiguous_format
         raise errors.SymbolicValueError(
             "onnx memory_format support is not implemented", input
@@ -4735,7 +4627,7 @@ def contiguous(g: jit_utils.GraphContext, input, memory_format):
 @_onnx_symbolic("aten::_pack_padded_sequence")
 @symbolic_helper.parse_args("v", "v", "i")
 @_beartype.beartype
-def _pack_padded_sequence(g: jit_utils.GraphContext, input, lengths, batch_first):
+def _pack_padded_sequence(g, input, lengths, batch_first):
     # Currently there is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
@@ -4757,12 +4649,7 @@ def _pack_padded_sequence(g: jit_utils.GraphContext, input, lengths, batch_first
 @symbolic_helper.parse_args("v", "v", "i", "t", "v")
 @_beartype.beartype
 def _pad_packed_sequence(
-    g: jit_utils.GraphContext,
-    data,
-    batch_sizes,
-    batch_first,
-    padding_value,
-    total_length,
+    g, data, batch_sizes, batch_first, padding_value, total_length
 ):
     # Ignore total_length as it is not supported in _symbolic_pad_packed_sequence
     # It is only useful/used when training using data_parallel model, so
@@ -4775,7 +4662,7 @@ def _pad_packed_sequence(
 
 @_onnx_symbolic("aten::randn")
 @_beartype.beartype
-def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
+def randn(g, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -4802,7 +4689,7 @@ def randn(g: jit_utils.GraphContext, shapes, dtype, *options):
 
 @_onnx_symbolic("aten::rand")
 @_beartype.beartype
-def rand(g: jit_utils.GraphContext, shapes, dtype, *options):
+def rand(g, shapes, dtype, *options):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
         scalar_type = _type_utils.JitScalarType.FLOAT
@@ -4830,13 +4717,7 @@ def rand(g: jit_utils.GraphContext, shapes, dtype, *options):
 @_onnx_symbolic("aten::randn_like")
 @_beartype.beartype
 def randn_like(
-    g: jit_utils.GraphContext,
-    self,
-    dtype,
-    layout=None,
-    device=None,
-    pin_memory=False,
-    memory_format=None,
+    g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
@@ -4849,13 +4730,7 @@ def randn_like(
 @_onnx_symbolic("aten::rand_like")
 @_beartype.beartype
 def rand_like(
-    g: jit_utils.GraphContext,
-    self,
-    dtype,
-    layout=None,
-    device=None,
-    pin_memory=False,
-    memory_format=None,
+    g, self, dtype, layout=None, device=None, pin_memory=False, memory_format=None
 ):
     dtype = symbolic_helper._get_const(dtype, "i", "dtype")
     if dtype is None:
@@ -4868,7 +4743,7 @@ def rand_like(
 @_onnx_symbolic("aten::rrelu")
 @symbolic_helper.parse_args("v", "f", "f", "i", "none")
 @_beartype.beartype
-def rrelu(g: jit_utils.GraphContext, input, lower, upper, training, generator):
+def rrelu(g, input, lower, upper, training, generator):
     if not training:
         slope = (upper + lower) / 2.0
         return g.op("LeakyRelu", input, alpha_f=slope)
@@ -4878,7 +4753,7 @@ def rrelu(g: jit_utils.GraphContext, input, lower, upper, training, generator):
 
 @_onnx_symbolic("aten::bernoulli")
 @_beartype.beartype
-def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
+def bernoulli(g, input, generator=None, out=None):
     if out is not None:
         symbolic_helper._unimplemented(
             "Bernoulli", "out parameter is not supported for bernoulli", input
@@ -4909,7 +4784,7 @@ def bernoulli(g: jit_utils.GraphContext, input, generator=None, out=None):
 @_onnx_symbolic("aten::log_sigmoid")
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def log_sigmoid(g: jit_utils.GraphContext, input):
+def log_sigmoid(g, input):
     p = g.op("Sigmoid", input)
     return g.op("Log", p)
 
@@ -4917,7 +4792,7 @@ def log_sigmoid(g: jit_utils.GraphContext, input):
 @_onnx_symbolic("aten::erf")
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def erf(g: jit_utils.GraphContext, input):
+def erf(g, input):
     return g.op("Erf", input)
 
 
@@ -4925,7 +4800,7 @@ def erf(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True, False, False)
 @symbolic_helper.parse_args("v", "i", "i")
 @_beartype.beartype
-def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
+def flatten(g, input, start_dim, end_dim):
     dim = symbolic_helper._get_tensor_rank(input)
     if dim is None:
         return symbolic_helper._unimplemented(
@@ -4950,7 +4825,7 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
 @_onnx_symbolic("aten::nonzero")
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def nonzero(g: jit_utils.GraphContext, input):
+def nonzero(g, input):
     """Emitted from `torch.nonzero(x, as_tuple=False)`"""
     return t(g, g.op("NonZero", input))
 
@@ -4958,21 +4833,21 @@ def nonzero(g: jit_utils.GraphContext, input):
 @_onnx_symbolic("aten::nonzero_numpy")
 # Emitted from `torch.nonzero(x, as_tuple=True)`
 @_beartype.beartype
-def nonzero_numpy(g: jit_utils.GraphContext, input, _outputs=None):
+def nonzero_numpy(g, input, _outputs=None):
     return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
 
 @_onnx_symbolic("aten::isnan")
 @symbolic_helper.parse_args("v")
 @_beartype.beartype
-def isnan(g: jit_utils.GraphContext, input):
+def isnan(g, input):
     output = g.op("IsNaN", input)
     return output
 
 
 @_onnx_symbolic("aten::any")
 @_beartype.beartype
-def _any(g: jit_utils.GraphContext, *args):
+def _any(g, *args):
     # aten::any(Tensor self)
     if len(args) == 1:
         input = args[0]
@@ -4991,7 +4866,7 @@ def _any(g: jit_utils.GraphContext, *args):
 
 @_onnx_symbolic("aten::all")
 @_beartype.beartype
-def _all(g: jit_utils.GraphContext, *args):
+def _all(g, *args):
     input = g.op("Not", args[0])
     # aten::all(Tensor self)
     if len(args) == 1:
@@ -5004,7 +4879,7 @@ def _all(g: jit_utils.GraphContext, *args):
 @_onnx_symbolic("aten::narrow")
 @symbolic_helper.parse_args("v", "i", "i", "i")
 @_beartype.beartype
-def narrow(g: jit_utils.GraphContext, input, dim, start, length):
+def narrow(g, input, dim, start, length):
     return symbolic_helper._slice_helper(
         g, input, axes=[dim], starts=[start], ends=[start + length]
     )
@@ -5013,31 +4888,21 @@ def narrow(g: jit_utils.GraphContext, input, dim, start, length):
 @_onnx_symbolic("aten::argmax")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmax(
-    g: jit_utils.GraphContext,
-    input: torch._C.Value,
-    dim: torch._C.Value,
-    keepdim: bool,
-):
+def argmax(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMax")
 
 
 @_onnx_symbolic("aten::argmin")
 @symbolic_helper.parse_args("v", "v", "b")
 @_beartype.beartype
-def argmin(
-    g: jit_utils.GraphContext,
-    input: torch._C.Value,
-    dim: torch._C.Value,
-    keepdim: bool,
-):
+def argmin(g, input: torch._C.Value, dim: torch._C.Value, keepdim: bool):
     return symbolic_helper._argmin_argmax_helper(g, input, dim, keepdim, "ArgMin")
 
 
 @_onnx_symbolic("aten::scatter")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def scatter(g: jit_utils.GraphContext, self, dim, index, src):
+def scatter(g, self, dim, index, src):
     src_type = src.type().scalarType()
     src = symbolic_helper._maybe_get_scalar(src)
     if symbolic_helper._is_value(src):
@@ -5059,7 +4924,7 @@ def scatter(g: jit_utils.GraphContext, self, dim, index, src):
 @_onnx_symbolic("aten::scatter_add")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
+def scatter_add(g, self, dim, index, src):
     scalar_name = symbolic_helper._try_get_scalar_type(self)
     if scalar_name is None:
         return symbolic_helper._unimplemented(
@@ -5077,14 +4942,14 @@ def scatter_add(g: jit_utils.GraphContext, self, dim, index, src):
 
 @_onnx_symbolic("aten::log2")
 @_beartype.beartype
-def log2(g: jit_utils.GraphContext, self):
+def log2(g, self):
     _ln2 = 0.693147180559945309
     return g.op("Div", log(g, self), g.op("Constant", value_t=torch.tensor(_ln2)))
 
 
 @_onnx_symbolic("aten::is_floating_point")
 @_beartype.beartype
-def is_floating_point(g: jit_utils.GraphContext, self):
+def is_floating_point(g, self):
     if symbolic_helper._is_fp(self):
         return g.op("Constant", value_t=torch.BoolTensor([1]))
     return g.op("Constant", value_t=torch.BoolTensor([0]))
@@ -5092,7 +4957,7 @@ def is_floating_point(g: jit_utils.GraphContext, self):
 
 @_onnx_symbolic("aten::__is_")
 @_beartype.beartype
-def __is_(g: jit_utils.GraphContext, self, other):
+def __is_(g, self, other):
     if symbolic_helper._is_none(other):
         if symbolic_helper._is_none(self):
             return g.op("Constant", value_t=torch.BoolTensor([1]))
@@ -5103,13 +4968,13 @@ def __is_(g: jit_utils.GraphContext, self, other):
 @_onnx_symbolic("aten::__isnot_")
 @wrap_logical_op_with_negation
 @_beartype.beartype
-def __isnot_(g: jit_utils.GraphContext, self, other):
+def __isnot_(g, self, other):
     return __is_(g, self, other)
 
 
 @_onnx_symbolic("aten::one_hot")
 @_beartype.beartype
-def one_hot(g: jit_utils.GraphContext, self, num_classes):
+def one_hot(g, self, num_classes):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     # onnxruntime supports limited type combinations for OneHot.
     if num_classes.type().scalarType() in {"Byte", "Char", "Int", "Short"}:
@@ -5120,7 +4985,7 @@ def one_hot(g: jit_utils.GraphContext, self, num_classes):
 @_onnx_symbolic("aten::gather")
 @symbolic_helper.parse_args("v", "i", "v", "v")
 @_beartype.beartype
-def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
+def gather(g, self, dim, index, sparse_grad=False):
     if symbolic_helper._maybe_get_const(sparse_grad, "i"):
         return symbolic_helper._unimplemented("gather", "sparse_grad == True", self)
     # NOTE: This workaround is needed since GatherElement is only supported
@@ -5139,7 +5004,7 @@ def gather(g: jit_utils.GraphContext, self, dim, index, sparse_grad=False):
 
 @symbolic_helper.parse_args("v", "is", "i", "i")
 @_beartype.beartype
-def _var_mean(g: jit_utils.GraphContext, input, dim, correction, keepdim):
+def _var_mean(g, input, dim, correction, keepdim):
     if dim is None:
         mean = g.op("ReduceMean", input, keepdims_i=0)
         t_mean = mean
@@ -5175,21 +5040,21 @@ def _var_mean(g: jit_utils.GraphContext, input, dim, correction, keepdim):
 
 @_onnx_symbolic("aten::std")
 @_beartype.beartype
-def std(g: jit_utils.GraphContext, input, *args):
+def std(g, input, *args):
     var, _ = var_mean(g, input, *args)
     return g.op("Sqrt", var)
 
 
 @_onnx_symbolic("aten::var")
 @_beartype.beartype
-def var(g: jit_utils.GraphContext, input, *args):
+def var(g, input, *args):
     var, _ = var_mean(g, input, *args)
     return var
 
 
 @_onnx_symbolic("aten::var_mean")
 @_beartype.beartype
-def var_mean(g: jit_utils.GraphContext, input, *args):
+def var_mean(g, input, *args):
     # var_mean (and all variance-related functions) has multiple signatures, so need to manually figure
     # out the correct arguments:
     # aten::var_mean(Tensor self, bool unbiased)
@@ -5203,7 +5068,7 @@ def var_mean(g: jit_utils.GraphContext, input, *args):
 
 @_onnx_symbolic("aten::std_mean")
 @_beartype.beartype
-def std_mean(g: jit_utils.GraphContext, input, *args):
+def std_mean(g, input, *args):
     var, mean = var_mean(g, input, *args)
     return g.op("Sqrt", var), mean
 
@@ -5211,13 +5076,13 @@ def std_mean(g: jit_utils.GraphContext, input, *args):
 @_onnx_symbolic("aten::logsumexp")
 @symbolic_helper.parse_args("v", "is", "i")
 @_beartype.beartype
-def logsumexp(g: jit_utils.GraphContext, input, dim, keepdim):
+def logsumexp(g, input, dim, keepdim):
     return g.op("ReduceLogSumExp", input, axes_i=dim, keepdims_i=keepdim)
 
 
 @_onnx_symbolic("aten::arange")
 @_beartype.beartype
-def arange(g: jit_utils.GraphContext, *args):
+def arange(g, *args):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("arange", *args)
 
@@ -5300,9 +5165,7 @@ def arange(g: jit_utils.GraphContext, *args):
 
 @_onnx_symbolic("aten::linspace")
 @_beartype.beartype
-def linspace(
-    g: jit_utils.GraphContext, start, end, steps, dtype, layout, device, pin_memory
-):
+def linspace(g, start, end, steps, dtype, layout, device, pin_memory):
     range_tensor = symbolic_helper._arange_helper(g, steps, None)
     step = div(
         g,
@@ -5314,22 +5177,22 @@ def linspace(
 
 @_onnx_symbolic("aten::lift")
 @_beartype.beartype
-def lift(g: jit_utils.GraphContext, self):
+def lift(g, self):
     # at::lift() is a no-op from the perspective of tracing for onnx
     return self
 
 
 @_onnx_symbolic("aten::masked_fill")
 @_beartype.beartype
-def masked_fill(g: jit_utils.GraphContext, self, mask, value):
+def masked_fill(g, self, mask, value):
     mask = _cast_Bool(g, mask, False)  # type: ignore[name-defined]
     value = symbolic_helper._maybe_get_scalar(value)
-    return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
+    return g.op("Where", mask, symbolic_helper._if_scalar_type_as(g, value, self), self)
 
 
 @_onnx_symbolic("aten::index")
 @_beartype.beartype
-def index(g: jit_utils.GraphContext, self, index):
+def index(g, self, index):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at("index", self, index, overload_name="Tensor")
 
@@ -5343,7 +5206,7 @@ def index(g: jit_utils.GraphContext, self, index):
         if not symbolic_helper._is_none(index) and (
             index.type().scalarType() == "Byte" or symbolic_helper._is_bool(index)
         ):
-            if g.opset < 9:
+            if GLOBALS.export_onnx_opset_version < 9:
                 raise errors.SymbolicValueError(
                     "Exporting masked indices are only supported after ONNX opset 9.",
                     self,
@@ -5498,7 +5361,7 @@ def index(g: jit_utils.GraphContext, self, index):
 @symbolic_helper.parse_args("v", "v", "is", "b", "v")
 @_beartype.beartype
 def linalg_norm(
-    g: jit_utils.GraphContext,
+    g,
     self: torch._C.Value,
     ord: torch._C.Value,
     dim: Optional[Sequence[int]],
@@ -5534,7 +5397,7 @@ def linalg_norm(
 @symbolic_helper.parse_args("v", "f", "is", "b", "v")
 @_beartype.beartype
 def linalg_vector_norm(
-    g: jit_utils.GraphContext,
+    g,
     self: torch._C.Value,
     ord: float,
     dim: Optional[Sequence[int]],
@@ -5575,7 +5438,7 @@ def linalg_vector_norm(
 @symbolic_helper.parse_args("v", "v", "is", "b", "v")
 @_beartype.beartype
 def linalg_matrix_norm(
-    g: jit_utils.GraphContext,
+    g,
     self: torch._C.Value,
     ord: torch._C.Value,
     dim: List[int],
@@ -5636,14 +5499,14 @@ def linalg_matrix_norm(
 @_onnx_symbolic("aten::linalg_cross")
 @symbolic_helper.parse_args("v", "v", "i")
 @_beartype.beartype
-def linalg_cross(g: jit_utils.GraphContext, input, other, dim=-1):
+def linalg_cross(g, input, other, dim=-1):
     return cross(g, input, other, dim)
 
 
 @_onnx_symbolic("aten::frobenius_norm")
 @symbolic_helper.parse_args("v", "is", "b")
 @_beartype.beartype
-def frobenius_norm(g: jit_utils.GraphContext, self, dim=None, keepdim=False):
+def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op("Mul", self, self)
     sumsqr = symbolic_helper._reducesum_helper(g, sqr, axes_i=dim, keepdims_i=keepdim)
     return g.op("Sqrt", sumsqr)
@@ -5652,9 +5515,7 @@ def frobenius_norm(g: jit_utils.GraphContext, self, dim=None, keepdim=False):
 @_onnx_symbolic("aten::multinomial")
 @symbolic_helper.parse_args("v", "i", "b", "v")
 @_beartype.beartype
-def multinomial(
-    g: jit_utils.GraphContext, input, num_samples, replacement=False, generator=None
-):
+def multinomial(g, input, num_samples, replacement=False, generator=None):
     if generator is not None and not symbolic_helper._is_none(generator):
         symbolic_helper._unimplemented(
             "Multinomial", "generator is not supported for multinomial", input
@@ -5677,7 +5538,7 @@ def multinomial(
 
 @_onnx_symbolic("aten::baddbmm")
 @_beartype.beartype
-def baddbmm(g: jit_utils.GraphContext, self, batch1, batch2, beta, alpha):
+def baddbmm(g, self, batch1, batch2, beta, alpha):
     dtype = self.type().scalarType()
     batch_mul = matmul(g, batch1, batch2)
     mul_a = mul(
@@ -5698,7 +5559,7 @@ def baddbmm(g: jit_utils.GraphContext, self, batch1, batch2, beta, alpha):
 @_onnx_symbolic("aten::meshgrid")
 @symbolic_helper.parse_args("v", "s")
 @_beartype.beartype
-def meshgrid(g: jit_utils.GraphContext, tensor_list, indexing: Optional[str] = None):
+def meshgrid(g, tensor_list, indexing: Optional[str] = None):
     if indexing is None:
         indexing = "ij"
     elif indexing not in {"ij", "xy"}:
@@ -5730,7 +5591,7 @@ def meshgrid(g: jit_utils.GraphContext, tensor_list, indexing: Optional[str] = N
 
 @_onnx_symbolic("aten::remainder")
 @_beartype.beartype
-def remainder(g: jit_utils.GraphContext, input, other):
+def remainder(g, input, other):
     div = _floor_divide(g, input, other)
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
@@ -5739,7 +5600,7 @@ def remainder(g: jit_utils.GraphContext, input, other):
 @_onnx_symbolic("aten::gelu")
 @symbolic_helper.parse_args("v", "s")
 @_beartype.beartype
-def gelu(g: jit_utils.GraphContext, self: torch._C.Value, approximate: str = "none"):
+def gelu(g, self: torch._C.Value, approximate: str = "none"):
     if approximate == "tanh":
         kBeta = math.sqrt(2 / math.pi)
         kKappa = 0.044715
@@ -5769,9 +5630,7 @@ def gelu(g: jit_utils.GraphContext, self: torch._C.Value, approximate: str = "no
 @symbolic_helper.quantized_args(True, False, False, False)
 @symbolic_helper.parse_args("v", "i", "v", "v", "f", "i")
 @_beartype.beartype
-def group_norm(
-    g: jit_utils.GraphContext, input, num_groups, weight, bias, eps, cudnn_enabled
-):
+def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "group_norm",
@@ -5851,7 +5710,7 @@ def group_norm(
 @_onnx_symbolic("aten::_weight_norm")
 @symbolic_helper.parse_args("v", "v", "i")
 @_beartype.beartype
-def _weight_norm(g: jit_utils.GraphContext, weight_v, weight_g, dim):
+def _weight_norm(g, weight_v, weight_g, dim):
     rank = symbolic_helper._get_tensor_rank(weight_v)
     if rank is not None:
         # W = g * ((v) / ||v||)
@@ -5879,7 +5738,7 @@ def _weight_norm(g: jit_utils.GraphContext, weight_v, weight_g, dim):
 
 @_onnx_symbolic("aten::dim")
 @_beartype.beartype
-def dim(g: jit_utils.GraphContext, self):
+def dim(g, self):
     """Implement the dim functionality available for a pytorch tensor in ONNX"""
     # ONNX does not support dim directly in this opset so we can use 2 ops to get the info
     shape = g.op("Shape", self)
@@ -5888,19 +5747,19 @@ def dim(g: jit_utils.GraphContext, self):
 
 @_onnx_symbolic("aten::__getitem_")
 @_beartype.beartype
-def __getitem_(g: jit_utils.GraphContext, self, i):
+def __getitem_(g, self, i):
     return select(g, self, g.op("Constant", value_t=torch.tensor([0])), i)
 
 
 @_onnx_symbolic("aten::item")
 @_beartype.beartype
-def item(g: jit_utils.GraphContext, self):
+def item(g, self):
     return self
 
 
 @_onnx_symbolic("aten::take")
 @_beartype.beartype
-def take(g: jit_utils.GraphContext, self, index):
+def take(g, self, index):
     self_flattened = symbolic_helper._reshape_helper(
         g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
     )
@@ -5910,7 +5769,7 @@ def take(g: jit_utils.GraphContext, self, index):
 
 
 @_beartype.beartype
-def _kl_div_log_target_impl(g: jit_utils.GraphContext, input, target):
+def _kl_div_log_target_impl(g, input, target):
     diff_ = sub(g, target, input)
     exp_ = exp(g, target)
     output = mul(g, exp_, diff_)
@@ -5918,7 +5777,7 @@ def _kl_div_log_target_impl(g: jit_utils.GraphContext, input, target):
 
 
 @_beartype.beartype
-def _kl_div_non_log_target_impl(g: jit_utils.GraphContext, input, target):
+def _kl_div_non_log_target_impl(g, input, target):
     log_ = log(g, target)
     diff_ = sub(g, log_, input)
     output_pos = mul(g, target, diff_)
@@ -5931,7 +5790,7 @@ def _kl_div_non_log_target_impl(g: jit_utils.GraphContext, input, target):
 @_onnx_symbolic("aten::kl_div")
 @symbolic_helper.parse_args("v", "v", "i", "b")
 @_beartype.beartype
-def kl_div(g: jit_utils.GraphContext, input, target, reduction, log_target):
+def kl_div(g, input, target, reduction, log_target):
     if log_target:
         output = _kl_div_log_target_impl(g, input, target)
     else:
@@ -5953,7 +5812,7 @@ def kl_div(g: jit_utils.GraphContext, input, target, reduction, log_target):
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "v", "is", "i")
 @_beartype.beartype
-def as_strided(g: jit_utils.GraphContext, self, sizes, strides, offset=None):
+def as_strided(g, self, sizes, strides, offset=None):
     sizes = symbolic_helper._maybe_get_const(sizes, "is")
     rank = len(strides)
     self_1d = symbolic_helper._reshape_helper(
@@ -5999,7 +5858,7 @@ def as_strided(g: jit_utils.GraphContext, self, sizes, strides, offset=None):
 
 @_onnx_symbolic("aten::__derive_index")
 @_beartype.beartype
-def __derive_index(g: jit_utils.GraphContext, index, start, step):
+def __derive_index(g, index, start, step):
     return g.op("Add", start, g.op("Mul", index, step))
 
 
@@ -6013,7 +5872,7 @@ def __derive_index(g: jit_utils.GraphContext, index, start, step):
 #  push(stack, 0);
 # }
 @_beartype.beartype
-def __range_length(g: jit_utils.GraphContext, lo, hi, step):
+def __range_length(g, lo, hi, step):
     sub = g.op("Sub", hi, lo)
     div = g.op("Ceil", true_divide(g, sub, step))
     return g.op("Cast", div, to_i=_C_onnx.TensorProtoDataType.INT64)
@@ -6021,7 +5880,7 @@ def __range_length(g: jit_utils.GraphContext, lo, hi, step):
 
 @_onnx_symbolic("aten::linear")
 @_beartype.beartype
-def linear(g: jit_utils.GraphContext, input, weight, bias):
+def linear(g, input, weight, bias):
     rank = symbolic_helper._get_tensor_rank(input)
     weight = t(g, weight)
     if rank == 2 and not bias.node().mustBeNone():
@@ -6040,7 +5899,7 @@ def linear(g: jit_utils.GraphContext, input, weight, bias):
 @symbolic_helper.parse_args("v", "b", "i", "v", "v", "v", "v")
 @_beartype.beartype
 def hann_window(
-    g: jit_utils.GraphContext,
+    g,
     window_length,
     periodic=True,
     dtype: Optional[int] = None,
@@ -6079,20 +5938,20 @@ def hann_window(
 
 @_onnx_symbolic("aten::mv")
 @_beartype.beartype
-def mv(g: jit_utils.GraphContext, self, vec):
+def mv(g, self, vec):
     return matmul(g, self, vec)
 
 
 @_onnx_symbolic("aten::dot")
 @_beartype.beartype
-def dot(g: jit_utils.GraphContext, self, other):
+def dot(g, self, other):
     return matmul(g, self, other)
 
 
 @_onnx_symbolic("aten::movedim")
 @symbolic_helper.parse_args("v", "t", "t")
 @_beartype.beartype
-def movedim(g: jit_utils.GraphContext, self, source, destination):
+def movedim(g, self, source, destination):
     # This is a pythonic implementation mostly taken from aten/src/ATen/native/TensorShape.cpp::movedim
     source = source.view(-1)
     destination = destination.view(-1)
@@ -6127,7 +5986,7 @@ def movedim(g: jit_utils.GraphContext, self, source, destination):
 @_onnx_symbolic("aten::fill")
 @symbolic_helper.parse_args("v", "v")
 @_beartype.beartype
-def fill(g: jit_utils.GraphContext, self, value):
+def fill(g, self, value):
     dtype = self.type().scalarType()
     if dtype is None:
         dtype = _type_utils.JitScalarType.FLOAT
@@ -6139,7 +5998,7 @@ def fill(g: jit_utils.GraphContext, self, value):
 
 @_onnx_symbolic("aten::index_add")
 @_beartype.beartype
-def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
+def index_add(g, self, dim, index, other, alpha=None):
     warnings.warn(
         "Warning: ONNX export does not support duplicated values in 'index' field, "
         + "this will cause the ONNX model to be incorrect."
@@ -6211,7 +6070,7 @@ def index_add(g: jit_utils.GraphContext, self, dim, index, other, alpha=None):
 @_onnx_symbolic("aten::roll")
 @symbolic_helper.parse_args("v", "is", "is")
 @_beartype.beartype
-def roll(g: jit_utils.GraphContext, self, shifts, dims):
+def roll(g, self, shifts, dims):
     assert len(shifts) == len(dims)
 
     result = self
@@ -6233,7 +6092,7 @@ def roll(g: jit_utils.GraphContext, self, shifts, dims):
 @_onnx_symbolic("aten::cross")
 @symbolic_helper.parse_args("v", "v", "i")
 @_beartype.beartype
-def cross(g: jit_utils.GraphContext, input, other, dim=None):
+def cross(g, input, other, dim=None):
     dim = symbolic_helper._get_dim_for_cross(input, dim)
     # If we have two tensors such that
     # A = [a, b, c], B = [d, e, f], we permute the tensor such that we have
@@ -6252,13 +6111,7 @@ def cross(g: jit_utils.GraphContext, input, other, dim=None):
 
 @_onnx_symbolic("aten::cdist")
 @_beartype.beartype
-def cdist(
-    g: jit_utils.GraphContext,
-    x1,
-    x2,
-    p=2.0,
-    compute_mode="use_mm_for_euclid_dist_if_necessary",
-):
+def cdist(g, x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
     # X1.shape = (B * P * D), X2.shape = (B * R * D)
     # In order to respect numpy style broadcasting as demonstrated in
     # https://github.com/onnx/onnx/blob/main/docs/Broadcasting.md
@@ -6276,7 +6129,7 @@ def cdist(
 
 @_onnx_symbolic("aten::lerp")
 @_beartype.beartype
-def lerp(g: jit_utils.GraphContext, self, end, weight):
+def lerp(g, self, end, weight):
     # Conditional for better numeric. This has been discussed in
     # https://github.com/pytorch/pytorch/pull/18871
     diff = g.op("Sub", end, self)
@@ -6298,7 +6151,7 @@ def lerp(g: jit_utils.GraphContext, self, end, weight):
 
 @_onnx_symbolic("aten::broadcast_tensors")
 @_beartype.beartype
-def broadcast_tensors(g: jit_utils.GraphContext, self):
+def broadcast_tensors(g, self):
     all_tensors = symbolic_helper._unpack_list(self)
     t_with_final_shape = zeros_like(g, all_tensors[0])
 
@@ -6312,14 +6165,14 @@ def broadcast_tensors(g: jit_utils.GraphContext, self):
 
 
 @_onnx_symbolic("aten::is_pinned")
-def is_pinned(g: jit_utils.GraphContext, self, device=None):
+def is_pinned(g, self, device=None):
     # Unused by ONNX.
     return None
 
 
 @_onnx_symbolic("prim::ConstantSplit")
 @_beartype.beartype
-def prim_constant_split(g: jit_utils.GraphContext, self, split_size, dim):
+def prim_constant_split(g, self, split_size, dim):
     size = symbolic_helper._get_tensor_dim_size(self, dim)
     if size is None:
         return symbolic_helper._unimplemented(
@@ -6338,7 +6191,7 @@ def prim_constant_split(g: jit_utils.GraphContext, self, split_size, dim):
 # method, and use the desugared version
 @_onnx_symbolic("prim::ConstantChunk")
 @_beartype.beartype
-def prim_constant_chunk(g: jit_utils.GraphContext, self, chunks, dim):
+def prim_constant_chunk(g, self, chunks, dim):
     dim_size = symbolic_helper._get_tensor_dim_size(self, dim)
     if dim_size is None:
         return symbolic_helper._unimplemented(
@@ -6350,19 +6203,19 @@ def prim_constant_chunk(g: jit_utils.GraphContext, self, chunks, dim):
 
 @_onnx_symbolic("prim::shape")
 @_beartype.beartype
-def prim_shape(g: jit_utils.GraphContext, self):
+def prim_shape(g, self):
     return g.op("Shape", self)
 
 
 @_onnx_symbolic("prim::max")
 @_beartype.beartype
-def prim_max(g: jit_utils.GraphContext, self, other):
+def prim_max(g, self, other):
     return _op_with_optional_float_cast(g, "Max", self, other, opset_before=12)
 
 
 @_onnx_symbolic("prim::min")
 @_beartype.beartype
-def prim_min(g: jit_utils.GraphContext, self, other=None):
+def prim_min(g, self, other=None):
     if not other:
         if symbolic_helper._is_packed_list(self):
             self = stack(g, self, g.op("Constant", value_t=torch.tensor([0])))
@@ -6372,27 +6225,25 @@ def prim_min(g: jit_utils.GraphContext, self, other=None):
 
 @_onnx_symbolic("prim::data")
 @_beartype.beartype
-def prim_data(g: jit_utils.GraphContext, self):
+def prim_data(g, self):
     return self
 
 
 @_onnx_symbolic("prim::layout")
-def prim_layout(g: jit_utils.GraphContext, self):
+def prim_layout(g, self):
     # Unused by ONNX.
     return None
 
 
 @_onnx_symbolic("prim::ListConstruct")
 @_beartype.beartype
-def prim_list_construct(g: jit_utils.GraphContext, *inputs, **kwargs):
+def prim_list_construct(g, *inputs, **kwargs):
     return None
 
 
 @_onnx_symbolic("prim::ListUnpack")
 @_beartype.beartype
-def prim_list_unpack(
-    g: jit_utils.GraphContext, *inputs, **kwargs
-) -> Optional[List[_C.Value]]:
+def prim_list_unpack(g, *inputs, **kwargs) -> Optional[List[_C.Value]]:
     if len(inputs) == 1 and inputs[0].node().kind() == "prim::ListConstruct":
         # Cancel the previous node if it is ListConstruct by returning its inputs
         # TODO(justinchuby): Use a public method in the helper module
@@ -6403,13 +6254,13 @@ def prim_list_unpack(
 
 @_onnx_symbolic("prim::TupleConstruct")
 @_beartype.beartype
-def prim_tuple_construct(g: jit_utils.GraphContext, *inputs, **kwargs):
+def prim_tuple_construct(g, *inputs, **kwargs):
     return None
 
 
 @_onnx_symbolic("prim::Uninitialized")
 @_beartype.beartype
-def prim_uninitialized(g: jit_utils.GraphContext, *inputs, **kwargs):
+def prim_uninitialized(g, *inputs, **kwargs):
     return None
 
 
@@ -6419,13 +6270,13 @@ def prim_uninitialized(g: jit_utils.GraphContext, *inputs, **kwargs):
 # this doesn't do anything in runtime and is a noop in ONNX
 @_onnx_symbolic("prim::unchecked_cast")
 @_beartype.beartype
-def prim_unchecked_cast(g: jit_utils.GraphContext, self):
+def prim_unchecked_cast(g, self):
     return self
 
 
 @_onnx_symbolic("prim::dtype")
 @_beartype.beartype
-def prim_dtype(g: jit_utils.GraphContext, self):
+def prim_dtype(g, self):
     scalar_name = symbolic_helper._try_get_scalar_type(self)
     if scalar_name is None:
         scalar_name = "Float"
@@ -6436,7 +6287,7 @@ def prim_dtype(g: jit_utils.GraphContext, self):
 
 @_onnx_symbolic("prim::tolist")
 @_beartype.beartype
-def prim_tolist(g: jit_utils.GraphContext, input, dim_val, elem_ty_val):
+def prim_tolist(g, input, dim_val, elem_ty_val):
     """tolist is currently supported only for 1D input tensors.
 
     dim_val and elem_ty_val represent dimension and type annotations
@@ -6453,41 +6304,41 @@ def prim_tolist(g: jit_utils.GraphContext, input, dim_val, elem_ty_val):
 # -----------------------------------------------------------------------------
 @_onnx_symbolic("prim::device")
 @_beartype.beartype
-def prim_device(g: jit_utils.GraphContext, *inputs, **kwargs) -> None:
-    output_type = g.original_node.output().type()
+def prim_device(ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
+    output_type = ctx.cur_node.output().type()
     if isinstance(output_type, _C.DeviceObjType):
         return None
 
     return symbolic_helper._unimplemented(
         "prim::device",
         f"output type should be 'DeviceObjType', not '{output_type.kind()}'",
-        g.original_node.output(),
+        ctx.cur_node.output(),
     )
 
 
 @_onnx_symbolic("prim::Loop")
 @_beartype.beartype
-def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
-    node = g.original_node
-    env = g.env
-    params_dict = g.params_dict
+def prim_loop(ctx: SymbolicContext, g, *inputs, **attrs):
+    n = ctx.cur_node
+    env = ctx.env
+    params_dict = ctx.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
 
-    old_blocks = tuple(node.blocks())
-    new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
-        g, "Loop", *inputs, outputs=node.outputsSize(), n_blocks=len(old_blocks)
+    new_op_outputs = g.op("Loop", *inputs, outputs=n.outputsSize())
+    new_node = (
+        new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
     )
-
-    for old_block, new_block_context in zip(old_blocks, new_block_contexts):
+    for b in n.blocks():
+        new_block = new_node.addBlock()
         # Copy input metadata to subblock
         #
         #   prim::Loop(iter, cond, input_1, ..., input_n)
         #     block0(iter, input_1, ..., input_n)
         #
         # For `Loop` node, copy metadata for `iter`, `input_1`, ..., `input_n`.
-        for i, b_in in enumerate(old_block.inputs()):
+        for i, b_in in enumerate(b.inputs()):
             if i == 0 and i < len(inputs):
                 b_in.setType(inputs[i].type())
             # For optional block inputs, they may switch between None not-None inside
@@ -6500,13 +6351,9 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             ):
                 b_in.setType(inputs[i + 1].type())
         torch._C._jit_pass_onnx_block(
-            old_block,
-            new_block_context.block,
-            operator_export_type,
-            env,
-            False,
+            b, new_block, operator_export_type, env, False  # type:ignore[arg-type]
         )
-    fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
+    new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
         new_node, opset_version
     )
     # Run shape type inference for Loop after subblock is converted.
@@ -6514,16 +6361,16 @@ def prim_loop(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
         torch._C._jit_pass_onnx_node_shape_type_inference(
             new_node, params_dict, opset_version
         )
-    return fixed_outputs
+    return new_op_outputs
 
 
 @_onnx_symbolic("prim::If")
 @_beartype.beartype
-def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
-    n = g.original_node
-    block = g.block
-    env = g.env
-    params_dict = g.params_dict
+def prim_if(ctx: SymbolicContext, g, *inputs, **attrs):
+    n = ctx.cur_node
+    block = ctx.onnx_block
+    env = ctx.env
+    params_dict = ctx.params_dict
 
     operator_export_type = GLOBALS.operator_export_type
     opset_version = GLOBALS.export_onnx_opset_version
@@ -6564,8 +6411,8 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
         env = torch._C._jit_pass_onnx_block(
             current_b,
             block,
-            operator_export_type,
-            env,
+            operator_export_type,  # type:ignore[arg-type]
+            env,  # type:ignore[arg-type]
             True,
         )
         if_output_list = list(n.outputs())
@@ -6582,20 +6429,20 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             final_b_list.append(onnx_b)
         return final_b_list
     else:
-        old_blocks = tuple(n.blocks())
-        new_op_outputs, new_block_contexts, new_node = jit_utils.add_op_with_blocks(
-            g, "If", *inputs, outputs=n.outputsSize(), n_blocks=len(old_blocks)
+        new_op_outputs = g.op("If", *inputs, outputs=n.outputsSize())
+        new_node = (
+            new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
         )
-
-        for old_block, new_block_context in zip(old_blocks, new_block_contexts):
+        for b in n.blocks():
+            new_block = new_node.addBlock()
             torch._C._jit_pass_onnx_block(
-                old_block,
-                new_block_context.block,
-                operator_export_type,
+                b,
+                new_block,
+                operator_export_type,  # type:ignore[arg-type]
                 env,
                 False,
             )
-        fixed_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
+        new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(
             new_node, opset_version
         )
         # Run shape type inference for If after subblock is converted.
@@ -6603,44 +6450,44 @@ def prim_if(g: jit_utils.GraphContext, *inputs, **attrs) -> List[_C.Value]:
             torch._C._jit_pass_onnx_node_shape_type_inference(
                 new_node, params_dict, opset_version
             )
-        return fixed_outputs
+        return new_op_outputs
 
 
 @_onnx_symbolic("prim::Constant")
 @_beartype.beartype
-def prim_constant(g: jit_utils.GraphContext, *inputs, **attrs):
-    node = g.original_node
+def prim_constant(ctx: SymbolicContext, g, *inputs, **attrs):
+    n = ctx.cur_node
 
-    if node.mustBeNone():
+    if n.mustBeNone():
         return None
     # This must go before checking for string values, because some device constants
     # have string values, but we want to keep them as unconverted Device types so
     # that eq() can work on them.
-    if isinstance(node.output().type(), _C.DeviceObjType):
+    if isinstance(n.output().type(), _C.DeviceObjType):
         return None
-    if node.kindOf("value") == "t":
-        return g.op("Constant", value_t=symbolic_helper._node_get(node, "value"))
-    if node.kindOf("value") == "s":
-        return g.op("Constant", value_s=symbolic_helper._node_get(node, "value"))
-    if node.output().type().isSubtypeOf(
+    if n.kindOf("value") == "t":
+        return g.op("Constant", value_t=symbolic_helper._node_get(n, "value"))
+    if n.kindOf("value") == "s":
+        return g.op("Constant", value_s=symbolic_helper._node_get(n, "value"))
+    if n.output().type().isSubtypeOf(
         _C.ListType.ofInts()
-    ) or node.output().type().isSubtypeOf(_C.ListType.ofFloats()):
+    ) or n.output().type().isSubtypeOf(_C.ListType.ofFloats()):
         return g.op(
-            "Constant", value_t=torch.tensor(symbolic_helper._node_get(node, "value"))
+            "Constant", value_t=torch.tensor(symbolic_helper._node_get(n, "value"))
         )
 
     raise errors.SymbolicValueError(
-        f"Unsupported prim::Constant kind: '{node.kindOf('value')}'. "
+        f"Unsupported prim::Constant kind: `{n.kindOf('value')}`. "
         f"Please send a bug report at {_constants.PYTORCH_GITHUB_ISSUES_URL}.",
-        node.output(),
+        n.output(),
     )
 
 
 @_onnx_symbolic("onnx::Placeholder")
 @_beartype.beartype
-def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
-    node = g.original_node
-    block = g.block
-    env = g.env
+def onnx_placeholder(ctx: SymbolicContext, g, *inputs, **attrs):
+    n = ctx.cur_node
+    block = ctx.onnx_block
+    env = ctx.env
 
-    return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
+    return torch._C._jit_onnx_convert_pattern_from_subblock(block, n, env)

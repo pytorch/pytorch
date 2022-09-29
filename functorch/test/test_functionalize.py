@@ -4,7 +4,8 @@ import functorch
 from unittest.mock import patch
 import functools
 from torch.testing._internal.common_utils import run_tests
-import test_aotdispatch
+import test_compile_cache
+import test_pythonkey
 
 
 def make_functionalize_fn(fn):
@@ -37,8 +38,10 @@ def make_functionalize_test(cls):
     return FunctionalizeTest
 
 
-FunctionalizeTestPythonKeyAOT = make_functionalize_test(test_aotdispatch.TestAOTAutograd)
-FunctionalizeTestPythonKeyPartitioning = make_functionalize_test(test_aotdispatch.TestPartitioning)
+FunctionalizeTestCompileCache = make_functionalize_test(test_compile_cache.TestCompileCache)
+FunctionalizeTestCompileCacheStaticArgs = make_functionalize_test(test_compile_cache.TestCompileCacheStaticArgs)
+FunctionalizeTestPythonKeyAOT = make_functionalize_test(test_pythonkey.TestAOTAutograd)
+FunctionalizeTestPythonKeyPartitioning = make_functionalize_test(test_pythonkey.TestPartitioning)
 
 if __name__ == "__main__":
     run_tests()

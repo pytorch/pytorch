@@ -142,24 +142,20 @@ class MetaConverter:
         arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
-        # Don't make parameters have symbolic shapes; they are assumed to stay
-        # constant size across training runs
-        make_symbolic = shape_env is not None and not isinstance(t, torch.nn.Parameter)
-
         def sym(name, x):
-            if make_symbolic:
-                return shape_env.create_symint(f"t{arg_cnt}.{name}()", x)
-            else:
+            if shape_env is None:
                 return x
+            else:
+                return shape_env.create_symint(f"t{arg_cnt}.{name}()", x)
 
         def sym_list(name, xs):
-            if make_symbolic:
+            if shape_env is None:
+                return xs
+            else:
                 return [
                     shape_env.create_symint(f"t{arg_cnt}.{name}({i})", x)
                     for i, x in enumerate(xs)
                 ]
-            else:
-                return xs
 
         def sym_size(t):
             return sym_list("size", t.size())

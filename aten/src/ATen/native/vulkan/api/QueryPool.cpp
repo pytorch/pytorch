@@ -2,7 +2,6 @@
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
 
-#include <cmath>
 #include <iostream>
 
 namespace at {
@@ -10,16 +9,9 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-namespace {
-// On Mali gpus timestamp_period seems to return 0.
-// For some reason when 52.08 is used op runtimes seem to make more sense
-// TODO: Figure out what is special about 52.08
-constexpr int64_t default_ns_per_tick = 52; // lround(52.08f);
-} // namespace
-
-QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
+QueryPool::QueryPool(const VkDevice device, const QueryPoolConfig& config)
     : mutex_{},
-      device_(adapter_p->device_handle()),
+      device_(device),
       config_(config),
       querypool_(VK_NULL_HANDLE),
       shader_log_{},
@@ -36,10 +28,6 @@ QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
   VK_CHECK(vkCreateQueryPool(device_, &info, nullptr, &querypool_));
 
   shader_log_.reserve(config_.initialReserveSize);
-
-  TORCH_CHECK(adapter_p, "Valid GPU device must be created for QueryPool");
-  ns_per_tick_ = std::lround(adapter_p->timestamp_period());
-  ns_per_tick_ = (ns_per_tick_ == 0) ? default_ns_per_tick : ns_per_tick_;
 }
 
 QueryPool::~QueryPool() {
@@ -57,7 +45,7 @@ void QueryPool::reset(const CommandBuffer& cmd) {
   shader_log_.clear();
 }
 
-size_t QueryPool::write_timestamp(const CommandBuffer& cmd) {
+uint32_t QueryPool::write_timestamp(const CommandBuffer& cmd) {
   TORCH_CHECK(
       in_use_ < config_.maxQueryCount,
       "Vulkan QueryPool: Exceeded the maximum number of queries "
@@ -105,7 +93,7 @@ void QueryPool::shader_profile_end(
     const uint32_t log_idx) {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  size_t query_idx = write_timestamp(cmd);
+  uint32_t query_idx = write_timestamp(cmd);
 
   shader_log_[log_idx].end_query_idx = query_idx;
 }
@@ -129,8 +117,9 @@ void QueryPool::extract_results() {
       flags)); // flags
 
   for (ShaderDuration& entry : shader_log_) {
-    entry.start_time_ns = query_data.at(entry.start_query_idx) * ns_per_tick_;
-    entry.end_time_ns = query_data.at(entry.end_query_idx) * ns_per_tick_;
+    entry.start_time_ns = query_data.at(entry.start_query_idx);
+    entry.end_time_ns = query_data.at(entry.end_query_idx);
+
     entry.execution_duration_ns = entry.end_time_ns - entry.start_time_ns;
   }
 }

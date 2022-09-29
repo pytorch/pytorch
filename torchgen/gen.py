@@ -1451,7 +1451,6 @@ def get_native_function_definitions(
     backend_idx: BackendIndex,
     selector: SelectiveBuilder,
     rocm: bool,
-    symint: bool,
     skip_dispatcher_op_registration: bool,
     gen_dispatch_helpers: bool,
 ) -> List[str]:
@@ -1465,7 +1464,6 @@ def get_native_function_definitions(
         Target.NAMESPACED_DEFINITION,
         selector,
         rocm=rocm,
-        symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
     )
@@ -1474,7 +1472,6 @@ def get_native_function_definitions(
         Target.ANONYMOUS_DEFINITION,
         selector,
         rocm=rocm,
-        symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
     )
@@ -1483,7 +1480,6 @@ def get_native_function_definitions(
         Target.REGISTRATION,
         selector,
         rocm=rocm,
-        symint=symint,
         class_method_name=None,
         skip_dispatcher_op_registration=skip_dispatcher_op_registration,
     )
@@ -1553,7 +1549,6 @@ def get_namespaced_declaration(
     backend_idx: BackendIndex,
     selector: SelectiveBuilder,
     rocm: bool,
-    symint: bool,
 ) -> List[str]:
     declarations: List[str] = []
     ns_grouped_kernels: Dict[str, List[str]] = defaultdict(list)
@@ -1565,7 +1560,6 @@ def get_namespaced_declaration(
         rocm=rocm,
         class_method_name=None,
         skip_dispatcher_op_registration=False,
-        symint=symint,
     )
     for f in grouped_native_functions:
         namespace = get_kernel_namespace(f=f, backend_idx=backend_idx).replace(
@@ -1739,7 +1733,6 @@ def gen_aggregated_headers(
                         backend_idx=backend_indices[dispatch_key],
                         selector=selector,
                         rocm=rocm,
-                        symint=True,
                     ),
                 },
             )
@@ -1880,7 +1873,6 @@ def gen_per_operator_headers(
                         Target.NAMESPACED_DECLARATION,
                         selector,
                         rocm=rocm,
-                        symint=True,
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
                     ),
@@ -2192,7 +2184,6 @@ def gen_source_files(
             backend_idx=backend_index,
             selector=selector,
             rocm=rocm,
-            symint=True,
             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
             gen_dispatch_helpers=gen_dispatch_helpers,
         )

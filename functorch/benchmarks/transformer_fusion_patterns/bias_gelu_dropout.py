@@ -1,5 +1,5 @@
 import torch
-from functorch.compile import memory_efficient_pointwise_fusion
+from functorch.compile import memory_efficient_pointwise_fusion, clear_compile_cache
 import benchmark_helper
 
 # ALL comments regarding the patetrns
@@ -21,6 +21,7 @@ def aot_fn(input, bias):
 
 fn = bias_gelu_dropout
 
+clear_compile_cache()
 
 # Set inputs
 device = "cuda"

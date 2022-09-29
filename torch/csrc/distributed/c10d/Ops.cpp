@@ -6,7 +6,6 @@
 
 namespace c10d {
 namespace {
-
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -168,8 +167,8 @@ TORCH_LIBRARY(c10d, m) {
       .def(torch::init<>())
       .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
   m.class_<ReduceOp>("ReduceOp").def(torch::init<>());
-  // It's important to register the op to the CompositeExplicitAutograd key
-  // instead of the CompositeImplicitAutograd key to enable
+  // It's important to register the op to the CompositeExplicitAutograd key to
+  // enable
   // __torch_dispatch__.
   m.def(
       "broadcast_",

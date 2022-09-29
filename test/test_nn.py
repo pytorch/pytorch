@@ -5867,7 +5867,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
         mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
-        nt = torch.nested.nested_tensor([torch.randn(4, 4)])
+        nt = torch.nested_tensor([torch.randn(4, 4)])
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
         has_torch_func = torch.overrides.has_torch_function(
@@ -5888,7 +5888,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mha(nt, nt, nt)
         with torch.inference_mode():
             mha(nt, nt, nt)
-        nt = torch.nested.nested_tensor([torch.randn(4, 4, requires_grad=False)])
+        nt = torch.nested_tensor([torch.randn(4, 4, requires_grad=False)])
         nt.requires_grad = False
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
@@ -6100,19 +6100,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         bn.load_state_dict(state_dict)
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
-
-    def test_load_state_dict_child(self):
-        base_module = nn.Linear(1, 1)
-        model = base_module
-        for _ in range(3):
-            model = nn.Sequential(*[deepcopy(model) for _ in range(10)])
-
-        def hook_fn(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
-            module_state_dict = module.state_dict()
-            self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
-
-        model[0][0]._register_load_state_dict_pre_hook(hook_fn, with_module=True)
-        model.load_state_dict(model.state_dict(), strict=True)
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
@@ -13933,10 +13920,10 @@ class TestNNDeviceType(NNTestCase):
                             # result.
                             with self.assertRaisesRegex(
                                     AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
-                                nt = torch.nested.nested_tensor([], device=device)
+                                nt = torch.nested_tensor([], device=device)
                                 _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
-                            nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device)], device=device)
+                            nt = torch.nested_tensor([torch.rand(0, 512, device=device)], device=device)
                             _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
                 else:
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
@@ -17884,39 +17871,6 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
-    # Ref: https://github.com/pytorch/pytorch/issue/85005
-    @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
-    @largeTensorTest("45GB", "cuda")
-    @parametrize_test("reduction", ("none", "mean", "sum"))
-    def test_nll_loss_large_tensor(self, device, reduction):
-        shape = [int(2 ** 16), int(2 ** 16) + 1]
-
-        input = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
-        labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
-
-        out = F.nll_loss(input, labels, reduction=reduction)
-
-        with torch.no_grad():
-            input_cpu = input.cpu().float().requires_grad_()
-            labels_cpu = labels.cpu()
-        out_cpu = F.nll_loss(input_cpu, labels_cpu, reduction=reduction)
-        # workaround to reduce memory usage vs. self.assertEqual, see #84944
-        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
-        if reduction == "sum":
-            orig_rtol, orig_atol = rtol, atol
-            rtol, atol = 7 * rtol, 3 * atol
-        with torch.no_grad():
-            self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
-        if reduction == "sum":
-            rtol, atol = orig_rtol, orig_atol
-
-        if reduction != "none":
-            out.backward()
-            out_cpu.backward()
-            with torch.no_grad():
-                self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
-
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
@@ -18223,30 +18177,6 @@ class TestNNDeviceType(NNTestCase):
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
-    # Ref: https://github.com/pytorch/pytorch/issue/85005
-    @onlyCUDA
-    @largeTensorTest("45GB", "cpu")
-    @largeTensorTest("45GB", "cuda")
-    @parametrize_test("reduction", ("none", "mean", "sum"))
-    def test_cross_entropy_large_tensor(self, device, reduction):
-        logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
-        labels = torch.zeros(logits.size(0), dtype=torch.long, device='cuda')
-        loss = F.cross_entropy(logits, labels, reduction=reduction)
-        if reduction != "none":
-            loss.backward()
-
-        with torch.no_grad():
-            logits_cpu = logits.cpu().detach().requires_grad_()
-            labels_cpu = labels.cpu().detach()
-        loss_cpu = F.cross_entropy(logits_cpu, labels_cpu, reduction=reduction)
-        if reduction != "none":
-            loss_cpu.backward()
-
-        # workaround to reduce memory usage vs. self.assertEqual, see #84944
-        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
-        self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
-        if reduction != "none":
-            self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
@@ -18800,7 +18730,7 @@ class TestNNDeviceType(NNTestCase):
                 mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
                 mask[0][-1] = True
 
-                nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
+                nt = torch.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
                 result = model(nt)
                 ref_output = torch.tensor(
                     [

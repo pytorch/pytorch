@@ -1,7 +1,5 @@
 #pragma once
 
-#include <c10d/Store.hpp>
-
 #include <chrono>
 #include <cstdint>
 
@@ -149,15 +147,6 @@ struct AllToAllOptions {
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-};
-
-struct DistributedBackendOptions {
-  c10::intrusive_ptr<::c10d::Store> store;
-  int group_rank;
-  int group_size;
-  std::chrono::duration<float> timeout;
-  std::string group_id;
-  std::vector<int64_t> global_ranks_in_group;
 };
 
 } // namespace c10d

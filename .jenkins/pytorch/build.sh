@@ -232,7 +232,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install "$(echo dist/*.whl)[opt-einsum]"
+    python -mpip install dist/*.whl
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x

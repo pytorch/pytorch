@@ -70,7 +70,7 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
         # and loading the cuda part additively.  Hence to achieve requirement (1) we bundle
         # two complete interpreter libs, one with and one without cuda.
 
-        cp_cmd = "$(exe //caffe2/torch/csrc/deploy:remove_dt_needed)" if suffix == "all" else "cp"
+        cp_cmd = "$(location //caffe2/torch/csrc/deploy:remove_dt_needed)" if suffix == "all" else "cp"
 
         build_name = "build_" + name
         if not legacy:

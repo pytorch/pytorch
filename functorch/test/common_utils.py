@@ -351,7 +351,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
         matching_opinfos = [o for o in all_opinfos
                             if o.name == decorate_meta.op_name and
                             o.variant_test_name == decorate_meta.variant_name]
-        assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {decorate_meta}"
+        assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {xfail}"
         assert len(matching_opinfos) == 1, (
             "OpInfos should be uniquely determined by their (name, variant_name). "
             f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"

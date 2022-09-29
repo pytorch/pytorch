@@ -17,6 +17,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
+from torch._C._functorch import CompileCache
 from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
@@ -520,6 +521,14 @@ def create_aot_dispatcher_function(
             return aot_dispatch_base(flat_fn, fake_flat_tensor_args, aot_config)
 
 
+class _CompileCache(CompileCache):
+    pass
+
+
+# using a C++-based pytree reduces the overhead by about 50%
+compile_cache = None
+
+
 # Inspired by autodidax (thanks!)
 class PytreeThunk:
     spec = None
@@ -546,6 +555,53 @@ class PytreeThunk:
             return x
         return pytree.tree_unflatten(x, self.spec)
 
+
+def filter_tensor_and_static_args(args, static_argnums):
+    """
+    Separate out the tensor and static args. Also, for the static args, store
+    the hash.
+    """
+    tensor_args = []
+    static_args = []
+    static_args_hashed = []
+    for idx, arg in enumerate(args):
+        if idx not in static_argnums:
+            tensor_args.append(arg)
+        else:
+            static_args.append(arg)
+            static_args_hashed.append(arg.__hash__())
+    return tensor_args, static_args, static_args_hashed
+
+
+def rearrange(tensor_args, static_args, static_argnums):
+    """
+    Generate the args as per the original spec. static_argnums is sorted.
+    """
+    tensor_index = 0
+    static_index = 0
+    index = 0
+    args = []
+    assert len(static_args) == len(static_argnums)
+    while tensor_index < len(tensor_args) and static_index < len(static_args):
+        if index == static_argnums[static_index]:
+            args.append(static_args[static_index])
+            static_index += 1
+        else:
+            args.append(tensor_args[tensor_index])
+            tensor_index += 1
+        index += 1
+
+    while tensor_index < len(tensor_args):
+        args.append(tensor_args[tensor_index])
+        tensor_index += 1
+
+    while static_index < len(static_args):
+        args.append(static_args[static_index])
+        static_index += 1
+
+    return args
+
+
 KNOWN_TYPES = [torch.Tensor, int, str, float, bool]
 
 
@@ -555,8 +611,8 @@ def aot_function(
     bw_compiler: Optional[Callable] = None,
     partition_fn: Callable = default_partition,
     decompositions: Optional[Dict] = None,
-    hasher_type=None,  # deprecated
-    static_argnums: Optional[Tuple[int]] = None,  # deprecated
+    hasher_type: str = "StaticShapeHasher",
+    static_argnums: Optional[Tuple[int]] = None,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -571,7 +627,14 @@ def aot_function(
     of core or simpler operators supported by the backend compilers.
 
     :func:`aot_function` uses a compilation cache, based on input tensor
-    properties, to detect when there is a need of recompilation.
+    properties, to detect when there is a need of recompilation. By default, its
+    behavior is static, i.e., it recompiles if shape of any input tensor
+    changes.
+
+    :attr:`static_argnums` allows user to mark the arguments of the original
+    :attr:`fn` as static. This is useful when an argument is a non-tensor, e.g.,
+    ``int`` or ``bool``. A change in the actual value of static arg causes
+    recompilation.
 
     .. warning::
         This API is experimental and likely to change.
@@ -591,6 +654,8 @@ def aot_function(
             backward graphs.
         decompositions (Dict): A dictionary to define the decomposition of
             larger Aten ops into simpler or core Aten ops.
+        static_argnums (Optional[Tuple[Int]]): An option tuple of ints to mark
+            the arguments of the function as static.
 
     Returns:
         Returns a ``Callable`` that retains the eager behavior of the original
@@ -607,10 +672,22 @@ def aot_function(
         >>> aot_fn = aot_function(fn, print_compile_fn)
         >>> x = torch.randn(4, 5, requires_grad=True)
         >>> aot_fn(x)
-    """
-    if static_argnums is not None:
-        raise RuntimeError("static_argnums has been deprecated - manually wrap your function or use torchdynamo.")
 
+    The static argnums are used to mark the non-tensor arguments as static. An
+    example is as follows where the dropout probability is as argument to the
+    original function.
+
+        >>> def fn(input, bias, residual, p: float):
+        >>>     a = torch.add(input, bias)
+        >>>     b = torch.nn.functional.dropout(a, p, training=True)
+        >>>     c = b + residual
+        >>>     return c
+        >>> aot_fn = aot_function(fn, print_compile_fn, static_argnums=(3,))
+
+    """
+    global compile_cache
+    if compile_cache is None:
+        compile_cache = CompileCache()
     if bw_compiler is None:
         bw_compiler = fw_compiler
     aot_config = AOTConfig(
@@ -621,26 +698,69 @@ def aot_function(
     )
     cached_res = None
 
+    fn_id = id(fn)
+    fw_compiler_id = id(fw_compiler)
+    bw_compiler_id = id(bw_compiler)
+
+    if isinstance(static_argnums, int):
+        static_argnums = [static_argnums]
+    elif static_argnums is not None and len(static_argnums) == 0:
+        static_argnums = None
+    elif static_argnums is not None:
+        static_argnums = list(static_argnums)
+        static_argnums.sort()
+
     @wraps(fn)
     def returned_function(*args, **kwargs):
+        global compile_cache
         nonlocal cached_res
+
+        # Separate out static args if static_argnums is present
+        tensor_args = args
+        static_args = []
+        # TODO - move the hashing part of static_args to C++.
+        static_args_hashed = []
+        if static_argnums is not None:
+            (
+                tensor_args,
+                static_args,
+                static_args_hashed,
+            ) = filter_tensor_and_static_args(args, static_argnums)
+
         # Now flatten the tensor args
-        flat_args, _ = pytree.tree_flatten((args, kwargs))
+        flat_tensor_args, _ = pytree.tree_flatten((tensor_args, kwargs))
+
+        # Check if the fn is already compiled
+        num_tensor_args = len(flat_tensor_args)
+        flat_args_for_cache = flat_tensor_args + static_args_hashed
+        cached_res = compile_cache.at(
+            fn_id,
+            fw_compiler_id,
+            bw_compiler_id,
+            num_tensor_args,
+            hasher_type,
+            *flat_args_for_cache,
+        )
 
         # Compile the function and save it in the cache
         if cached_res is None:
             # Save the args_spec for flat_tensor_args to unflatten while tracing
-            _, tensor_args_spec = pytree.tree_flatten((args, kwargs))
+            _, tensor_args_spec = pytree.tree_flatten((tensor_args, kwargs))
             out_spec = PytreeThunk()
 
-            def flat_fn(*flat_args):
+            def flat_fn(*flat_tensor_args):
                 # The input are flattened tensor args. Prepare the args in the
                 # order that original function expects. Add static args as well.
                 # They will appear as tensor constants in the traced graph.
-                nonlocal out_spec
-                args, kwargs = pytree.tree_unflatten(
-                    flat_args, tensor_args_spec
+                nonlocal out_spec, static_args
+
+                tensor_args, kwargs = pytree.tree_unflatten(
+                    flat_tensor_args, tensor_args_spec
                 )
+                if static_argnums is None:
+                    args = tensor_args
+                else:
+                    args = rearrange(tensor_args, static_args, static_argnums)
                 tree_out = fn(*args, **kwargs)
                 flat_out, spec = pytree.tree_flatten(tree_out)
                 for i in flat_out:
@@ -663,16 +783,48 @@ def aot_function(
 
             compiled_fn = create_aot_dispatcher_function(
                 flat_fn,
-                flat_args,
+                flat_tensor_args,
                 aot_config,
             )
             cached_res = (compiled_fn, out_spec)
 
+            # Save the compiled_fn in the cache
+            compile_cache.insert(
+                fn_id,
+                fw_compiler_id,
+                bw_compiler_id,
+                num_tensor_args,
+                hasher_type,
+                cached_res,
+                *flat_args_for_cache,
+            )
+
         cached_fn, out_spec = cached_res
-        out = cached_fn(flat_args)
+        out = cached_fn(flat_tensor_args)
         return out_spec.unflatten(out)
 
     return returned_function
+
+
+def num_of_recompilations():
+    """
+    Returns the numbers of recompilations since the last time cache was cleared.
+    This is equivalent to the number of entries in the compilation cache.
+    """
+    global compile_cache
+    if compile_cache is None:
+        return 0
+    return compile_cache.size()
+
+
+def clear_compile_cache():
+    """
+    Clears the compilation cache.
+    """
+    global compile_cache
+    if compile_cache is not None:
+        compile_cache.clear()
+        compile_cache = None
 
 
 def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
@@ -769,8 +921,8 @@ def aot_module_simplified(mod: nn.Module, *top_args, **top_kwargs) -> nn.Module:
         bw_compiler: Optional[Callable] = None,
         partition_fn: Callable = default_partition,
         decompositions: Optional[Dict] = None,
-        hasher_type=None,
-        static_argnums=None,
+        hasher_type: str = "StaticShapeHasher",
+        static_argnums: Optional[Tuple[int]] = None,
     ) -> Callable:
         assert static_argnums is None
         if bw_compiler is None:
