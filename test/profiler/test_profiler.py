@@ -1524,6 +1524,11 @@ class TestTorchTidyProfiler(TestCase):
                     [(v.storage().data_ptr()) for v in group.get("params", [])],
                     opt_.param_addrs
                 )
+            for opt_ in opts:
+                self.assertEqual(
+                    [(name, val.storage().data_ptr()) for dic in opt.state.values() for name, val in dic.items()],
+                    opt_.opt_state
+                )
 
     def test_optimizer(self):
         inputs = torch.rand(10)
