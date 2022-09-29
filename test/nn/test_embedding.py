@@ -623,7 +623,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
                     atol = None
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
-    
+
     @onlyCUDA
     @dtypes(*((torch.float, torch.double, torch.bfloat16, torch.half)
               if TEST_WITH_ROCM else (torch.float, torch.double, torch.half)))
