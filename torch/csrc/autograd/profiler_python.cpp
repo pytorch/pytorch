@@ -269,6 +269,31 @@ class Callsite {
   Config<CallType::PyCall>::key_t caller_;
 };
 
+void check_and_store(
+    const pybind11::handle& name,
+    const pybind11::handle& param,
+    std::vector<std::pair<std::basic_string<char>, void*>>& storeroom) {
+  auto t = param.ptr();
+  if (py::isinstance<py::str>(name) && THPVariable_CheckExact(t)) {
+    auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
+    if (storage) {
+      storeroom.emplace_back(name.cast<std::string>(), storage->data());
+    }
+  }
+}
+
+void check_and_store(
+    const pybind11::handle& param,
+    std::vector<void*>& storeroom) {
+  auto t = param.ptr();
+  if (THPVariable_CheckExact(t)) {
+    auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
+    if (storage) {
+      storeroom.emplace_back(storage->data());
+    }
+  }
+}
+
 // ============================================================================
 // == Type specific store and load implementations. ===========================
 // ============================================================================
@@ -358,13 +383,7 @@ void ValueCache::store<CallType::PyModuleCall>(
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
     std::vector<std::pair<std::string, void*>> params_;
     for (auto& it : params) {
-      auto t = it.second.ptr();
-      if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(t)) {
-        auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
-        if (storage) {
-          params_.emplace_back(it.first.cast<std::string>(), storage->data());
-        }
-      }
+      check_and_store(it.first, it.second, params_);
     }
     cache.modules_and_params_[key] = make_pair(cls, params_);
   }
@@ -396,6 +415,13 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     py::list param_groups_handle =
         py::handle((PyObject*)key).attr("param_groups");
     std::vector<void*> params_;
+    // param_groups is a list of dict
+    for (auto& param_group : param_groups_handle) {
+      for (auto& param :
+           py::cast<py::dict>(param_group).attr("get")("params")) {
+        check_and_store(param, params_);
+      }
+    }
     std::vector<std::pair<std::string, void*>> states_;
 
     cache.optimizer_data_[key] = {cls, params_, states_};
