@@ -954,6 +954,18 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
         for user in list(last_getitem.users.keys()):
             user.replace_input_with(last_getitem, new_input)
 
+def _get_observer_from_activation_post_process(
+    activation_post_process: Union[ObserverBase, FakeQuantize],
+) -> ObserverBase:
+    """
+    If `activation_post_process` is an observer, return the observer.
+    If `activation_post_process` is a fake quantize, return the internal observer.
+    """
+    if isinstance(activation_post_process, ObserverBase):
+        return activation_post_process
+    else:
+        return activation_post_process.activation_post_process
+
 def _qconfig_satisfies_dtype_config_constraints(
         qconfig: QConfigAny,
         dtype_with_constraints: DTypeWithConstraints,
@@ -972,11 +984,7 @@ def _qconfig_satisfies_dtype_config_constraints(
             activation_post_process: Union[ObserverBase, FakeQuantize],
             dtype_with_constraints: DTypeWithConstraints,
             debug_string: str) -> bool:
-        # For FakeQuantize, the attributes are set in the observer inside the FakeQuantize
-        if isinstance(activation_post_process, FakeQuantize):
-            observer = activation_post_process.activation_post_process
-        else:
-            observer = activation_post_process
+        observer = _get_observer_from_activation_post_process(activation_post_process)
         app_quant_min = getattr(observer, "quant_min", None)
         app_quant_max = getattr(observer, "quant_max", None)
         # TODO: for now, just use the existing eps value as scale_min. In the future, we should
