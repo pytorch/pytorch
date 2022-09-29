@@ -22,6 +22,7 @@ from functorch import (
     make_fx
 )
 from functorch._src.aot_autograd import aot_module_simplified
+from functorch._src.partitioners import move_input_mutations_into_epilogue
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,
@@ -588,7 +589,11 @@ class TestPartitioning(AOTTestCase):
             res = aot_mod(x)
         res.sum().backward()
 
+    @patch("functorch.compile.config.use_functionalize", False)
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutations_with_functionalization(self):
+        from functorch.experimental import functionalize
+
         # Function takes in 4 total tensors, mutates 1 and 3, returns 2 and 4
         def fn(tensor1, lst, tensor2):
             a = tensor1
@@ -603,7 +608,7 @@ class TestPartitioning(AOTTestCase):
 
             return [b, b], d
         args = [torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2)]
-        out = functorch.make_fx(functorch.experimental.functionalize(fn))(*args)
+        out = make_fx(functionalize(fn))(*args)
         self.assertExpectedInline((out.code), """\
 
 
@@ -641,32 +646,28 @@ def forward(self, tensor1, lst, tensor2):
     """)
 
 
-        from unittest.mock import patch
-        with patch.object(functorch.compile.config, "use_functionalize", True):
-            with patch.object(functorch.compile.config, "use_fake_tensor", True):
-                functorch.compile.clear_compile_cache()
-                aot_autograd_fn = aot_function(fn, nop, nop)
+        aot_autograd_fn = aot_function(fn, nop, nop)
 
-                inpt_expected = (torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2))
-                inpt_actual = (torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2))
+        inpt_expected = (torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2))
+        inpt_actual = (torch.ones(2), [torch.ones(2), torch.ones(2)], torch.ones(2))
 
-                # Mutate inputs
-                out_expected = fn(*inpt_expected)
-                out_actual = aot_autograd_fn(*inpt_actual)
+        # Mutate inputs
+        out_expected = fn(*inpt_expected)
+        out_actual = aot_autograd_fn(*inpt_actual)
 
-                for e, a in zip(out_expected, out_actual):
-                    self.assertEqual(e, a)
-                for e, a in zip(inpt_expected, inpt_actual):
-                    self.assertEqual(e, a)
+        for e, a in zip(out_expected, out_actual):
+            self.assertEqual(e, a)
+        for e, a in zip(inpt_expected, inpt_actual):
+            self.assertEqual(e, a)
 
-                # Mutate inputs again
-                out_expected = fn(*inpt_expected)
-                out_actual = aot_autograd_fn(*inpt_actual)
+        # Mutate inputs again
+        out_expected = fn(*inpt_expected)
+        out_actual = aot_autograd_fn(*inpt_actual)
 
-                for e, a in zip(out_expected, out_actual):
-                    self.assertEqual(e, a)
-                for e, a in zip(inpt_expected, inpt_actual):
-                    self.assertEqual(e, a)
+        for e, a in zip(out_expected, out_actual):
+            self.assertEqual(e, a)
+        for e, a in zip(inpt_expected, inpt_actual):
+            self.assertEqual(e, a)
 
 
 class TestAOTModuleSimplified(AOTTestCase):
