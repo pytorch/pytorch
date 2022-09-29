@@ -1,7 +1,9 @@
 # Owner(s): ["module: onnx"]
 
 import copy
+import functools
 import io
+from typing import Callable
 
 import onnx
 
@@ -22,12 +24,8 @@ from torch.onnx import (
     unregister_custom_op_symbolic,
     utils,
 )
-from torch.onnx.symbolic_helper import (
-    _set_operator_export_type,
-    _set_opset_version,
-    _unpack_list,
-    parse_args,
-)
+from torch.onnx._globals import GLOBALS
+from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
 from verify import verify
@@ -69,22 +67,71 @@ class _BaseTestCase(common_utils.TestCase):
         return graph, params_dict, torch_out
 
 
-class TestUtilityFuns_opset_independent(_BaseTestCase):
-    def test_unconvertible_ops(self):
-        class MyModule(torch.nn.Module):
+@common_utils.instantiate_parametrized_tests
+class TestUnconvertibleOps(common_utils.TestCase):
+    """Unit tests for the `unconvertible_ops` function."""
+
+    def setUp(self):
+        class EinsumModule(torch.nn.Module):
             def forward(self, x):
-                return torch.cumsum(x, dim=0)
+                return torch.einsum("ii", x)
 
-        model = MyModule()
-        x = torch.randn(2, 3, 4)
+        self.einsum_module = EinsumModule()
 
-        graph, unconvertible_ops = utils.unconvertible_ops(model, (x,), opset_version=9)
-        iter = graph.nodes()
-        self.assertEqual(next(iter).kind(), "onnx::Constant")
-        self.assertEqual(next(iter).kind(), "prim::Constant")
-        self.assertEqual(next(iter).kind(), "aten::cumsum")
-        self.assertEqual(len(unconvertible_ops), 1)
-        self.assertEqual(unconvertible_ops, ["aten::cumsum"])
+    def test_it_returns_graph_and_unconvertible_ops_at_lower_opset_version(self):
+        x = torch.randn(4, 4)
+
+        # Einsum is supported since opset 12. It should be unconvertible at opset 9.
+        graph, unconvertible_ops = utils.unconvertible_ops(
+            self.einsum_module, (x,), opset_version=9
+        )
+        nodes = graph.nodes()
+        self.assertEqual(next(nodes).kind(), "prim::Constant")
+        self.assertEqual(next(nodes).kind(), "prim::ListConstruct")
+        self.assertEqual(next(nodes).kind(), "prim::Constant")
+        self.assertEqual(next(nodes).kind(), "aten::einsum")
+        self.assertEqual(unconvertible_ops, ["aten::einsum"])
+
+    @common_utils.parametrize(
+        "jit_function",
+        [
+            common_utils.subtest(
+                functools.partial(torch.jit.trace, example_inputs=torch.randn(4, 4)),
+                name="traced",
+            ),
+            common_utils.subtest(torch.jit.script, name="scripted"),
+        ],
+    )
+    def test_it_returns_unconvertible_ops_at_lower_opset_version_for_jit_module(
+        self, jit_function: Callable
+    ):
+        module = jit_function(self.einsum_module)
+        x = torch.randn(4, 4)
+
+        # Einsum is supported since opset 12. It should be unconvertible at opset 9.
+        _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=9)
+        self.assertEqual(unconvertible_ops, ["aten::einsum"])
+
+    @common_utils.parametrize(
+        "jit_function",
+        [
+            common_utils.subtest(lambda x: x, name="nn_module"),
+            common_utils.subtest(
+                functools.partial(torch.jit.trace, example_inputs=torch.randn(4, 4)),
+                name="traced",
+            ),
+            common_utils.subtest(torch.jit.script, name="scripted"),
+        ],
+    )
+    def test_it_returns_empty_list_when_all_ops_convertible(
+        self, jit_function: Callable
+    ):
+        module = jit_function(self.einsum_module)
+        x = torch.randn(4, 4)
+
+        # Einsum is supported since opset 12
+        _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=12)
+        self.assertEqual(unconvertible_ops, [])
 
 
 class TestUtilityFuns_opset9(_BaseTestCase):
@@ -136,8 +183,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 out, out2 = torch.split(t, splits, dim=1)
                 return out, out2
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.randn(2, 3)
         y = torch.randn(2, 4)
         t = torch.randn(2, 7)
@@ -157,8 +204,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 b = torch.transpose(a, 1, 0)
                 return b + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(3, 2)
         graph, _, __ = self._model_to_graph(
             TransposeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -176,8 +223,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 b = torch.norm(a, p=2, dim=-2, keepdim=False)
                 return b + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             ReduceModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -194,8 +241,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 b = torch.norm(a, p=1, dim=-2)
                 return b + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             NormModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -212,8 +259,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 b = torch.narrow(a, 0, 0, 1)
                 return b + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         graph, _, __ = self._model_to_graph(
             NarrowModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -231,8 +278,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 b = a[1:10]  # index exceeds dimension
                 return b + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         graph, _, __ = self._model_to_graph(
             SliceIndexExceedsDimModule(),
@@ -255,8 +302,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 d = torch.select(a, dim=1, index=0)
                 return b + x, c + d
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         graph, _, __ = self._model_to_graph(
             SliceNegativeIndexModule(),
@@ -277,8 +324,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 c = torch.index_select(a, dim=-2, index=torch.tensor([0, 1]))
                 return b + 1, c + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 3)
         model = GatherModule()
         model(x)
@@ -296,8 +343,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 b = torch.unsqueeze(a, -2)
                 return b + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(1, 2, 3)
         graph, _, __ = self._model_to_graph(
             UnsqueezeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1, 2]}
@@ -318,8 +365,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 a = torch.randn(2, 3, 4, 5, 8, 7)
                 return self.prelu(x) + a
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.randn(2, 3, 4, 5, 8, 7)
         graph, _, __ = self._model_to_graph(
             PReluModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2, 3, 4, 5]}
@@ -336,8 +383,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 a = torch.tensor([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]])
                 return torch.squeeze(a) + x + torch.squeeze(a)
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             SqueezeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -353,8 +400,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 a = torch.tensor([[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]])
                 return torch.squeeze(a, dim=-3) + x
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             SqueezeAxesModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -389,8 +436,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 d = b + c
                 return x + d
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.ones(2, 3)
         graph, _, __ = self._model_to_graph(
             ConcatModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -410,8 +457,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def forward(self, input, initial_state):
                 return self.mygru(input, initial_state)
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         input = torch.randn(5, 3, 7)
         h0 = torch.randn(1, 3, 3)
         graph, _, __ = self._model_to_graph(
@@ -441,8 +488,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def forward(self, A):
                 return torch.matmul(A, torch.transpose(self.B, -1, -2))
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         A = torch.randn(2, 3)
         graph, _, __ = self._model_to_graph(
             MatMulNet(), (A,), input_names=["A"], dynamic_axes={"A": [0, 1]}
@@ -464,8 +511,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 b = self.weight.reshape(1, -1, 1, 1)
                 return x * b
 
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         x = torch.randn(4, 5)
         graph, _, __ = self._model_to_graph(
             ReshapeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
@@ -488,8 +535,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return div * x
 
         x = torch.randn(2, 5)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -511,8 +558,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return mul / x
 
         x = torch.randn(2, 5)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -534,8 +581,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return add - x
 
         x = torch.randn(2, 5)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, params_dict, __ = self._model_to_graph(
             Module(),
             (x,),
@@ -566,8 +613,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return sub + x
 
         x = torch.randn(2, 5)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, params_dict, __ = self._model_to_graph(
             Module(),
             (x,),
@@ -598,8 +645,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return sqrt / x
 
         x = torch.randn(2, 5)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -618,8 +665,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return x + shape
 
         x = torch.randn(2, 5)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             ShapeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
@@ -1063,7 +1110,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return torch.erfc(x)
 
         x = torch.randn(2, 3, 4)
-        _set_opset_version(self.opset_version)
+        GLOBALS.export_onnx_opset_version = self.opset_version
         graph, _, __ = self._model_to_graph(
             Module(),
             (x,),
@@ -1325,8 +1372,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 return x
 
         x = torch.randn(20, 16, 50, 100)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         _, params_dict, __ = self._model_to_graph(
             Model(),
             (x,),
@@ -1354,8 +1401,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         model = torch.jit.script(MyModule())
         x = torch.randn(10, 3, 128, 128)
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             model,
             (x,),
@@ -1449,8 +1496,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         input_1 = torch.tensor([11])
         input_2 = torch.tensor([12])
-        _set_opset_version(self.opset_version)
-        _set_operator_export_type(OperatorExportTypes.ONNX)
+        GLOBALS.export_onnx_opset_version = self.opset_version
+        GLOBALS.operator_export_type = OperatorExportTypes.ONNX
         graph, _, __ = self._model_to_graph(
             MyModule(),
             (input_1, input_2),
