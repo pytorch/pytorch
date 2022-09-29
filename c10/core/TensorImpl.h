@@ -21,6 +21,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
+#include <c10/util/strong_type.h>
 
 #include <algorithm>
 #include <atomic>
