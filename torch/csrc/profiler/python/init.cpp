@@ -128,6 +128,7 @@ void initPythonBindings(PyObject* module) {
   py::class_<TensorMetadata>(m, "_TensorMetadata")
       .def_readonly("impl_ptr", &TensorMetadata::impl_)
       .def_readonly("storage_data_ptr", &TensorMetadata::data_)
+      .def_readonly("id", &TensorMetadata::id_)
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
@@ -173,8 +174,32 @@ void initPythonBindings(PyObject* module) {
       .def_property_readonly(
           "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
 
+  py::class_<OptimizerInfo>(m, "_OptInfo")
+      .def_property_readonly(
+          "self",
+          [](const OptimizerInfo& a) {
+            return reinterpret_cast<intptr_t>(a.self_.value_of());
+          })
+      .def_property_readonly(
+          "param_addrs",
+          [](const OptimizerInfo& s) {
+            py::list params_addrs;
+            for (auto& addr : s.params_addr_) {
+              params_addrs.append(reinterpret_cast<intptr_t>(addr));
+            }
+            return params_addrs;
+          })
+      .def_property_readonly("opt_state", [](const OptimizerInfo& s) {
+        py::list states;
+        for (auto& a : s.opt_state_) {
+          states.append(
+              std::make_pair(a.first, reinterpret_cast<intptr_t>(a.second)));
+        }
+        return states;
+      });
+
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
-      .def_readonly("module", &ExtraFields<EventType::PyCall>::module_)
+      .def_readonly("opt", &ExtraFields<EventType::PyCall>::opt_)
       .def_readonly("callsite", &ExtraFields<EventType::PyCall>::callsite_)
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_)
       .def_readonly("module", &ExtraFields<EventType::PyCall>::module_);
