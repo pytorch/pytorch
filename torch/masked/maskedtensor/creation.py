@@ -15,11 +15,7 @@ These two factory functions are intended to mirror
 """
 
 def masked_tensor(data, mask, requires_grad=False):
-    assert not is_masked_tensor(data)
-    assert not is_masked_tensor(mask)
     return MaskedTensor(data, mask, requires_grad)
 
 def as_masked_tensor(data, mask):
-    assert not is_masked_tensor(data)
-    assert not is_masked_tensor(mask)
     return MaskedTensor._from_values(data, mask)
