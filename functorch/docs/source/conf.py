@@ -88,8 +88,8 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'functorch'
-copyright = 'functorch Contributors'
-author = 'functorch Contributors'
+copyright = 'PyTorch Contributors'
+author = 'PyTorch Contributors'
 functorch_version = str(functorch.__version__)
 
 # The version info for the project you're documenting, acts as replacement for
@@ -170,7 +170,7 @@ html_theme_options = {
     "collapse_navigation": False,
     "display_version": True,
     "logo_only": True,
-    "pytorch_project": "docs",
+    "pytorch_project": "functorch",
     "navigation_with_keys": True,
     "analytics_id": "UA-117752657-2",
 }
