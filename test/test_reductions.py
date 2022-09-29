@@ -1129,6 +1129,10 @@ class TestReductions(TestCase):
             torch.bincount(torch.tensor([1, 3], device=device),
                            torch.tensor([.2, .2], device=device),
                            minlength=-1)
+        # n-d weights, with n > 1 throws
+        with self.assertRaisesRegex(RuntimeError, '1-d'):
+            torch.bincount(torch.tensor([1, 0], device=device),
+                           torch.tensor([[1., 0.3], [1., 0.3]], device=device))
         # input and weights dim mismatch
         with self.assertRaisesRegex(RuntimeError, 'same length'):
             torch.bincount(torch.tensor([1, 0], device=device),
