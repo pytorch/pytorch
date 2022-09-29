@@ -11,9 +11,15 @@ from typing import Any
 class Fix(object):
     """A proposed fix for the problem represented by a result object. A fix specifies a set of artifacts to modify. For each artifact, it specifies a set of bytes to remove, and provides a set of new bytes to replace them."""
 
-    artifact_changes: Any
-    description: Any
-    properties: Any
+    artifact_changes: Any = dataclasses.field(
+        metadata={"schema_property_name": "artifactChanges"}
+    )
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

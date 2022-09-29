@@ -11,11 +11,19 @@ from typing import Any
 class Message(object):
     """Encapsulates a message intended to be read by the end user."""
 
-    arguments: Any
-    id: Any
-    markdown: Any
-    properties: Any
-    text: Any
+    arguments: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "arguments"}
+    )
+    id: Any = dataclasses.field(default=None, metadata={"schema_property_name": "id"})
+    markdown: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "markdown"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    text: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "text"}
+    )
 
 
 # flake8: noqa

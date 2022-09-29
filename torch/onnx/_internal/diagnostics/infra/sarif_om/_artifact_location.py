@@ -11,11 +11,19 @@ from typing import Any
 class ArtifactLocation(object):
     """Specifies the location of an artifact."""
 
-    description: Any
-    index: Any
-    properties: Any
-    uri: Any
-    uri_base_id: Any
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    uri: Any = dataclasses.field(default=None, metadata={"schema_property_name": "uri"})
+    uri_base_id: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "uriBaseId"}
+    )
 
 
 # flake8: noqa

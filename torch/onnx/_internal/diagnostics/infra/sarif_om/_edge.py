@@ -11,11 +11,19 @@ from typing import Any
 class Edge(object):
     """Represents a directed edge in a graph."""
 
-    id: Any
-    source_node_id: Any
-    target_node_id: Any
-    label: Any
-    properties: Any
+    id: Any = dataclasses.field(metadata={"schema_property_name": "id"})
+    source_node_id: Any = dataclasses.field(
+        metadata={"schema_property_name": "sourceNodeId"}
+    )
+    target_node_id: Any = dataclasses.field(
+        metadata={"schema_property_name": "targetNodeId"}
+    )
+    label: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "label"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

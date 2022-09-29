@@ -11,11 +11,21 @@ from typing import Any
 class StackFrame(object):
     """A function call within a stack trace."""
 
-    location: Any
-    module: Any
-    parameters: Any
-    properties: Any
-    thread_id: Any
+    location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "location"}
+    )
+    module: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "module"}
+    )
+    parameters: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "parameters"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    thread_id: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "threadId"}
+    )
 
 
 # flake8: noqa

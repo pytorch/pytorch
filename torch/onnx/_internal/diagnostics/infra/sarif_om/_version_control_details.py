@@ -11,13 +11,27 @@ from typing import Any
 class VersionControlDetails(object):
     """Specifies the information necessary to retrieve a desired revision from a version control system."""
 
-    repository_uri: Any
-    as_of_time_utc: Any
-    branch: Any
-    mapped_to: Any
-    properties: Any
-    revision_id: Any
-    revision_tag: Any
+    repository_uri: Any = dataclasses.field(
+        metadata={"schema_property_name": "repositoryUri"}
+    )
+    as_of_time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "asOfTimeUtc"}
+    )
+    branch: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "branch"}
+    )
+    mapped_to: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "mappedTo"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    revision_id: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "revisionId"}
+    )
+    revision_tag: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "revisionTag"}
+    )
 
 
 # flake8: noqa

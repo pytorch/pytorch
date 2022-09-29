@@ -11,11 +11,21 @@ from typing import Any
 class PhysicalLocation(object):
     """A physical location relevant to a result. Specifies a reference to a programming artifact together with a range of bytes or characters within that artifact."""
 
-    address: Any
-    artifact_location: Any
-    context_region: Any
-    properties: Any
-    region: Any
+    address: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "address"}
+    )
+    artifact_location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "artifactLocation"}
+    )
+    context_region: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "contextRegion"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    region: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "region"}
+    )
 
 
 # flake8: noqa

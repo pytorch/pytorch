@@ -11,9 +11,15 @@ from typing import Any
 class Replacement(object):
     """The replacement of a single region of an artifact."""
 
-    deleted_region: Any
-    inserted_content: Any
-    properties: Any
+    deleted_region: Any = dataclasses.field(
+        metadata={"schema_property_name": "deletedRegion"}
+    )
+    inserted_content: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "insertedContent"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

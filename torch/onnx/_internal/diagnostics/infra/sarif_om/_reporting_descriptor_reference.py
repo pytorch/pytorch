@@ -11,11 +11,19 @@ from typing import Any
 class ReportingDescriptorReference(object):
     """Information about how to locate a relevant reporting descriptor."""
 
-    guid: Any
-    id: Any
-    index: Any
-    properties: Any
-    tool_component: Any
+    guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "guid"}
+    )
+    id: Any = dataclasses.field(default=None, metadata={"schema_property_name": "id"})
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    tool_component: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "toolComponent"}
+    )
 
 
 # flake8: noqa

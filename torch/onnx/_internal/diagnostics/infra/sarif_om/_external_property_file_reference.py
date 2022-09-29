@@ -11,10 +11,18 @@ from typing import Any
 class ExternalPropertyFileReference(object):
     """Contains information that enables a SARIF consumer to locate the external property file that contains the value of an externalized property associated with the run."""
 
-    guid: Any
-    item_count: Any
-    location: Any
-    properties: Any
+    guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "guid"}
+    )
+    item_count: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "itemCount"}
+    )
+    location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "location"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

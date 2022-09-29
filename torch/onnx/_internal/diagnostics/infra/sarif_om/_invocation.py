@@ -11,32 +11,86 @@ from typing import Any
 class Invocation(object):
     """The runtime environment of the analysis tool run."""
 
-    execution_successful: Any
-    account: Any
-    arguments: Any
-    command_line: Any
-    end_time_utc: Any
-    environment_variables: Any
-    executable_location: Any
-    exit_code: Any
-    exit_code_description: Any
-    exit_signal_name: Any
-    exit_signal_number: Any
-    machine: Any
-    notification_configuration_overrides: Any
-    process_id: Any
-    process_start_failure_message: Any
-    properties: Any
-    response_files: Any
-    rule_configuration_overrides: Any
-    start_time_utc: Any
-    stderr: Any
-    stdin: Any
-    stdout: Any
-    stdout_stderr: Any
-    tool_configuration_notifications: Any
-    tool_execution_notifications: Any
-    working_directory: Any
+    execution_successful: Any = dataclasses.field(
+        metadata={"schema_property_name": "executionSuccessful"}
+    )
+    account: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "account"}
+    )
+    arguments: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "arguments"}
+    )
+    command_line: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "commandLine"}
+    )
+    end_time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "endTimeUtc"}
+    )
+    environment_variables: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "environmentVariables"}
+    )
+    executable_location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "executableLocation"}
+    )
+    exit_code: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "exitCode"}
+    )
+    exit_code_description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "exitCodeDescription"}
+    )
+    exit_signal_name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "exitSignalName"}
+    )
+    exit_signal_number: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "exitSignalNumber"}
+    )
+    machine: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "machine"}
+    )
+    notification_configuration_overrides: Any = dataclasses.field(
+        default=None,
+        metadata={"schema_property_name": "notificationConfigurationOverrides"},
+    )
+    process_id: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "processId"}
+    )
+    process_start_failure_message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "processStartFailureMessage"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    response_files: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "responseFiles"}
+    )
+    rule_configuration_overrides: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "ruleConfigurationOverrides"}
+    )
+    start_time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "startTimeUtc"}
+    )
+    stderr: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "stderr"}
+    )
+    stdin: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "stdin"}
+    )
+    stdout: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "stdout"}
+    )
+    stdout_stderr: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "stdoutStderr"}
+    )
+    tool_configuration_notifications: Any = dataclasses.field(
+        default=None,
+        metadata={"schema_property_name": "toolConfigurationNotifications"},
+    )
+    tool_execution_notifications: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "toolExecutionNotifications"}
+    )
+    working_directory: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "workingDirectory"}
+    )
 
 
 # flake8: noqa

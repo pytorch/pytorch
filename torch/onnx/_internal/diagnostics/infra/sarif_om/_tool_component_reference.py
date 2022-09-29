@@ -11,10 +11,18 @@ from typing import Any
 class ToolComponentReference(object):
     """Identifies a particular toolComponent object, either the driver or an extension."""
 
-    guid: Any
-    index: Any
-    name: Any
-    properties: Any
+    guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "guid"}
+    )
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "name"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

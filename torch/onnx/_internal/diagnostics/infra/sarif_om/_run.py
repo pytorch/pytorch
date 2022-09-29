@@ -11,34 +11,90 @@ from typing import Any
 class Run(object):
     """Describes a single run of an analysis tool, and contains the reported output of that run."""
 
-    tool: Any
-    addresses: Any
-    artifacts: Any
-    automation_details: Any
-    baseline_guid: Any
-    column_kind: Any
-    conversion: Any
-    default_encoding: Any
-    default_source_language: Any
-    external_property_file_references: Any
-    graphs: Any
-    invocations: Any
-    language: Any
-    logical_locations: Any
-    newline_sequences: Any
-    original_uri_base_ids: Any
-    policies: Any
-    properties: Any
-    redaction_tokens: Any
-    results: Any
-    run_aggregates: Any
-    special_locations: Any
-    taxonomies: Any
-    thread_flow_locations: Any
-    translations: Any
-    version_control_provenance: Any
-    web_requests: Any
-    web_responses: Any
+    tool: Any = dataclasses.field(metadata={"schema_property_name": "tool"})
+    addresses: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "addresses"}
+    )
+    artifacts: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "artifacts"}
+    )
+    automation_details: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "automationDetails"}
+    )
+    baseline_guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "baselineGuid"}
+    )
+    column_kind: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "columnKind"}
+    )
+    conversion: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "conversion"}
+    )
+    default_encoding: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "defaultEncoding"}
+    )
+    default_source_language: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "defaultSourceLanguage"}
+    )
+    external_property_file_references: Any = dataclasses.field(
+        default=None,
+        metadata={"schema_property_name": "externalPropertyFileReferences"},
+    )
+    graphs: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "graphs"}
+    )
+    invocations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "invocations"}
+    )
+    language: Any = dataclasses.field(
+        default="en-US", metadata={"schema_property_name": "language"}
+    )
+    logical_locations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "logicalLocations"}
+    )
+    newline_sequences: Any = dataclasses.field(
+        default_factory=lambda: ["\r\n", "\n"],
+        metadata={"schema_property_name": "newlineSequences"},
+    )
+    original_uri_base_ids: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "originalUriBaseIds"}
+    )
+    policies: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "policies"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    redaction_tokens: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "redactionTokens"}
+    )
+    results: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "results"}
+    )
+    run_aggregates: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "runAggregates"}
+    )
+    special_locations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "specialLocations"}
+    )
+    taxonomies: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "taxonomies"}
+    )
+    thread_flow_locations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "threadFlowLocations"}
+    )
+    translations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "translations"}
+    )
+    version_control_provenance: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "versionControlProvenance"}
+    )
+    web_requests: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "webRequests"}
+    )
+    web_responses: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "webResponses"}
+    )
 
 
 # flake8: noqa

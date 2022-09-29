@@ -11,12 +11,20 @@ from typing import Any
 class ThreadFlow(object):
     """Describes a sequence of code locations that specify a path through a single thread of execution such as an operating system or fiber."""
 
-    locations: Any
-    id: Any
-    immutable_state: Any
-    initial_state: Any
-    message: Any
-    properties: Any
+    locations: Any = dataclasses.field(metadata={"schema_property_name": "locations"})
+    id: Any = dataclasses.field(default=None, metadata={"schema_property_name": "id"})
+    immutable_state: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "immutableState"}
+    )
+    initial_state: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "initialState"}
+    )
+    message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "message"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

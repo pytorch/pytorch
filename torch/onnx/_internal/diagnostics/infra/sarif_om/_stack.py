@@ -11,9 +11,13 @@ from typing import Any
 class Stack(object):
     """A call stack that is relevant to a result."""
 
-    frames: Any
-    message: Any
-    properties: Any
+    frames: Any = dataclasses.field(metadata={"schema_property_name": "frames"})
+    message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "message"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

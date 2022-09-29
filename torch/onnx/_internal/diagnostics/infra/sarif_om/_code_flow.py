@@ -11,9 +11,15 @@ from typing import Any
 class CodeFlow(object):
     """A set of threadFlows which together describe a pattern of code execution relevant to detecting a result."""
 
-    thread_flows: Any
-    message: Any
-    properties: Any
+    thread_flows: Any = dataclasses.field(
+        metadata={"schema_property_name": "threadFlows"}
+    )
+    message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "message"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

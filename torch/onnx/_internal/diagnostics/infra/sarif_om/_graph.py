@@ -11,10 +11,18 @@ from typing import Any
 class Graph(object):
     """A network of nodes and directed edges that describes some aspect of the structure of the code (for example, a call graph)."""
 
-    description: Any
-    edges: Any
-    nodes: Any
-    properties: Any
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    edges: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "edges"}
+    )
+    nodes: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "nodes"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

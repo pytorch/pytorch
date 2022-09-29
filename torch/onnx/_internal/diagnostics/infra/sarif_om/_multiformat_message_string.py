@@ -11,9 +11,13 @@ from typing import Any
 class MultiformatMessageString(object):
     """A message string or message format string rendered in multiple formats."""
 
-    text: Any
-    markdown: Any
-    properties: Any
+    text: Any = dataclasses.field(metadata={"schema_property_name": "text"})
+    markdown: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "markdown"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

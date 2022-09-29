@@ -11,20 +11,48 @@ from typing import Any
 class ThreadFlowLocation(object):
     """A location visited by an analysis tool while simulating or monitoring the execution of a program."""
 
-    execution_order: Any
-    execution_time_utc: Any
-    importance: Any
-    index: Any
-    kinds: Any
-    location: Any
-    module: Any
-    nesting_level: Any
-    properties: Any
-    stack: Any
-    state: Any
-    taxa: Any
-    web_request: Any
-    web_response: Any
+    execution_order: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "executionOrder"}
+    )
+    execution_time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "executionTimeUtc"}
+    )
+    importance: Any = dataclasses.field(
+        default="important", metadata={"schema_property_name": "importance"}
+    )
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    kinds: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "kinds"}
+    )
+    location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "location"}
+    )
+    module: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "module"}
+    )
+    nesting_level: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "nestingLevel"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    stack: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "stack"}
+    )
+    state: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "state"}
+    )
+    taxa: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "taxa"}
+    )
+    web_request: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "webRequest"}
+    )
+    web_response: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "webResponse"}
+    )
 
 
 # flake8: noqa

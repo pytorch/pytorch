@@ -11,16 +11,36 @@ from typing import Any
 class Address(object):
     """A physical or virtual address, or a range of addresses, in an 'addressable region' (memory or a binary file)."""
 
-    absolute_address: Any
-    fully_qualified_name: Any
-    index: Any
-    kind: Any
-    length: Any
-    name: Any
-    offset_from_parent: Any
-    parent_index: Any
-    properties: Any
-    relative_address: Any
+    absolute_address: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "absoluteAddress"}
+    )
+    fully_qualified_name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "fullyQualifiedName"}
+    )
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    kind: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "kind"}
+    )
+    length: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "length"}
+    )
+    name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "name"}
+    )
+    offset_from_parent: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "offsetFromParent"}
+    )
+    parent_index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "parentIndex"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    relative_address: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "relativeAddress"}
+    )
 
 
 # flake8: noqa

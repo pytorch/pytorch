@@ -11,19 +11,45 @@ from typing import Any
 class Artifact(object):
     """A single artifact. In some cases, this artifact might be nested within another artifact."""
 
-    contents: Any
-    description: Any
-    encoding: Any
-    hashes: Any
-    last_modified_time_utc: Any
-    length: Any
-    location: Any
-    mime_type: Any
-    offset: Any
-    parent_index: Any
-    properties: Any
-    roles: Any
-    source_language: Any
+    contents: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "contents"}
+    )
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    encoding: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "encoding"}
+    )
+    hashes: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "hashes"}
+    )
+    last_modified_time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "lastModifiedTimeUtc"}
+    )
+    length: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "length"}
+    )
+    location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "location"}
+    )
+    mime_type: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "mimeType"}
+    )
+    offset: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "offset"}
+    )
+    parent_index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "parentIndex"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    roles: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "roles"}
+    )
+    source_language: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "sourceLanguage"}
+    )
 
 
 # flake8: noqa

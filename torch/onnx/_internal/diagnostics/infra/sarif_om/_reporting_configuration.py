@@ -11,11 +11,21 @@ from typing import Any
 class ReportingConfiguration(object):
     """Information about a rule or notification that can be configured at runtime."""
 
-    enabled: Any
-    level: Any
-    parameters: Any
-    properties: Any
-    rank: Any
+    enabled: Any = dataclasses.field(
+        default=True, metadata={"schema_property_name": "enabled"}
+    )
+    level: Any = dataclasses.field(
+        default="warning", metadata={"schema_property_name": "level"}
+    )
+    parameters: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "parameters"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    rank: Any = dataclasses.field(
+        default=-1.0, metadata={"schema_property_name": "rank"}
+    )
 
 
 # flake8: noqa
