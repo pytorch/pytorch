@@ -821,6 +821,9 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 
 @register_decomposition(aten._softmax)
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
+    # eager softmax returns a contiguous tensor. Ensure that decomp also returns
+    # a contiguous tensor.
+    x = x.contiguous()
     if half_to_float:
         assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
@@ -837,6 +840,9 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 @register_decomposition(aten._log_softmax)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
+    # eager log_softmax returns a contiguous tensor. Ensure that decomp also
+    # returns a contiguous tensor.
+    x = x.contiguous()
     if half_to_float:
         assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
@@ -1224,8 +1230,8 @@ def native_batch_norm(
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean = running_mean.to(dtype=computation_dtype)
-        running_var = running_var.to(dtype=computation_dtype)
+        running_mean = running_mean.to(dtype=computation_dtype, copy=True)
+        running_var = running_var.to(dtype=computation_dtype, copy=True)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes
