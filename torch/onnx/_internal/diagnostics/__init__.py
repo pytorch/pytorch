@@ -1,5 +1,12 @@
-from ._diagnostic import context, engine, ExportDiagnostic, ExportDiagnosticTool, levels
+from ._diagnostic import (
+    context,
+    create_export_diagnostic_context,
+    engine,
+    ExportDiagnostic,
+    ExportDiagnosticTool,
+)
 from ._rules import rules
+from .infra import levels
 
 __all__ = [
     "ExportDiagnostic",
@@ -8,4 +15,5 @@ __all__ = [
     "levels",
     "engine",
     "context",
+    "create_export_diagnostic_context",
 ]

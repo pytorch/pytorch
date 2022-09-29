@@ -1,12 +1,10 @@
 """Diagnostic components for PyTorch ONNX export."""
 
+import contextlib
 from typing import Any, Optional, Tuple, TypeVar
 
 import torch
 from torch.onnx._internal.diagnostics import _rules, infra
-
-levels = infra.Level
-
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _ExportDiagnostic = TypeVar("_ExportDiagnostic", bound="ExportDiagnostic")
@@ -106,3 +104,18 @@ class ExportDiagnosticEngine(infra.DiagnosticEngine):
 
 engine = ExportDiagnosticEngine()
 context = engine.background_context
+
+
+@contextlib.contextmanager
+def create_export_diagnostic_context():
+    """Create a diagnostic context for export.
+
+    This is a workaround for code robustness since diagnostic context is accessed by
+    export internals via global variable. See `ExportDiagnosticEngine` for more details.
+    """
+    global context
+    context = engine.create_diagnostic_context(ExportDiagnosticTool())
+    try:
+        yield context
+    finally:
+        context = engine.background_context

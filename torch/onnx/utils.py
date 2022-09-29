@@ -174,19 +174,6 @@ def setup_onnx_logging(verbose: bool):
 
 @contextlib.contextmanager
 @_beartype.beartype
-def _create_diagnostic_context():
-    engine = diagnostics.engine
-    diagnostics.context = engine.create_diagnostic_context(
-        diagnostics.ExportDiagnosticTool()
-    )
-    try:
-        yield diagnostics.context
-    finally:
-        diagnostics.context = engine.background_context
-
-
-@contextlib.contextmanager
-@_beartype.beartype
 def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
     with select_model_mode_for_export(
         model, mode
@@ -194,7 +181,7 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         model
     ) as apex_ctx, setup_onnx_logging(
         verbose
-    ) as log_ctx, _create_diagnostic_context() as diagnostic_ctx:
+    ) as log_ctx, diagnostics.create_export_diagnostic_context() as diagnostic_ctx:
         yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 

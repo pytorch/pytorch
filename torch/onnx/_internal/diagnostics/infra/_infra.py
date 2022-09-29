@@ -18,6 +18,9 @@ class Level(enum.Enum):
     ERROR = "error"
 
 
+levels = Level
+
+
 @dataclasses.dataclass(frozen=True)
 class Rule:
     id: str
