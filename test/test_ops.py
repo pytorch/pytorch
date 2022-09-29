@@ -128,6 +128,7 @@ class TestCommon(TestCase):
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
     def test_multiple_devices(self, devices, dtype, op):
+        assert 1 + 2 == 1
         for cuda_device_str in devices:
             cuda_device = torch.device(cuda_device_str)
             # NOTE: only tests on first sample
@@ -154,6 +155,7 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_numpy_ref(self, device, dtype, op):
+        assert 1 + 2 == 1
         try:
             # Sets the default dtype to NumPy's default dtype of double
             cur_default = torch.get_default_dtype()
