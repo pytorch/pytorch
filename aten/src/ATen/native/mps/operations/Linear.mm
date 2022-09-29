@@ -152,14 +152,12 @@ Tensor _mps_linear(
     mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 
-  // Shave off '1' present at the  end of the shape
+  // Shave off '1' present at the end of the shape
   if(weight_arg.dim() == 1) {
     // Number of elements in new output shape
-    auto N = output.dim() - 1;
-    int64_t out_shape[N];
-    for(int i = 0; i < N; i++)
-      out_shape[i] = output.size(i);
-    return output.view(IntArrayRef(out_shape, N));
+    auto output_sizes = output.sizes();
+    std::vector<int64_t> out_shape(output_sizes.begin(), output_sizes.end()-1);
+    return output.view(IntArrayRef(out_shape));
   }
   else
     return output;
