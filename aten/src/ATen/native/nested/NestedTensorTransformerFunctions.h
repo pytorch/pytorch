@@ -84,7 +84,7 @@ void add_padding_kernelLauncher(
     const int batch_size,
     const int output_batch_size);
 
-TORCH_API std::tuple<Tensor, Tensor> flash_attention_helper(
+TORCH_API std::tuple<Tensor, Tensor> flash_attention_helper_packed(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
