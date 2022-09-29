@@ -14,7 +14,7 @@
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
-  - [Additonal Steps to prepare for release day](#additonal-steps-to-prepare-for-release-day)
+  - [Additional Steps to prepare for release day](#additional-steps-to-prepare-for-release-day)
     - [Modify release matrix](#modify-release-matrix)
     - [Open Google Colab issue](#open-google-colab-issue)
 - [Patch Releases](#patch-releases)
@@ -186,7 +186,7 @@ Promotion should occur in two steps:
 
 **NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
 
-## Additonal Steps to prepare for release day
+## Additional Steps to prepare for release day
 
 The following should be prepared for the release day
 
@@ -264,7 +264,7 @@ For versions of Python that we support we follow the [NEP 29 policy](https://num
 
 ## Accelerator Software
 
-For acclerator software like CUDA and ROCm we will typically use the following criteria:
+For accelerator software like CUDA and ROCm we will typically use the following criteria:
 * Support latest 2 minor versions
 
 ### Special support cases
