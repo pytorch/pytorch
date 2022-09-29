@@ -494,9 +494,6 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
     switch(backend){
       case sdp::SDPBackend::flash_attention:
           return flash_attention_helper_dense_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
-      case sdp::SDPBackend::mem_eff_attention:
-        TORCH_CHECK(false, "Mem efficient attention is not supported yet");
-        return std::make_tuple(Tensor(), Tensor());
       case sdp::SDPBackend::math:
         return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
       default:
