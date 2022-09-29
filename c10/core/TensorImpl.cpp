@@ -227,15 +227,19 @@ void TensorImpl::HandleResize() {
   }
 }
 
-bool TensorImpl::compute_contiguous() const {
+template <typename T>
+bool_is_contiguous _compute_contiguous(
+    ArrayRef<T> sizes,
+    ArrayRef<T> strides,
+    T numel) {
   bool is_contiguous = true;
-  if (is_empty())
-    return is_contiguous;
-  int64_t z = 1;
-  for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+  if (numel == 0)
+    return bool_is_contiguous(is_contiguous);
+  T z = 1;
+  for (int64_t d = sizes.size() - 1; d >= 0; d--) {
+    const auto size_d = sizes[d];
     if (size_d != 1) {
-      if (sizes_and_strides_.stride_at_unchecked(d) == z) {
+      if (strides[d] == z) {
         z *= size_d;
       } else {
         is_contiguous = false;
@@ -243,103 +247,150 @@ bool TensorImpl::compute_contiguous() const {
       }
     }
   }
-  return is_contiguous;
+  return bool_is_contiguous(is_contiguous);
 }
 
-bool TensorImpl::compute_channels_last_contiguous_2d() const {
+// NB: intentionally bypass the normal accessors; we always want to be
+// consistent with what is actually stored on the struct
+#define COMPUTE_WITH_SIZES_STRIDES_NUMEL(TEMPLATE)                            \
+  (has_symbolic_sizes_strides_                                                \
+       ? TEMPLATE<c10::SymInt>(                                               \
+             extra_meta_->sizes_, extra_meta_->strides_, extra_meta_->numel_) \
+       : TEMPLATE<int64_t>(                                                   \
+             sizes_and_strides_.sizes_arrayref(),                             \
+             sizes_and_strides_.strides_arrayref(),                           \
+             numel_))
+
+#define COMPUTE_WITH_SIZES_STRIDES(TEMPLATE)                               \
+  (has_symbolic_sizes_strides_                                             \
+       ? TEMPLATE<c10::SymInt>(extra_meta_->sizes_, extra_meta_->strides_) \
+       : TEMPLATE<int64_t>(                                                \
+             sizes_and_strides_.sizes_arrayref(),                          \
+             sizes_and_strides_.strides_arrayref()))
+
+bool_is_contiguous TensorImpl::compute_contiguous() const {
+  return COMPUTE_WITH_SIZES_STRIDES_NUMEL(_compute_contiguous);
+}
+
+template <typename T>
+bool_is_channels_last_contiguous _compute_channels_last_contiguous_2d(
+    ArrayRef<T> sizes,
+    ArrayRef<T> strides) {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
-  switch (sizes_and_strides_.size()) {
+  switch (sizes.size()) {
     case 4: {
-      int64_t expected = 1;
+      T expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes[d];
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
-            return false;
+          if (strides[d] != expected) {
+            return bool_is_channels_last_contiguous(false);
           }
           expected *= size_d;
         }
       }
-      return true;
+      return bool_is_channels_last_contiguous(true);
     }
     // NOLINTNEXTLINE(bugprone-branch-clone)
     case 3:
       // TODO dim == 3 case will be enabled once it is fully tested
-      return false;
+      return bool_is_channels_last_contiguous(false);
     default:
-      return false;
+      return bool_is_channels_last_contiguous(false);
   }
 }
 
-bool TensorImpl::compute_channels_last_contiguous_3d() const {
+bool_is_channels_last_contiguous TensorImpl::
+    compute_channels_last_contiguous_2d() const {
+  return COMPUTE_WITH_SIZES_STRIDES(_compute_channels_last_contiguous_2d);
+}
+
+template <typename T>
+bool_is_channels_last_3d_contiguous _compute_channels_last_contiguous_3d(
+    ArrayRef<T> sizes,
+    ArrayRef<T> strides) {
   // Please don't combine these code, constant array is used here to let
   // compiler fully unroll the loop to get better performance
-  switch (sizes_and_strides_.size()) {
+  switch (sizes.size()) {
     case 5: {
-      int64_t expected = 1;
+      T expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d = sizes[d];
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
-            return false;
+          if (strides[d] != expected) {
+            return bool_is_channels_last_3d_contiguous(false);
           }
           expected *= size_d;
         }
       }
-      return true;
+      return bool_is_channels_last_3d_contiguous(true);
     }
     // NOLINTNEXTLINE(bugprone-branch-clone)
     case 4:
       // TODO dim == 4 case will be enabled once it is fully tested
-      return false;
+      return bool_is_channels_last_3d_contiguous(false);
     default:
-      return false;
+      return bool_is_channels_last_3d_contiguous(false);
   }
 }
 
-bool TensorImpl::compute_strides_like_channels_last_2d() const {
-  return is_channels_last_strides_2d(
-      TensorImpl::sizes(), TensorImpl::strides());
+bool_is_channels_last_3d_contiguous TensorImpl::
+    compute_channels_last_contiguous_3d() const {
+  return COMPUTE_WITH_SIZES_STRIDES(_compute_channels_last_contiguous_3d);
 }
 
-bool TensorImpl::compute_strides_like_channels_last_3d() const {
-  return is_channels_last_strides_3d(
-      TensorImpl::sizes(), TensorImpl::strides());
+bool_is_channels_last TensorImpl::compute_strides_like_channels_last_2d()
+    const {
+  return bool_is_channels_last(
+      COMPUTE_WITH_SIZES_STRIDES(is_channels_last_strides_2d));
 }
 
-bool TensorImpl::compute_non_overlapping_and_dense() const {
-  if (dim() == 1) {
-    return sizes_and_strides_.size_at_unchecked(0) < 2 ||
-        sizes_and_strides_.stride_at_unchecked(0) == 1;
+bool_is_channels_last_3d TensorImpl::compute_strides_like_channels_last_3d()
+    const {
+  return bool_is_channels_last_3d(
+      COMPUTE_WITH_SIZES_STRIDES(is_channels_last_strides_3d));
+}
+
+template <typename T>
+bool_is_non_overlapping_and_dense _compute_non_overlapping_and_dense(
+    ArrayRef<T> sizes,
+    ArrayRef<T> strides) {
+  auto dim = sizes.size();
+  if (dim == 1) {
+    return bool_is_non_overlapping_and_dense(sizes[0] < 2 || strides[0] == 1);
   }
   SmallVector<int64_t, 5> perm;
-  perm.resize(dim());
-  for (const auto i : c10::irange(dim())) {
+  perm.resize(dim);
+  for (const auto i : c10::irange(dim)) {
     perm[i] = i;
   }
   // Sort by strides, leaving 0 and 1 sized dims at the end of the array
   std::sort(perm.begin(), perm.end(), [&](int64_t a, int64_t b) {
-    if (sizes_and_strides_.size_at_unchecked(a) < 2) {
+    if (sizes[a] < 2) {
       return false;
-    } else if (sizes_and_strides_.size_at_unchecked(b) < 2) {
+    } else if (sizes[b] < 2) {
       return true;
     }
-    return sizes_and_strides_.stride_at_unchecked(a) <
-        sizes_and_strides_.stride_at_unchecked(b);
+    return strides[a] < strides[b];
   });
-  int64_t require_stride = 1;
-  for (const auto i : c10::irange(dim())) {
-    const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
+  T require_stride = 1;
+  for (const auto i : c10::irange(dim)) {
+    const auto size_perm_i = sizes[perm[i]];
     if (size_perm_i < 2) {
-      return true;
+      return bool_is_non_overlapping_and_dense(true);
     }
-    if (sizes_and_strides_.stride_at_unchecked(perm[i]) != require_stride) {
-      return false;
+    if (strides[perm[i]] != require_stride) {
+      return bool_is_non_overlapping_and_dense(false);
     }
     require_stride *= size_perm_i;
   }
-  return true;
+  return bool_is_non_overlapping_and_dense(true);
+}
+
+bool_is_non_overlapping_and_dense TensorImpl::
+    compute_non_overlapping_and_dense() const {
+  return COMPUTE_WITH_SIZES_STRIDES(_compute_non_overlapping_and_dense);
 }
 
 void TensorImpl::release_resources() {
@@ -885,33 +936,6 @@ void TensorImpl::ShareExternalPointer(
   }
 }
 
-bool _compute_contiguous(const ExtraMeta& extra_meta, std::vector<int> order) {
-  if (order.size() != extra_meta.sizes_.size())
-    return false;
-  bool is_contiguous = true;
-  if (extra_meta.numel_ == 0)
-    return is_contiguous;
-  SymInt z = 1;
-  for (auto d : order) {
-    const auto size_d = extra_meta.sizes_.at(d);
-    if (size_d != 1) {
-      if (extra_meta.strides_.at(d) == z) {
-        z *= size_d;
-      } else {
-        is_contiguous = false;
-        break;
-      }
-    }
-  }
-  return is_contiguous;
-}
-
-bool _compute_contiguous(const ExtraMeta& extra_meta) {
-  std::vector<int> order(extra_meta.sizes_.size());
-  std::iota(order.rbegin(), order.rend(), 0);
-  return _compute_contiguous(extra_meta, order);
-}
-
 // NB: this doesn't check that the sizes/strides/offset are in bound for the
 // storage, and furthermore, it CANNOT do so as in some cases we temporarily
 // violate invariants by first setting sizes/strides, and then updating the
@@ -948,11 +972,9 @@ void TensorImpl::set_sizes_and_strides(
     numel *= s;
   }
   extra_meta_->numel_ = numel;
-  extra_meta_->is_contiguous_ = _compute_contiguous(*extra_meta_);
-  extra_meta_->is_channels_last_contiguous_ =
-      _compute_contiguous(*extra_meta_, {1, 3, 2, 0});
-  extra_meta_->is_channels_last_3d_contiguous_ =
-      _compute_contiguous(*extra_meta_, {1, 4, 3, 2, 0});
+  extra_meta_->is_contiguous_ = compute_contiguous();
+  extra_meta_->is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+  extra_meta_->is_channels_last_3d_contiguous_ = compute_channels_last_contiguous_3d();
 }
 
 namespace impl {
