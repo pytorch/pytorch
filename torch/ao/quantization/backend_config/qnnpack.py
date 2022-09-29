@@ -18,105 +18,89 @@ from .backend_config import BackendConfig, DTypeConfig, DTypeWithConstraints
 # |  DTYPE CONFIGS  |
 # ===================
 
-def _get_activation_dtype_with_constraints(dtype: torch.dtype):
-    return DTypeWithConstraints(dtype=dtype, scale_min_lower_bound=2 ** -12)
+# xnnpack dtype configs
 
-def _get_weight_dtype_with_constraints(dtype: torch.dtype):
-    return DTypeWithConstraints(
-        dtype=dtype,
-        quant_min_lower_bound=-127,
-        quant_max_upper_bound=127,
-        scale_min_lower_bound=2 ** -12
-    )
+# We restrict scale values to be 2 ** -12 to ensure the
+# requantization scale never falls below the xnnpack lower
+# threshold. Additionally, for qint8 weight, we restrict
+# the quantization values to [-127, +127], excluding -128.
+# For more detail, refer to the description of
+# `default_symmetric_qnnpack_qconfig`.
 
-act_qint8_with_constraints = _get_activation_dtype_with_constraints(torch.qint8)
-act_quint8_with_constraints = _get_activation_dtype_with_constraints(torch.quint8)
-act_fp16_with_constraints = _get_activation_dtype_with_constraints(torch.float16)
-act_fp_with_constraints = _get_activation_dtype_with_constraints(torch.float)
-weight_qint8_with_constraints = _get_weight_dtype_with_constraints(torch.qint8)
-weight_quint8_with_constraints = _get_weight_dtype_with_constraints(torch.quint8)
-weight_quint4x2_with_constraints = _get_weight_dtype_with_constraints(torch.quint4x2)
-weight_fp16_with_constraints = _get_weight_dtype_with_constraints(torch.float16)
+# TODO: add additional restriction on qscheme to ensure it
+# is either per_tensor_symmetric or per_channel_symmetric
 
-# weighted op
+xnnpack_act_qint8_with_constraints = DTypeWithConstraints(
+    dtype=torch.qint8,
+    scale_min_lower_bound=2 ** -12,
+)
 
-qnnpack_weighted_op_qint8_dtype_config = DTypeConfig(
-    input_dtype=act_qint8_with_constraints,
-    output_dtype=act_qint8_with_constraints,
-    weight_dtype=weight_qint8_with_constraints,
+xnnpack_weight_qint8_with_constraints = DTypeWithConstraints(
+    dtype=torch.qint8,
+    quant_min_lower_bound=-127,
+    quant_max_upper_bound=127,
+    scale_min_lower_bound=2 ** -12,
+)
+
+xnnpack_weighted_op_qint8_dtype_config = DTypeConfig(
+    input_dtype=xnnpack_act_qint8_with_constraints,
+    output_dtype=xnnpack_act_qint8_with_constraints,
+    weight_dtype=xnnpack_weight_qint8_with_constraints,
     bias_dtype=torch.float,
 )
 
-qnnpack_weighted_op_quint8_dtype_config = DTypeConfig(
-    input_dtype=act_quint8_with_constraints,
-    output_dtype=act_quint8_with_constraints,
-    weight_dtype=weight_qint8_with_constraints,
-    bias_dtype=torch.float,
+xnnpack_default_op_qint8_dtype_config = DTypeConfig(
+    input_dtype=xnnpack_act_qint8_with_constraints,
+    output_dtype=xnnpack_act_qint8_with_constraints,
 )
 
-# default op
+# qnnpack dtype configs
 
-qnnpack_default_op_qint8_dtype_config = DTypeConfig(
-    input_dtype=act_qint8_with_constraints,
-    output_dtype=act_qint8_with_constraints,
+qnnpack_weighted_op_int8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.quint8,
+    weight_dtype=torch.qint8,
+    bias_dtype=torch.float,
 )
 
 qnnpack_default_op_quint8_dtype_config = DTypeConfig(
-    input_dtype=act_quint8_with_constraints,
-    output_dtype=act_quint8_with_constraints,
+    input_dtype=torch.quint8,
+    output_dtype=torch.quint8,
 )
 
 qnnpack_default_op_fp16_dtype_config = DTypeConfig(
-    input_dtype=act_fp16_with_constraints,
-    output_dtype=act_fp16_with_constraints,
-    weight_dtype=weight_fp16_with_constraints,
+    input_dtype=torch.float16,
+    output_dtype=torch.float16,
+    weight_dtype=torch.float16,
     bias_dtype=torch.float16,
 )
 
-# dynamic
-
-qnnpack_default_dynamic_qint8_dtype_config = DTypeConfig(
-    input_dtype=act_qint8_with_constraints,
-    output_dtype=act_fp_with_constraints,
-    weight_dtype=weight_qint8_with_constraints,
+qnnpack_default_dynamic_int8_dtype_config = DTypeConfig(
+    input_dtype=torch.quint8,
+    output_dtype=torch.float,
+    weight_dtype=torch.qint8,
     bias_dtype=torch.float,
     is_dynamic=True,
 )
 
-qnnpack_default_dynamic_quint8_dtype_config = DTypeConfig(
-    input_dtype=act_quint8_with_constraints,
-    output_dtype=act_fp_with_constraints,
-    weight_dtype=weight_qint8_with_constraints,
+qnnpack_default_dynamic_float16_dtype_config = DTypeConfig(
+    input_dtype=torch.float16,
+    output_dtype=torch.float,
+    weight_dtype=torch.float16,
     bias_dtype=torch.float,
     is_dynamic=True,
-)
-
-qnnpack_default_dynamic_fp16_dtype_config = DTypeConfig(
-    input_dtype=act_fp16_with_constraints,
-    output_dtype=act_fp_with_constraints,
-    weight_dtype=weight_fp16_with_constraints,
-    bias_dtype=torch.float,
-    is_dynamic=True,
-)
-
-# weight only
-
-qnnpack_weight_only_qint8_dtype_config = DTypeConfig(
-    input_dtype=act_fp_with_constraints,
-    output_dtype=act_fp_with_constraints,
-    weight_dtype=weight_qint8_with_constraints,
 )
 
 qnnpack_weight_only_quint8_dtype_config = DTypeConfig(
-    input_dtype=act_fp_with_constraints,
-    output_dtype=act_fp_with_constraints,
-    weight_dtype=weight_quint8_with_constraints,
+    input_dtype=torch.float,
+    output_dtype=torch.float,
+    weight_dtype=torch.quint8,
 )
 
 qnnpack_weight_only_quint4x2_dtype_config = DTypeConfig(
-    input_dtype=act_fp_with_constraints,
-    output_dtype=act_fp_with_constraints,
-    weight_dtype=weight_quint4x2_with_constraints,
+    input_dtype=torch.float,
+    output_dtype=torch.float,
+    weight_dtype=torch.quint4x2,
 )
 
 
@@ -129,39 +113,36 @@ def get_qnnpack_backend_config() -> BackendConfig:
     Return the `BackendConfig` for PyTorch's native QNNPACK backend.
     """
     conv_dtype_configs = [
-        qnnpack_weighted_op_qint8_dtype_config,
-        qnnpack_weighted_op_quint8_dtype_config,
+        xnnpack_weighted_op_qint8_dtype_config,
+        qnnpack_weighted_op_int8_dtype_config,
     ]
     linear_dtype_configs = [
-        qnnpack_weighted_op_qint8_dtype_config,
-        qnnpack_weighted_op_quint8_dtype_config,
-        qnnpack_default_dynamic_qint8_dtype_config,
-        qnnpack_default_dynamic_quint8_dtype_config,
-        qnnpack_default_dynamic_fp16_dtype_config,
+        xnnpack_weighted_op_qint8_dtype_config,
+        qnnpack_weighted_op_int8_dtype_config,
+        qnnpack_default_dynamic_int8_dtype_config,
+        qnnpack_default_dynamic_float16_dtype_config,
     ]
     binary_op_dtype_configs = [
-        qnnpack_weighted_op_qint8_dtype_config,
-        qnnpack_weighted_op_quint8_dtype_config,
+        xnnpack_weighted_op_qint8_dtype_config,
+        qnnpack_weighted_op_int8_dtype_config,
     ]
     default_op_dtype_configs = [
-        qnnpack_default_op_qint8_dtype_config,
+        xnnpack_default_op_qint8_dtype_config,
         qnnpack_default_op_quint8_dtype_config,
     ]
     fixed_qparams_op_dtype_configs = [
-        qnnpack_weighted_op_qint8_dtype_config,
-        qnnpack_weighted_op_quint8_dtype_config,
+        xnnpack_weighted_op_qint8_dtype_config,
+        qnnpack_weighted_op_int8_dtype_config,
     ]
     share_qparams_op_dtype_configs = [
-        qnnpack_default_op_qint8_dtype_config,
+        xnnpack_default_op_qint8_dtype_config,
         qnnpack_default_op_quint8_dtype_config,
     ]
     rnn_op_dtype_configs = [
-        qnnpack_default_dynamic_qint8_dtype_config,
-        qnnpack_default_dynamic_quint8_dtype_config,
-        qnnpack_default_dynamic_fp16_dtype_config,
+        qnnpack_default_dynamic_int8_dtype_config,
+        qnnpack_default_dynamic_float16_dtype_config,
     ]
     embedding_op_dtype_configs = [
-        qnnpack_weight_only_qint8_dtype_config,
         qnnpack_weight_only_quint8_dtype_config,
         qnnpack_weight_only_quint4x2_dtype_config,
     ]

@@ -423,6 +423,14 @@ void ValueCache::store<CallType::PyOptimizerCall>(
       }
     }
     std::vector<std::pair<std::string, void*>> states_;
+    py::dict state_handle = py::handle((PyObject*)key).attr("state");
+    for (auto& it : state_handle) {
+      TORCH_INTERNAL_ASSERT(
+          py::isinstance<py::dict>(it.second), "Expects a dict type element");
+      for (auto& state_elem : py::cast<py::dict>(it.second)) {
+        check_and_store(state_elem.first, state_elem.second, states_);
+      }
+    }
 
     cache.optimizer_data_[key] = {cls, params_, states_};
   }
@@ -709,9 +717,9 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     // to all the prior frames onto our event stack. (We stop at depth=128)
     std::vector<PyFrameObject*> current_stack;
     auto frame = PyEval_GetFrame();
-    Py_INCREF(frame);
     size_t depth = 0; // Make sure we can't infinite loop.
     while (frame != nullptr && depth <= 128) {
+      Py_INCREF(frame);
       current_stack.push_back(frame);
       frame = PyFrame_GetBack(frame);
       depth++;

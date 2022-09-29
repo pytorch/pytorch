@@ -418,17 +418,6 @@ default_fused_per_channel_wt_fake_quant = FusedMovingAvgObsFakeQuantize.with_arg
 Fused version of `default_per_channel_weight_fake_quant`, with improved performance.
 """
 
-# TODO: expose this and clean up public APIs in fake_quantize.py
-_wt_fake_quant_range_neg_127_to_127 = FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                             quant_min=-127,
-                                                             quant_max=127,
-                                                             dtype=torch.qint8,
-                                                             qscheme=torch.per_tensor_symmetric,
-                                                             eps=2 ** -12)
-"""
-Version of `default_weight_fake_quant` with the 8-bit values restricted to [-127, +127], excluding -128.
-"""
-
 fused_wt_fake_quant_range_neg_127_to_127 = FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                    quant_min=-127,
                                                                                    quant_max=127,
