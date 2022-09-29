@@ -236,7 +236,8 @@ bool_is_contiguous _compute_contiguous(
   if (numel == 0)
     return bool_is_contiguous(is_contiguous);
   T z = 1;
-  for (int64_t d = sizes.size() - 1; d >= 0; d--) {
+  // NB: make sure we do signed arithmetic
+  for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
     const auto size_d = sizes[d];
     if (size_d != 1) {
       if (strides[d] == z) {
