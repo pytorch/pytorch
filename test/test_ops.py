@@ -63,7 +63,6 @@ from torch._subclasses.fake_tensor import (
 )
 from torch._subclasses.fake_utils import outputs_alias_inputs
 
-from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch._prims as prims
 from torch._prims.context import TorchRefsMode
 
@@ -173,8 +172,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        mode = FakeTensorMode()
-        with mode:
+        with FakeTensorMode() as mode:
             pass
 
         def _to_tensormeta(x):
@@ -189,7 +187,7 @@ class TestCommon(TestCase):
 
             meta_sample = sample.transform(_to_tensormeta)
             try:
-                with enable_torch_dispatch_mode(mode):
+                with mode:
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
             except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
@@ -1784,7 +1782,7 @@ aliasing_failures = (
 # tests which have inconsistent fake tensor stride propagation
 # XXX: no new tests should be added to this list as a result of a
 # decomp or prim, see https://github.com/pytorch/pytorch/issues/78050#issuecomment-1253950325
-fake_tensor_stride_failing_ops = [
+fake_tensor_stride_failing_ops = {
     "fft.fft2",
     "fft.fft",
     "fft.fftn",
@@ -1805,9 +1803,9 @@ fake_tensor_stride_failing_ops = [
     "fft.rfftn",
     "svd",
     "linalg.svd",
-]
+}
 
-fake_backward_xfails = fake_tensor_stride_failing_ops + [
+fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "linalg.cond",
     "linalg.matrix_norm",
     "linalg.norm",
@@ -1824,14 +1822,23 @@ fake_backward_xfails = fake_tensor_stride_failing_ops + [
     "cholesky",
     "linalg.eigh",
     "symeig",
-]
+}
 
-fake_backward_xfails = [xfail(stride_skip) for stride_skip in fake_backward_xfails] + [
+fake_backward_xfails = {xfail(stride_skip) for stride_skip in fake_backward_xfails} | {
     xfail("segment_reduce", "lengths"),
     xfail("norm", "nuc"),
-    xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
+    xfail("linalg.norm", "subgradients_at_zero"),  # can accept vector inputs
     skip('nn.functional.ctc_loss'),
-]
+}
+
+fake_autocast_backward_xfails = {
+    skip("nn.functional.binary_cross_entropy"),
+    skip("sparse.sampled_addmm"),
+    skip("linalg.pinv"),
+    skip("linalg.pinv", "hermitian"),
+    skip("linalg.pinv", "singular"),
+    skip('pinverse'),
+}
 
 @skipIfSlowGradcheckEnv
 class TestFakeTensor(TestCase):
@@ -1864,7 +1871,7 @@ class TestFakeTensor(TestCase):
                     continue
 
                 with context():
-                    with enable_torch_dispatch_mode(mode):
+                    with mode:
                         res_fake = op(input, *args, **kwargs)
 
 
@@ -1910,13 +1917,7 @@ class TestFakeTensor(TestCase):
         context = torch.cuda.amp.autocast if device == "cuda" else torch.cpu.amp.autocast
         self._test_fake_helper(device, dtype, op, context)
 
-    @skipIfRocm
-    @onlyCUDA
-    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
-    @skipOps('TestFakeTensor', 'test_fake_crossref_backward', fake_backward_xfails)
-    def test_fake_crossref_backward(self, device, dtype, op):
-        # tests fake tensor property propagation through a cross ref mode
-        # on ops which support backward
+    def _test_fake_crossref_helper(self, device, dtype, op, context):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
 
         for iter, sample in enumerate(samples):
@@ -1929,15 +1930,29 @@ class TestFakeTensor(TestCase):
                 aten.empty_strided.default,
                 aten.copy_.default,
                 aten.is_same_size.default,
-
             )
+
             # TODO: enable check_aliasing, batch norm fails
-            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=False):
-                with warnings.catch_warnings():
+            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
+                with warnings.catch_warnings(), context():
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
                         sample.output_process_fn_grad,
                         op.gradcheck_wrapper)
+
+    @skipIfRocm
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_no_amp', fake_backward_xfails)
+    def test_fake_crossref_backward_no_amp(self, device, dtype, op):
+        self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
+
+    @skipIfRocm
+    @onlyCUDA
+    @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
+    @skipOps('TestFakeTensor', 'test_fake_crossref_backward_amp', fake_backward_xfails | fake_autocast_backward_xfails)
+    def test_fake_crossref_backward_amp(self, device, dtype, op):
+        self._test_fake_crossref_helper(device, dtype, op, torch.cuda.amp.autocast)
 
 
 instantiate_device_type_tests(TestCommon, globals())
