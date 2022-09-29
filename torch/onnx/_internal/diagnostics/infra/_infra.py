@@ -10,7 +10,12 @@ from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
 
 class Level(enum.Enum):
-    """The level of a diagnostic."""
+    """The level of a diagnostic.
+
+    This class is used to represent the level of a diagnostic. The levels are defined
+    by the SARIF specification, and are not modifiable. For alternative categories,
+    please use infra.Tag instead.
+    """
 
     NONE = "none"
     NOTE = "note"
@@ -19,6 +24,12 @@ class Level(enum.Enum):
 
 
 levels = Level
+
+
+class Tag(enum.Enum):
+    """The tag of a diagnostic. This class can be inherited to define custom tags."""
+
+    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -144,6 +155,7 @@ class Diagnostic:
     locations: List[Location] = dataclasses.field(default_factory=list)
     stacks: List[Stack] = dataclasses.field(default_factory=list)
     additional_message: Optional[str] = None
+    tags: List[Tag] = dataclasses.field(default_factory=list)
 
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
@@ -159,6 +171,9 @@ class Diagnostic:
         )
         sarif_result.locations = [location.sarif() for location in self.locations]
         sarif_result.stacks = [stack.sarif() for stack in self.stacks]
+        sarif_result.properties = sarif.PropertyBag(
+            tags=[tag.value for tag in self.tags]
+        )
         return sarif_result
 
     def with_location(self: _Diagnostic, location: Location) -> _Diagnostic:

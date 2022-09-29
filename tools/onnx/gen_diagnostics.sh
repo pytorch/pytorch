@@ -1,3 +1,4 @@
+#!/bin/bash
 cd ../../
 python -m tools.onnx.gen_diagnostics \
     torch/onnx/_internal/diagnostics/rules.yaml \

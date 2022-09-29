@@ -20,6 +20,8 @@ def _assert_has_diagnostics(
     unseen_pairs = {(rule.id, level.value) for rule, level in rule_level_pairs}
     actual_results = []
     for run in sarif_log.runs:
+        if run.results is None:
+            continue
         for result in run.results:
             id_level_pair = (result.rule_id, result.level)
             unseen_pairs.discard(id_level_pair)
