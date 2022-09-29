@@ -346,8 +346,8 @@ std::tuple<Tensor,optional<int64_t>> slice_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
     int64_t dim,
-    const c10::optional<c10::SymInt>& start,
-    const c10::optional<c10::SymInt>& end,
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
     c10::SymInt step) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
   dim = getPhysicalDim(self, self_bdim.has_value(), dim);

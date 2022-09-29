@@ -484,6 +484,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
     # CompiledFunction.forward(inputs) -> mutated_inputs, outputs
     # CompiledFunction.backward(grad_outputs) -> grad_inputs
     # Epilogue(inp1, mutated_inp1, inp2, mutated_inp2, ...) -> ()
+    #
+    # TODO: Doesn't aot_dispatch_base need the epilogue too?
+    # ... it probably needs to run functionalization as well?
     @disable_torchdynamo
     def compiled_function_with_epilogue(*args):
         # First, call the custom autograd fn
@@ -502,7 +505,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             # TODO: this epilogue should also be responsible for generating outputs
             # that are aliases of inputs.
             input_mutation_epilogue(*mutated_input_args)
-            return fw_outs
+        return fw_outs
 
     return compiled_function_with_epilogue
 
