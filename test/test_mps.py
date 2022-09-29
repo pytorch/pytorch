@@ -8008,6 +8008,8 @@ class TestConsistency(TestCase):
             'logical_and': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
             'logical_or': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
             'logical_xor': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
+            'native_layer_norm': ['torch.float32'],
+            'nn.functional.layer_norm': ['torch.float32'],
         }
 
     # These ops that are problematic. So never run them even when
@@ -8138,7 +8140,6 @@ class TestConsistency(TestCase):
         'logsumexp': ['torch.bool', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         'matmul': ['torch.uint8'],
         'mean': ['torch.float16', 'torch.float32'],
-        'native_layer_norm': ['torch.float32'],
         'neg': ['torch.uint8'],
         'new_empty': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         'nn.functional.adaptive_avg_pool1d': ['torch.float32'],
@@ -8154,7 +8155,6 @@ class TestConsistency(TestCase):
         'nn.functional.dropout': ['torch.float32'],
         'nn.functional.gelu': ['torch.float32'],
         'nn.functional.interpolate': ['torch.float32', 'torch.float32', 'torch.float32'],
-        'nn.functional.layer_norm': ['torch.float32'],
         'nn.functional.margin_ranking_loss': ['torch.uint8'],
         'nn.functional.max_pool1d': ['torch.float32'],
         'nn.functional.max_pool2d': ['torch.float32'],
