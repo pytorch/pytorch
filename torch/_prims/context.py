@@ -152,12 +152,6 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
 
-        skip_decomposition_table: Sequence[
-            Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-        ] = {  # type: ignore[assignment]
-            # control-flow dependent decomposition. See Issue #85517
-            torch.ops.aten.masked_fill.Tensor,
-        }
         # For torch.ops.aten.*, use registered decompositions from torch._decomp
         # torch._decomp.decomposition_table provides a mapping from
         # torch.ops.aten.* to torch._refs or torch._decomp.decompositions
