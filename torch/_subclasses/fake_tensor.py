@@ -120,12 +120,13 @@ def get_schema_info(func):
 # are used for aot autograd tracing so we would like to unify and add
 # additional testing to them
 @functools.lru_cache(None)
-def aten_to_aten_decomposition(decomp_fn):
+def aten_to_aten_decomp(func):
+    from torch._decomp import decomposition_table
     decompositions = torch._decomp.decompositions
     decomp_attrs = [
         getattr(decompositions, attr) for attr in dir(decompositions)
     ]
-    return decomp_fn in decomp_attrs
+    return decomposition_table[func] in decomp_attrs
 
 
 def tree_flatten_only(ty: Type[T], pytree: PyTree):
@@ -752,10 +753,6 @@ class FakeTensorMode(TorchDispatchMode):
 
         from torch._decomp import decomposition_table, _disabled_meta_decomps
 
-        with self, in_kernel_invocation_manager(self, in_kernel=False):
-            if func in decomposition_table and aten_to_aten_decomposition(decomposition_table[func]) and func not in _disabled_meta_decomps:
-                return decomposition_table[func](*args, **kwargs)
-
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
@@ -786,6 +783,10 @@ class FakeTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
+
+        with self, in_kernel_invocation_manager(self, in_kernel=False):
+            if func in decomposition_table and aten_to_aten_decomp(func) and func not in _disabled_meta_decomps:
+                return decomposition_table[func](*args, **kwargs)
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
