@@ -10625,6 +10625,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                # AssertionError: Booleans mismatch: True is not False
                DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_autocast'),
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake'),
            )
            ),
     OpInfo('nn.functional.cosine_similarity',
