@@ -5239,7 +5239,6 @@ for shape in [(1,), ()]:
             self.assertIsNone(out.grad_fn._saved_scales)                  # c10::optional<ArrayRef<double>> -> float[]?
 
         out = torch.nn.functional.interpolate(a, scale_factor=0.5, mode="linear")
-        self.assertIsNone(out.grad_fn._saved_output_size)
         self.assertEqual(out.grad_fn._saved_scale_factors, (0.5,))
         self.assertIsInstance(out.grad_fn._saved_scale_factors[0], float)
 

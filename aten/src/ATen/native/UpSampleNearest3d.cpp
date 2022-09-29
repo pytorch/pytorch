@@ -158,7 +158,7 @@ Tensor upsample_nearest3d(
   return at::upsample_nearest3d(input, osize, scale_d, scale_h, scale_w);
 }
 
-Tensor _upsample_nearest_exact3d_cpu(
+Tensor _upsample_nearest_exact3d(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
@@ -167,18 +167,6 @@ Tensor _upsample_nearest_exact3d_cpu(
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
   return at::_upsample_nearest_exact3d(input, osize, scale_d, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact3d_backward_cpu(
-    const Tensor& grad_output,
-    at::OptionalIntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input_size, output_size, scale_factors);
-  auto scale_d = get_scale_value(scale_factors, 0);
-  auto scale_h = get_scale_value(scale_factors, 1);
-  auto scale_w = get_scale_value(scale_factors, 2);
-  return at::_upsample_nearest_exact3d_backward(grad_output, osize, input_size, scale_d, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_nearest3d_kernel);

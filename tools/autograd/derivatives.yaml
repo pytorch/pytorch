@@ -2098,25 +2098,6 @@
   self: _upsample_nearest_exact3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_bilinear2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: _upsample_bilinear2d_aa_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
-  result: auto_linear
-
-- name: _upsample_bicubic2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: _upsample_bicubic2d_aa_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
-
-- name: _upsample_nearest_exact1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact1d_backward(grad, output_size, input.sizes(), scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact2d_backward(grad, output_size, input.sizes(), scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact3d_backward(grad, output_size, input.sizes(), scale_factors)
-  result: auto_linear
-
 - name: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   self: pixel_unshuffle(grad, upscale_factor)
   result: auto_linear
@@ -2502,25 +2483,6 @@
 
 - name: _upsample_nearest_exact3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
   grad_output: _upsample_nearest_exact3d(grad, output_size, scales_d, scales_h, scales_w)
-  result: auto_linear
-
-- name: _upsample_bilinear2d_aa_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_bilinear2d_aa(grad, output_size, align_corners, scale_factors)
-  result: auto_linear
-
-- name: _upsample_bicubic2d_aa_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_bicubic2d_aa(grad, output_size, align_corners, scale_factors)
-
-- name: _upsample_nearest_exact1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact1d(grad, output_size, scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact2d(grad, output_size, scale_factors)
-  result: auto_linear
-
-- name: _upsample_nearest_exact3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact3d(grad, output_size, scale_factors)
   result: auto_linear
 
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
