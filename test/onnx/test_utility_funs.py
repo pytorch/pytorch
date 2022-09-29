@@ -17,13 +17,7 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
-from torch.onnx import (
-    OperatorExportTypes,
-    register_custom_op_symbolic,
-    TrainingMode,
-    unregister_custom_op_symbolic,
-    utils,
-)
+from torch.onnx import OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
@@ -1160,12 +1154,12 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
     def test_custom_opsets_gelu(self):
-        self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::gelu", 9)
 
         def gelu(g, self, approximate):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
-        register_custom_op_symbolic("::gelu", gelu, 1)
+        torch.onnx.register_custom_op_symbolic("::gelu", gelu, 9)
         model = torch.nn.GELU(approximate="none")
         x = torch.randn(3, 3)
         f = io.BytesIO()
@@ -1184,12 +1178,12 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.opset_import[1].version, 1)
 
     def test_register_aten_custom_op_symbolic(self):
-        self.addCleanup(unregister_custom_op_symbolic, "aten::gelu", 1)
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "aten::gelu", 9)
 
         def gelu(g, self, approximate):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
-        register_custom_op_symbolic("aten::gelu", gelu, 1)
+        torch.onnx.register_custom_op_symbolic("aten::gelu", gelu, 9)
         model = torch.nn.GELU(approximate="none")
         x = torch.randn(3, 3)
         f = io.BytesIO()
@@ -1201,6 +1195,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     @skipIfNoLapack
     def test_custom_opsets_inverse(self):
+        self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
+
         class CustomInverse(torch.nn.Module):
             def forward(self, x):
                 return torch.inverse(x) + x
@@ -1208,7 +1204,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         def linalg_inv(g, self):
             return g.op("com.microsoft::Inverse", self).setType(self.type())
 
-        register_custom_op_symbolic("::linalg_inv", linalg_inv, 1)
+        torch.onnx.register_custom_op_symbolic("::linalg_inv", linalg_inv, 9)
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
         f = io.BytesIO()
@@ -1760,7 +1756,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             tensors = _unpack_list(tensor_list)
             return g.op("Concat", *tensors, axis_i=dim)
 
-        register_custom_op_symbolic("::cat", cat, _onnx_opset_version)
+        torch.onnx.register_custom_op_symbolic("::cat", cat, _onnx_opset_version)
 
         class CatModel(torch.nn.Module):
             def forward(self, x):
@@ -1781,7 +1777,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 "report this bug."
             ),
         )
-        unregister_custom_op_symbolic("::cat", _onnx_opset_version)
+        torch.onnx.unregister_custom_op_symbolic("::cat", _onnx_opset_version)
 
 
 class TestUtilityFuns_opset10(TestUtilityFuns_opset9):
