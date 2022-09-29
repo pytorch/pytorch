@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.ao.quantization import default_dynamic_qconfig
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
@@ -72,7 +72,7 @@ from torch.ao.ns._numeric_suite_fx import (
     extract_shadow_logger_info,
     extend_logger_results_with_comparison,
 )
-from torch.ao.quantization.backend_config import get_native_backend_config_dict
+from torch.ao.quantization.backend_config import get_native_backend_config
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 
 
@@ -287,7 +287,7 @@ def get_all_quant_patterns():
     all_quant_patterns = get_default_quant_patterns()
     # some of the patterns are moved to (native) backend_config_dict so we need to
     # add them back here
-    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config_dict()).items():
+    for pattern, quantize_handler in get_pattern_to_quantize_handlers(get_native_backend_config()).items():
         all_quant_patterns[pattern] = quantize_handler
     return all_quant_patterns
 

@@ -321,10 +321,11 @@ class ModelReportVisualizer:
                     The rest of the rows will contain data
 
         Example Use:
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_filtered_tables(
-                    feature_filter = "per_channel_min",
-                    module_fqn_filter = "block1"
-                ) # generates table with per_channel_min info for all modules in block 1 of the model
+            ...     feature_filter = "per_channel_min",
+            ...     module_fqn_filter = "block1"
+            ... ) # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(feature_filter, module_fqn_filter)
@@ -403,12 +404,13 @@ class ModelReportVisualizer:
                 Default = "", results in all the modules in the reports to be visible in the table
 
         Example Use:
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_table_visualization(
-                    feature_filter = "per_channel_min",
-                    module_fqn_filter = "block1"
-                )
-            # prints out neatly formatted table with per_channel_min info for
-                all modules in block 1 of the model
+            ...     feature_filter = "per_channel_min",
+            ...     module_fqn_filter = "block1"
+            ... )
+            >>> # prints out neatly formatted table with per_channel_min info
+            >>> # for all modules in block 1 of the model
         """
         # see if we got tabulate
         if not got_tabulate:
@@ -497,7 +499,7 @@ class ModelReportVisualizer:
             # calculate the number of channels
             num_channels: int = max(row[self.CHANNEL_NUM_INDEX] for row in table) + 1
             for channel in range(num_channels):
-                y_data.append([])  # seperate data list per channel
+                y_data.append([])  # separate data list per channel
 
             for table_row_num, row in enumerate(table):
                 # get x_value to append
@@ -552,13 +554,14 @@ class ModelReportVisualizer:
                 Default = "", results in all the modules in the reports to be visible in the table
 
         Example Use:
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_plot_visualization(
-                    feature_filter = "per_channel_min",
-                    module_fqn_filter = "block1"
-                )
-            # outputs line plot of per_channel_min information for all modules in block1 of model
-                each channel gets it's own line, and it's plotted across the in-order modules
-                on the x-axis
+            ...     feature_filter = "per_channel_min",
+            ...     module_fqn_filter = "block1"
+            ... )
+            >>> # outputs line plot of per_channel_min information for all
+            >>> # modules in block1 of model each channel gets it's own line,
+            >>> # and it's plotted across the in-order modules on the x-axis
         """
         # checks if we have matplotlib and let's user know to install it if don't
         if not got_matplotlib:
@@ -613,10 +616,11 @@ class ModelReportVisualizer:
                 Default = 10, the values will be split into 10 equal sized bins
 
         Example Use:
+            >>> # xdoctest: +SKIP
             >>> mod_report_visualizer.generategenerate_histogram_visualization_plot_visualization(
-                    feature_filter = "per_channel_min",
-                    module_fqn_filter = "block1"
-                )
+            ...     feature_filter = "per_channel_min",
+            ...     module_fqn_filter = "block1"
+            ... )
             # outputs histogram of per_channel_min information for all modules in block1 of model
                 information is gathered across all channels for all modules in block 1 for the
                 per_channel_min and is displayed in a histogram of equally sized bins

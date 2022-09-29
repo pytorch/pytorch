@@ -407,15 +407,15 @@ For static quantization techniques which quantize activations, the user needs
 to do the following in addition:
 
 1. Specify where activations are quantized and de-quantized. This is done using
-   :class:`~torch.quantization.QuantStub` and
-   :class:`~torch.quantization.DeQuantStub` modules.
-2. Use :class:`torch.nn.quantized.FloatFunctional` to wrap tensor operations
+   :class:`~torch.ao.quantization.QuantStub` and
+   :class:`~torch.ao.quantization.DeQuantStub` modules.
+2. Use :class:`~torch.ao.nn.quantized.FloatFunctional` to wrap tensor operations
    that require special handling for quantization into modules. Examples
    are operations like ``add`` and ``cat`` which require special handling to
    determine output quantization parameters.
 3. Fuse modules: combine operations/modules into a single module to obtain
    higher accuracy and performance. This is done using the
-   :func:`torch.quantization.fuse_modules` API, which takes in lists of modules
+   :func:`~torch.ao.quantization.fuse_modules` API, which takes in lists of modules
    to be fused. We currently support the following fusions:
    [Conv, Relu], [Conv, BatchNorm], [Conv, BatchNorm, Relu], [Linear, Relu]
 
@@ -1133,6 +1133,9 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
 .. py:module:: torch.ao.nn
+.. py:module:: torch.ao.nn.quantizable
+.. py:module:: torch.ao.nn.quantizable.modules
+.. py:module:: torch.ao.nn.quantized
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
@@ -1144,3 +1147,15 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.sparsity
 .. py:module:: torch.ao.sparsity.scheduler
 .. py:module:: torch.ao.sparsity.sparsifier
+
+.. py:module:: torch.nn.qat
+.. py:module:: torch.nn.qat.modules
+.. py:module:: torch.nn.qat.dynamic
+.. py:module:: torch.nn.qat.dynamic.modules
+.. py:module:: torch.nn.quantized
+.. py:module:: torch.nn.quantized.modules
+.. py:module:: torch.nn.quantized.dynamic
+.. py:module:: torch.nn.quantized.dynamic.modules
+
+.. py:module:: torch.ao.nn.quantized.reference
+.. py:module:: torch.ao.nn.quantized.reference.modules

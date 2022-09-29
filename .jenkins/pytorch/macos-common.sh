@@ -28,7 +28,7 @@ else
     numpy=1.18.5 \
     pyyaml=5.3 \
     setuptools=46.0.0 \
-    cmake=3.19 \
+    cmake=3.22.1 \
     cffi \
     ninja \
     typing_extensions \

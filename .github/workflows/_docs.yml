@@ -41,7 +41,13 @@ jobs:
     runs-on: [self-hosted, linux.4xlarge]
     strategy:
       matrix:
-        docs_type: [cpp, python]
+        include:
+          - docs_type: cpp
+            # Nightly cpp docs take about 150m to finish, and the number is stable
+            timeout-minutes: 180
+          - docs_type: python
+            # It takes less than 30m to finish python docs unless there are issues
+            timeout-minutes: 30
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -76,6 +82,8 @@ jobs:
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
       - name: Build ${{ matrix.docs_type }} docs
+        timeout-minutes: ${{ matrix.timeout-minutes }}
+        id: build-docs
         env:
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
@@ -118,7 +126,7 @@ jobs:
 
       - name: Upload Python Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           s3-bucket: doc-previews
@@ -128,7 +136,7 @@ jobs:
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           if-no-files-found: error

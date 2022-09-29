@@ -16,6 +16,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_hook.h>
@@ -213,7 +214,7 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   // that is stored in PyNode, since we don't really own that C++ object.
   if (auto cdata = self->cdata.lock()) {
     for (const auto& hook : cdata->pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -611,14 +612,16 @@ static void _append_subgraph(
     subgraph_input->copyMetadata(node->inputs().at(i));
     value_map[node->inputs().at(i)] = subgraph_input;
   }
-  // Find node position in graph, all subsequent nodes after are added to
+  // Find node position in owning block, all subsequent nodes after are added to
   // subgraph
-  auto it = std::find(graph->nodes().begin(), graph->nodes().end(), node);
+  auto owning_block = node->owningBlock();
+  auto it = std::find(
+      owning_block->nodes().begin(), owning_block->nodes().end(), node);
   // Skip TupleUnpack node if created
   if (!unpack_output) {
     it++;
   }
-  for (it++; it != graph->nodes().end(); ++it) {
+  for (it++; it != owning_block->nodes().end(); ++it) {
     torch::jit::Node* node = *it;
     auto* clone_node =
         subgraph->insertNode(subgraph->createClone(node, value_map_func));
@@ -806,6 +809,18 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_maybe_clear_saved_tensors(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  if (!get_current_graph_task_keep_graph()) {
+    cdata->release_variables();
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   HANDLE_TH_ERRORS
 
@@ -899,7 +914,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   THPVariable* var = reinterpret_cast<THPVariable*>(_var);
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(
-      new PyFunctionPreHook(var->backward_hooks, tensor.output_nr()));
+      new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
   auto self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(
@@ -926,6 +941,21 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
       "autograd functions, see "
       "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
   return torch::autograd::registerFunctionHook(*cdata, hook);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
+  HANDLE_TH_ERRORS
+  auto self = (THPFunction*)_self;
+  auto cdata = self->cdata.lock();
+  TORCH_CHECK(
+      cdata,
+      "Attribute 'register_prehook' is invalid for this instance of _C._FunctionBase. "
+      "Accessing this attribute directly on an instance of autograd.Function is a legacy "
+      "access pattern that is no longer supported. For examples on how to use new-style "
+      "autograd functions, see "
+      "https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function ");
+  return torch::autograd::registerFunctionPreHook(*cdata, hook);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1184,12 +1214,17 @@ static struct PyGetSetDef THPFunction_properties[] = {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
+    {(char*)"maybe_clear_saved_tensors",
+     THPFunction_maybe_clear_saved_tensors,
+     METH_NOARGS,
+     nullptr},
     {(char*)"apply", THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
     {(char*)"_register_hook_dict",
      THPFunction__register_hook_dict,
      METH_O,
      nullptr},
     {(char*)"register_hook", THPFunction_register_hook, METH_O, nullptr},
+    {(char*)"register_prehook", THPFunction_register_prehook, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THPFunctionType = {

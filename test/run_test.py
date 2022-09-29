@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import json
+import glob
 from typing import Dict, Optional, List, cast, Any
 
 import torch
@@ -27,6 +28,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
+from torch.multiprocessing import Pool, get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -63,7 +65,9 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    all_py_files = list(cwd.glob('**/test_*.py'))
+    # This supports symlinks, so we can link domain library tests like functorch
+    # to PyTorch test directory
+    all_py_files = [pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)]
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
     if sys.platform == "win32":
@@ -97,6 +101,8 @@ TESTS = discover_tests(
         'test_jit_string',
         'test_kernel_launch_checks',
         'test_metal',
+        # Right now we have a separate CI job for running MPS
+        'test_mps',
         'test_nnapi',
         'test_segment_reductions',
         'test_static_runtime',
@@ -124,9 +130,12 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
-        "test_deploy",
     ]
 )
+
+# The doctests are a special case that don't correspond to a file that discover
+# tests can enable.
+TESTS = TESTS + ['doctests']
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
@@ -242,7 +251,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
-    "test_openmp",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -257,6 +265,7 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_show_pickle",
     "test_tensorexpr",
     "test_cuda_primary_ctx",
+    "test_cuda_trace",
 ] + FSDP_TEST
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -293,6 +302,14 @@ if dist.is_available():
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
+    if dist.is_ucc_available():
+        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+            "UCX_TLS": "tcp",
+            "UCC_TLS": "nccl,ucp",
+            "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+        }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {
@@ -315,19 +332,7 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
-
-
-def discover_functorch_tests():
-    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
-    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
-    result = discover_tests(pathlib.Path(functorch_test_dir))
-    result = [os.path.join(functorch_test_dir, r) for r in result]
-
-    # Sanity check
-    assert len(result) >= 8
-    return result
-
-FUNCTORCH_TESTS = discover_functorch_tests()
+FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -355,8 +360,13 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
 
 
 def run_test(
-    test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None
-):
+    test_module,
+    test_directory,
+    options,
+    launcher_cmd=None,
+    extra_unittest_args=None,
+    env=None,
+) -> int:
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -384,9 +394,17 @@ def run_test(
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + ".py"] + unittest_args
 
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+    log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
+                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")))
+    os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
-    return shell(command, test_directory)
+    with open(log_path, "w") as f:
+        ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
+    print_log_file(test_module, log_path)
+    os.remove(log_path)
+    return ret_code
 
 
 def test_cuda_primary_ctx(test_module, test_directory, options):
@@ -477,15 +495,24 @@ def test_distributed(test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
     config = DISTRIBUTED_TESTS_CONFIG
-    for backend, env_vars in config.items():
-        if sys.platform == "win32" and backend != "gloo":
-            continue
-        if backend == "mpi" and not mpi_available:
-            continue
-        for with_init_file in {True, False}:
+
+    for with_init_file in {True, False}:
+        # Run all distributed backends in parallel, trying to run env/file init
+        # methods in parallel too ends in failures in which the subprocesses
+        # timeout
+        pool = Pool(processes=len(config))
+        return_codes = []
+        tmp_dirs = []
+
+        for backend, env_vars in config.items():
+            if sys.platform == "win32" and backend != "gloo":
+                continue
+            if backend == "mpi" and not mpi_available:
+                continue
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
+            tmp_dirs.append(tmp_dir)
             if options.verbose:
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
@@ -505,6 +532,7 @@ def test_distributed(test_module, test_directory, options):
                 else:
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
                 os.environ["INIT_METHOD"] = init_method
+
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -535,23 +563,165 @@ def test_distributed(test_module, test_directory, options):
                         )
 
                     mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-
-                    return_code = run_test(
-                        test_module, test_directory, options, launcher_cmd=mpiexec
+                    return_code = pool.apply_async(
+                        run_test,
+                        args=(test_module, test_directory, options),
+                        kwds={
+                            "launcher_cmd": mpiexec,
+                            "env": os.environ.copy(),
+                        }
                     )
                 else:
-                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
-                if return_code != 0:
-                    return return_code
+                    return_code = pool.apply_async(
+                        run_test,
+                        args=(test_module, test_directory, options),
+                        kwds={
+                            "extra_unittest_args": ["--subprocess"],
+                            "env": os.environ.copy(),
+                        }
+                    )
+
+                return_codes.append(return_code)
+
             finally:
-                shutil.rmtree(tmp_dir)
                 os.environ.clear()
                 os.environ.update(old_environ)
+
+        pool.close()
+        # Close the pool and wait for all the processes to finish
+        pool.join()
+
+        for tmp_dir in tmp_dirs:
+            shutil.rmtree(tmp_dir)
+
+        for return_code in return_codes:
+            if return_code.get() != 0:
+                return return_code
+
     return 0
+
+
+def run_doctests(test_module, test_directory, options):
+    """
+    Assumes the incoming test module is called doctest, and simply executes the
+    xdoctest runner on the torch library itself.
+    """
+    import xdoctest
+    import pathlib
+    pkgpath = pathlib.Path(torch.__file__).parent
+
+    #
+    enabled = {
+        # TODO: expose these options to the user
+        # Temporary disable all feature-conditional tests
+        # 'lapack': 'auto',
+        # 'cuda': 'auto',
+        # 'cuda1': 'auto',
+        # 'qengine': 'auto',
+        'lapack': 0,
+        'cuda': 0,
+        'cuda1': 0,
+        'qengine': 0,
+    }
+
+    # Resolve "auto" based on a test to determine if the feature is available.
+    if enabled['cuda'] == 'auto' and torch.cuda.is_available():
+        enabled['cuda'] = True
+
+    if enabled['cuda1'] == 'auto' and torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        enabled['cuda1'] = True
+
+    if enabled['lapack'] == 'auto' and torch._C.has_lapack:
+        enabled['lapack'] = True
+
+    if enabled['qengine'] == 'auto':
+        try:
+            # Is there a better check if quantization is enabled?
+            import torch.nn.quantized as nnq  # NOQA
+            torch.backends.quantized.engine = 'qnnpack'
+            torch.backends.quantized.engine = 'fbgemm'
+        except (ImportError, RuntimeError):
+            ...
+        else:
+            enabled['qengine'] = True
+
+    # Set doctest environment variables
+    if enabled['cuda']:
+        os.environ['TORCH_DOCTEST_CUDA'] = '1'
+
+    if enabled['cuda1']:
+        os.environ['TORCH_DOCTEST_CUDA1'] = '1'
+
+    if enabled['lapack']:
+        os.environ['TORCH_DOCTEST_LAPACK'] = '1'
+
+    if enabled['qengine']:
+        os.environ['TORCH_DOCTEST_QENGINE'] = '1'
+
+    pkgpath = os.path.dirname(torch.__file__)
+    xdoctest_config = {
+        'global_exec': r'\n'.join([
+            'from torch import nn',
+            'import torch.nn.functional as F',
+            'import torch',
+        ]),
+        'style': 'google',
+        'options': '+IGNORE_WHITESPACE',
+    }
+    xdoctest_verbose = max(1, options.verbose)
+    run_summary = xdoctest.runner.doctest_module(
+        os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
+        command=options.xdoctest_command, argv=[])
+    result = 1 if run_summary.get('n_failed', 0) else 0
+    return result
+
+
+def print_log_file(test: str, file_path: str) -> None:
+    with open(file_path, "r") as f:
+        print_to_stderr("")
+        print_to_stderr(f"PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr(f"##[group]PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr(f.read())
+        print_to_stderr("##[endgroup]")
+        print_to_stderr(f"FINISHED PRINT LOG FILE of {test} ({file_path})")
+        print_to_stderr("")
+
+
+def run_test_ops(test_module, test_directory, options):
+    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
+        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
+        # it's also on periodic so we don't care about TTS as much
+        return run_test(test_module, test_directory, copy.deepcopy(options),
+                        extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
+                        )
+    NUM_PROCS = 3
+    return_codes = []
+    os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+    pool = get_context("spawn").Pool(NUM_PROCS)
+    for i in range(NUM_PROCS):
+        return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
+                                       kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
+                                                                     "-k=not _linalg_cholesky_"],
+                                             })
+        return_codes.append(return_code)
+    pool.close()
+    pool.join()
+    del os.environ['NUM_PARALLEL_PROCS']
+
+    for return_code in return_codes:
+        if return_code.get() != 0:
+            return return_code.get()
+    return_code = run_test(test_module, test_directory, copy.deepcopy(options),
+                           extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                "-k=_linalg_cholesky_"],
+                           )
+    return return_code
 
 
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
+    "test_cuda_trace": get_run_test_with_subprocess_fn(),
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
@@ -567,6 +737,11 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "doctests": run_doctests,
+    "test_ops": run_test_ops,
+    "test_ops_gradients": run_test_ops,
+    "test_ops_jit": run_test_ops,
+    "functorch/test_ops": run_test_ops,
 }
 
 
@@ -723,6 +898,15 @@ def parse_args():
         action="store_true",
         help="Only list the test that will run.",
     )
+    parser.add_argument(
+        "--xdoctest-command",
+        default='list',
+        help=(
+            "Control the specific doctest action. "
+            "Use 'list' to simply parse doctests and check syntax. "
+            "Use 'all' to execute all doctests or specify a specific "
+            "doctest to run")
+    )
     return parser.parse_args()
 
 
@@ -796,6 +980,9 @@ def get_selected_tests(options):
 
     if options.functorch:
         selected_tests = FUNCTORCH_TESTS
+    else:
+        # Exclude all functorch tests otherwise
+        options.exclude.extend(FUNCTORCH_TESTS)
 
     # process reordering
     if options.bring_to_front:
@@ -820,7 +1007,7 @@ def get_selected_tests(options):
         options.exclude.extend(DISTRIBUTED_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
-    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) == "11.6":
+    if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.6":
         options.exclude.extend(["distributions/test_constraints"])
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -903,7 +1090,7 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
     return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
-    ), "Return code should be an integer"
+    ), f"While running {test} got non integer return code {return_code}"
     if return_code == 0:
         return None
 

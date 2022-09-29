@@ -79,4 +79,8 @@ void PrefixStore::setTimeout(const std::chrono::milliseconds& timeout) {
   store_->setTimeout(timeout);
 }
 
+c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
+  return store_;
+}
+
 } // namespace c10d

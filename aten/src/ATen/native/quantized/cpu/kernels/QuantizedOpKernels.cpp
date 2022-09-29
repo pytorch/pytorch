@@ -47,7 +47,7 @@ void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
 
 template <bool ReLUFused = false>
 Tensor qcat_nhwc_kernel(
-    const c10::List<Tensor>& qxs,
+    const MaterializedITensorListRef& qxs,
     int64_t dim,
     double scale,
     int64_t zero_point) {
@@ -2747,18 +2747,26 @@ void quantized_normalize_kernel(
                 dq =
                   (dq - layer_mean_div_scale_xVec) *
                     gamma_p_vec + beta_vec;
-                qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
-                  .store(Y_ptr + vecStartIdx);
               }
+              qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + vecStartIdx);
             }
-            for (int64_t remIdx = chEndIdx - kNonVecRemInChannel;
-                 remIdx < chEndIdx;
-                 remIdx++) {
-              auto qXVal = X_ptr[remIdx];
-              float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
-              float dqY =
-                (dqXVal - layer_mean_div_scale_x) * gamma_p + beta;
-              Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
+
+            // Remainder
+            if (kNonVecRemInChannel > 0) {
+              int64_t remIdx = chEndIdx - kNonVecRemInChannel;
+              auto qXVec = qVec::loadu(X_ptr + remIdx, kNonVecRemInChannel);
+              auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
+                    x_fake_scale_zp_neg_premul_vec);
+              int validDqvecLen = (kNonVecRemInChannel - 1) / fVec::size() + 1;
+              for (int i = 0; i < validDqvecLen; ++i) {
+                auto &dq = dqXVec[i];
+                dq =
+                  (dq - layer_mean_div_scale_xVec) *
+                    gamma_p_vec + beta_vec;
+              }
+              qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
+                .store(Y_ptr + remIdx, kNonVecRemInChannel);
             }
           } // chIdx
 
@@ -3700,8 +3708,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (const auto b : c10::irange(batches)) {
-      for (const auto e : c10::irange(elements_per_channel)) {
+    for (C10_UNUSED const auto b : c10::irange(batches)) {
+      for (C10_UNUSED const auto e : c10::irange(elements_per_channel)) {
         uint32_t c = 0;
         while (c + 8 < channels) {
           const int32x4_t voffset0123 = vld1q_s32(&zero_points_int32t[c]);
@@ -3735,7 +3743,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
       }
     }
   } else {
-    for (const auto b : c10::irange(batches)) {
+    for (C10_UNUSED const auto b : c10::irange(batches)) {
       for (const auto c : c10::irange(channels)) {
         uint32_t e = 0;
         const int32x4_t voffset = vdupq_n_s32(zero_points_int32t[c]);
@@ -3782,8 +3790,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
     // channels_last contig.
     // If axis = 0 and channels_last contig, implementation for channels
     // first (NCHW) works.
-    for (const auto b : c10::irange(batches)) {
-      for (const auto e : c10::irange(elements_per_channel)) {
+    for (const auto b C10_UNUSED : c10::irange(batches)) {
+      for (const auto e C10_UNUSED : c10::irange(elements_per_channel)) {
         uint32_t c = 0;
         while (c + 8 < channels) {
           const int16x8_t vzero_point = vld1q_s16(&zero_points_int16t[c]);
@@ -3813,8 +3821,8 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
       }
     }
   } else {
-    for (const auto b : c10::irange(batches)) {
-      for (const auto c : c10::irange(channels)) {
+    for (const auto b C10_UNUSED : c10::irange(batches)) {
+      for (const auto c C10_UNUSED : c10::irange(channels)) {
         uint32_t e = 0;
         const int16x8_t vzero_point = vdupq_n_s16(zero_points_int16t[c]);
         const float32x4_t vinv_scale = vdupq_n_f32(inv_scales[c]);

@@ -355,7 +355,7 @@ Use of a caching allocator can interfere with memory checking tools such as
 
 The behavior of caching allocator can be controlled via environment variable
 ``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...``
+The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``max_split_size_mb`` prevents the allocator from splitting blocks larger

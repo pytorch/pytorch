@@ -23,7 +23,6 @@ from torch.onnx import (
     utils,
 )
 from torch.onnx.symbolic_helper import (
-    _set_onnx_shape_inference,
     _set_operator_export_type,
     _set_opset_version,
     _unpack_list,
@@ -51,12 +50,11 @@ class _BaseTestCase(common_utils.TestCase):
         input_names=None,
         dynamic_axes=None,
     ):
+        torch.onnx.utils._setup_trace_module_map(model, False)
         if training == torch.onnx.TrainingMode.TRAINING:
             model.train()
         elif training == torch.onnx.TrainingMode.EVAL:
             model.eval()
-        # Need disable onnx_shape_inference for this test because it puts const node to initializers.
-        _set_onnx_shape_inference(False)
         utils._validate_dynamic_axes(dynamic_axes, model, None, None)
         graph, params_dict, torch_out = utils._model_to_graph(
             model,
@@ -68,7 +66,6 @@ class _BaseTestCase(common_utils.TestCase):
             input_names=input_names,
             dynamic_axes=dynamic_axes,
         )
-        _set_onnx_shape_inference(True)
         return graph, params_dict, torch_out
 
 
@@ -626,10 +623,9 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         graph, _, __ = self._model_to_graph(
             ShapeModule(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]}
         )
-
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Shape")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_upsample_scale_fold_as_constant(self):
         # upsample scale is a constant, not a model parameter,
@@ -989,6 +985,77 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             self.assertIn(ln_node.attribute[0], expected_ln_attrs)
             self.assertIn(ln_node.attribute[1], expected_ln_attrs)
 
+    def test_node_scope(self):
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x)
+
+        class M(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.num_layers = num_layers
+                self.lns = torch.nn.ModuleList(
+                    [torch.nn.LayerNorm(3, eps=float(i)) for i in range(num_layers)]
+                )
+                self.gelu1 = torch.nn.GELU()
+                self.gelu2 = torch.nn.GELU()
+                self.relu = N()
+
+            def forward(self, x, y, z):
+                res1 = self.gelu1(x)
+                res2 = self.gelu2(y)
+                for ln in self.lns:
+                    z = ln(z)
+                return res1 + res2, self.relu(z)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+
+        model = M(3)
+        expected_scope_names = {
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.activation.GELU::gelu1",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.activation.GELU::gelu2",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.normalization.LayerNorm::lns.0",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.normalization.LayerNorm::lns.1",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "torch.nn.modules.normalization.LayerNorm::lns.2",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::/"
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.N::relu/"
+            "torch.nn.modules.activation.ReLU::relu",
+            "test_utility_funs.TestUtilityFuns_opset9.test_node_scope.<locals>.M::",
+        }
+
+        graph, _, _ = self._model_to_graph(
+            model, (x, y, z), input_names=[], dynamic_axes={}
+        )
+        for node in graph.nodes():
+            self.assertIn(node.scopeName(), expected_scope_names)
+
+        expected_torch_script_scope_names = {
+            "test_utility_funs.M::/torch.nn.modules.activation.GELU::gelu1",
+            "test_utility_funs.M::/torch.nn.modules.activation.GELU::gelu2",
+            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.0",
+            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.1",
+            "test_utility_funs.M::/torch.nn.modules.normalization.LayerNorm::lns.2",
+            "test_utility_funs.M::/test_utility_funs.N::relu/torch.nn.modules.activation.ReLU::relu",
+            "test_utility_funs.M::",
+        }
+
+        graph, _, _ = self._model_to_graph(
+            torch.jit.script(model), (x, y, z), input_names=[], dynamic_axes={}
+        )
+        for node in graph.nodes():
+            self.assertIn(node.scopeName(), expected_torch_script_scope_names)
+
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
@@ -1091,10 +1158,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def forward(self, x):
                 return torch.inverse(x) + x
 
-        def inverse(g, self):
+        def linalg_inv(g, self):
             return g.op("com.microsoft::Inverse", self).setType(self.type())
 
-        register_custom_op_symbolic("::inverse", inverse, 1)
+        register_custom_op_symbolic("::linalg_inv", linalg_inv, 1)
         model = CustomInverse()
         x = torch.randn(2, 3, 3)
         f = io.BytesIO()
@@ -1380,8 +1447,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             def forward(self, x, y):
                 return f(x, y)
 
-        input_1 = torch.tensor(11)
-        input_2 = torch.tensor(12)
+        input_1 = torch.tensor([11])
+        input_2 = torch.tensor([12])
         _set_opset_version(self.opset_version)
         _set_operator_export_type(OperatorExportTypes.ONNX)
         graph, _, __ = self._model_to_graph(
@@ -1434,8 +1501,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.input[1].name, "in_weight")
         self.assertEqual(graph.graph.input[2].name, "in_bias")
 
-    def test_onnx_intermediate_renaming(self):
-        class RenamedIntermediateModule(torch.nn.Module):
+    def test_onnx_node_naming(self):
+        class MainModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self._module_1 = torch.nn.Linear(10, 10)
@@ -1450,15 +1517,28 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 z = self._module_4(y * z)
                 return z
 
-        module = RenamedIntermediateModule()
+        module = MainModule()
+        ref_node_names = [
+            "/_module_1/Gemm",
+            "/_module_2/Gemm",
+            "/_module_3/Gemm",
+            "/_module_4/Gemm",
+            "/Mul",
+            "/Mul_1",
+        ]
+        f = io.BytesIO()
 
-        g, p, o = utils._model_to_graph(module, torch.ones(1, 10), output_names=["y"])
-        renamed_intermediate = 0
-        for n in g.nodes():
-            for v in n.inputs():
-                if v.debugName().startswith("onnx::Mul_"):
-                    renamed_intermediate += 1
-        self.assertEqual(renamed_intermediate, 2)
+        torch.onnx.export(module, torch.ones(1, 10), f, output_names=["y"])
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        for n in onnx_model.graph.node:
+            self.assertIn(n.name, ref_node_names)
+
+        torch.onnx.export(
+            torch.jit.script(module), torch.ones(1, 10), f, output_names=["y"]
+        )
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        for n in onnx_model.graph.node:
+            self.assertIn(n.name, ref_node_names)
 
     def _test_deduplicate_initializers(self, torchscript=False):
         class MyModule(torch.nn.Module):

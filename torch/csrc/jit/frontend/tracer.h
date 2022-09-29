@@ -267,6 +267,10 @@ TORCH_API void addInputs(Node* n, const char* name, c10::SymIntArrayRef value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
+    c10::optional<c10::SymInt> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
     const c10::optional<ArrayRef<int64_t>>& value);
 TORCH_API void addInputs(
     Node* n,
@@ -276,6 +280,16 @@ TORCH_API void addInputs(
     Node* n,
     const char* name,
     ArrayRef<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    std::vector<at::Tensor> value,
+    bool allow_undefined = false);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    at::ITensorListRef value,
     bool allow_undefined = false);
 TORCH_API void addInputs(
     Node* n,

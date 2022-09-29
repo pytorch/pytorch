@@ -20,6 +20,7 @@ from torch._prims_common import (
     DimsType,
     Number,
     NumberType,
+    RETURN_TYPE,
     ShapeType,
     StrideType,
     TensorLike,
@@ -188,6 +189,7 @@ __all__ = [
     #
     # Randomness Prims
     #
+    "normal",
     "uniform",
     #
     # FFT prims
@@ -196,27 +198,6 @@ __all__ = [
     "fft_c2c",
     "fft_c2r",
 ]
-
-
-# In order to keep things like aliasing relationships and storage
-# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
-# which caches conversions to Meta Tensors. We would like to use
-# one consistent mode among along FakeTensors, which we store here.
-# We store a weakref, so that when all previous FakeTensors are
-# the present mode will also deallocate. FakeTensorMode holds onto
-# tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.x
-prim_fake_mode_ref = None
-
-
-def get_prim_fake_mode():
-    global prim_fake_mode_ref
-    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
-        prim_fake_mode_ref = weakref.ref(mode)
-        return mode
-    else:
-        return prim_fake_mode_ref()
 
 
 def TensorMeta(
@@ -259,58 +240,7 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    if isinstance(tensorlike, FakeTensor):
-        mode = tensorlike.fake_mode
-    else:
-        mode = get_prim_fake_mode()
-
-    if device.type == "meta":
-        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-    else:
-        # SymInt doesnt support empty_strided yet
-        if any(
-            isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
-        ):
-            meta_t = torch.empty(shape, dtype=dtype, device="meta")
-        else:
-            meta_t = torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-        return FakeTensor(mode, meta_t, device)
-
-
-#
-# Common datastructures and helpers
-#
-
-# Describes the return type of the primitive:
-#
-#   - NEW, a new tensor is created
-#   - VIEW, a view of an input tensor is returned
-#   - INPLACE, one or more input tensors is modified
-#
-# these descriptors are mututally exclusive and exhaustive.
-class RETURN_TYPE(Enum):
-    NEW = (0,)
-    VIEW = (1,)
-    INPLACE = (2,)
-
-
-def _wrap_tensor_meta(f):
-    def wrap(t):
-        if (
-            isinstance(t, torch.Tensor)
-            and not isinstance(t, FakeTensor)
-            and not t.device.type == "meta"
-        ):
-            return FakeTensor.from_tensor(t, get_prim_fake_mode())
-        else:
-            return t
-
-    def wrapper(*args, **kwargs):
-        wrapped_args = tree_map(wrap, args)
-        wrapped_kwargs = tree_map(wrap, kwargs)
-        return f(*wrapped_args, **wrapped_kwargs)
-
-    return wrapper
+    return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
 
 def _make_prim(
@@ -342,18 +272,16 @@ def _make_prim(
     def _autograd_impl(*args, **kwargs):
         return backwards_not_supported(_prim)(*args, **kwargs)
 
-    _meta_impl = _wrap_tensor_meta(meta)
-
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
-            return _meta_impl(*args, **kwargs)
+            return meta(*args, **kwargs)
         else:
             return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
     prim_autograd_impl.impl(name, _autograd_impl)
-    prim_meta_impl.impl(name, _meta_impl)
+    prim_meta_impl.impl(name, meta)
 
     _prim_packet = getattr(torch.ops.prims, name)
     _prim = _prim_packet.default
@@ -369,7 +297,7 @@ def _make_prim(
 
         p.schema = schema
         p.prim_impl = _prim_impl
-        p.prim_meta_impl = _wrap_tensor_meta(meta)
+        p.prim_meta_impl = meta
 
     return _prim
 
@@ -455,6 +383,8 @@ def _elementwise_meta(
     # Number case
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
+    assert not isinstance(number, torch.SymIntNode), "NYI"
+    assert not isinstance(number, torch.SymFloatNode), "NYI"
     return TensorMeta(number)
 
 
@@ -924,9 +854,14 @@ bitwise_xor = _make_elementwise_binary_prim(
 # div prim performs truncation division on integer inputs
 #   and true division for floating and complex inputs
 def _div_aten(a, b):
-    if isinstance(a, (bool, int)):
+    is_integral = isinstance(a, (bool, int)) or (
+        isinstance(a, torch.Tensor) and utils.is_integer_dtype(a.dtype)
+    )
+
+    if is_integral:
         return torch.div(a, b, rounding_mode="trunc")
-    return torch.true_divide(a, b)
+    else:
+        return torch.true_divide(a, b)
 
 
 div = _make_elementwise_binary_prim(
@@ -1162,7 +1097,7 @@ _as_strided_doc = """
 """
 
 as_strided = _make_prim(
-    schema="as_strided(Tensor(a!) a, int[] size, int[] stride, int storage_offset) -> Tensor(a!)",
+    schema="as_strided(Tensor(a!) a, SymInt[] size, SymInt[] stride, SymInt storage_offset) -> Tensor(a!)",
     meta=_as_strided_meta,
     impl_aten=_as_strided_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1379,12 +1314,18 @@ conj = _make_prim(
 )
 
 
-def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
+def expand_dims(
+    a: TensorLikeType, dimensions: DimsSequenceType, ndim=None
+) -> TensorLikeType:
     """
     Creates a view of a with a.ndim + len(dimensions) dimensions, with new
     dimensions of length one at the dimensions specified by dimensions.
     """
-    dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
+    if ndim is not None:
+        # TODO: this is only here to support the unsqueeze ref
+        dims = sorted(utils.canonicalize_dims(ndim, dimensions))  # type: ignore[arg-type]
+    else:
+        dims = sorted(utils.canonicalize_dims(a.ndim, dimensions))  # type: ignore[arg-type]
     if len(set(dims)) != len(dims):
         msg = "Received duplicate dimensions to expand in {0}".format(str(dimensions))
         raise ValueError(msg)
@@ -1514,7 +1455,7 @@ _slice_doc = """
     """
 
 slice = _make_prim(
-    schema="slice(Tensor(a) a, int[] start_indices, int[] limit_indices, int[]? strides=None) -> Tensor(a)",
+    schema="slice(Tensor(a) a, SymInt[] start_indices, SymInt[] limit_indices, SymInt[]? strides=None) -> Tensor(a)",
     meta=_slice_meta,
     impl_aten=_slice_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1597,8 +1538,9 @@ _slice_in_dim_doc = """
     Convenience wrapper for slicing just one dimension using slice.
     """
 
+# TODO: make stride SymInt
 slice_in_dim = _make_prim(
-    schema="slice_in_dim(Tensor(a) a, int start_index, int limit_index, int stride=1, int axis=0) -> Tensor(a)",
+    schema="slice_in_dim(Tensor(a) a, SymInt start_index, SymInt limit_index, int stride=1, int axis=0) -> Tensor(a)",
     meta=_slice_in_dim_meta,
     impl_aten=_slice_in_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1612,10 +1554,9 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     utils.validate_dim_length(outer_length)
 
     # Verifies the dim can be split with the specified lhs_length
-    _inner_length = a.shape[dim] / outer_length
-    inner_length: int = int(_inner_length)
+    inner_length = a.shape[dim] // outer_length
 
-    if inner_length != _inner_length:
+    if (a.shape[dim] % outer_length) != 0:
         msg = "Attempting to split dimension of length {0}, but outer length of {1} divides it with a remainder!".format(
             a.shape[dim], outer_length
         )
@@ -1635,7 +1576,7 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
 
 
 def _split_dim_aten(a: Tensor, dim: int, outer_length: int) -> Tensor:
-    inner_length = int(a.shape[dim] / outer_length)
+    inner_length = a.shape[dim] // outer_length
     new_shape = a.shape[0:dim] + (outer_length, inner_length) + a.shape[dim + 1 :]
 
     return a.view(new_shape)
@@ -1650,7 +1591,7 @@ _split_dim_doc = """
 
 # TODO: consider renaming split_dim_view
 split_dim = _make_prim(
-    schema="split_dim(Tensor(a) a, int dim, int outer_length) -> Tensor(a)",
+    schema="split_dim(Tensor(a) a, int dim, SymInt outer_length) -> Tensor(a)",
     meta=_split_dim_meta,
     impl_aten=_split_dim_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1783,12 +1724,16 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
     shape = tensors[0].shape
     concat_length = 0
-    for tensor in tensors:
+    for tensor_idx, tensor in enumerate(tensors):
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
-            else:
-                assert length == common_length
+            elif length != common_length:
+                raise RuntimeError(
+                    f"Sizes of tensors must match except in dimension {dim}. "
+                    "Expected {common_length} but got {length} for tensor number "
+                    "{tensor_idx} in the list"
+                )
 
     new_shape = list(tensors[0].shape).copy()
     new_shape[dim] = concat_length
@@ -1843,7 +1788,7 @@ _reshape_doc = """
   containing a copy of the data in a.
   """
 reshape = _make_prim(
-    schema="reshape(Tensor a, int[] shape) -> Tensor",
+    schema="reshape(Tensor a, SymInt[] shape) -> Tensor",
     meta=_reshape_meta,
     impl_aten=_reshape_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2137,7 +2082,7 @@ _resize_doc = """
 
 # TODO: review support arbitrary resizes
 resize = _make_prim(
-    schema="resize(Tensor(a!) a, int[] shape) -> Tensor(a!)",
+    schema="resize(Tensor(a!) a, SymInt[] shape) -> Tensor(a!)",
     meta=_resize_meta,
     impl_aten=_resize_aten,
     return_type=RETURN_TYPE.INPLACE,
@@ -2359,7 +2304,7 @@ _empty_doc = """
 """
 
 empty = _make_prim(
-    schema="empty(int[] shape, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="empty(SymInt[] shape, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     meta=_empty_meta,
     impl_aten=_empty_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2384,7 +2329,7 @@ _empty_strided_doc = """
 
 # TODO: add layout, pin_memory
 empty_strided = _make_prim(
-    schema="empty_strided(int[] shape, int[] strides, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="empty_strided(SymInt[] shape, SymInt[] strides, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     return_type=RETURN_TYPE.NEW,
     meta=_empty_strided_meta,
     impl_aten=torch.empty_strided,
@@ -2424,7 +2369,7 @@ _full_doc = """
 
 # TODO: add layout
 full = _make_prim(
-    schema="full(int[] shape, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
+    schema="full(SymInt[] shape, Scalar fill_value, *, ScalarType dtype, Device device, bool requires_grad) -> Tensor",
     meta=_full_meta,
     impl_aten=_full_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2578,6 +2523,64 @@ svd = _make_prim(
 # Randomness Prims
 #
 
+# TODO: add generator support
+# NOTE: there is currently no way of acquiring the "default" torch generator
+def _normal_meta(
+    shape: ShapeType,
+    *,
+    mean: Union[float, complex],
+    std: float,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    utils.check(
+        std >= 0.0,
+        lambda: f"expected non-negative standard deviation, but got std={std}",
+    )
+
+    utils.check(
+        utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
+        lambda: f"expected a floating-point or complex dtype, but got dtype={dtype}",
+    )
+
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _normal_aten(
+    shape: ShapeType,
+    *,
+    mean: Union[float, complex],
+    std: float,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> Tensor:
+    a = torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    with torch.no_grad():
+        # NOTE: normal_ is incorrectly annotated to expect mean to be a float
+        a.normal_(mean, std)  # type: ignore[arg-type]
+    return a
+
+
+_normal_doc = """
+    Constructs a tensor filled with values drawn from a normal distribution with the specified mean
+    and standard deviation.
+
+    Only supports floating-point types.
+"""
+
+normal = _make_prim(
+    schema=(
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device,  bool requires_grad) -> Tensor"
+    ),
+    return_type=RETURN_TYPE.NEW,
+    meta=_normal_meta,
+    impl_aten=_normal_aten,
+    doc=_normal_doc,
+)
+
 
 def _uniform_meta(
     shape: ShapeType,
@@ -2611,13 +2614,17 @@ _uniform_doc = """
 # TODO: we should more seriously review randomness modeling and prims
 uniform = _make_prim(
     schema=(
-        "uniform(int[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
+        "uniform(SymInt[] shape, *, Scalar low, Scalar high, ScalarType dtype, Device device) -> Tensor"
     ),
     return_type=RETURN_TYPE.NEW,
     meta=_uniform_meta,
     impl_aten=_uniform_aten,
     doc=_uniform_doc,
 )
+
+#
+# FFT prims
+#
 
 
 def _fft_r2c_meta(
@@ -2735,7 +2742,7 @@ _fft_c2r_doc = """
 
 
 fft_c2r = _make_prim(
-    schema="fft_c2r(Tensor self, *, int[] dim, int last_dim_size) -> Tensor",
+    schema="fft_c2r(Tensor self, *, int[] dim, SymInt last_dim_size) -> Tensor",
     meta=_fft_c2r_meta,
     impl_aten=_fft_c2r_aten,
     return_type=RETURN_TYPE.NEW,

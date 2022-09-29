@@ -4,7 +4,7 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 from torchgen.api.autograd import (
     Derivative,
@@ -20,6 +20,7 @@ from torchgen.api.types import (
     boolT,
     doubleT,
     intArrayRefT,
+    iTensorListRefT,
     ListCType,
     longT,
     MutRefCType,
@@ -28,11 +29,13 @@ from torchgen.api.types import (
     scalarT,
     stringT,
     symIntArrayRefT,
+    SymIntT,
+    TENSOR_LIST_LIKE_CTYPES,
     tensorListT,
     tensorT,
 )
 from torchgen.code_template import CodeTemplate
-from torchgen.model import Argument
+from torchgen.model import Argument, FunctionSchema
 from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
@@ -87,7 +90,7 @@ GRAD_INPUT_MASK = CodeTemplate(
 
 DERIVATIVE_SINGLE = CodeTemplate(
     """\
-if (should_compute_output({ ${name}_ix })) {
+if (task_should_compute_output({ ${name}_ix })) {
   auto grad_result = ${derivative};
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }
@@ -96,7 +99,7 @@ if (should_compute_output({ ${name}_ix })) {
 
 DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate(
     """\
-  if (should_compute_output({ ${name}_ix })) {
+  if (task_should_compute_output({ ${name}_ix })) {
     copy_range(grad_inputs, ${name}_ix, std::get<${i}>(grad_result));
   }
 """
@@ -104,7 +107,7 @@ DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate(
 
 DERIVATIVE_MULTI = CodeTemplate(
     """\
-if (should_compute_output({ ${idx_ranges} })) {
+if (task_should_compute_output({ ${idx_ranges} })) {
   ${grad_input_mask}
   auto grad_result = ${derivative};
   ${copy_ranges}
@@ -308,6 +311,10 @@ GETTER_BODY_INT64_T = """\
 return PyLong_FromUnsignedLong((int64_t) prop);
 """
 
+GETTER_BODY_SYMINT = """\
+return prop.is_symbolic() ? py::cast(prop.toSymIntNodeImpl()).release().ptr() : PyLong_FromUnsignedLong(prop.as_int_unchecked());
+"""
+
 GETTER_BODY_DOUBLE = """\
 return PyFloat_FromDouble((double) prop);
 """
@@ -346,6 +353,7 @@ if (prop.isComplex()) {
 
 MISC_GETTER_DEFS = {
     OptionalCType(BaseCType(longT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
+    OptionalCType(BaseCType(SymIntT)): (GETTER_DEFINITION_OPT, GETTER_BODY_SYMINT),
     BaseCType(doubleT): (GETTER_DEFINITION, GETTER_BODY_DOUBLE),
     OptionalCType(BaseCType(doubleT)): (GETTER_DEFINITION_OPT, GETTER_BODY_DOUBLE),
     BaseCType(boolT): (GETTER_DEFINITION, GETTER_BODY_BOOL),
@@ -362,9 +370,22 @@ MISC_GETTER_DEFS = {
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
+def get_infos_with_derivatives_list(
+    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]
+) -> List[DifferentiabilityInfo]:
+
+    diff_info_list = [
+        info
+        for diffinfo_dict in differentiability_infos.values()
+        for info in diffinfo_dict.values()
+    ]
+
+    return list(filter(lambda info: info.args_with_derivatives, diff_info_list))
+
+
 def gen_autograd_functions_lib(
     out: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
+    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
     """Functions.h and Functions.cpp body
@@ -373,10 +394,9 @@ def gen_autograd_functions_lib(
     for each every differentiable torch function.
     """
 
-    # only create an autograd function if we are actually going to calculate a derivative
-    infos = list(
-        filter(lambda info: info.args_with_derivatives, differentiability_infos)
-    )
+    # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
+    # infos with the diff dispatchkeys but the same name will still be in the same shard.
+    infos = get_infos_with_derivatives_list(differentiability_infos)
     declarations = list(map(lambda f: process_function(f, FUNCTION_DECLARATION), infos))
     definitions = list(map(lambda f: process_function(f, FUNCTION_DEFINITION), infos))
 
@@ -388,7 +408,9 @@ def gen_autograd_functions_lib(
             fname,
             fname,
             lambda: {
-                "generated_comment": "@" + f"generated from {fm.template_dir}/" + fname,
+                "generated_comment": "@"
+                + f"generated from {fm.template_dir_for_comments()}/"
+                + fname,
                 "autograd_function_declarations": declarations,
                 "autograd_function_definitions": definitions,
             },
@@ -397,7 +419,7 @@ def gen_autograd_functions_lib(
 
 def gen_autograd_functions_python(
     out: str,
-    differentiability_infos: Sequence[DifferentiabilityInfo],
+    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
 
@@ -406,7 +428,8 @@ def gen_autograd_functions_python(
     fm.write(
         "python_functions.h",
         lambda: {
-            "generated_comment": f"@generated from {fm.template_dir}/python_functions.h",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/python_functions.h",
             "shard_forward_declare": [
                 f"void initialize_autogenerated_functions_{i}();"
                 for i in range(num_shards)
@@ -417,15 +440,15 @@ def gen_autograd_functions_python(
         },
     )
 
-    infos = list(
-        filter(lambda info: info.args_with_derivatives, differentiability_infos)
-    )
+    # get a 1D list of diffinfos, we do not need them to be per FunctionSchema/DispatchKey here
+    # infos with the diff dispatchkeys but the same name will still be in the same shard.
+    infos = get_infos_with_derivatives_list(differentiability_infos)
     fm.write_sharded(
         "python_functions.cpp",
         infos,
         key_fn=lambda info: info.name,
         base_env={
-            "generated_comment": f"@generated from {fm.template_dir}/python_functions.cpp",
+            "generated_comment": f"@generated from {fm.template_dir_for_comments()}/python_functions.cpp",
         },
         env_callable=lambda info: {
             "py_function_initializers": [
@@ -451,10 +474,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
     py_getsetdef_structs: List[str] = []
 
     for arg in info.args_with_derivatives:
-        if (
-            arg.type == "at::TensorList"
-            or arg.type == "const c10::List<c10::optional<at::Tensor>> &"
-        ):
+        if arg.type in TENSOR_LIST_LIKE_CTYPES:
             size = f"{arg.name}_size_"
             saved_list_sizes.append(f"size_t {arg.name}_size_;")
         else:
@@ -488,7 +508,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
             should_append_raw_getsetdef = True
-        elif type == BaseCType(tensorListT):
+        elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -568,6 +588,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(
                 GETTER_DEFINITION.substitute(
                     op=info.op, name=name, body=GETTER_BODY_INT64_T
+                )
+            )
+        elif type == BaseCType(SymIntT):
+            saved_variables.append(f"c10::SymInt {name};")
+            getter_definitions.append(
+                GETTER_DEFINITION.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_SYMINT
                 )
             )
         elif type == BaseCType(stringT):
@@ -661,7 +688,9 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             )
         else:
             if "grad_input_mask" in formula:
-                masks = [f"should_compute_output({{ {n}_ix }})," for n in var_names]
+                masks = [
+                    f"task_should_compute_output({{ {n}_ix }})," for n in var_names
+                ]
                 grad_input_mask = GRAD_INPUT_MASK.substitute(
                     masks=masks, n=len(var_names)
                 )
