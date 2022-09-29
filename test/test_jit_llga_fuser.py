@@ -663,6 +663,30 @@ class TestFusionPattern(JitLlgaTestCase):
         self.assertFused(graph, ['aten::_convolution'])
 
     @onlyCPU
+    @dtypes(torch.int32)
+    def test_wildcard_unsupported_dtype(self, dtype):
+        class M(nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, x):
+                y = x // 2
+                return y
+
+        # In shufflenet_v2_x1_0, channels_per_groups is computed as:
+        # channels_per_group = num_channels // groups
+        # JIT IR converts groups to Long dtype, which is unsupported
+        # by oneDNN Graph, viz. Long(requires_grad=0, device=cpu) = prim::Constant[value={2}]()
+        # This test just ensures that the bridge code can handle
+        # unsupported dtypes for inputs to ops unsupported
+        # by oneDNN Graph. In this particular UT, aten::floor_divide
+        # would be added as a wildcard in graph-construction stage.
+        m = M()
+        x = torch.tensor([32], dtype=dtype)
+        _, graph = self.checkTrace(m, [x], dtype)
+        self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
+
+    @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
     def test_rewrap_tensor_input_to_pytorch(self, dtype):
         class M(nn.Module):
