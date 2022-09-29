@@ -103,7 +103,7 @@ class CUDAGraph(torch._C._CUDAGraph):
     def debug_dump(self):
         r"""
         Calls a debugging function to dump the graph if the dump path has been
-        set via torch._C._cuda_setCudaGraphsDebugPath()
+        set via torch._C._cuda_set_graphs_debug_path()
         """
         return super(CUDAGraph, self).debug_dump()
 
