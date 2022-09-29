@@ -1430,6 +1430,16 @@ PyObject* THPVariable_is_nested(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_has_symbolic_sizes_strides(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(
+      self_.unsafeGetTensorImpl()->has_symbolic_sizes_strides());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1568,6 +1578,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr},
     {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
     {"is_nested", (getter)THPVariable_is_nested, nullptr, nullptr, nullptr},
+    {"_has_symbolic_sizes_strides",
+     (getter)THPVariable_has_symbolic_sizes_strides,
+     nullptr,
+     nullptr,
+     nullptr},
     {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
     {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
     {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},

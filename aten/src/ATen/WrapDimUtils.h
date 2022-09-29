@@ -79,6 +79,17 @@ inline void maybe_wrap_dims(Container& dims, int64_t dim_post_expr) {
   return maybe_wrap_dims_n(dims.data(), dims.size(), dim_post_expr);
 }
 
+inline void maybe_wrap_dims(
+    at::OptionalIntArrayRef opt_dims,
+    int64_t dim_post_expr) {
+  if (opt_dims.has_value()) {
+    at::IntArrayRef dims = opt_dims.value();
+    // TODO: This const_cast is probably not a good idea...
+    int64_t* dims_ptr = const_cast<int64_t*>(dims.data());
+    maybe_wrap_dims_n(dims_ptr, dims.size(), dim_post_expr);
+  }
+}
+
 // previously, size [0] tensors were the only possible empty tensors; thus, it
 // wasn't possible to cat empty tensors unless all the other tensors were
 // 1-dimensional, so we allowed these tensors to be "skipped" (both for wrap
