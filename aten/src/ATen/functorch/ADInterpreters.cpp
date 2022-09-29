@@ -1,8 +1,11 @@
 #include <ATen/functorch/ADInterpreters.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/TensorWrapper.h>
+#include <bitset>
 
 namespace at { namespace functorch {
+
+constexpr size_t default_bitset_size = 64;
 
 static void checkForInvalidMutationOnCaptures(
     const c10::OperatorHandle& op,
@@ -121,7 +124,7 @@ static void autogradBasedTransformSendToNext(
     stack->push_back((*stack)[front + arg_idx]);
   }
 
-  std::bitset<64> outputs_aliasing_immutable; // set = 1 for all bits
+  std::bitset<default_bitset_size> outputs_aliasing_immutable; // set = 1 for all bits
   if(!grad_special_case) {
     for (auto idx = stack->size() - args_size; idx < stack->size(); idx++) {
       const auto ivalue = (*stack)[idx];
