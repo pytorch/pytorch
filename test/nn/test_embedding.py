@@ -1171,8 +1171,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_embedding_bag_bfloat16(self, device, dtypes):
-        self._test_EmbeddingBag(device, 'sum', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
-        self._test_EmbeddingBag(device, 'mean', True, wdtype=torch.bfloat16, dtype=dtypes[0], odtype=dtypes[1], test_backward=True)
+        with set_default_dtype(torch.double):
+            self._test_EmbeddingBag(device, 'sum', True,
+                                    wdtype=torch.bfloat16, dtype=dtypes[0],
+                                    odtype=dtypes[1], test_backward=True)
+            self._test_EmbeddingBag(device, 'mean', True,
+                                    wdtype=torch.bfloat16, dtype=dtypes[0],
+                                    odtype=dtypes[1], test_backward=True)
 
     @onlyNativeDeviceTypes  # currently fails on XLA
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
