@@ -1,6 +1,7 @@
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Sequence, Union
+from typing import Any, Callable, Dict, Sequence
+from warnings import warn
 
 import torch
 
@@ -65,25 +66,6 @@ def torch_to_refs_map():
         if s in torch._refs.__all__:
             r[getattr(torch.Tensor, s)] = torch._refs.__dict__.get(s)
     return r
-
-
-@functools.lru_cache(None)
-def nvfuser_decomp_table():
-    """
-    decomposition table needed for nvfuser
-    """
-    aten = torch.ops.aten
-    nvfuser_decompositions: Sequence[
-        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-    ] = {  # type: ignore[assignment]
-        # AMP calls `to` in C++, which is not handled by torch mapping
-        aten._to_copy,
-    }
-
-    from torch._decomp import get_decompositions
-
-    decomp_table = get_decompositions(nvfuser_decompositions)
-    return decomp_table
 
 
 @functools.lru_cache(None)
@@ -184,7 +166,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             if self.should_fallback_fn(self, func, args, kwargs):
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
-            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+            with self:
                 return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
@@ -201,10 +183,18 @@ def _is_node_supported_nvfuser(node):
 
 
 def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
-    with torch.overrides.enable_torch_function_mode(
-        torch_function_mode, replace=torch_function_mode.inner
-    ):
-        gm = get_isolated_graphmodule(func, args, kwargs)
+    with torch_function_mode:
+        try:
+            gm = get_isolated_graphmodule(func, args, kwargs)
+        except Exception as e:
+            warn(
+                "get_isolated_graphmodule failed on decomposition: "
+                + func.__name__
+                + " with error message: "
+                + str(e)
+            )
+            # returns unsupported when tracing fails.
+            return True
 
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
@@ -231,6 +221,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             and "aten.var_mean" in str(func)
         )
 
+    def _is_rand_like(self, func):
+        result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
+            func == torch.ops.aten.rand_like or func == torch.ops.aten.rand_like.default
+        )
+        return result
+
     def __torch_function__(
         self,
         orig_func: Callable,
@@ -243,5 +239,9 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
+        if self._is_rand_like(orig_func):
+            if len(kwargs) > 0:
+                warn("rand_like has ignored kwars!")
+            return torch.ops.nvprims.rand_like(*args)
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)
