@@ -192,8 +192,8 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     with torch_function_mode:
         try:
             gm = get_isolated_graphmodule(func, args, kwargs)
-        except:
-            warn("get_isolated_graphmodule failed on decomposition: " + func.__name__)
+        except Exception as e:
+            warn("get_isolated_graphmodule failed on decomposition: " + func.__name__ + " with error message: " + str(e))
             return True
 
     supported_ops = NvfuserPrimOperatorSupport()
