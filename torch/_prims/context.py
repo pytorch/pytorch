@@ -106,6 +106,14 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
 
     By default, this context manager will fall back on the torch.ops.prims* if the
     nvprim does not exist.
+    It's possible to skip certain prims by passing their names to the skip_ops
+    argument. skip_ops is expected to be a sequence of strings, e.g.,
+    ["prims.add.default"] In order to check the expected name of a prim, one can
+    use the `torch.overrides.resolve_name`.
+
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode(skips_ops=("prims.add.default")):
+    ...     torch.ops.prims.add.default(x, y)  # does not call torch.ops.nvprims.add.default(x, y)
     """
 
     def __init__(self, *, skip_ops=()):
