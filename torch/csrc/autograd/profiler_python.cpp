@@ -709,9 +709,9 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     // to all the prior frames onto our event stack. (We stop at depth=128)
     std::vector<PyFrameObject*> current_stack;
     auto frame = PyEval_GetFrame();
-    Py_INCREF(frame);
     size_t depth = 0; // Make sure we can't infinite loop.
     while (frame != nullptr && depth <= 128) {
+      Py_INCREF(frame);
       current_stack.push_back(frame);
       frame = PyFrame_GetBack(frame);
       depth++;
