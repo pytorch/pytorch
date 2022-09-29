@@ -663,7 +663,6 @@ aot_autograd_failures = {
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
-    xfail('nn.functional.gaussian_nll_loss'),
     xfail('tensor_split'),
     xfail('corrcoef'),
     xfail('quantile'),
@@ -919,6 +918,7 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.glu', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.grid_sample', ''),  # prims::arange() Expected a value of type 'number' for argument...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('nn.functional.gaussian_nll_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.hinge_embedding_loss', ''),  # aten.zeros_like.default - couldn't find symbolic meta...
     xfail('nn.functional.huber_loss', ''),  # Unable to cast Python instance to C++ type (#define PYBIND11_DE...
     xfail('nn.functional.instance_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides

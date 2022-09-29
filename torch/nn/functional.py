@@ -2817,14 +2817,15 @@ def gaussian_nll_loss(
         raise ValueError(reduction + " is not a valid value for reduction")
 
     # Clamp for stability
-    var = var.clone()
     with torch.no_grad():
-        var.clamp_(min=eps)
+        # No inplace clamp since it breaks test_make_fx_symbolic_exhaustive
+        var = var.clamp(min=eps)
 
     # Calculate the loss
     loss = 0.5 * (torch.log(var) + (input - target)**2 / var)
     if full:
-        loss += 0.5 * math.log(2 * math.pi)
+        # No inplace add since it breaks test_make_fx_symbolic_exhaustive
+        loss = loss + (0.5 * math.log(2 * math.pi))
 
     if reduction == 'mean':
         return loss.mean()

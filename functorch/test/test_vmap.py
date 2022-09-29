@@ -3247,7 +3247,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
         xfail('tensor_split'),  # data_ptr
         xfail('histogramdd'),  # expected Tensor as element 0 in argument 0, but got tuple
-        xfail('nn.functional.gaussian_nll_loss'),  # data-dependent control flow error
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
@@ -3351,7 +3350,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('unique_consecutive'),
         xfail('unique'),
         xfail('nn.functional.ctc_loss'),
-        xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.huber_loss'),
         # We can get this to work on CUDA through decomposition,
         # but fails on CPU due to max_pool1d_cpu not having a derivative

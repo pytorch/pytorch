@@ -770,7 +770,6 @@ class TestOperators(TestCase):
         xfail('tensor_split'),  # data_ptr composite compliance
         xfail('quantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip('as_strided'),  # Test runner cannot handle this
-        xfail('nn.functional.gaussian_nll_loss'),  # .item or data-dependent control flow
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
@@ -864,6 +863,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.embedding', ''),
+        skip('nn.functional.gaussian_nll_loss'),  # takes too long
         xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "amin"),  # aten::scatter_reduce.two hit the vmap fallback
@@ -943,7 +943,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
-        xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.bilinear'),
         xfail('nn.functional.fractional_max_pool3d'),
@@ -1219,6 +1218,7 @@ class TestOperators(TestCase):
         skip('broadcast_tensors'),
         skip('linalg.lstsq'),
         skip('nn.functional.bilinear'),
+        skip('nn.functional.gaussian_nll_loss'),
         skip('native_layer_norm'),
 
         # Potential bugs/errors
@@ -1259,7 +1259,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # calls random op
         xfail('nn.functional.fractional_max_pool2d'),  # calls random op
         xfail('nn.functional.fractional_max_pool3d'),  # calls random op
-        xfail('nn.functional.gaussian_nll_loss'),  # data depenedant flow
         xfail('nn.functional.grid_sample'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hardsigmoid'),  # Forward AD not implemented and no decomposition
         xfail('nn.functional.hinge_embedding_loss'),  # vmap: inplace into a regular tensor
