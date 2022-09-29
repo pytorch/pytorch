@@ -193,7 +193,12 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
         try:
             gm = get_isolated_graphmodule(func, args, kwargs)
         except Exception as e:
-            warn("get_isolated_graphmodule failed on decomposition: " + func.__name__ + " with error message: " + str(e))
+            warn(
+                "get_isolated_graphmodule failed on decomposition: "
+                + func.__name__
+                + " with error message: "
+                + str(e)
+            )
             # returns unsupported when tracing fails.
             return True
 
