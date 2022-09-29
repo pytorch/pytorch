@@ -33,6 +33,7 @@ if TEST_SCIPY:
     import scipy.special
 
 NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
+GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
 class TestPrims(TestCase):
     @onlyCUDA
@@ -782,6 +783,7 @@ class TestDecomp(TestCase):
     @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_masked_fill_decomposition_under_nvprim_context(self, device, dtype):
+        # masked_fill decomposition extracts cpu scalar tensor value when filling out a cuda tensor. This triggers data-dependent control flow on TorchRefsNvfuser speculative lowering.
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
@@ -795,8 +797,11 @@ class TestDecomp(TestCase):
         # mimics real use-case for TorchRefsNvfuserCapabilityMode context
         gm = make_fx(func, decomposition_table={})(x, mask, y)
 
-        with TorchRefsNvfuserCapabilityMode():
-            gm = make_fx(gm)(x, mask, y)
+        with warnings.catch_warnings(record=True) as caught:
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(gm)(x, mask, y)
+        # masked_fill decomposition fails inside `get_isolated_graphmodule`
+        self.assertTrue(any(GET_ISOLATED_GRAPHMODULE_ERROR in str(w.message) for w in caught))
 
     @ops([op for op in op_db if op.supports_varargs], dtypes=OpDTypes.any_one)
     def test_decomposition_method_vararg(self, device, dtype, op):
