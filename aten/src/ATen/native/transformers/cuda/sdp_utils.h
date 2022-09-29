@@ -26,7 +26,7 @@ struct sdp_params {
   bool is_causal;
 };
 
-enum class SDPBackend { flash_attention, mem_eff_attention, math, error};
+enum class SDPBackend {flash_attention, math, error};
 
 //  Define gate functions that determine if a fused kernel can be ran
 inline bool check_gradients(sdp_params params, bool debug) {
@@ -130,31 +130,6 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
-// inline bool check_packed_projection_shape(sdp_params params, bool debug) {
-//   if (params.query.dim() == 5 && params.query.size(2) != 3) {
-//     TORCH_CHECK(
-//         debug,
-//         "Query is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Query.size(2): ",
-//         params.query.size(2));
-//     return false;
-//   }
-//   if (params.key.dim() == 5 && params.key.size(2) != 3) {
-//     TORCH_CHECK(
-//         debug,
-//         "Key is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Key.size(2): ",
-//         params.key.size(2));
-//     return false;
-//   }
-//   if (params.value.dim() == 5 && params.value.size(2) != 3) {
-//     TORCH_CHECK(
-//         debug,
-//         "Value is 5 dimensional(input is packed) but the 2nd dimension's shape does not equal 3. Value.size(2): ",
-//         params.value.size(2));
-//     return false;
-//   }
-//   return true;
-// }
-
 inline bool check_head_dim_size(
     sdp_params params,
     const std::unordered_set<int64_t> allowed_sizes,
@@ -222,7 +197,6 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   std::vector<std::function<bool(sdp_params, bool)>> constraints{
       check_runtime_disabled,
       check_tensor_shapes,
-      // check_packed_projection_shape,
       check_for_attn_weights,
       check_for_attn_mask,
       compiled_with_fused_kernels,
