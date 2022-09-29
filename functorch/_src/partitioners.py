@@ -5,9 +5,9 @@ import math
 import torch.utils._pytree as pytree
 import copy
 import os
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from torch.fx.passes import graph_drawer
-from typing import Tuple
+from typing import Tuple, List
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 
@@ -83,16 +83,15 @@ def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
 
 
-def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule):
-    num_fwd_outputs = joint_module._out_spec.children_specs[0].num_leaves
+def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, num_fwd_outputs):
     outputs = pytree.tree_flatten([node.args for node in joint_module.graph.nodes if node.op == 'output'])[0]
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
 
 
-def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values):
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
+def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, num_fwd_outputs):
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs)
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
     # Construct the forward module
@@ -118,7 +117,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values):
 
 
 def default_partition(
-    joint_module: fx.GraphModule, _joint_inputs
+    joint_module: fx.GraphModule, _joint_inputs, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
@@ -139,12 +138,13 @@ def default_partition(
     Args:
         joint_module(fx.GraphModule): The joint forward and backward graph. This
             is the result of AOT Autograd tracing.
+        num_fwd_outputs: The number of outputs from the forward graph.
 
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module)
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs)
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
@@ -161,7 +161,102 @@ def default_partition(
             saved_values.append(node)
     saved_values = list(set(saved_values))
 
-    return _extract_fwd_bwd_modules(joint_module, saved_values)
+    return _extract_fwd_bwd_modules(joint_module, saved_values, num_fwd_outputs)
+
+# This function expects a post-functionalization FX GraphModule,
+# which means that all ops in the graph are functional, except for
+# some copy_() or as_strided_() nodes, that can show up at the end
+# of a graph who's module involves input mutations.
+#
+# This function extracts those input mutations into
+# a separate, opaque epilogue.
+#
+# We also update fx_g inplace to add the mutated inputs directly
+# as outputs in the graph.
+# Finally, this function returns a boolean list
+# telling AOTAutograd which of the inputs were actually mutated,
+# which correspond to actual inputs in the "input_mutation_submodule".
+#
+# AOTAutograd is responsible for splitting off the mutated inputs
+# after calling the compiled forward graph,
+# and running the epilogue.
+def move_input_mutations_into_epilogue(fx_g: fx.GraphModule) -> List[bool]:
+    mutable_nodes: List[Node] = []  # the copy_() and as_strided_() nodes, that we'll delete move to a submodule.
+    mutated_inputs: List[Node] = []
+    node_map: Dict[Node, Node] = {}
+    node_to_placeholder: Dict[Node, Node] = OrderedDict()  # mapping of nodes from old graph to placeholder in new submodule.
+    mutation_subgraph = fx.Graph()
+    model_input_to_mutation: Dict[Node: bool] = OrderedDict()
+
+    # First, default all model inputs to not having mutations
+    for n in fx_g.graph.nodes:
+        if n.op == 'placeholder':
+            model_input_to_mutation[n] = False
+
+    def remap_input(x):
+        if x in node_map:
+            return node_map[x]
+        if x not in node_to_placeholder:
+            # Add the copy_() mutated input argument as a submodule input.
+            placeholder_node = mutation_subgraph.placeholder(x.name, type_expr=x.type)
+            placeholder_node.meta = copy.copy(x.meta)
+            node_to_placeholder[x] = placeholder_node
+        return node_to_placeholder[x]
+
+    inpt_nodes = [n for n in fx_g.graph.nodes if n.op == 'placeholder']
+    for n in fx_g.graph.nodes:
+        if not isinstance(n.target, torch._ops.OpOverload):
+            continue
+        mutable_schema_args = [
+            a for a in n.target._schema.arguments
+            if a.alias_info is not None and a.alias_info.is_write
+        ]
+        if len(mutable_schema_args) == 0:
+            continue
+        # First some basic assertions.
+        # This graph should be entirely functional, but might contain
+        # some copy_() mutation nodes, that copy data back into program inputs.
+        # Any mutable ops that we find should correspond to copy_() nodes.
+        assert n.target == torch.ops.aten.copy_.default or \
+               n.target == torch.ops.aten.as_strided_.default, \
+               "Given a non-functionalized graph."
+        # Add the copy_() node to the submodule, remember which nodes are mutated input
+        # so we can return them in the original graph.
+        mutable_nodes.append(n)
+        if n.target == torch.ops.aten.copy_.default:
+            original_input = n.args[0]
+            mutated_input = n.args[1]
+            if mutated_input not in mutated_inputs:
+                mutated_inputs.append(mutated_input)
+            # Figure out which inputs were mutated
+            model_input_to_mutation[original_input] = True
+        new_node = mutation_subgraph.node_copy(n, remap_input)
+        node_map[n] = new_node
+
+    mutation_subgraph.lint()
+
+    # Create the epilogue, as an opaque callable.
+    def mutation_epilogue(*args):
+        return torch.fx.Interpreter(torch.fx.GraphModule({}, mutation_subgraph)).run(*args)
+
+    # Update the output node to also return the mutated inputs.
+    output_node = [n for n in fx_g.graph.nodes if n.op == 'output']
+    # FX graphs created through torch_dispatch tracing should
+    # only have a single output node.
+    assert len(output_node) == 1
+    assert isinstance(output_node[0].args, tuple) and len(output_node[0].args) == 1
+    # Update the output node to also return any mutated inputs
+    new_args = [mutated_inputs + output_node[0].args[0]]
+    output_node[0].args = tuple(new_args)
+
+
+    # Remove the mutable nodes from the original graph
+    for n in reversed(mutable_nodes):
+        fx_g.graph.erase_node(n)
+    fx_g.graph.lint()
+    fx_g.recompile()
+
+    return mutation_epilogue, list(model_input_to_mutation.values())
 
 
 def _prod(x):
@@ -207,7 +302,7 @@ def _count_ops(graph):
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser"
+    joint_module: fx.GraphModule, _joint_inputs, num_fwd_outputs, compiler="nvfuser"
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -223,6 +318,7 @@ def min_cut_rematerialization_partition(
     Args:
         joint_module(fx.GraphModule): The joint forward and backward graph. This
             is the result of AOT Autograd tracing.
+        num_fwd_outputs: The number of outputs from the forward graph.
 
     Returns:
         Returns the generated forward and backward Fx graph modules.
@@ -255,7 +351,7 @@ def min_cut_rematerialization_partition(
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module)
+        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
@@ -408,7 +504,7 @@ def min_cut_rematerialization_partition(
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
-    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values)
+    fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i.meta['tensor_meta']) for i in saved_values]) / 1e9)
         fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])

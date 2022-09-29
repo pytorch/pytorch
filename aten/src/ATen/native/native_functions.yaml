@@ -981,6 +981,12 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   tags: nondeterministic_seeded
+  dispatch:
+    # This op needs to be a primitive w.r.t. Python,
+    # because functionalization wants to convert bernoulli_.float -> bernoulli.p.
+    # If we leave it as CompositeImplicitAutograd, then we'll run this kernel
+    # If we leave it as CompositeImplicitAutograd, then we'll run this kernel
+    CompositeExplicitAutograd: bernoulli
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias=None) -> Tensor
 
