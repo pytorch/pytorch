@@ -964,7 +964,7 @@ def _get_observer_from_activation_post_process(
     if isinstance(activation_post_process, ObserverBase):
         return activation_post_process
     else:
-        return activation_post_process.activation_post_process
+        return activation_post_process.activation_post_process  # type: ignore[return-value]
 
 def _qconfig_satisfies_dtype_config_constraints(
         qconfig: QConfigAny,
