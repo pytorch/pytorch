@@ -54,6 +54,25 @@ using StorageImplData = strong::type<
     strong::hashable,
     strong::boolean>;
 
+// Identity is a complex concept in PyTorch. A Tensor might not have a
+// an associated storage, multiple Tensors might share the same underlying
+// storage, the storage of a Tensor might change over time, etc.
+//
+// For the purpose of profiling we're mostly interested in data flow
+// analysis. As a result, we can take an expansive view of identity:
+// Tensors share an ID if they share a TensorImpl or storage data.
+//
+// This identity equality is transitive; If Tensors T0 and T1 share a storage
+// S0 and T1 later points to a different storage S1 then all Tensors which
+// point to either S0 or S1 are considered to have the same identity. (Since
+// profiler cannot reason beyond that.)
+//
+// The profiler will handle lifetime analysis to ensure that identities do
+// not run afoul of the ABA problem. This does, however, mean that identities
+// can only be assigned when memory profiling is enabled. (And we cannot
+// handle ABA for TensorImpl as those allocations are not instrumented.)
+using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
+
 struct RawTensorMetadata {
   TensorImplAddress impl_;
   StorageImplData data_;
@@ -75,24 +94,7 @@ struct TensorMetadata : public RawTensorMetadata {
     return {device_type_, device_index_};
   }
 
-  // Identity is a complex concept in PyTorch. A Tensor might not have a
-  // an associated storage, multiple Tensors might share the same underlying
-  // storage, the storage of a Tensor might change over time, etc.
-  //
-  // For the purpose of profiling we're mostly interested in data flow
-  // analysis. As a result, we can take an expansive view of identity:
-  // Tensors share an ID if they share a TensorImpl or storage data.
-  //
-  // This identity equality is transitive; If Tensors T0 and T1 share a storage
-  // S0 and T1 later points to a different storage S1 then all Tensors which
-  // point to either S0 or S1 are considered to have the same identity. (Since
-  // profiler cannot reason beyond that.)
-  //
-  // The profiler will handle lifetime analysis to ensure that identities do
-  // not run afoul of the ABA problem. This does, however, mean that identities
-  // can only be assigned when memory profiling is enabled. (And we cannot
-  // handle ABA for TensorImpl as those allocations are not instrumented.)
-  c10::optional<size_t> id_;
+  c10::optional<TensorID> id_;
 };
 
 struct Inputs {
