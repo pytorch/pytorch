@@ -127,11 +127,6 @@ jobs:
       build-environment: ios-12-5-1-x86-64
       ios-platform: SIMULATOR
       ios-arch: x86_64
-    secrets:
-      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
-      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
-      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
-      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   macos-12-py3-x86-64-build:
     name: macos-12-py3-x86-64
@@ -190,6 +185,7 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "macos-m1-12" },
           { config: "default", shard: 2, num_shards: 2, runner: "macos-m1-12" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "macos-m1-12" },
         ]}
     secrets:
       MACOS_SCCACHE_S3_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}

@@ -6,10 +6,6 @@
 import torch
 from . import _C
 
-# Monkey patch PyTorch. This is a hack, we should try to upstream
-# these pieces.
-from ._src import monkey_patching as _monkey_patching
-
 # Top-level APIs. Please think carefully before adding something to the
 # top-level namespace:
 # - private helper functions should go into functorch._src
