@@ -89,7 +89,12 @@ data_type LlgaTensorDesc::getLlgaDataType(at::ScalarType dt) const {
     case at::ScalarType::QUInt8:
       return data_type::u8;
     default:
-      TORCH_CHECK(false, "oneDNN Graph does not support the dtype ", dt);
+      // If a dtype is unsupported, oneDNN Graph will make that op a wildcard in
+      // the graph construction stage. Then when we would execute oneDNN Graph
+      // kernels pertaining to oneDNN Graph partitions, such an op would not be
+      // inside a oneDNN Graph partition, so we would not encounter inputs with
+      // unsupported dtypes at the time of executing compiled partitions.
+      return data_type::undef;
   }
 }
 

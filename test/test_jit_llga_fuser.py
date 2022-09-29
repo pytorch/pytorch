@@ -764,6 +764,7 @@ for model_name, enabled in [
     ['squeezenet1_0', True],
     ['vgg16', True],
     ['alexnet', True],
+    ['shufflenet_v2_x1_0', True],
     ['wide_resnet50_2', True],
 ]:
     def _wrapper(mname, dtype):
