@@ -120,6 +120,7 @@ class TORCH_API Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  void rebuildTensorFromTypeV2();
   void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED
   void rebuildRRef();
@@ -176,6 +177,8 @@ class TORCH_API Unpickler {
 
   // See [type tag serialization]
   uint64_t version_;
+
+  uint8_t skip_next_read_global = 0;
 };
 
 void restoreAccurateTypeTags(const IValue& root, const c10::TypePtr& type_tag);

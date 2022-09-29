@@ -532,6 +532,9 @@ PickleOpCode Unpickler::readInstruction() {
       }
       stack_.emplace_back(std::move(tensor));
     } break;
+    case PickleOpCode::SETITEM: {
+      // We take care of it in other opcodes.
+    } break;
     default: {
       AT_ERROR(
           "Unknown opcode for unpickling at ",
@@ -546,6 +549,16 @@ PickleOpCode Unpickler::readInstruction() {
 void Unpickler::readGlobal(
     const std::string& module_name,
     const std::string& class_name) {
+  if (this->skip_next_read_global) {
+    this->skip_next_read_global--;
+    if (this->skip_next_read_global == 1) {
+    } else if (this->skip_next_read_global == 0) {
+      stack_.emplace_back(int64_t(globals_.size() - 1));
+      return;
+    } else {
+      TORCH_CHECK(false, "INVALID VALUES")
+    }
+  }
   // TODO [unpickler refactor] __main__ isn't used by the pickler anymore, this
   // is only here for bc-compatibility reasons
   if (module_name == "__main__") {
@@ -631,6 +644,11 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (
+      module_name == "torch._tensor" &&
+      (class_name == "_rebuild_from_type_v2")) {
+    // Unpickle a tensor
+    rebuildTensorFromTypeV2();
   } else if (
       module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
     rebuildSparseTensor();
@@ -830,6 +848,28 @@ void Unpickler::rebuildTensor(bool quantized) {
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
+    stack_.emplace_back(std::move(result));
+  });
+}
+
+void Unpickler::rebuildTensorFromTypeV2() {
+  this->skip_next_read_global = 2;
+  auto curr_globals_idx = globals_.size();
+  globals_.emplace_back([this, curr_globals_idx] {
+    auto args = pop(stack_).toTuple();
+    size_t tup_idx = 0;
+    const auto args_elems = args->elements();
+    auto tup = args_elems.at(tup_idx + 2).toTuple();
+    auto state = args_elems.at(tup_idx + 3).toGenericDict();
+    // std::cout << "STATE PRINT:" << state << "\n";
+    // std::cout << "STATE:" << state.size() << "\n";
+    if (state.size() > 0) {
+      TORCH_WARN(
+          "Loading Tensor with Python Attribute will be silently ignored");
+    }
+    stack_.emplace_back(tup);
+    globals_[curr_globals_idx + 1]();
+    auto result = pop(stack_);
     stack_.emplace_back(std::move(result));
   });
 }
