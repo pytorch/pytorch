@@ -168,6 +168,8 @@ class TestQuantizedOps(TestCase):
         X, (scale, zero_point, torch_type) = X
         if not isinstance(X, torch.Tensor):
             X = torch.from_numpy(X)
+        if (X.device.type == 'cuda') and (torch.backends.quantized.engine == 'qnnpack'):
+            return
         # Quantizes the reference to account for max error.
         # q_min and q_max only depend on the initial torch_type.
         q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
@@ -229,9 +231,7 @@ class TestQuantizedOps(TestCase):
 
     """Tests the correctness of the quantized::relu op."""
     @override_qengines
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qrelu(self, X):
+    def test_qrelu(self):
         relu_test_configs = [
             {
                 'quantized_fn': [
@@ -253,7 +253,29 @@ class TestQuantizedOps(TestCase):
                 }
             }
         ]
-        self._test_activation_function(X, 'relu', relu_test_configs)
+        devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
+        for device in devices:
+            # Only test the non-in-place version relu quantized cuda,
+            # will remove this when creating in-place version relu quantized cuda.
+            if device == 'cuda':
+                relu_test_configs = [
+                    {
+                        'quantized_fn': [
+                            torch.relu,
+                            torch.nn.functional.relu,
+                        ],
+                        'reference_fn': torch.nn.functional.relu
+                    },
+                ]
+            shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+            dtypes = (torch.quint8, torch.qint8)
+            scales = (0.05, 0.1)
+            zero_points = (0, 5)
+            test_cases = itertools.product(shapes, dtypes, scales, zero_points)
+            for shape, dtype, scale, zero_point in test_cases:
+                X = torch.randn(*shape, device=device)
+                X = (X, (scale, zero_point, dtype))
+                self._test_activation_function(X, 'relu', relu_test_configs)
 
     """Tests the correctness of the quantized::relu6 op."""
     def test_qrelu6(self):
