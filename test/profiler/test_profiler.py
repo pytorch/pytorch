@@ -1248,7 +1248,7 @@ class TestProfiler(TestCase):
         a = torch.randn(4, 4)
         b = torch.randn(4, 4)
         c = torch.randn(4, 4)
-        inp = torch.nested_tensor([a, b])
+        inp = torch.nested.nested_tensor([a, b])
         with torch.profiler.profile(record_shapes=True) as prof:
             torch.nn.functional.linear(inp, c, None)
         for e in prof.events():
@@ -1524,6 +1524,11 @@ class TestTorchTidyProfiler(TestCase):
                     [(v.storage().data_ptr()) for v in group.get("params", [])],
                     opt_.param_addrs
                 )
+            for opt_ in opts:
+                self.assertEqual(
+                    [(name, val.storage().data_ptr()) for dic in opt.state.values() for name, val in dic.items()],
+                    opt_.opt_state
+                )
 
     def test_optimizer(self):
         inputs = torch.rand(10)
@@ -1637,8 +1642,46 @@ class MockProfilerEvent():
         object.__setattr__(self, "parent", parent)
         object.__setattr__(self, "children", children)
 
+class MockNode:
+    def __init__(self, name, children) -> None:
+        self.name = name
+        self.children = [MockNode(name, i) for name, i in children.items()]
+
 
 class TestExperimentalUtils(TestCase):
+
+    def make_tree(self) -> List[MockNode]:
+        tree = {
+            "root_0": {
+                "1": {
+                    "2": {}
+                },
+                "3": {
+                    "4": {},
+                    "5": {},
+                },
+            },
+            "root_1": {
+                "6": {},
+                "7": {},
+                "8": {
+                    "9": {
+                        "10": {}
+                    },
+                },
+            },
+        }
+        return [MockNode(name, i) for name, i in tree.items()]
+
+    def test_dfs(self) -> None:
+        self.assertEqual(
+            " ".join(i.name for i in _utils.traverse_dfs(self.make_tree())),
+            "root_0 1 2 3 4 5 root_1 6 7 8 9 10")
+
+    def test_bfs(self) -> None:
+        self.assertEqual(
+            " ".join(i.name for i in _utils.traverse_bfs(self.make_tree())),
+            "root_0 root_1 1 3 6 7 8 2 4 5 9 10")
 
     @staticmethod
     def generate_mock_profile():
