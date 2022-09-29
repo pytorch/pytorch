@@ -1362,14 +1362,6 @@ Call this whenever a new thread is created in order to propagate values from
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
   });
 
-  py_module.def("_is_deploy_enabled", []() {
-#if defined(USE_DEPLOY)
-    return true;
-#else
-    return false;
-#endif
-  });
-
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
       (THPGenerator*)THPGenerator_initDefaultGenerator(defaultGenerator);
