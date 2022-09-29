@@ -398,7 +398,7 @@ static void checkBasicAsStridedValidForSlice(
     int64_t num_batch_dims,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    const optional<c10::SymInt>& maybe_storage_offset) {
+    optional<c10::SymInt> maybe_storage_offset) {
   auto slice_sizes = physical_tensor.sym_sizes().slice(num_batch_dims);
   auto slice_strides = physical_tensor.sym_strides().slice(num_batch_dims);
   auto base_offset = physical_tensor.sym_storage_offset();
@@ -456,7 +456,7 @@ Tensor as_strided_batching_rule(
     const Tensor& tensor,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    const optional<c10::SymInt>& storage_offset) {
+    optional<c10::SymInt> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::as_strided_symint(tensor, sizes, strides, storage_offset);
