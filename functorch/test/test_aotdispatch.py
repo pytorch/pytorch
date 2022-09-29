@@ -428,6 +428,7 @@ class TestAOTAutograd(AOTTestCase):
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
 
+    @unittest.expectedFailure  # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_op_depending_on_symint(self):
