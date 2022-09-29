@@ -1360,12 +1360,12 @@ std::vector<Shape> compute_shape_slice_scatter(
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_as_strided_scatter(
+std::vector<Shape> compute_shape_as_strided_scatter_symint(
     const at::Tensor& self,
     const at::Tensor& src,
-    at::IntArrayRef size,
-    at::IntArrayRef stride,
-    c10::optional<int64_t> storage_offset) {
+    at::SymIntArrayRef size,
+    at::SymIntArrayRef stride,
+    c10::optional<c10::SymInt> storage_offset) {
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
@@ -1380,7 +1380,7 @@ std::vector<Shape> compute_shape_as_strided_scatter(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::as_strided_scatter(
+  auto out_meta = at::compositeexplicitautograd::as_strided_scatter_symint(
       self_meta, src_meta, size, stride, storage_offset);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
