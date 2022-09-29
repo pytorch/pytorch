@@ -13,6 +13,7 @@
 #include <c10/util/Optional.h>
 
 // ncclGetLastError() is enabled only for NCCL versions 2.13+
+// ncclRemoteError only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 13)
 #define ENABLE_NCCL_GET_LAST_ERROR
