@@ -5,6 +5,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
 #include <c10/util/variant.h>
+#include <bitset>
 
 namespace at { namespace functorch {
 
@@ -179,7 +180,6 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
 //   if use_flag_relative[i] == 1: <-- treats use_flag_relative as a bitset
 //     args[i] = func(args[i], i - begin, true)
 //   args[i] = func(args[i], i - begin)
-// NOTE: relative_skips must be sorted
 void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
     const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func);
 
