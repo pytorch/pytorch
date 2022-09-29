@@ -571,8 +571,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        // NB: intentionally suffixed with extra _format to prevent tests for
+        // "_like" suffix from triggering on this
         TORCH_SELECTIVE_SCHEMA(
-            "aten::is_strides_like(Tensor self, MemoryFormat memory_format) -> bool"),
+            "aten::is_strides_like_format(Tensor self, MemoryFormat memory_format) -> bool"),
         [](Stack& stack) {
           auto memory_format = pop(stack).toMemoryFormat();
           auto t = pop(stack).toTensor();

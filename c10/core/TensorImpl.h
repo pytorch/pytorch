@@ -2291,6 +2291,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(
         !has_symbolic_sizes_strides_,
         "empty_tensor_restride() called on tensor with symbolic shape")
+#ifdef DEBUG
+    TORCH_INTERNAL_ASSERT(
+        compute_numel() == numel_,
+        "If you are seeing this error, that means empty_tensor_restride was "
+        "called before setting correct numel");
+#endif
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         // dim_ is a virtual call, don't repeat it

@@ -1415,7 +1415,7 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
                 if func in [
                     torch.ops.aten.is_contiguous.default,
                     torch.ops.aten.is_contiguous.memory_format,
-                    torch.ops.aten.is_strides_like.default,
+                    torch.ops.aten.is_strides_like_format.default,
                     torch.ops.aten.is_non_overlapping_and_dense.default,
                     torch.ops.aten.stride.default
                 ]:
@@ -1428,8 +1428,8 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         self.assertFalse(e.is_contiguous(memory_format=torch.channels_last))
         self.assertEqual(calls, [(torch.ops.aten.is_contiguous.memory_format, [torch.channels_last])])
         calls.clear()
-        self.assertFalse(torch.ops.aten.is_strides_like.default(e, torch.channels_last))
-        self.assertEqual(calls, [(torch.ops.aten.is_strides_like.default, [torch.channels_last])])
+        self.assertFalse(torch.ops.aten.is_strides_like_format.default(e, torch.channels_last))
+        self.assertEqual(calls, [(torch.ops.aten.is_strides_like_format.default, [torch.channels_last])])
         calls.clear()
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(e))
         self.assertEqual(calls, [(torch.ops.aten.is_non_overlapping_and_dense.default, [])])

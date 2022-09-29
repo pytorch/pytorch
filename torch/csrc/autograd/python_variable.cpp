@@ -2424,7 +2424,9 @@ bool ConcretePyInterpreterVTable::is_strides_like(
       py::module::import("torch")
           .attr("ops")
           .attr("aten")
-          .attr("is_strides_like")
+          // NB: intentionally suffixed with _format to avoid
+          // triggering matches against "_like" suffix
+          .attr("is_strides_like_format")
           .attr("default")
           .ptr(),
       "torch.ops.aten",
@@ -2436,7 +2438,7 @@ bool ConcretePyInterpreterVTable::is_strides_like(
 
   TORCH_CHECK(
       PyBool_Check(out.ptr()),
-      "is_strides_like returned invalid type ",
+      "is_strides_like_format returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected bool");
 
