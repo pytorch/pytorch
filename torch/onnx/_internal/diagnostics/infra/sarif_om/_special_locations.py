@@ -11,8 +11,12 @@ from typing import Any
 class SpecialLocations(object):
     """Defines locations of special significance to SARIF consumers."""
 
-    display_base: Any
-    properties: Any
+    display_base: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "displayBase"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

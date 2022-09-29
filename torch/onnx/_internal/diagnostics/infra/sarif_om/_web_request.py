@@ -11,15 +11,33 @@ from typing import Any
 class WebRequest(object):
     """Describes an HTTP request."""
 
-    body: Any
-    headers: Any
-    index: Any
-    method: Any
-    parameters: Any
-    properties: Any
-    protocol: Any
-    target: Any
-    version: Any
+    body: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "body"}
+    )
+    headers: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "headers"}
+    )
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    method: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "method"}
+    )
+    parameters: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "parameters"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    protocol: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "protocol"}
+    )
+    target: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "target"}
+    )
+    version: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "version"}
+    )
 
 
 # flake8: noqa

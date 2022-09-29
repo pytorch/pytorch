@@ -11,11 +11,19 @@ from typing import Any
 class RunAutomationDetails(object):
     """Information that describes a run's identity and role within an engineering system process."""
 
-    correlation_guid: Any
-    description: Any
-    guid: Any
-    id: Any
-    properties: Any
+    correlation_guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "correlationGuid"}
+    )
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "guid"}
+    )
+    id: Any = dataclasses.field(default=None, metadata={"schema_property_name": "id"})
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

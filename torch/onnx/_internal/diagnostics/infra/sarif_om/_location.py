@@ -11,13 +11,25 @@ from typing import Any
 class Location(object):
     """A location within a programming artifact."""
 
-    annotations: Any
-    id: Any
-    logical_locations: Any
-    message: Any
-    physical_location: Any
-    properties: Any
-    relationships: Any
+    annotations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "annotations"}
+    )
+    id: Any = dataclasses.field(default=-1, metadata={"schema_property_name": "id"})
+    logical_locations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "logicalLocations"}
+    )
+    message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "message"}
+    )
+    physical_location: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "physicalLocation"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    relationships: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "relationships"}
+    )
 
 
 # flake8: noqa

@@ -11,13 +11,25 @@ from typing import Any
 class TranslationMetadata(object):
     """Provides additional metadata related to translation."""
 
-    name: Any
-    download_uri: Any
-    full_description: Any
-    full_name: Any
-    information_uri: Any
-    properties: Any
-    short_description: Any
+    name: Any = dataclasses.field(metadata={"schema_property_name": "name"})
+    download_uri: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "downloadUri"}
+    )
+    full_description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "fullDescription"}
+    )
+    full_name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "fullName"}
+    )
+    information_uri: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "informationUri"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    short_description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "shortDescription"}
+    )
 
 
 # flake8: noqa
