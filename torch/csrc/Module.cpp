@@ -390,23 +390,18 @@ static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
 }
 
 void DLPack_Capsule_Destructor(PyObject* data) {
-  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
-    // early out, see DLPack spec: if a consuming library sets the capsule
-    // name to something else, they own it and we don't need to do anything
-    return;
-  }
   HANDLE_TH_ERRORS
-  // Causes overheads for validity checks again, but this case is rare
-  // since consuming libraries should rename the capsule according to spec.
-  // Note that this cannot set a python error (we checked validity above),
-  // so we don't need to handle python error state here.
   DLManagedTensor* dlMTensor =
       (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
-  // the dlMTensor has not been consumed, call deleter ourselves.
-  // DLPack spec mentions that deleter may be NULL, but deleter from
-  // `at::toDLPack` is never NULL, so no need for an additional check here.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
+  if (dlMTensor) {
+    // the dlMTensor has not been consumed, call deleter ourselves
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+    dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
+  } else {
+    // the dlMTensor has been consumed
+    // PyCapsule_GetPointer has set an error indicator
+    PyErr_Clear();
+  }
   END_HANDLE_TH_ERRORS_RET()
 }
 
@@ -1306,14 +1301,6 @@ Call this whenever a new thread is created in order to propagate values from
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     std::cout << "Included: " << toString(local_keyset.included_) << "\n";
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
-  });
-
-  py_module.def("_is_deploy_enabled", []() {
-#if defined(USE_DEPLOY)
-    return true;
-#else
-    return false;
-#endif
   });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();

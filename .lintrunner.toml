@@ -170,7 +170,6 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'torch/csrc/deploy/**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
     'torch/csrc/onnx/**/*.cpp',
@@ -183,7 +182,6 @@ exclude_patterns = [
     # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
     # in a follow up PR.
     # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
-    # deploy/interpreter files are excluded due to using macros and other techniquies
     # that are not easily converted to accepted c++
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
@@ -197,11 +195,6 @@ exclude_patterns = [
     'torch/csrc/autograd/FunctionsManual.cpp',
     'torch/csrc/generic/*.cpp',
     'torch/csrc/jit/codegen/cuda/runtime/*',
-    'torch/csrc/deploy/interactive_embedded_interpreter.cpp',
-    'torch/csrc/deploy/interpreter/**',
-    'torch/csrc/deploy/test_deploy_python_ext.cpp',
-    'torch/csrc/deploy/test_deploy_missing_interpreter.cpp',
-    'torch/csrc/deploy/test_deploy_gpu.cpp',
     'torch/csrc/utils/disable_torch_function.cpp',
 ]
 init_command = [
