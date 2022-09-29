@@ -1086,7 +1086,7 @@ void svd_kernel(const Tensor& A,
   });
 }
 
-void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
+void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size, const int64_t max_pivot) {
   if (iter.numel() == 0) {
     return;
   }
@@ -1103,7 +1103,7 @@ void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
 
       for (const auto i : c10::irange(dim_size)) {
         auto new_idx = pivots_data[i] - 1;
-        TORCH_CHECK(new_idx >= 0 && new_idx < dim_size,
+        TORCH_CHECK(new_idx >= 0 && new_idx < max_pivot,
                     "pivots passed to lu_unpack must be between 1 and LU.size(-1)."
                     "Did you properly pass the result of lu_factor?");
         std::swap(
