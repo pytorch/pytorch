@@ -391,6 +391,7 @@ Python version: {python_version}
 Python platform: {python_platform}
 Is CUDA available: {is_cuda_available}
 CUDA runtime version: {cuda_runtime_version}
+CUDA_MODULE_LOADING set to: {cuda_module_loading}
 GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
