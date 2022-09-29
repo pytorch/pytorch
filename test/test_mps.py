@@ -3442,6 +3442,13 @@ class TestNLLLoss(TestCase):
 
         self.assertEqual(y_cpu, y_mps.cpu())
 
+    def test_constant_pad_4d_warning(self):
+        inputCPU = torch.rand((1, 2, 2, 2, 1, 1))
+        inputMPS = inputCPU.detach().clone().to('mps')
+        outputCPU = F.pad(inputCPU, [0, 0, 0, 0, 0, 0, 1, 0])
+        outputMPS = F.pad(inputMPS, [0, 0, 0, 0, 0, 0, 1, 0])
+        self.assertEqual(outputCPU, outputMPS)
+
     def test_pad(self):
         def helper(shape, padding, op, value=0):
             inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -4680,18 +4687,18 @@ class TestNLLLoss(TestCase):
         all_zeros = torch.zeros(shape, device='mps')
 
         prob_tensor = all_ones * 0.5
-        ## probability of drawing "1" is 0.5
+        # probability of drawing "1" is 0.5
         mps_out = torch.bernoulli(prob_tensor)
         # We can't check reliably the mean and std.
         # Just make sure we don't return constant values
         self.assertNotEqual(mps_out.to('cpu').mean(), 0.)
         self.assertNotEqual(mps_out.to('cpu').std() ** 2, 0.)
 
-        ## probability of drawing "1" is 0
+        # probability of drawing "1" is 0
         mps_out = torch.bernoulli(all_zeros)
         self.assertEqual(mps_out, all_zeros)
 
-        ## probability of drawing "1" is 1
+        # probability of drawing "1" is 1
         mps_out = torch.bernoulli(all_ones)
         self.assertEqual(mps_out, all_ones)
 
