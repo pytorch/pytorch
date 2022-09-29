@@ -22,8 +22,6 @@ def outputs_alias_inputs(outputs, inputs):
         for inp in tree_flatten_only(torch.Tensor, inputs)
         if torch._C._has_storage(inp)
     }
-    print(tree_flatten_only(torch.Tensor, inputs))
-    print(tree_flatten_only(torch.Tensor, outputs))
     return any(
         torch._C._has_storage(out) and out.storage()._cdata in input_storages
         for out in tree_flatten_only(torch.Tensor, outputs)
