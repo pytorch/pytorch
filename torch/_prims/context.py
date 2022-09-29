@@ -231,15 +231,16 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         )
 
     def _is_view_or_reshape(self, func):
-        return (
-            "torch.Tensor.view" == torch.overrides.resolve_name(func)
-            or "torch.Tensor.reshape" == torch.overrides.resolve_name(func)
-            or "torch.view_copy" == torch.overrides.resolve_name(func)
-            or "torch.reshape" == torch.overrides.resolve_name(func)
-            or func == torch.ops.aten.view.default
-            or func == torch.ops.aten._unsafe_view.default
-            or func == torch.ops.aten.view_copy.default
-        )
+        allowed_ops = [
+            "torch.Tensor.view",
+            "torch.Tensor.reshape",
+            "torch.view_copy",
+            "torch.reshape",
+            "aten.view.default",
+            "aten._unsafe_view.default",
+            "aten.view_copy.default",
+        ]
+        return torch.overrides.resolve_name(func) in allowed_ops
 
     def _is_rand_like(self, func):
         result = "torch.rand_like" == torch.overrides.resolve_name(func) or (
