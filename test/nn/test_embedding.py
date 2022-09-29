@@ -1,29 +1,19 @@
 # Owner(s): ["module: nn"]
-from functools import reduce
-from itertools import repeat
 import unittest
-import subprocess
-import sys
-import os
 import random
 import itertools
 from itertools import product
-import math
 
-from torch._six import inf, nan
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
-    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, _assertGradAndGradgradChecks, \
-    subtest, skipIfMps
+from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
+    instantiate_parametrized_tests, parametrize as parametrize_test, _assertGradAndGradgradChecks
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_nn import NNTestCase, _test_bfloat16_ops, _test_module_empty_input
-from torch.testing._internal.common_device_type import largeTensorTest, onlyNativeDeviceTypes, dtypes, \
-    instantiate_device_type_tests, skipCUDAIfRocm, expectedFailureMeta, dtypesIfCUDA, onlyCPU, onlyCUDA, \
+from torch.testing._internal.common_nn import NNTestCase
+from torch.testing._internal.common_device_type import onlyNativeDeviceTypes, dtypes, \
+    instantiate_device_type_tests, dtypesIfCUDA, onlyCUDA, \
     TEST_WITH_ROCM, skipCUDAIf, skipMeta
-from torch.testing._internal.common_dtype import floating_types_and
 import torch.nn.functional as F
 import torch.nn as nn
-from torch.autograd import gradcheck, gradgradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 
 class TestEmbeddingNN(NNTestCase):
@@ -1120,37 +1110,38 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
     def test_embedding_bag_device(self, device, dtypes):
-        self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
-        self._test_EmbeddingBag(device, 'mean', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
-        self._test_EmbeddingBag(device, 'max', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
+        with set_default_dtype(torch.double):
+            self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
+            self._test_EmbeddingBag(device, 'mean', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
+            self._test_EmbeddingBag(device, 'max', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
 
-        test_backward = False
-        if self.device_type == 'cuda':
-            # see 'todo' in test_embedding_bag.
-            test_backward = dtypes[2] is not torch.float16
-        elif self.device_type == 'cpu':
-            # TODO: figure out why precision on sparse embeddings isn't the
-            # same as for dense.
-            test_backward = dtypes[2] is not torch.float and dtypes[2] is not torch.float16
+            test_backward = False
+            if self.device_type == 'cuda':
+                # see 'todo' in test_embedding_bag.
+                test_backward = dtypes[2] is not torch.float16
+            elif self.device_type == 'cpu':
+                # TODO: figure out why precision on sparse embeddings isn't the
+                # same as for dense.
+                test_backward = dtypes[2] is not torch.float and dtypes[2] is not torch.float16
 
-        self._test_EmbeddingBag(
-            device,
-            'sum',
-            True,
-            wdtype=dtypes[2],
-            dtype=dtypes[0],
-            odtype=dtypes[1],
-            test_backward=test_backward,
-        )
-        self._test_EmbeddingBag(
-            device,
-            'mean',
-            True,
-            wdtype=dtypes[2],
-            dtype=dtypes[0],
-            odtype=dtypes[1],
-            test_backward=test_backward,
-        )
+            self._test_EmbeddingBag(
+                device,
+                'sum',
+                True,
+                wdtype=dtypes[2],
+                dtype=dtypes[0],
+                odtype=dtypes[1],
+                test_backward=test_backward,
+            )
+            self._test_EmbeddingBag(
+                device,
+                'mean',
+                True,
+                wdtype=dtypes[2],
+                dtype=dtypes[0],
+                odtype=dtypes[1],
+                test_backward=test_backward,
+            )
 
     @skipMeta
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long), (torch.float, torch.double, torch.half)))
