@@ -2752,7 +2752,7 @@ Tensor as_strided_backward(
     TensorGeometry input_geometry,
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
-    const optional<c10::SymInt>& sym_storage_offset_) {
+    optional<c10::SymInt> sym_storage_offset_) {
   // TODO: properly use sym
   auto sizes = c10::asIntArrayRefSlow(sym_sizes);
   auto strides = c10::asIntArrayRefSlow(sym_strides);
@@ -2880,7 +2880,7 @@ Tensor as_strided_scatter_backward(
     TensorGeometry src_geometry,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    const optional<c10::SymInt>& storage_offset) {
+    optional<c10::SymInt> storage_offset) {
   // Note [as_strided_scatter backward support]
   // as_strided_scatter handling for autograd is a beast, and is non-trivial to
   // implement for arbitrarily strided inputs. Most uses for as_strided with
@@ -3153,8 +3153,8 @@ Tensor slice_backward_wrapper(
     const at::Tensor& grad,
     const c10::SymIntArrayRef& input_sizes,
     int64_t dim,
-    const c10::optional<c10::SymInt>& start,
-    const c10::optional<c10::SymInt>& end,
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
     c10::SymInt step) {
   auto start_val = start.has_value() ? start.value() : 0;
   auto end_val = end.has_value() ? end.value() : INT64_MAX;
