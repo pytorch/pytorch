@@ -9,7 +9,6 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
-#include <mkl_graph.h>
 
 namespace at {
 namespace native {
