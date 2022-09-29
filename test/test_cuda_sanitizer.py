@@ -8,7 +8,7 @@ from typing import List
 import torch
 import torch.cuda._sanitizer as csan
 from torch.cuda._sanitizer import StreamId, DataPtr, EventId
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import NoTest, TestCase, run_tests
 
 
 # We cannot import TEST_CUDA from torch.testing._internal.common_cuda here,
@@ -19,7 +19,7 @@ TEST_CUDA = torch.cuda.is_available()
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 
 class TestArgumentHandler(TestCase):

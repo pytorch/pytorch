@@ -5,7 +5,7 @@ from torch.cuda.jiterator import _create_jit_fn as create_jit_fn
 from torch.cuda.jiterator import _create_multi_output_jit_fn as create_multi_output_jit_fn
 import sys
 from itertools import product
-from torch.testing._internal.common_utils import TestCase, parametrize, run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import NoTest, TestCase, parametrize, run_tests, TEST_CUDA
 from torch.testing._internal.common_dtype import all_types_and_complex_and
 from torch.testing._internal.common_device_type import (
     skipCUDAIfRocm, skipCUDAIf, instantiate_device_type_tests, dtypes, toleranceOverride, tol)
@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import _get_torch_cuda_version
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 
 code_string = "template <typename T> T my_fused_kernel(T x, T y, T alpha, T beta) { return alpha * x + beta * y; }"

@@ -648,8 +648,8 @@ def get_report_path(pytest=False):
     test_report_path = os.path.join(test_report_path, test_filename)
     if pytest:
         test_report_path = test_report_path.replace('python-unittest', 'python-pytest')
-        os.makedirs(test_report_path, exist_ok=True)
         test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
+        os.makedirs(Path(test_report_path).parent, exist_ok=True)
         return test_report_path
     os.makedirs(test_report_path, exist_ok=True)
     return test_report_path
@@ -709,6 +709,9 @@ def run_tests(argv=UNITTEST_ARGS):
                 other_args.append('--import-disabled-tests')
             if SLOW_TESTS_FILE:
                 other_args.append('--import-slow-tests')
+            if USE_PYTEST:
+                other_args.append('--use-pytest')
+                test_case_full_name = f"-k={test_case_full_name.split('.')[1]}"
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
@@ -907,13 +910,6 @@ TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 # correction, before throwing out the extra compute and proceeding
 # as we had before.  By default, we don't run these tests.
 TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
-
-
-if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
-    num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
-    # other libraries take up about 11% of space per process
-    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
-
 
 def skipIfCrossRef(fn):
     @wraps(fn)
@@ -1901,6 +1897,10 @@ def set_warn_always_context(new_val: bool):
         yield
     finally:
         torch.set_warn_always(old_val)
+
+
+class NoTest():
+    __test__ = False
 
 
 class TestCase(expecttest.TestCase):

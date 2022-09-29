@@ -1,7 +1,7 @@
 # Owner(s): ["module: cuda"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocmVersionLessThan
+from torch.testing._internal.common_utils import NoTest, TestCase, run_tests, skipIfRocmVersionLessThan
 import sys
 import unittest
 
@@ -16,7 +16,7 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 
 class TestCudaPrimaryCtx(TestCase):

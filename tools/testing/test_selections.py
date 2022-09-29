@@ -1,60 +1,57 @@
 import os
 import subprocess
 
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
 
-NUM_PROCS = 2
+LARGE_TEST = 45 * 60
+
+TestJob = Tuple[str, int, int, float]
 
 
 class ShardJob:
     def __init__(self, test_times: Dict[str, float]):
         self.test_times = test_times
-        self.serial: List[str] = []
-        self.parallel: List[str] = []
+        self.test_jobs: List[TestJob] = []
 
     def get_total_time(self) -> float:
-        procs = [0.0 for _ in range(NUM_PROCS)]
-        for test in self.parallel:
-            test_time = self.test_times.get(test, 0)
-            min_index = procs.index(min(procs))
-            procs[min_index] += test_time
-        time = max(procs) + sum(self.test_times.get(test, 0) for test in self.serial)
-        return time
+        return sum(x[3] for x in self.test_jobs)
 
-    def convert_to_tuple(self) -> Tuple[float, List[str]]:
-        return (self.get_total_time(), self.serial + self.parallel)
+    def convert_to_tuple(self) -> Tuple[float, List[TestJob]]:
+        return (self.get_total_time(), self.test_jobs)
 
 
 def calculate_shards(
     num_shards: int,
     tests: List[str],
-    test_file_times: Dict[str, float],
-    must_serial: Optional[Callable[[str], bool]] = None,
-) -> List[Tuple[float, List[str]]]:
-    must_serial = must_serial or (lambda x: True)
+    test_times: Dict[str, float],
+) -> List[Tuple[float, List[TestJob]]]:
+    known_tests = [x for x in tests if x in test_times]
+    unknown_tests = [x for x in tests if x not in known_tests]
 
-    known_tests = [x for x in tests if x in test_file_times]
-    unknown_tests: List[str] = [x for x in tests if x not in known_tests]
-
-    sorted_tests = sorted(known_tests, key=lambda j: test_file_times[j], reverse=True)
-
-    sharded_jobs: List[ShardJob] = [
-        ShardJob(test_file_times) for _ in range(num_shards)
-    ]
-    for test in sorted_tests:
-        if must_serial(test):
-            min_sharded_job = sorted(sharded_jobs, key=lambda j: j.get_total_time())[0]
-            min_sharded_job.serial.append(test)
+    test_jobs: List[TestJob] = []
+    for test in known_tests:
+        test_time = test_times[test]
+        if test_time > LARGE_TEST:
+            test_shards = int(test_time // LARGE_TEST + 1)
+            for i in range(test_shards):
+                test_jobs.append((test, i, test_shards, test_time / test_shards))
         else:
-            min_sharded_job = sorted(sharded_jobs, key=lambda j: j.get_total_time())[0]
-            min_sharded_job.parallel.append(test)
+            test_jobs.append((test, 0, 1, test_time))
+
+    test_jobs = sorted(test_jobs, key=lambda x: x[3], reverse=True)
+
+    sharded_jobs: List[ShardJob] = [ShardJob(test_times) for _ in range(num_shards)]
+
+    for test_job in test_jobs:
+        min_sharded_job = sorted(sharded_jobs, key=lambda j: j.get_total_time())[0]
+        min_sharded_job.test_jobs.append(test_job)
 
     # Round robin the unknown jobs starting with the smallest shard
     index = sorted(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())[0]
     for test in unknown_tests:
-        sharded_jobs[index].serial.append(test)
+        sharded_jobs[index].test_jobs.append((test, 0, 1, 0.0))
         index = (index + 1) % num_shards
     return [job.convert_to_tuple() for job in sharded_jobs]
 
@@ -72,7 +69,7 @@ def _query_changed_test_files() -> List[str]:
     return lines
 
 
-def get_reordered_tests(tests: List[str]) -> List[str]:
+def get_reordered_tests(tests: List[TestJob]) -> List[TestJob]:
     """Get the reordered test filename list based on github PR history or git changed file."""
     prioritized_tests: List[str] = []
     if len(prioritized_tests) == 0:
@@ -94,7 +91,7 @@ def get_reordered_tests(tests: List[str]) -> List[str]:
     the_rest = []
 
     for test in tests:
-        if test in prioritized_tests:
+        if test[0] in prioritized_tests:
             bring_to_front.append(test)
         else:
             the_rest.append(test)

@@ -6,7 +6,7 @@ import unittest.mock
 
 import torch
 import torch.utils._cuda_trace as cuda_trace
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import NoTest, TestCase, run_tests
 
 # NOTE: Each test needs to be run in a brand new process, to reset the registered hooks
 # and make sure the CUDA streams are initialized for each test that uses them.
@@ -19,7 +19,7 @@ TEST_CUDA = torch.cuda.is_available()
 
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 
 class TestCudaTrace(TestCase):

@@ -215,7 +215,7 @@ class TestFXGraphPasses(JitTestCase):
 
         # 5 getitem special case
         (TestPartitionFunctions.forward13, [["add_2", "add_1", "add"]]),
-    ])
+    ], name_fn=lambda x, y: f"fn_{x.__name__}_expected_partition_{y}")
     def test_partitioner(self, fn, expected_partition):
         traced = symbolic_trace(fn)
 
@@ -235,6 +235,24 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
+
+
+    @parametrize("fn, expected_partition", [
+        # horizontal fusion without a common downstream node, not supported yet
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
+        # horizontal fusion with a common downstream node, not supported yet
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
+    ], name_fn=lambda x, y: f"fn_{x.__name__}_expetected_partition_{y}")
+    def test_partitioner_xfail(self, fn, expected_partition):
+        traced = symbolic_trace(fn)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
+        partitions = partitioner.propose_partitions()
+
+        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
+        with self.assertRaises(Exception):
+            assert len(partitions_name) == len(expected_partition)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],
@@ -719,7 +737,7 @@ class TestFXMatcherUtils(JitTestCase):
         MultiOutputWithWithInvalidMatches,
         QuantizationFp8Pattern,
         NoAnchorFound,
-    ])
+    ], name_fn=lambda x: f"test_model_{x.__name__}")
     def test_subgraph_matcher(self, test_model):
 
         setup = getattr(test_model, "setup", None)
