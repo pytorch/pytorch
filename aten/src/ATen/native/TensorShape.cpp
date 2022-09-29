@@ -1630,7 +1630,7 @@ Tensor reshape_as(const Tensor& self, const Tensor& other) {
 static Tensor select_sparse(const Tensor& self, int64_t dim, int64_t index) {
   int64_t sparse_dim = self.sparse_dim();
   int64_t dense_dim = self.dense_dim();
-  TORCH_INTERNAL_ASSERT(dim >= 0 && dim < sparse_dim + dense_dim);
+  TORCH_INTERNAL_ASSERT(0 <= dim && dim < sparse_dim + dense_dim);
 
   auto indices = self._indices();
   auto values = self._values();

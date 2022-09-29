@@ -39,7 +39,7 @@ __global__ void index_elementwise_kernel(int N, func_t f) {
 
 template<int nt, int vt, typename func_t>
 static void launch_kernel(int64_t N, const func_t& f) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  TORCH_INTERNAL_ASSERT(0 <= N && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
@@ -171,7 +171,7 @@ void index_copy_kernel_impl(
     auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
     auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
     auto* __restrict__ source_data = reinterpret_cast<scalar_t*>(source_ptr + offsets[2]);
-    CUDA_KERNEL_ASSERT(idx >= 0 && idx < self_dim_size && "index_copy_(): index out of bounds");
+    CUDA_KERNEL_ASSERT(0 <= idx && idx < self_dim_size && "index_copy_(): index out of bounds");
 
     self_data[idx * self_dim_stride] = *source_data;
   };

@@ -142,7 +142,7 @@ TensorView* softmax(TensorView* x, int dim) {
   const int kNumberOfDims =
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
-  TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
+  TORCH_INTERNAL_ASSERT(0 <= kReductionAxis && kReductionAxis < kNumberOfDims);
 
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   broadcast_mask[kReductionAxis] = true;
@@ -165,7 +165,7 @@ TensorView* softmax_backward(TensorView* dy, TensorView* y, int dim) {
   const int kNumberOfDims =
       TensorDomain::noReductions(y->getMaybeRFactorDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
-  TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
+  TORCH_INTERNAL_ASSERT(0 <= kReductionAxis && kReductionAxis < kNumberOfDims);
 
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   broadcast_mask[kReductionAxis] = true;
@@ -185,7 +185,7 @@ TensorView* log_softmax(TensorView* x, int dim) {
   const int kNumberOfDims =
       TensorDomain::noReductions(x->getMaybeRFactorDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
-  TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
+  TORCH_INTERNAL_ASSERT(0 <= kReductionAxis && kReductionAxis < kNumberOfDims);
 
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   broadcast_mask[kReductionAxis] = true;
@@ -208,7 +208,7 @@ TensorView* log_softmax_backward(TensorView* dy, TensorView* y, int dim) {
   const int kNumberOfDims =
       TensorDomain::noReductions(y->getMaybeRFactorDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
-  TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
+  TORCH_INTERNAL_ASSERT(0 <= kReductionAxis && kReductionAxis < kNumberOfDims);
 
   auto bcast_sum_grad = sum(dy, {kReductionAxis}, true /* keepdim */);
   auto softmax = exp(y);

@@ -100,7 +100,7 @@ __global__ void _scatter_gather_elementwise_kernel(int N, func_t f) {
 
 template <int nt, int vt, typename func_t>
 static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  TORCH_INTERNAL_ASSERT(0 <= N && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
@@ -141,7 +141,7 @@ struct _cuda_scatter_gather_internal_kernel {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[2]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+      CUDA_KERNEL_ASSERT(0 <= idx_dim && idx_dim < index_size
         && "index out of bounds");
 
       f(
@@ -362,7 +362,7 @@ struct _cuda_scatter_fill_internal_kernel {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(int64_t*)(index_ptr + offsets[1]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
+      CUDA_KERNEL_ASSERT(0 <= idx_dim && idx_dim < index_size
         && "index out of bounds"
       );
 

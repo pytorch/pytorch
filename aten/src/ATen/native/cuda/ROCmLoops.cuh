@@ -119,7 +119,7 @@ __global__ void elementwise_kernel(int N, func_t f) {
 
 template<int nt, int vt, typename func_t>
 static void launch_kernel(int64_t N, const func_t& f) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  TORCH_INTERNAL_ASSERT(0 <= N && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }
@@ -282,7 +282,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
 // TODO (@zasdfgbnm): this function assume trivial 1d and no dynamic casting
 template<typename func_t, typename array_t, std::enable_if_t<detail::has_same_arg_types<func_t>::value, int> = 0>
 static void launch_kernel(int64_t N, const func_t& f, array_t data) {
-  TORCH_INTERNAL_ASSERT(N >= 0 && N <= std::numeric_limits<int32_t>::max());
+  TORCH_INTERNAL_ASSERT(0 <= N && N <= std::numeric_limits<int32_t>::max());
   if (N == 0) {
     return;
   }

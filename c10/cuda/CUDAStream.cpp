@@ -198,7 +198,7 @@ static void initCUDAStreamsOnce() {
 
 // Helper to verify the GPU index is valid
 static inline void check_gpu(DeviceIndex device_index) {
-  TORCH_INTERNAL_ASSERT(device_index >= 0 && device_index < num_gpus);
+  TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < num_gpus);
 }
 
 // Helper to determine the index of the stream to return

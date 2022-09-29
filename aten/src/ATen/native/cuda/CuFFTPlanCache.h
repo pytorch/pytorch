@@ -406,7 +406,7 @@ private:
 #endif
 static_assert(0 <= CUFFT_MAX_PLAN_NUM && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<int64_t>::max(),
               "CUFFT_MAX_PLAN_NUM not in size_t range");
-static_assert(CUFFT_DEFAULT_CACHE_SIZE >= 0 && CUFFT_DEFAULT_CACHE_SIZE <= CUFFT_MAX_PLAN_NUM,
+static_assert(0 <= CUFFT_DEFAULT_CACHE_SIZE && CUFFT_DEFAULT_CACHE_SIZE <= CUFFT_MAX_PLAN_NUM,
               "CUFFT_DEFAULT_CACHE_SIZE not in [0, CUFFT_MAX_PLAN_NUM] range");
 
 // This cache assumes that the mapping from key to value never changes.

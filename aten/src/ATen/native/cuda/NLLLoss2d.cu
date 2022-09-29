@@ -101,7 +101,7 @@ __global__ void nll_loss2d_forward_kernel(
        i += step) {
     int64_t t = target[toffset + i];
     if (t != ignore_index) {
-      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(0 <= t && t < n_classes);
       cur_weight = weight != nullptr ? weight[t] : static_cast<scalar_t>(1);
       const auto input_index = ioffset + i + map_nelem * t;
       CUDA_KERNEL_ASSERT(input_index >= 0);
@@ -190,7 +190,7 @@ __global__ void nll_loss2d_backward_kernel(
        i += step) {
     const int64_t t = target_thread[i];
     if (t != ignore_index) {
-      CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
+      CUDA_KERNEL_ASSERT(0 <= t && t < n_classes);
       const auto grad_input_index = i + map_nelem * t;
       CUDA_KERNEL_ASSERT(grad_input_index >= 0);
       grad_input_thread[i + map_nelem * t] = weights != nullptr ? weights[t] * grad

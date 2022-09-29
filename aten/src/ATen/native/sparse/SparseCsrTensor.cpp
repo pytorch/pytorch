@@ -765,7 +765,7 @@ Tensor select_sparse_csr(const Tensor& self, int64_t dim, int64_t index) {
     index += size;
   }
 
-  TORCH_INTERNAL_ASSERT(dim >= 0 && dim < self.dim());
+  TORCH_INTERNAL_ASSERT(0 <= dim && dim < self.dim());
 
   auto new_sizes = DimVector(self.sizes());
   new_sizes.erase(new_sizes.begin() + dim);

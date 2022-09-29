@@ -431,7 +431,7 @@ Val* TensorIndex::index(int i) const {
       nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
   if (i < 0)
     i += nDims();
-  TORCH_INTERNAL_ASSERT(i >= 0 && i < int(nDims()));
+  TORCH_INTERNAL_ASSERT(0 <= i && i < int(nDims()));
   return indices_[i];
 }
 

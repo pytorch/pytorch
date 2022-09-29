@@ -13,7 +13,7 @@ __global__ void LabelCrossEntropyKernel(
     const int N, const int D, const float* Xdata, const int* labeldata,
     const float log_threshold, float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
+    CUDA_KERNEL_ASSERT(0 <= labeldata[i] && labeldata[i] < D);
     Ydata[i] = -logf(fmaxf(Xdata[i * D + labeldata[i]], log_threshold));
   }
 }

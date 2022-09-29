@@ -191,8 +191,8 @@ static void fractional_max_pool2d_out_single_batch_frame(
 
           for (h2 = inputHStart; h2 < inputHStart + poolSizeH; ++h2) {
             for (w2 = inputWStart; w2 < inputWStart + poolSizeW; ++w2) {
-              AT_ASSERT(h2 >= 0 && h2 < inputH);
-              AT_ASSERT(w2 >= 0 && w2 < inputW);
+              AT_ASSERT(0 <= h2 && h2 < inputH);
+              AT_ASSERT(0 <= w2 && w2 < inputW);
 
               int planeIndex = h2 * inputW + w2;
               scalar_t val = inputForPlane[planeIndex];
@@ -263,7 +263,7 @@ static void fractional_max_pool2d_backward_out_single_batch_frame(
         for (w = 0; w < outputW; ++w) {
           int outputIndex = h * outputW + w;
           int64_t index = indicesForPlane[outputIndex];
-          AT_ASSERT(index >= 0 && index < inputW * inputH);
+          AT_ASSERT(0 <= index && index < inputW * inputH);
 
           gradInputForPlane[index] += gradOutputForPlane[outputIndex];
         }

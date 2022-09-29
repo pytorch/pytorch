@@ -45,7 +45,7 @@ __global__ void max_unpooling2d_forward_kernel(
     int n = linearIndex / inputWidth / inputHeight / numChannels;
     output += (n * numChannels + c) * outputHeight * outputWidth;
     int maxind = indices[linearIndex];
-    CUDA_KERNEL_ASSERT(maxind >= 0 && maxind < outputImageSize);
+    CUDA_KERNEL_ASSERT(0 <= maxind && maxind < outputImageSize);
     output[maxind] = input[linearIndex];
   }
 }
@@ -67,7 +67,7 @@ __global__ void max_unpooling3d_forward_kernel(
   if (iRow < input.size(2) && iColumn < input.size(3)) {
     T val = input[slice][iFrame][iRow][iColumn];
     int64_t index = indices[slice][iFrame][iRow][iColumn];
-    CUDA_KERNEL_ASSERT(index >= 0 && index < outputImageSize);
+    CUDA_KERNEL_ASSERT(0 <= index && index < outputImageSize);
     output[slice * oT * oH * oW + index] = val;
   }
 }

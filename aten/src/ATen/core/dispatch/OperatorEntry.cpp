@@ -235,7 +235,7 @@ const KernelFunction& OperatorEntry::kernelForDispatchKey(DispatchKey k) const {
 bool OperatorEntry::hasComputedKernelForDispatchKey(DispatchKey k) const {
   TORCH_CHECK(!isAliasDispatchKey(k), "Alias keys do not have runtime kernel registrations.");
   const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
-  TORCH_INTERNAL_ASSERT(dispatch_ix >= 0 && dispatch_ix < c10::num_runtime_entries, toString(k), dispatch_ix);
+  TORCH_INTERNAL_ASSERT(0 <= dispatch_ix && dispatch_ix < c10::num_runtime_entries, toString(k), dispatch_ix);
   return dispatchTable_[dispatch_ix].isValid();
 }
 

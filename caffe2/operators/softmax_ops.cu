@@ -19,7 +19,7 @@ __global__ void LabelCrossEntropyKernel(
     const float* weights,
     float* Ydata) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    CUDA_KERNEL_ASSERT(labeldata[i] >= 0 && labeldata[i] < D);
+    CUDA_KERNEL_ASSERT(0 <= labeldata[i] && labeldata[i] < D);
     float weight = weights ? weights[i] : 1.0;
     Ydata[i] = -logPdata[i * D + labeldata[i]] * weight;
   }
@@ -158,7 +158,7 @@ __global__ void SpatialCrossEntropyLossKernel(
     const int label = static_cast<int>(label_data[index]);
 
     if (label != DONTCARE) {
-      CUDA_KERNEL_ASSERT(label >= 0 && label < D);
+      CUDA_KERNEL_ASSERT(0 <= label && label < D);
       float weight = (weights == NULL ? 1.0 : weights[index]);
       loss_data[index] =
           -logf(

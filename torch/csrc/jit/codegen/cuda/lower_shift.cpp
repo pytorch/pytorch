@@ -96,12 +96,12 @@ int AxisHaloInfo::width() const {
 }
 
 int AxisHaloInfo::width(int pos) const {
-  TORCH_INTERNAL_ASSERT(pos >= 0 && pos < 2);
+  TORCH_INTERNAL_ASSERT(0 <= pos && pos < 2);
   return widths_[pos];
 }
 
 void AxisHaloInfo::setWidth(int pos, int width) {
-  TORCH_INTERNAL_ASSERT(pos >= 0 && pos < 2);
+  TORCH_INTERNAL_ASSERT(0 <= pos && pos < 2);
   widths_[pos] = width;
 }
 

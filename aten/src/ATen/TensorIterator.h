@@ -336,11 +336,11 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   }
 
   const TensorBase& input_base(int arg = 0) const {
-    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
+    AT_ASSERT(0 <= arg && arg < ntensors() - num_outputs_);
     return tensor_base(num_outputs_ + arg);
   }
   const Tensor& input(int arg = 0) const {
-    AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
+    AT_ASSERT(0 <= arg && arg < ntensors() - num_outputs_);
     return tensor(num_outputs_ + arg);
   }
 

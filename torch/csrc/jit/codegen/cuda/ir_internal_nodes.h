@@ -445,7 +445,7 @@ class TORCH_CUDA_CU_API WelfordTriplet {
 
   //! Convert a given index to a name
   static ValName indexToValName(int index) {
-    TORCH_INTERNAL_ASSERT(index >= 0 && index < 3, "Invalid index: ", index);
+    TORCH_INTERNAL_ASSERT(0 <= index && index < 3, "Invalid index: ", index);
     return static_cast<ValName>(index);
   }
 
