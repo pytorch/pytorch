@@ -988,7 +988,6 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 def must_serial(file: str) -> bool:
     return (
         "distributed" in os.getenv("TEST_CONFIG", "") or
-        "functorch" in os.getenv("TEST_CONFIG", "") or
         "dynamo" in os.getenv("TEST_CONFIG", "") or
         "distributed" in file or
         file in CUSTOM_HANDLERS or
@@ -1165,10 +1164,12 @@ def main():
 
     failure_messages = []
 
+    # parallel = in parallel with other files
+    # serial = this file on it's own.  The file might still be run in parallel with itself (ex test_ops)
     selected_tests_parallel = [x for x in selected_tests if not must_serial(x)]
     selected_tests_serial = [x for x in selected_tests if x not in selected_tests_parallel]
-    print_to_stderr("parallel tests:\n {}".format("\n ".join(selected_tests_parallel)))
-    print_to_stderr("serial tests:\n {}".format("\n ".join(selected_tests_serial)))
+    print_to_stderr("parallel (file granularity) tests:\n {}".format("\n ".join(selected_tests_parallel)))
+    print_to_stderr("serial (file granularity) tests:\n {}".format("\n ".join(selected_tests_serial)))
 
     pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=1)
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
