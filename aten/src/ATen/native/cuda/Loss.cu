@@ -152,6 +152,9 @@ namespace {
 
 constexpr int NLL_LOSS_THREADS = 32;
 
+// TODO(crcrpar): Think about removing this dispatch, and introducing canUse32BitIndexMath
+// NOTE(crcrpar): ATen/native/cuda/Loss.cu's nll loss implementation doesn't have the following dispatch for `target`, which only hardcode int64_t
+//   With this dispatch, `target` could be Byte and `ignore_index` could be int64_t, which doesn't sound quite reasonable.
 #define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                     \
   AT_DISPATCH_SWITCH(TYPE, NAME,                                              \
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
@@ -192,7 +195,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
   CUDA_KERNEL_ASSERT(threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0);
 
   int64_t t = static_cast<int64_t>(*target);
-  if (t != static_cast<int>(ignore_index)) {
+  if (t != ignore_index) {
     CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
     const auto cur_weight = weights != nullptr ? weights[t] : scalar_t{1};
     *total_weight = cur_weight;
@@ -452,7 +455,7 @@ __global__ void nll_loss_backward_reduce_cuda_kernel_2d(
     const int64_t t = target[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
-      // note: this index could overflow in int64_t as `t` itself can be close to the max.
+      // NOTE(crcrpar): this index could overflow in int64_t as `t` itself can be close to the max.
       const uint64_t index = static_cast<uint64_t>(i) * ndim + t;
       CUDA_KERNEL_ASSERT(index >= 0);
       grad_input[index] = weights != nullptr ? weights[t] * grad : grad;

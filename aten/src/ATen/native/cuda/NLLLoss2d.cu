@@ -44,6 +44,7 @@ inline scalar_t* optional_data(const Tensor& source) {
 using at::cuda::detail::CUDA_NUM_THREADS;
 using at::cuda::detail::GET_BLOCKS;
 
+// TODO(crcrpar): Think about introducing `canUse32BitIndexMath` and choose int or int64_t for `target`.
 template <typename scalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 __global__ void nll_loss2d_forward_no_reduce_kernel(
@@ -187,7 +188,7 @@ __global__ void nll_loss2d_backward_kernel(
   for (int i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    int64_t t = target_thread[i];
+    const int64_t t = target_thread[i];
     if (t != ignore_index) {
       CUDA_KERNEL_ASSERT(t >= 0 && t < n_classes);
       const auto grad_input_index = i + map_nelem * t;
