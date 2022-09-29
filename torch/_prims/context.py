@@ -1,6 +1,6 @@
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Sequence, Union
+from typing import Any, Callable, Dict, Sequence
 from warnings import warn
 
 import torch

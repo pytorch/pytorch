@@ -783,7 +783,9 @@ class TestDecomp(TestCase):
     @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
     def test_masked_fill_decomposition_under_nvprim_context(self, device, dtype):
-        # masked_fill decomposition extracts cpu scalar tensor value when filling out a cuda tensor. This triggers data-dependent control flow on TorchRefsNvfuser speculative lowering.
+        # masked_fill decomposition extracts cpu scalar tensor value when
+        # filling out a cuda tensor. This triggers data-dependent control flow
+        # on TorchRefsNvfuser speculative lowering.
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
