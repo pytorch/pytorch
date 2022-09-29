@@ -4,23 +4,28 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _artifact_location,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class ExternalPropertyFileReference(object):
     """Contains information that enables a SARIF consumer to locate the external property file that contains the value of an externalized property associated with the run."""
 
-    guid: Any = dataclasses.field(
+    guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    item_count: Any = dataclasses.field(
+    item_count: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "itemCount"}
     )
-    location: Any = dataclasses.field(
+    location: Optional[_artifact_location.ArtifactLocation] = dataclasses.field(
         default=None, metadata={"schema_property_name": "location"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

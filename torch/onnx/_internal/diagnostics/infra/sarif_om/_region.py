@@ -4,47 +4,53 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _artifact_content,
+    _message,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class Region(object):
     """A region within an artifact where a result was detected."""
 
-    byte_length: Any = dataclasses.field(
+    byte_length: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "byteLength"}
     )
-    byte_offset: Any = dataclasses.field(
+    byte_offset: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "byteOffset"}
     )
-    char_length: Any = dataclasses.field(
+    char_length: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "charLength"}
     )
-    char_offset: Any = dataclasses.field(
+    char_offset: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "charOffset"}
     )
-    end_column: Any = dataclasses.field(
+    end_column: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "endColumn"}
     )
-    end_line: Any = dataclasses.field(
+    end_line: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "endLine"}
     )
-    message: Any = dataclasses.field(
+    message: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    snippet: Any = dataclasses.field(
+    snippet: Optional[_artifact_content.ArtifactContent] = dataclasses.field(
         default=None, metadata={"schema_property_name": "snippet"}
     )
-    source_language: Any = dataclasses.field(
+    source_language: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "sourceLanguage"}
     )
-    start_column: Any = dataclasses.field(
+    start_column: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "startColumn"}
     )
-    start_line: Any = dataclasses.field(
+    start_line: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "startLine"}
     )
 

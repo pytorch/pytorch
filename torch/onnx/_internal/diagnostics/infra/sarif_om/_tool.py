@@ -4,18 +4,25 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _property_bag,
+    _tool_component,
+)
 
 
 @dataclasses.dataclass
 class Tool(object):
     """The analysis tool that was run."""
 
-    driver: Any = dataclasses.field(metadata={"schema_property_name": "driver"})
-    extensions: Any = dataclasses.field(
+    driver: _tool_component.ToolComponent = dataclasses.field(
+        metadata={"schema_property_name": "driver"}
+    )
+    extensions: Optional[List[_tool_component.ToolComponent]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "extensions"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

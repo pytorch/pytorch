@@ -4,20 +4,26 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _artifact_location,
+    _property_bag,
+    _replacement,
+)
 
 
 @dataclasses.dataclass
 class ArtifactChange(object):
     """A change to a single artifact."""
 
-    artifact_location: Any = dataclasses.field(
+    artifact_location: _artifact_location.ArtifactLocation = dataclasses.field(
         metadata={"schema_property_name": "artifactLocation"}
     )
-    replacements: Any = dataclasses.field(
+    replacements: List[_replacement.Replacement] = dataclasses.field(
         metadata={"schema_property_name": "replacements"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 
