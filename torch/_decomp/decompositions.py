@@ -817,9 +817,9 @@ def col2im(
 
     check_positive(kernel_size, "kernel_size")
     check_positive(dilation, "dilation")
-    check_positive(dilation, "padding", strict=False)
+    check_positive(padding, "padding", strict=False)
     check_positive(stride, "stride")
-    check_positive(dilation, "output_size")
+    check_positive(output_size, "output_size")
 
     shape = input.shape
     ndim = len(shape)
@@ -878,10 +878,9 @@ def col2im(
         out_w, kernel_w, dilation_w, padding_w, stride_w, input.device
     )
 
-    output = input.new_zeros([shape[0], shape[1] // prod(kernel_size)] + output_size)
+    output_padded_size = [o + 2 * p for o, p in zip(output_size, padding)]
+    output = input.new_zeros([shape[0], shape[1] // prod(kernel_size)] + output_padded_size)
     idx = (None, None, indices_row, indices_col)
-    # Equiv. to `output[idx] += input` but faster as the += expression decomposes into
-    # aux = output[idx]; aux += input; output[idx] = aux
     output = torch.ops.aten.index_put(output, idx, input, accumulate=True)
     output = F.pad(output, (-padding_h, -padding_h, -padding_w, -padding_w))
 
