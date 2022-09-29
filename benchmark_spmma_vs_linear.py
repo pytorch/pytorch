@@ -14,7 +14,7 @@ for output_channel, input_channel in zip(output_channels, input_channels):
     weight = torch.rand(output_channel, input_channel, device="cuda", dtype=torch.bfloat16)
     bias = torch.rand(output_channel, device="cuda", dtype=torch.bfloat16)
     for i in range(10):
-        torch.nn.functional.linear(activation, weight, bias=bias)
+        torch.nn.functional.linear(activation, weight, bias=None)
 
 
     torch.cuda.synchronize()
@@ -23,14 +23,14 @@ for output_channel, input_channel in zip(output_channels, input_channels):
     start_event.record()
     num_iters = 100
     for i in range(num_iters):
-        torch.nn.functional.linear(activation, weight, bias=bias)
+        torch.nn.functional.linear(activation, weight, bias=None)
     end_event.record()
     torch.cuda.synchronize()
     dense_time = start_event.elapsed_time(end_event) / num_iters
 
     # cusparselt kernel benchmark of spmma2 -- timing is done in C++ backend
-    cusparselt_time = torch.cusparselt_spmma2(torch.rand(2, 2, device='cuda'), output_channel, first_activation_dim, input_channel)
-    # cusparselt_time = torch.cusparselt_spmma(torch.rand(2, 2, device='cuda'), output_channel, first_activation_dim, input_channel)
+    # cusparselt_time = torch.cusparselt_spmma2(torch.rand(2, 2, device='cuda'), output_channel, first_activation_dim, input_channel)
+    cusparselt_time = torch.cusparselt_spmma(torch.rand(2, 2, device='cuda'), output_channel, first_activation_dim, input_channel)
     print(cusparselt_time, dense_time)
     print("output_channel =", output_channel, "; input_channel =", input_channel, "; speedup =", cusparselt_time / dense_time)
 
