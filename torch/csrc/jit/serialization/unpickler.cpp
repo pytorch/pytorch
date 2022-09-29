@@ -91,6 +91,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         TORCH_CHECK(!w.value.toSymInt().is_symbolic());
         // no op, there is nothing to tag
         break;
+      case c10::SymFloatType::Kind:
+        TORCH_CHECK(!w.value.toSymFloat().is_symbolic());
+        // no op, there is nothing to tag
+        break;
       case DynamicType::Kind:
       case UnionType::Kind:
       case EnumType::Kind:

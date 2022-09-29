@@ -1,6 +1,8 @@
 #pragma once
 
+#include <c10/util/hash.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/heuristic.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <sstream>
 
@@ -15,6 +17,16 @@ namespace cuda {
 // are equivelent!
 class TransposeParams : public HeuristicParams {
  public:
+  static constexpr size_t getMaxThreadsPerBlock() {
+    return 128;
+  }
+
+  // See note [Supporting small transpose dimensions], all dims are positions in
+  // reference1
+  std::vector<std::pair<size_t, size_t>> split_before_tiling = {};
+  std::vector<size_t> dims_merged_with_1 = {};
+  std::vector<size_t> dims_merged_with_2 = {};
+
   // Vectorization factor for tensors in the first group
   size_t vectorize_factor1 = 1;
 
@@ -40,7 +52,10 @@ class TransposeParams : public HeuristicParams {
       return false;
     }
     const TransposeParams& other = *other_casted;
-    bool attr_equal = other.vectorize_factor1 == vectorize_factor1 &&
+    bool attr_equal = other.split_before_tiling == split_before_tiling &&
+        other.dims_merged_with_1 == dims_merged_with_1 &&
+        other.dims_merged_with_2 == dims_merged_with_2 &&
+        other.vectorize_factor1 == vectorize_factor1 &&
         other.vectorize_factor2 == vectorize_factor2 &&
         other.tile_size1 == tile_size1 && other.tile_size2 == tile_size2;
     return attr_equal;
@@ -50,41 +65,92 @@ class TransposeParams : public HeuristicParams {
     std::stringstream ss;
     ss << "\n===== Transpose Parameters ========\n"
        << (tag == "" ? "" : "Tag: ") << tag << " Transpose Characteristics:\n"
-       << " Gridx: " << lparams.gdimx() << " BlckY: " << lparams.bdimy()
-       << " BlckX: " << lparams.bdimx() << "\n";
+       << " Gridx: " << lparams.gdimx() << " BlckX: " << lparams.bdimx()
+       << "\n";
     ss << " input tile size: " << tile_size1 << "\n";
     ss << " output tile size: " << tile_size2 << "\n";
     int elements_per_tile = tile_size1 * tile_size2;
     ss << " elements per tile: " << elements_per_tile << "\n";
-    int elements_per_thread =
-        elements_per_tile / (lparams.bdimy() * lparams.bdimx());
+    int elements_per_thread = elements_per_tile / lparams.bdimx();
     ss << " elements per thread: " << elements_per_thread << "\n";
     if (vectorize_factor1 > 1) {
-      ss << "Vectorize set 1, Factor: " << vectorize_factor1 << "\n";
+      ss << "Vectorize group 1, Factor: " << vectorize_factor1 << "\n";
     }
     int unroll_factor1 = elements_per_thread / vectorize_factor1;
     if (unroll_factor1 > 1) {
-      ss << "Unroll set 1, Factor: " << unroll_factor1 << "\n";
+      ss << "Unroll group 1, Factor: " << unroll_factor1 << "\n";
     }
     if (vectorize_factor2 > 1) {
-      ss << "Vectorize set 2, Factor: " << vectorize_factor2 << "\n";
+      ss << "Vectorize group 2, Factor: " << vectorize_factor2 << "\n";
     }
     int unroll_factor2 = elements_per_thread / vectorize_factor2;
     if (unroll_factor2 > 1) {
-      ss << "Unroll set 2, Factor: " << unroll_factor2 << "\n";
+      ss << "Unroll group 2, Factor: " << unroll_factor2 << "\n";
+    }
+    if (!split_before_tiling.empty() || !dims_merged_with_1.empty() ||
+        !dims_merged_with_2.empty()) {
+      ss << "Virtual inner-most dim:\n";
+      if (!split_before_tiling.empty()) {
+        ss << "  ";
+        bool first = true;
+        for (auto pair : split_before_tiling) {
+          if (!first) {
+            ss << ", ";
+          }
+          first = false;
+          ss << "split(" << pair.first << ", " << pair.second << ")";
+        }
+        ss << "\n";
+      }
+      if (!dims_merged_with_1.empty()) {
+        ss << "  merge ";
+        bool first = true;
+        for (auto dim : dims_merged_with_1) {
+          if (!first) {
+            ss << ", ";
+          }
+          first = false;
+          ss << dim;
+        }
+        ss << " with innermost1\n";
+      }
+      if (!dims_merged_with_2.empty()) {
+        ss << "  merge ";
+        bool first = true;
+        for (auto dim : dims_merged_with_2) {
+          if (!first) {
+            ss << ", ";
+          }
+          first = false;
+          ss << dim;
+        }
+        ss << " with innermost2\n";
+      }
     }
     ss << "====================================\n";
     return ss.str();
   }
 
   size_t hash() const override {
-    size_t attr_hash = vectorize_factor1 ^ (vectorize_factor2 << 16) ^
-        (tile_size1 << 32) ^ (tile_size2 << 48);
-    return attr_hash;
+    return c10::get_hash(
+        split_before_tiling,
+        dims_merged_with_1,
+        dims_merged_with_2,
+        vectorize_factor1,
+        vectorize_factor2,
+        tile_size1,
+        tile_size2);
   }
 
   std::shared_ptr<HeuristicParams> clone() const override {
     return std::make_shared<TransposeParams>(*this);
+  }
+
+  int getThreadsPerBlock() const {
+    size_t tile_vectors1 = ceilDiv(tile_size1 * tile_size2, vectorize_factor1);
+    size_t tile_vectors2 = ceilDiv(tile_size1 * tile_size2, vectorize_factor2);
+    size_t tile_vectors = std::min(tile_vectors1, tile_vectors2);
+    return std::min(getMaxThreadsPerBlock(), tile_vectors);
   }
 };
 

@@ -11,13 +11,13 @@ import torch.nn as nn
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
-from torch._subclasses import FakeTensorMode
+from torch._subclasses import FakeTensorMode, CrossRefFakeMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.nn.utils import stateless
 
 from functorch import make_fx
-from functorch._C import CompileCache
+from torch._C._functorch import CompileCache
 from functorch.experimental import functionalize
 from torch._dispatch.python import enable_python_dispatcher
 from . import config
@@ -128,7 +128,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
         special_stack = forward_node_stack.copy()
         special_stack.append(
-            "Gradient addition node due to mulitple use of tensor around:"
+            "Gradient addition node due to multiple use of tensor around:"
         )
         node.register_hook(get_posthook(special_stack))
 
@@ -276,6 +276,9 @@ class AOTConfig:
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    if config.debug_graphs:
+        print("====== Forward (only) graph ======")
+        fw_module.print_readable()
     with track_graph_compiling("inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
@@ -473,11 +476,19 @@ def create_aot_dispatcher_function(
     # NB: don't bother setting allow_fallback_kernels; this should not actually
     # be configurable in fake tensor, we should automatically do the right
     # thing
+    if config.debug_fake_cross_ref:
+        # This is a little messy but TorchDynamo directly changes `use_fake_tensor`
+        # so it's not enough for user to change the config manually
+        # TODO: have TorchDynamo read in `use_fake_tensor` from os environ /
+        # coordinate flags
+        config.use_fake_tensor = False
+
     fake_mode = FakeTensorMode() if config.use_fake_tensor else nullcontext()
+    cross_ref = CrossRefFakeMode() if config.debug_fake_cross_ref else nullcontext()
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
-    with preserve_rng_state(), fake_mode, python_dispatcher_mode:
+    with preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:

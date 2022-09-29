@@ -160,24 +160,33 @@ Tensor handle_r_to_c(Tensor self, Tensor gradient_result) {
 
 Tensor restore_reduced_dims(
     const Tensor& output,
-    IntArrayRef dims,
+    at::OptionalIntArrayRef opt_dims,
     bool keepdim) {
   if (keepdim) {
     return output;
   }
-  int64_t total_dims = output.dim() + dims.size();
-  std::vector<int64_t> target_shape(total_dims, 0);
-  for (int64_t i : dims) {
-    if (i < 0) {
-      i = total_dims + i;
-    }
-    target_shape[i] = 1;
+  int64_t total_dims;
+
+  if (opt_dims.has_value()) {
+    total_dims = output.dim() + opt_dims.value().size();
+  } else {
+    total_dims = 0;
   }
-  int64_t j = 0;
-  for (int64_t i : output.sizes()) {
-    while (target_shape[j] > 0)
-      j++;
-    target_shape[j++] = i;
+  std::vector<int64_t> target_shape(total_dims, 0);
+  if (opt_dims.has_value()) {
+    IntArrayRef dims = opt_dims.value();
+    for (int64_t i : dims) {
+      if (i < 0) {
+        i = total_dims + i;
+      }
+      target_shape[i] = 1;
+    }
+    int64_t j = 0;
+    for (int64_t i : output.sizes()) {
+      while (target_shape[j] > 0)
+        j++;
+      target_shape[j++] = i;
+    }
   }
   return output.reshape(target_shape);
 }
@@ -185,7 +194,7 @@ Tensor restore_reduced_dims(
 Tensor scale_grad_by_count(
     const Tensor& grad,
     const Tensor& mask,
-    IntArrayRef dims) {
+    at::OptionalIntArrayRef dims) {
   return (grad / mask.sum(dims, true)) * mask;
 }
 
@@ -193,7 +202,7 @@ Tensor amaxamin_jvp(
     const Tensor& x,
     const Tensor& dx,
     const Tensor& result,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim) {
   auto mask = x == restore_reduced_dims(result, dim, keepdim);
   return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
@@ -228,7 +237,7 @@ Tensor norm_backward(
     const Tensor& self,
     const optional<Scalar>& p_,
     Tensor norm,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim) {
   // NB: We mask fill the NaNs in the output to be zero but still do float
   // division
@@ -282,7 +291,7 @@ Tensor norm_jvp(
     const Tensor& self_t,
     const optional<Scalar>& p_,
     Tensor norm,
-    IntArrayRef dim,
+    at::OptionalIntArrayRef dim,
     bool keepdim) {
   // NB: currently norm_jvp is also reused for dist's jvp (which haas two
   // differentiable inputs)
@@ -357,12 +366,12 @@ Tensor _nested_from_padded_backward(
   if (do_transform_0213) {
     auto new_sizes = {
         input.size(0), input.size(2), (input.size(1) * input.size(3))};
-    auto out = nested_to_padded_tensor(grad, 0, new_sizes);
+    auto out = grad.to_padded_tensor(0, new_sizes);
     auto expand_last_dim_size = {
         input.size(0), input.size(2), input.size(1), input.size(3)};
     return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
   }
-  return nested_to_padded_tensor(grad, 0, input.sizes());
+  return grad.to_padded_tensor(0, input.sizes());
 }
 
 Tensor linalg_vector_norm_jvp(
@@ -2750,9 +2759,16 @@ static inline int64_t _min_storage_size(
 Tensor as_strided_backward(
     Tensor grad,
     TensorGeometry input_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset_) {
+    c10::SymIntArrayRef sym_sizes,
+    c10::SymIntArrayRef sym_strides,
+    optional<c10::SymInt> sym_storage_offset_) {
+  // TODO: properly use sym
+  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
+  auto strides = c10::asIntArrayRefSlow(sym_strides);
+  auto storage_offset_ = sym_storage_offset_.has_value()
+      ? c10::make_optional(sym_storage_offset_->expect_int())
+      : c10::nullopt;
+
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -2871,9 +2887,9 @@ Tensor as_strided_scatter_backward(
     Tensor grad,
     TensorGeometry input_geometry,
     TensorGeometry src_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset) {
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    optional<c10::SymInt> storage_offset) {
   // Note [as_strided_scatter backward support]
   // as_strided_scatter handling for autograd is a beast, and is non-trivial to
   // implement for arbitrarily strided inputs. Most uses for as_strided with
@@ -2882,10 +2898,11 @@ Tensor as_strided_scatter_backward(
   // inputs. We can assume that the input was a contiguous tensor. Also, we'll
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
-  auto grad_slice = grad_.as_strided(sizes, strides, storage_offset);
+  auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
+  // TODO: geometry should return symints
   auto result =
       grad_.new_empty_strided(input_geometry.sizes(), input_geometry.strides());
-  auto result_slice = result.as_strided(sizes, strides, storage_offset);
+  auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;
 }
@@ -5651,18 +5668,19 @@ Tensor lu_unpack_backward(
   }
 }
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
   Tensor out_fw_grad;
 
+  auto materialized = tensors.materialize();
   auto any_defined = false;
-  for (const auto& t : tensors) {
+  for (const Tensor& t : materialized) {
     any_defined |= isFwGradDefined(t);
   }
 
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
-    for (auto& t : tensors) {
+    for (const Tensor& t : materialized) {
       fw_grads.push_back(
           isFwGradDefined(t)
               ? t._fw_grad(/*level*/ 0)

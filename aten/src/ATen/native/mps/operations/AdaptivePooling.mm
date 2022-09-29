@@ -19,11 +19,27 @@ void set_kernel_params
    int64_t &strideH, int64_t &strideW,
    int64_t &kernel_sizeH, int64_t &kernel_sizeW) {
 
-  strideH = (int64_t) (isizeH / osizeH);
-  strideW = (int64_t) (isizeW / osizeW);
+  TORCH_CHECK((isizeH >= osizeH && isizeW >= osizeW) || (isizeH <= osizeH && isizeW <= osizeW),
+              "Adaptive pool MPS: Input height and width must both be greather than or equal to, or lesser than, output height and width")
 
-  kernel_sizeH = isizeH - (osizeH-1) * strideH;
-  kernel_sizeW = isizeW - (osizeW-1) * strideW;
+  TORCH_CHECK((!(isizeH <= osizeH && isizeW <= osizeW) || (osizeH % isizeH == 0 && osizeW % isizeW == 0)),
+              "Adaptive pool MPS: If output is larger than input, output sizes must be multiples of input sizes")
+
+  if(isizeH >= osizeH) {
+    strideH = (int64_t) (isizeH / osizeH);
+    strideW = (int64_t) (isizeW / osizeW);
+
+    kernel_sizeH = isizeH - (osizeH-1) * strideH;
+    kernel_sizeW = isizeW - (osizeW-1) * strideW;
+  }
+  else {
+    strideH = (int64_t) (osizeH / isizeH);
+    strideW = (int64_t) (osizeW / isizeW);
+
+    kernel_sizeH = osizeH - (isizeH-1) * strideH;
+    kernel_sizeW = osizeW - (isizeW-1) * strideW;
+  }
+
 }
 
 // Adaptive average pooling
@@ -71,13 +87,35 @@ Tensor& adaptive_avg_pool2d_out_mps
                     strideH, strideW,
                     kernel_sizeH, kernel_sizeW);
 
-  output =  at::avg_pool2d(input,
-                           IntArrayRef({kernel_sizeH, kernel_sizeW}),
-                           IntArrayRef({strideH, strideW}),
-                           IntArrayRef({0, 0}),
-                           false,
-                           true,
-                           c10::nullopt);
+  if(isizeH >= osizeH) {
+    output =  at::avg_pool2d(input,
+                             IntArrayRef({kernel_sizeH, kernel_sizeW}),
+                             IntArrayRef({strideH, strideW}),
+                             IntArrayRef({0, 0}),
+                             false,
+                             true,
+                             c10::nullopt);
+  }  else {
+    Tensor phony_grad = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    auto num_input_dims = input.sizes().size();
+    int64_t phony_shape[num_input_dims];
+    for(int i = 0; i < num_input_dims - 2; i++)
+      phony_shape[i] = input.size(i);
+    phony_shape[num_input_dims-2] = output_size[0];
+    phony_shape[num_input_dims-1] = output_size[1];
+    phony_grad.resize_(IntArrayRef(phony_shape, num_input_dims));
+    output =  at::avg_pool2d_backward(input,
+                                      phony_grad,
+                                      IntArrayRef({kernel_sizeH, kernel_sizeW}),
+                                      IntArrayRef({strideH, strideW}),
+                                      IntArrayRef({0, 0}),
+                                      false,
+                                      true,
+                                      c10::nullopt);
+    // Multiply output by kernel size
+    output = at::mul(output, kernel_sizeH*kernel_sizeW);
+  }
+
   return output;
 }
 
@@ -138,15 +176,27 @@ Tensor adaptive_avg_pool2d_backward_mps
                       strideH, strideW,
                       kernel_sizeH, kernel_sizeW);
     auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    if (gradInput.numel() != 0)
-      gradInput = at::avg_pool2d_backward(gradOutput,
-                                          input,
-                                          IntArrayRef({kernel_sizeH, kernel_sizeW}),
-                                          IntArrayRef({strideH, strideW}),
-                                          IntArrayRef({0, 0}),
-                                          false,
-                                          true,
-                                          c10::nullopt);
+    if (gradInput.numel() != 0) {
+      if(isizeH >= osizeH) {
+        gradInput = at::avg_pool2d_backward(gradOutput,
+                                            input,
+                                            IntArrayRef({kernel_sizeH, kernel_sizeW}),
+                                            IntArrayRef({strideH, strideW}),
+                                            IntArrayRef({0, 0}),
+                                            false,
+                                            true,
+                                            c10::nullopt);
+      } else {
+        gradInput = at::avg_pool2d(gradOutput,
+                                   IntArrayRef({kernel_sizeH, kernel_sizeW}),
+                                   IntArrayRef({strideH, strideW}),
+                                   IntArrayRef({0, 0}),
+                                   false,
+                                   true,
+                                   c10::nullopt);
+        gradInput = at::mul(gradInput, kernel_sizeH*kernel_sizeW);
+      }
+    }
 
     return gradInput;
 
