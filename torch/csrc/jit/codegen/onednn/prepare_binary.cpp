@@ -97,7 +97,14 @@ void handleBinaryOpInputs(Node* node) {
           node->output()->setType(
               node->output()->type()->expect<TensorType>()->withScalarType(
                   promotedDtype));
-        } // end different dtype of both tensors
+        } else {
+          // both dtypes are same
+          // IR info of dtypes is missing sometimes in JIT IR,
+          // and we shouldn't treat those tensors as FP32 tensors by default.
+          node->output()->setType(
+              node->output()->type()->expect<TensorType>()->withScalarType(
+                  dtypeOfFirstInput));
+        }
       } // end inner if block
     } // end outer if block
   }

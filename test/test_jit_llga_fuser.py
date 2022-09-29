@@ -34,7 +34,6 @@ def warmup_forward(f, *args, profiling_count=3):
     return results
 
 class JitLlgaTestCase(JitTestCase):
-    original_autocast_mode = False
 
     def setUp(self):
         # PyTorch has divergent op support for AMP in JIT & eager modes
@@ -47,11 +46,11 @@ class JitLlgaTestCase(JitTestCase):
         torch.jit.enable_onednn_fusion(False)
         torch._C._jit_set_autocast_mode(self.original_autocast_mode)
 
-    def checkTrace(self, m, x, *args, **kwargs):
+    def checkTrace(self, m, x, dtype=torch.float32, *args, **kwargs):
         if isinstance(m, torch.nn.Module):
             m.eval()
         with torch.no_grad(), torch._jit_internal._disable_emit_hooks():
-            if x[0].dtype == torch.bfloat16:
+            if dtype == torch.bfloat16:
                 # We rely upon eager-mode AMP support for BF16
                 with torch.cpu.amp.autocast(cache_enabled=False, dtype=torch.bfloat16):
                     # https://pytorch.org/docs/stable/generated/torch.jit.trace.html
@@ -148,16 +147,16 @@ class TestOp(JitLlgaTestCase):
                           groups=g,
                           bias=bias)
 
-            x = torch.rand(1, in_channels * g, spatial, spatial, dtype=dtype)
-            _, graph = self.checkTrace(m, [x])
+            x = torch.rand(1, in_channels * g, spatial, spatial)
+            _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
     def test_bn2d(self, dtype):
         m = nn.BatchNorm2d(32).eval()
-        x = torch.rand(1, 32, 28, 28, dtype=dtype)
-        _, graph = self.checkTrace(m, [x])
+        x = torch.rand(1, 32, 28, 28)
+        _, graph = self.checkTrace(m, [x], dtype)
         # single-op partition shouldn't be created for softmax
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
@@ -175,8 +174,8 @@ class TestOp(JitLlgaTestCase):
         for eltwise in ['relu', 'gelu']:
             eltwise_fn = get_eltwise_fn(eltwise)
             m = M(eltwise_fn)
-            x = torch.rand(1, 32, 28, 28, dtype=dtype)
-            _, graph = self.checkTrace(m, [x])
+            x = torch.rand(1, 32, 28, 28)
+            _, graph = self.checkTrace(m, [x], dtype)
             # single-op partition shouldn't be created.
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
@@ -197,8 +196,8 @@ class TestOp(JitLlgaTestCase):
                              dilation=dilation,
                              ceil_mode=ceil_mode)
 
-            x = torch.rand(1, 4, spatial, spatial, dtype=dtype)
-            _, graph = self.checkTrace(m, [x])
+            x = torch.rand(1, 4, spatial, spatial)
+            _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
@@ -218,8 +217,8 @@ class TestOp(JitLlgaTestCase):
                              ceil_mode=ceil_mode,
                              count_include_pad=count_include_pad)
 
-            x = torch.rand(1, 4, spatial, spatial, dtype=dtype)
-            _, graph = self.checkTrace(m, [x])
+            x = torch.rand(1, 4, spatial, spatial)
+            _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
@@ -233,9 +232,9 @@ class TestOp(JitLlgaTestCase):
                 x = F.avg_pool2d(x, kernel_size=(x.size(2), x.size(3)), padding=0, count_include_pad=False)
                 return x
 
-        x = torch.randn(1, 1000, 1, 1, dtype=dtype)
+        x = torch.randn(1, 1000, 1, 1)
         m = M()
-        _, graph = self.checkTrace(m, [x])
+        _, graph = self.checkTrace(m, [x], dtype)
         # kernel_size is not Constant, shouldn't have any LLGA_FUSION_GROUP
         # TODO: with shape specialization, should have 1 LLGA_FUSION_GROUP
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
@@ -245,8 +244,8 @@ class TestOp(JitLlgaTestCase):
     def test_softmax(self, dtype):
         for dim in [-4, -3, -2, -1, 0, 1, 2, 3]:
             m = nn.Softmax(dim=dim)
-            x = torch.rand(8, 12, 12, 12, dtype=dtype)
-            _, graph = self.checkTrace(m, [x])
+            x = torch.rand(8, 12, 12, 12)
+            _, graph = self.checkTrace(m, [x], dtype)
             # single-op partition shouldn't be created for softmax
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 0)
 
@@ -254,14 +253,14 @@ class TestOp(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_linear(self, dtype):
         for bias in [True, False]:
-            x = torch.rand(32, 28, dtype=dtype)
+            x = torch.rand(32, 28)
             m = torch.nn.Linear(in_features=28, out_features=64, bias=bias)
-            _, graph = self.checkTrace(m, [x])
+            _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
             self.assertFused(graph, ['aten::linear'])
 
 
-    def _gen_binary_inputs(self, dtype, gen_permute=True):
+    def _gen_binary_inputs(self, gen_permute=True):
         for xshape, yshape in [
             [[1, 32, 28, 28], [1, 32, 28, 28]],
             [[1, 32, 28, 28], [1, 1, 28, 28]],
@@ -269,9 +268,9 @@ class TestOp(JitLlgaTestCase):
             [[1, 32, 28, 28], [1]],
 
         ]:
-            yield torch.rand(xshape, dtype=dtype), torch.rand(yshape, dtype=dtype)
+            yield torch.rand(xshape), torch.rand(yshape)
             if gen_permute and xshape != yshape:
-                yield torch.rand(yshape, dtype=dtype), torch.rand(xshape, dtype=dtype)
+                yield torch.rand(yshape), torch.rand(xshape)
 
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
@@ -279,8 +278,8 @@ class TestOp(JitLlgaTestCase):
         def forward_add(x, y):
             return torch.add(x, y, alpha=2)
 
-        for x, y in self._gen_binary_inputs(dtype):
-            _, graph = self.checkTrace(forward_add, [x, y])
+        for x, y in self._gen_binary_inputs():
+            _, graph = self.checkTrace(forward_add, [x, y], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
@@ -289,8 +288,8 @@ class TestOp(JitLlgaTestCase):
         def add_scalar(x):
             return 42 + x + 3.14
 
-        x = torch.rand(32, 32, dtype=dtype)
-        _, graph = self.checkTrace(add_scalar, [x])
+        x = torch.rand(32, 32)
+        _, graph = self.checkTrace(add_scalar, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
@@ -300,10 +299,10 @@ class TestOp(JitLlgaTestCase):
             # alpha and beta are 1, by default
             return torch.addmm(z, x, y)
 
-        x = torch.rand(64, 32, dtype=dtype)
-        y = torch.rand(32, 32, dtype=dtype)
-        z = torch.rand(64, 32, dtype=dtype)
-        _, graph = self.checkTrace(addmm, [x, y, z])
+        x = torch.rand(64, 32)
+        y = torch.rand(32, 32)
+        z = torch.rand(64, 32)
+        _, graph = self.checkTrace(addmm, [x, y, z], dtype)
         # single-op partition should be created for matmul with bias.
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
@@ -313,8 +312,8 @@ class TestOp(JitLlgaTestCase):
         def forward_mul(x, y):
             return torch.mul(x, y) * 3
 
-        for x, y in self._gen_binary_inputs(dtype=dtype):
-            _, graph = self.checkTrace(forward_mul, [x, y])
+        for x, y in self._gen_binary_inputs():
+            _, graph = self.checkTrace(forward_mul, [x, y], dtype)
             # single-op partitions shouldn't be created
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
@@ -324,17 +323,17 @@ class TestOp(JitLlgaTestCase):
         def forward(x):
             return x * 1 + 0.0
 
-        x = torch.rand(32, dtype=dtype)
-        _, graph = self.checkTrace(forward, [x])
+        x = torch.rand(32)
+        _, graph = self.checkTrace(forward, [x], dtype)
         self.assertFused(graph, ['aten::add', 'aten::mul'])
 
     @onlyCPU
-    @dtypes(torch.float32)
+    @dtypes(torch.float32, torch.bfloat16)
     def test_layer_norm(self, dtype):
         # TODO: support more normalized_shape
         m = torch.nn.LayerNorm(10)
-        x = torch.randn(2, 5, 10, 10, dtype=dtype)
-        _, graph = self.checkTrace(m, [x])
+        x = torch.randn(2, 5, 10, 10)
+        _, graph = self.checkTrace(m, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
@@ -351,16 +350,16 @@ class TestOp(JitLlgaTestCase):
             [2048, 64],
         ]:
             for d in range(len(xshape)):
-                x = torch.rand(xshape, dtype=dtype)
-                _, graph = self.checkTrace(cat_along_dim(d), [x, x, x])
+                x = torch.rand(xshape)
+                _, graph = self.checkTrace(cat_along_dim(d), [x, x, x], dtype)
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
 
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
     def test_typecheck(self, dtype):
         x = torch.rand(32, 28, dtype=dtype)
-        m = torch.nn.Linear(in_features=28, out_features=64, dtype=dtype, bias=True)
-        traced, graph = self.checkTrace(m, [x])
+        m = torch.nn.Linear(in_features=28, out_features=64, bias=True, dtype=dtype)
+        traced, graph = self.checkTrace(m, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::linear'])
         # change the shape of the input, we should enter fallback graph
@@ -395,8 +394,8 @@ class TestFusionPattern(JitLlgaTestCase):
                 eltwise_fn = get_eltwise_fn(eltwise_fn_name)
 
                 m = M(eltwise_fn)
-                x = torch.rand(1, 32, 28, 28, dtype=dtype)
-                _, graph = self.checkTrace(m, [x])
+                x = torch.rand(1, 32, 28, 28)
+                _, graph = self.checkTrace(m, [x], dtype=dtype)
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 2)
                 # test if relu_ is replace with relu by mutation removal pass
                 self.assertFused(graph, ['aten::' + eltwise_fn_name])
@@ -421,9 +420,9 @@ class TestFusionPattern(JitLlgaTestCase):
         for inplace in [False, True]:
             for memory_format in [torch.contiguous_format, torch.channels_last]:
                 m = M(inplace)
-                x = torch.rand(1, 32, 28, 28, dtype=dtype).to(memory_format=memory_format)
+                x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
 
-                _, graph = self.checkTrace(m, [x])
+                _, graph = self.checkTrace(m, [x], dtype)
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 2)
                 # oneDNN graph does not have silu OP. The bridge will convert silu to sigmoid - mul
                 # Inplace op will become outplace op on the JIT graph
@@ -441,10 +440,10 @@ class TestFusionPattern(JitLlgaTestCase):
         class M(nn.Module):
             def __init__(self, eltwise_fn):
                 super(M, self).__init__()
-                self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=dtype)
-                self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=dtype)
-                self.conv3 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=dtype)
-                self.conv4 = nn.Conv2d(32, 32, 3, padding=1, bias=True, dtype=dtype)
+                self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
+                self.conv2 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
+                self.conv3 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
+                self.conv4 = nn.Conv2d(32, 32, 3, padding=1, bias=True)
                 self.eltwise = eltwise_fn
                 self.adaptive_avg_pool_2d = nn.AdaptiveAvgPool2d((5, 7))
 
@@ -466,12 +465,12 @@ class TestFusionPattern(JitLlgaTestCase):
         eltwise_fn = get_eltwise_fn(eltwise_fn_name)
         m = M(eltwise_fn)
         m = m.to(memory_format=torch.channels_last)
-        x = torch.rand(1, 32, 28, 28, dtype=dtype).to(memory_format=torch.channels_last)
-        y = torch.rand(1, 32, 28, 28, dtype=dtype).to(memory_format=torch.channels_last)
+        x = torch.rand(1, 32, 28, 28).to(memory_format=torch.channels_last)
+        y = torch.rand(1, 32, 28, 28).to(memory_format=torch.channels_last)
         # Simply test if the output is accurate
         # The output of the second partition is input to adaptive_avg_pool2d, which is
         # unsupported by LLGA. In resnext101 32x16d, we encountered an accuracy issue.
-        _, graph = self.checkTrace(m, [x, y])
+        _, graph = self.checkTrace(m, [x, y], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 4)
 
     @onlyCPU
@@ -501,9 +500,9 @@ class TestFusionPattern(JitLlgaTestCase):
 
         for inplace in [False, True]:
             for memory_format in [torch.contiguous_format, torch.channels_last]:
-                x = torch.rand(1, 32, 28, 28, dtype=dtype).to(memory_format=memory_format)
+                x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
                 m = M()
-                _, graph = self.checkTrace(m, [x])
+                _, graph = self.checkTrace(m, [x], dtype)
                 self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 5)
                 self.assertFused(graph, ['aten::_convolution', "aten::clamp"])
 
@@ -524,8 +523,8 @@ class TestFusionPattern(JitLlgaTestCase):
         m = M().eval()
         if dtype == torch.bfloat16:
             m = optimization.fuse(m)
-        x = torch.rand(1, 32, 28, 28, dtype=dtype)
-        _, graph = self.checkTrace(m, [x])
+        x = torch.rand(1, 32, 28, 28)
+        _, graph = self.checkTrace(m, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::_convolution', 'aten::batch_norm'])
 
@@ -547,8 +546,8 @@ class TestFusionPattern(JitLlgaTestCase):
         m = M().eval()
         if dtype == torch.bfloat16:
             m = optimization.fuse(m)
-        x = torch.rand(1, 32, 28, 28, dtype=dtype)
-        _, graph = self.checkTrace(m, [x])
+        x = torch.rand(1, 32, 28, 28)
+        _, graph = self.checkTrace(m, [x], dtype)
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::_convolution', 'aten::batch_norm',
                                  'aten::relu'])
@@ -570,8 +569,8 @@ class TestFusionPattern(JitLlgaTestCase):
         for eltwise in ['relu']:
             eltwise_fn = get_eltwise_fn(eltwise)
             m = M(eltwise_fn).eval()
-            x = torch.rand(1, 32, 28, 28, dtype=dtype)
-            _, graph = self.checkTrace(m, [x])
+            x = torch.rand(1, 32, 28, 28)
+            _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
             self.assertFused(graph, ['aten::' + eltwise])
 
@@ -595,8 +594,8 @@ class TestFusionPattern(JitLlgaTestCase):
 
             eltwise_fn = get_eltwise_fn(eltwise)
             m = M(eltwise_fn, has_bias)
-            x = torch.rand(32, 28, dtype=dtype, requires_grad=False)
-            _, graph = self.checkTrace(m, [x])
+            x = torch.rand(32, 28, requires_grad=False)
+            _, graph = self.checkTrace(m, [x], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
             self.assertFused(graph, ['aten::' + eltwise])
 
@@ -604,7 +603,7 @@ class TestFusionPattern(JitLlgaTestCase):
     @dtypes(torch.float32, torch.bfloat16)
     def test_conv2d_sum(self, dtype):
         class M(nn.Module):
-            def __init__(self, dtype=dtype, bias=False):
+            def __init__(self, bias=False):
                 super(M, self).__init__()
                 self.conv1 = nn.Conv2d(32, 32, 3, padding=1, bias=bias)
                 self.bn1 = nn.BatchNorm2d(32)
@@ -628,9 +627,9 @@ class TestFusionPattern(JitLlgaTestCase):
             m = M(bias).eval()
             if dtype == torch.bfloat16:
                 m = optimization.fuse(m)
-            x = torch.rand(1, 32, 16, 16, dtype=dtype, requires_grad=False)
-            y = torch.rand(1, 32, 16, 16, dtype=dtype, requires_grad=False)
-            _, graph = self.checkTrace(m, [x, y])
+            x = torch.rand(1, 32, 16, 16, requires_grad=False)
+            y = torch.rand(1, 32, 16, 16, requires_grad=False)
+            _, graph = self.checkTrace(m, [x, y], dtype)
             self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 3)
 
     @onlyCPU
@@ -657,8 +656,8 @@ class TestFusionPattern(JitLlgaTestCase):
         # The output of conv is used by a wildcard op: ListConstruct.
         # Thus conv-eltwise cannot be selected into the same Partition.
         m = M()
-        x = torch.rand(1, 32, 28, 28, dtype=dtype)
-        _, graph = self.checkTrace(m, [x])
+        x = torch.rand(1, 32, 28, 28)
+        _, graph = self.checkTrace(m, [x], dtype)
         # conv can exist in a single-op oneDNN Graph partition but not relu
         self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 1)
         self.assertFused(graph, ['aten::_convolution'])
@@ -687,13 +686,13 @@ class TestFusionPattern(JitLlgaTestCase):
         eltwise_fn = get_eltwise_fn(eltwise_fn_name)
         m = M(eltwise_fn)
         m = m.to(memory_format=torch.channels_last)
-        x = torch.rand(1, 32, 28, 28, dtype=dtype).to(memory_format=torch.channels_last)
-        y = torch.rand(1, 32, 28, 28, dtype=dtype).to(memory_format=torch.channels_last)
+        x = torch.rand(1, 32, 28, 28).to(memory_format=torch.channels_last)
+        y = torch.rand(1, 32, 28, 28).to(memory_format=torch.channels_last)
         # Simply test if the output is accurate
         # The output of the second partition is input to adaptive_avg_pool2d, which is
         # unsupported by LLGA, so it must be handled by PyTorch, which should receive
         # correct strides info of the channels-last tensor.
-        graph, _ = self.checkTrace(m, [x, y])
+        graph, _ = self.checkTrace(m, [x, y], dtype)
 
 @unittest.skipIf(LLGA_NOT_ENABLED, "MKL-DNN build is disabled")
 class TestEnableDisableLlgaFuser(JitTestCase):
@@ -747,8 +746,8 @@ class TestModel(JitLlgaTestCase):
         m = getattr(torchvision.models, model_name)().eval()
         if dtype == torch.bfloat16:
             m = optimization.fuse(m)
-        x = torch.rand(1, 3, 224, 224, dtype=dtype) / 10
-        _, graph = self.checkTrace(m, [x])
+        x = torch.rand(1, 3, 224, 224) / 10
+        _, graph = self.checkTrace(m, [x], dtype)
         self.assertFused(graph, ['aten::_convolution', 'aten::batch_norm',
                                  'aten::relu', 'aten::linear',
                                  'aten::avg_pool2d', 'aten::max_pool2d'])
@@ -758,8 +757,21 @@ for model_name, enabled in [
     ['resnext50_32x4d', True],
     ['resnext101_32x8d', True],
     ['densenet121', True],
+    ['densenet161', True],
+    ['densenet169', True],
+    ['densenet201', True],
+    ['efficientnet_b0', True],
+    ['efficientnet_b1', True],
+    ['efficientnet_b2', True],
+    ['efficientnet_b3', True],
+    ['efficientnet_b4', True],
+    ['efficientnet_b5', True],
+    ['efficientnet_b6', True],
+    ['efficientnet_b7', True],
+    ['regnet_y_400mf', True],
     ['googlenet', TEST_SCIPY],
     ['mobilenet_v2', True],
+    ['mobilenet_v3_large', True],
     ['mnasnet1_0', True],
     ['squeezenet1_0', True],
     ['vgg16', True],
