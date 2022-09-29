@@ -577,10 +577,13 @@ struct cpu_scatter_gather_base_kernel {
 // Note [scatter reduce optimization]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //
-// 1. initiative: optimize scatter_reduce optimization on PyG
-//   `scatter_add` is extensively used on 'message passing' when
-//   aggregating info. The `index` tensor is extended which means
-//   the aggregation is on rowwise.
+// 1. initiative: optimize `scatter_reduce` on classic PyG use-case:
+//   `scatter_reduce` is extensively used on 'message passing' when
+//   aggregating info.
+//
+//   Typically, `self` will 2D tensor and `index` is a 1D extended/broadcasted
+//   tensor, which means that the aggregation is on rowwise and we can vectorize
+//   on the inner dimensions.
 //
 // 2. implementation: map `scatter_reduce` to `spmm` reduce
 //   in the shape of `[M, N]` * `[N, K]`, where:
@@ -717,25 +720,27 @@ void scatter_fill_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& inde
     self, dim, index, value, "scatter_fill_cpu_", tensor_assign);
 }
 
-inline bool is_fast_path_scatter(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+inline bool with_spmm_for_scatter(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   if (!is_radix_sort_available()) { return false; }
 
   // skip when having empty tensor
   if (self.numel() == 0 || index.numel() == 0 || src.numel() == 0) { return false; }
 
-  //skip when having scalar tensor
+  // skip when having scalar tensor
   if (self.ndimension() == 0 || index.ndimension() == 0 || src.ndimension() == 0) { return false; }
 
-  // currently inner_size == 1 will go sequetial
-  if (index.numel() == index.size(0)) { return false; }
+  // using `spmm` for scatter would require sorting on index,
+  // this is only perf beneficial when the inner dimension, aka, `channels`
+  // is big enough.
+  constexpr int64_t threshold = 16;
+  if (index.numel() / index.size(0) < threshold) { return false; }
 
   // index is expanded
   return dim == 0 && index.stride(0) == 1 && src.is_contiguous() && self.is_contiguous();
-
 }
 
 void scatter_add_cpu_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  if (is_fast_path_scatter(self, dim, index, src)) {
+  if (with_spmm_for_scatter(self, dim, index, src)) {
     scatter_add_config(self, index, src);
   } else {
     cpu_scatter_gather_base_kernel<>()(

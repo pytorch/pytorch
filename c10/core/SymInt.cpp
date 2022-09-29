@@ -180,4 +180,13 @@ SymInt SymInt::operator*(int64_t sci) const {
   return *this * c10::SymInt(sci);
 }
 
+std::ostream& operator<<(std::ostream& os, SymInt s) {
+  if (s.is_symbolic()) {
+    os << s.toSymIntNodeImpl()->str();
+  } else {
+    os << s.as_int_unchecked();
+  }
+  return os;
+}
+
 } // namespace c10

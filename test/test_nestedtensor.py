@@ -268,7 +268,7 @@ class TestNestedTensor(TestCase):
 
     def test_nested_namespace(self):
         nt = torch.nested_tensor([torch.randn(2, 3), torch.randn(4, 5)])
-        result = torch.nested.to_padded_tensor(nt, 4)
+        result = nt.to_padded_tensor(4)
         nested_namespace_result = torch.nested.to_padded_tensor(nt, 4)
         self.assertEqual(result, nested_namespace_result)
 
@@ -993,7 +993,7 @@ class TestNestedTensorDeviceType(TestCase):
             r"matmul: Expected size for the 1st dimension of 2nd input tensor to be: [0-9]+ but got: [0-9]+.",
             lambda: torch.matmul(nt1, nt0)
         )
-        # error case: incompatible generalized batch size
+        # error case: incompatible (wrong) batch sizes that shouldn't even broadcast?
         nt0 = torch.nested_tensor([torch.randn((2, 2, 4)),
                                    torch.randn((2, 3, 4))],
                                   device=device, dtype=dtype)
@@ -1002,23 +1002,26 @@ class TestNestedTensorDeviceType(TestCase):
                                   device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"matmul: For nested tensors, no broadcasting is currently performed: "
-            r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
-            r"have mismatching sizes [0-9]+ and [0-9]+",
+            "matmul(): For nested tensors, batch dimensions must have the same sizes,",
             lambda: torch.matmul(nt0, nt1)
         )
+        # error case: incompatible batch sizes that should technically broadcast
+        nt0 = torch.nested_tensor([torch.randn((2, 2, 4)),
+                                   torch.randn((1, 3, 4))],
+                                  device=device, dtype=dtype)
+        nt1 = torch.nested_tensor([torch.randn((1, 4, 6)),
+                                   torch.randn((3, 4, 5))],
+                                  device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"matmul: For nested tensors, no broadcasting is currently performed: "
-            r"[0-9]+-th nested matrices in batch at dimension [0-9]+ "
-            r"have mismatching sizes [0-9]+ and [0-9]+",
-            lambda: torch.matmul(nt1, nt0)
+            "matmul(): For nested tensors, batch dimensions must have the same sizes,",
+            lambda: torch.matmul(nt0, nt1)
         )
         # error case: underlying matrices cannot be multiplied
         nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))], device=device, dtype=dtype)
         self.assertRaisesRegex(
             RuntimeError,
-            r"0-th nested matrices in batch cannot be multiplied \(2x4 and 2x4\)",
+            "matmul(): Nested tensors cannot be matrix multiplied",
             lambda: torch.matmul(nt0, nt0)
         )
         # normal nested tensor: 3D
@@ -1027,11 +1030,11 @@ class TestNestedTensorDeviceType(TestCase):
         actual = torch.nested.to_padded_tensor(torch.matmul(nt0, nt1), 0.0)
         expect = torch.matmul(torch.nested.to_padded_tensor(nt0, 0.0), torch.nested.to_padded_tensor(nt1, 0.0))
         self.assertEqual(actual, expect)
-        # normal nested tensor: 4D
-        nt0 = torch.nested_tensor([torch.randn((8, 2, 4)),
+        # normal nested tensor: 4D (with testing for batch_size=1)
+        nt0 = torch.nested_tensor([torch.randn((1, 2, 4)),
                                    torch.randn((8, 3, 7))],
                                   device=device, dtype=dtype)
-        nt1 = torch.nested_tensor([torch.randn((8, 4, 6)),
+        nt1 = torch.nested_tensor([torch.randn((1, 4, 6)),
                                    torch.randn((8, 7, 5))],
                                   device=device, dtype=dtype)
         actual = torch.nested.to_padded_tensor(torch.matmul(nt0, nt1), 0.0)
@@ -1175,11 +1178,11 @@ class TestNestedTensorDeviceType(TestCase):
             "empty nested tensor cannot be reshaped",
             lambda: nt_empty.view(-1)
         )
-        # error case: invalid proposed shape for underlying tensors
+        # error case: -1 for batch size
         self.assertRaisesRegex(
             RuntimeError,
-            r"invalid shape dimension -2",
-            lambda: nt.view(-2, 2, 3)
+            r"view: For now nested view cannot change or infer the implicit batch dimension",
+            lambda: nt.view(-1, 2, 3)
         )
         self.assertRaisesRegex(
             RuntimeError,
@@ -1191,9 +1194,10 @@ class TestNestedTensorDeviceType(TestCase):
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
         nt = torch.nested_tensor([x0, x1])
         pt = torch.nested.to_padded_tensor(nt, 0.0)
+        # error case, trying to reshape batch dim to a legit shape
         self.assertRaisesRegex(
             RuntimeError,
-            r"for now view cannot change the implicit batch dimension",
+            r"For now nested view cannot change or infer the implicit batch dimension",
             lambda: nt.transpose(-1, -2).view(40, -1)
         )
         # inherit only the ragged dimension
@@ -1203,10 +1207,15 @@ class TestNestedTensorDeviceType(TestCase):
         # (2, 3, 20) -> (2, 3, 5, 4) -> (2, 4, 5, 4)
         pt1 = pt.view(2, -1, 5, 4)
         self.assertEqual(noncontiguous_to_padded_tensor(nt1), pt1)
-        # also inherit regular dimension
-        nt2 = nt1.view(2, -1, -1, 2, 2)
-        pt2 = pt1.view(2, -1, 5, 2, 2)
-        self.assertEqual(noncontiguous_to_padded_tensor(nt2), pt2)
+
+        # more than one -1 (even for "old" dims), should fail
+        # this attempts to do # (2, (2, 3), 5, 4) -> (2, (2, 3), 5, 2, 2)
+        # but we ban "inherit old behavior" for >1 dimension
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"only one dimension can be inferred",
+            lambda: nt1.view(2, -1, -1, 2, 2)
+        )
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_view_inference_mode_interaction(self, device, dtype):
@@ -1243,11 +1252,11 @@ class TestNestedTensorDeviceType(TestCase):
             "empty nested tensor cannot be reshaped",
             lambda: nt_empty.reshape(-1)
         )
-        # error case: invalid proposed shape for underlying tensors
+        # error case: -1 for batch size
         self.assertRaisesRegex(
             RuntimeError,
-            r"invalid shape dimension -2",
-            lambda: nt.reshape(-2, 2, 3)
+            r"reshape: For now nested reshape cannot change or infer the implicit batch dimension",
+            lambda: nt.reshape(-1, 2, 3)
         )
         self.assertRaisesRegex(
             RuntimeError,
@@ -1257,11 +1266,12 @@ class TestNestedTensorDeviceType(TestCase):
         # normal case
         x0 = torch.randn((2, 20), device=device, dtype=dtype)
         x1 = torch.randn((3, 20), device=device, dtype=dtype)
-        nt = torch.nested_tensor([x0, x1])
+        nt = torch.nested_tensor([x0, x1])  # (2, (2, 3), 20)
         pt = torch.nested.to_padded_tensor(nt, 0.0)
+        # error case, trying to reshape batch dim to a legit shape
         self.assertRaisesRegex(
             RuntimeError,
-            r"for now reshape cannot change the implicit batch dimension",
+            r"reshape: For now nested reshape cannot change or infer the implicit batch dimension",
             lambda: nt.transpose(-1, -2).reshape(40, -1)
         )
         # inherit only the ragged dimension
@@ -1271,10 +1281,15 @@ class TestNestedTensorDeviceType(TestCase):
         # (2, 3, 20) -> (2, 3, 5, 4) -> (2, 4, 5, 4)
         pt1 = pt.reshape(2, -1, 5, 4)
         self.assertEqual(noncontiguous_to_padded_tensor(nt1), pt1)
-        # also inherit regular dimension
-        nt2 = nt1.reshape(2, -1, -1, 2, 2)
-        pt2 = pt1.reshape(2, -1, 5, 2, 2)
-        self.assertEqual(noncontiguous_to_padded_tensor(nt2), pt2)
+
+        # more than one -1 (even for "old" dims), should fail
+        # this attempts to do # (2, (2, 3), 5, 4) -> (2, (2, 3), 5, 2, 2)
+        # but we ban "inherit old behavior" for >1 dimension
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"only one dimension can be inferred",
+            lambda: nt1.reshape(2, -1, -1, 2, 2)
+        )
 
     @parametrize("input_dim", [3, 4])
     def test_scaled_dot_product_attention(self, device, input_dim):
