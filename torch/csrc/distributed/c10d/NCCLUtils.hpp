@@ -20,6 +20,29 @@
 #define ENABLE_NCCL_GET_LAST_ERROR
 #endif
 
+// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
+// and ncclCommGetAsyncError() are not supported in earlier versions.
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 4)
+#define ENABLE_NCCL_ERROR_CHECKING
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_ERROR_CHECKING
+#endif
+
+// P2P is enabled only for NCCL versions 2.7+ since ncclSend()
+// and ncclRecv() are not supported in earlier versions.
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 7)
+#define ENABLE_NCCL_P2P_SUPPORT
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_P2P_SUPPORT
+#endif
+
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 11)
+#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
+#endif
 
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
@@ -58,30 +81,6 @@ std::string getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string>
   return interpret + err;
 }
 } // namespace
-
-// Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
-// and ncclCommGetAsyncError() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 4)
-#define ENABLE_NCCL_ERROR_CHECKING
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_ERROR_CHECKING
-#endif
-
-// P2P is enabled only for NCCL versions 2.7+ since ncclSend()
-// and ncclRecv() are not supported in earlier versions.
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 7)
-#define ENABLE_NCCL_P2P_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_P2P_SUPPORT
-#endif
-
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 11)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_PREMUL_SUM_SUPPORT
-#endif
 
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                                  \
