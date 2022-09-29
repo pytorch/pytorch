@@ -625,7 +625,9 @@ class TestONNXExport(common_utils.TestCase):
         def symbolic_custom_invalid_add(g, input, other, alpha=None):
             return g.op("Add", input, other, invalid_attr_i=1)
 
-        torch.onnx.register_custom_op_symbolic("::add", symbolic_custom_invalid_add, 1)
+        torch.onnx.register_custom_op_symbolic(
+            "::add", symbolic_custom_invalid_add, opset_version=9
+        )
 
         x = torch.randn(2, 3, 4)
         y = torch.randn(2, 3, 4)
@@ -635,9 +637,9 @@ class TestONNXExport(common_utils.TestCase):
 
         try:
             with self.assertRaises(torch.onnx.errors.CheckerError):
-                torch.onnx.export(test_model, (x, y), f)
+                torch.onnx.export(test_model, (x, y), f, opset_version=9)
         finally:
-            torch.onnx.unregister_custom_op_symbolic("::add", 1)
+            torch.onnx.unregister_custom_op_symbolic("::add", 9)
 
         self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
         loaded_model = onnx.load_from_string(f.getvalue())
