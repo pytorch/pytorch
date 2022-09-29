@@ -197,7 +197,8 @@ def split(
     return tensor.split(split_size_or_sections, dim)
 
 
-def einsum(*args: Any) -> Tensor:
+def einsum(*args: Any,
+           optimize_path: Optional[Union[bool, Union[Sequence[int], Sequence[Tuple[int, int]]]]] = None) -> Tensor:
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -247,10 +248,14 @@ def einsum(*args: Any) -> Tensor:
 
     .. note::
 
-        This function uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up computation or to
-        consume less memory by optimizing contraction order. Note that finding _the_ optimal path is an NP-hard problem,
-        thus, opt_einsum relies on different heuristics to achieve near-optimal results. If opt_einsum is not available,
-        the default order is to contract from left to right.
+        This function automatically uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up
+        computation or to consume less memory by optimizing contraction order. Note that finding _the_ optimal path is
+        an NP-hard problem, thus, opt_einsum relies on different heuristics to achieve near-optimal results. If the
+        opt_einsum package is not available, the default order is to contract from left to right.
+
+        Using opt_einsum to compute an optimal path does incur a constant amount of performance overhead. One can use
+        the `optimize_path` kwarg to specify an already optimized path by passing in a List or to simply bypass the
+        calculation by passing in `False`. See the `optimize_path` keyword argument below for more details.
 
     .. note::
 
@@ -263,6 +268,26 @@ def einsum(*args: Any) -> Tensor:
     Args:
         equation (str): The subscripts for the Einstein summation.
         operands (List[Tensor]): The tensors to compute the Einstein summation of.
+
+    Keyword Args:
+        optimize_path (Sequence[int] or Sequence[Tuple[int, int]] or bool): A Sequence representing the contraction path
+            to use when performing the contractions or a boolean to control whether einsum should calculate an optimal
+            contraction path before proceeding with computation.
+
+            If a list: Each tuple in the list specifies the index of the two tensors to be contracted next, with the
+            result of the contraction being appended to the list of operands. e.g. given 3 input operands and
+            `optimize=[(1, 2), (0, 1)]` the second and third operands will be contracted first and the result will
+            have index `1` since contracted operands are removed from the list. If provided in `List[int]` format
+            every pair of consecutive indices form a contraction, e.g. `optimize=[1, 2, 0, 1]` is the same path as
+            in the previous example. If there is only one input operand, then the contraction path should be `[(0,)]`.
+
+            If `None`: einsum will default to first calculating an optimized contraction path with the help of
+            opt_einsum if the package is installed in the same environment. If opt_einsum is not available, path
+            calculation will be skipped and tensors will be contracted from left to right. Defaults to `None`.
+
+            If `False`: einsum will skip path calculation and contract the tensors from left to right.
+
+            If `True`: einsum will attempt path calculation and error if opt_einsum cannot be found.
 
     Examples::
 
@@ -325,6 +350,11 @@ def einsum(*args: Any) -> Tensor:
         >>> torch.einsum('bn,anm,bm->ba', l, A, r)
         tensor([[-0.3430, -5.2405,  0.4494],
                 [ 0.3311,  5.5201, -3.0356]])
+
+        >>> # custom contraction path
+        >>> torch.einsum('bn,anm,bm->ba', l, A, r, optimize_path=[(1, 2), (0, 1)])
+        tensor([[-0.3430, -5.2405,  0.4494],
+                [ 0.3311,  5.5201, -3.0356]])
     """
     # This wrapper exists to support variadic args.
     if len(args) < 2:
@@ -367,20 +397,47 @@ def einsum(*args: Any) -> Tensor:
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         _operands = operands[0]
-        # recurse incase operands contains value that has torch function
+        # recurse in case operands contains value that has torch function
         # in the original implementation this line is omitted
-        return einsum(equation, *_operands)
+        return einsum(equation, *_operands, optimize_path=optimize_path)
 
-    if len(operands) <= 2:
+    # Process user input'd contraction path
+    if isinstance(optimize_path, Sequence):
+        if len(optimize_path) == 0:
+            raise RuntimeError("einsum(): optimize_path should not be an empty list, "
+                               "for a single operand, optimize_path should be [(0,)]")
+        # Convert List[Tuple[int, int]] to List[int] for the C++ API. Every 2 consecutive
+        # integers form a contraction.
+        if isinstance(optimize_path[0], Sequence):
+            # For a single operand, optimize should be [(0,)]
+            if len(optimize_path) == 1 and len(optimize_path[0]) == 1:
+                optimize_path = [optimize_path[0][0]]
+            else:
+                path: List[int] = []
+                for contraction in optimize_path:
+                    if not isinstance(contraction, Sequence) or len(contraction) != 2:
+                        raise RuntimeError("einsum(): contractions in the optimize path must be 2-tuple of ints")
+                    path.extend(contraction)
+                optimize_path = path
+        return _VF.einsum(equation, operands, path=optimize_path)  # type: ignore[attr-defined]
+
+    if len(operands) <= 2 or optimize_path is False:
         # the path for contracting 0 or 1 time(s) is already optimized
+        # specifically use `is False` vs. `not` because we handle None differently--False means that the user
+        # intentionally opts out of path calculation.
         return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
-    path = None
+    # optimize_path is True
+    if _opt_einsum is None and optimize_path:
+        raise RuntimeError("einsum(): optimize_path is set to True, but opt_einsum is not available to calculate "
+                           "the optimal path")
+
+    # go the default path; optimize_path is None
     if _opt_einsum is not None:
         tupled_path = _opt_einsum.contract_path(equation, *operands)[0]
         # flatten path for dispatching to C++
-        path = [item for pair in tupled_path for item in pair]
-    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
+        optimize_path = [item for pair in tupled_path for item in pair]
+    return _VF.einsum(equation, operands, path=optimize_path)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.

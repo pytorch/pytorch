@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values,
-     freeze_rng_state, IS_ARM64, parametrize, IS_SANDCASTLE)
+     freeze_rng_state, IS_ARM64, parametrize, IS_SANDCASTLE, TEST_OPT_EINSUM)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -3668,8 +3668,16 @@ class TestLinalg(TestCase):
     def _check_einsum(self, *args, np_args=None):
         if np_args is None:
             np_args = [arg.cpu().numpy() if isinstance(arg, torch.Tensor) else arg for arg in args]
-        res = torch.einsum(*args)
+
         ref = np.einsum(*np_args)
+
+        # use path optimization; requires opt_einsum to be installed
+        if TEST_OPT_EINSUM:
+            res = torch.einsum(*args, optimize_path=True)
+            self.assertEqual(torch.from_numpy(np.array(ref)), res)
+
+        # skip path optimization
+        res = torch.einsum(*args, optimize_path=False)
         self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
     @dtypes(torch.double, torch.cdouble)
@@ -3760,6 +3768,22 @@ class TestLinalg(TestCase):
         r = make_tensor((5, 20), dtype=dtype, device=device, noncontiguous=True)
         w = make_tensor((15, 10, 20), dtype=dtype, device=device)
         self._check_einsum(l, [40, 41], w, [2, 41, 50], r, [40, 50], [40, 2])
+
+    @dtypes(torch.double, torch.cdouble)
+    def test_einsum_contraction_path(self, device, dtype):
+        def check(equation, *operands, path=None):
+            np_ops = [op.cpu().numpy() for op in operands]
+            res = torch.einsum(equation, *operands, optimize_path=path)
+            ref = np.einsum(equation, *np_ops, optimize=('einsum_path', *path))
+            self.assertEqual(res, torch.from_numpy(np.array(ref)))
+
+        x = make_tensor((2, 3), device=device, dtype=dtype)
+        y = make_tensor((3, 2), device=device, dtype=dtype)
+        z = make_tensor((2, 1, 1), device=device, dtype=dtype)
+
+        check('...', x, path=[(0,)])
+        check('ij,jk', x, y, path=[(0, 1)])
+        check('ij,jk,bik->bik', x, y, z, path=[(0, 2), (0, 1)])
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_random(self, device, dtype):
@@ -3910,9 +3934,9 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
-        def check(*args, regex, exception=RuntimeError):
+        def check(*args, regex, exception=RuntimeError, optimize_path=None):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
-                torch.einsum(*args)
+                torch.einsum(*args, optimize_path=optimize_path)
 
         x = make_tensor((2,), dtype=torch.float32, device=device)
         y = make_tensor((2, 3), dtype=torch.float32, device=device)
@@ -3941,7 +3965,10 @@ class TestLinalg(TestCase):
               r' seen size 2')
 
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
-        check(x, [52], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
+        check('a', [x], regex=r'optimize_path should not be an empty list', optimize_path=[])
+        check('a', [x], regex=r'size 1 but got 2', optimize_path=[(0, 1)])
+        check('a,ab', [x, y], regex=r'cannot contract an operand with itself', optimize_path=[(0, 0)])
+        check('a,ab', [x, y], regex=r'out of bounds', optimize_path=[(1, 2)])
 
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)

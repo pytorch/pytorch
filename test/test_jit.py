@@ -1995,10 +1995,13 @@ graph(%Ra, %Rb):
         def sublist_format(x, y):
             return torch.einsum(x, [0], y, [1], [0, 1])
 
+        def optimize_path_kwarg(x, y):
+            return torch.einsum('i,j->ij', (x, y), optimize_path=[0, 1])
+
         x = make_tensor((5,), dtype=torch.float32, device="cpu")
         y = make_tensor((10,), dtype=torch.float32, device="cpu")
 
-        for fn in [equation_format, equation_format_varargs, sublist_format]:
+        for fn in [equation_format, equation_format_varargs, sublist_format, optimize_path_kwarg]:
             check(fn, torch.jit.script(fn), x, y)
             check(fn, torch.jit.trace(fn, (x, y)), x, y)
 

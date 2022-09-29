@@ -5120,6 +5120,18 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     inputs.append(SampleInput([c(H)], args=("i...->...",)))
     inputs.append(SampleInput([c(C), c(x)], args=('...ik, ...j -> ij',)))
 
+    # Test optimize_path kwarg
+    z = make_tensor((3, 2), device, dtype, requires_grad=requires_grad)
+    inputs.append(SampleInput([c(A), z], args=('ij,jk',), kwargs={'optimize_path': [(0, 1)]}))
+    inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
+                  args=('jk,ikl,ijk,lm->mk',),
+                  kwargs={'optimize_path': [(0, 2), (0, 1), (0, 1)]}))
+    inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
+                  args=('jk,ikl,ijk,lm->mk',),
+                  kwargs={'optimize_path': True}))
+    inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
+                  args=('jk,ikl,ijk,lm->mk',),
+                  kwargs={'optimize_path': False}))
     return inputs
 
 
@@ -13443,7 +13455,7 @@ op_db: List[OpInfo] = [
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
            # TODO(@heitorschueroff) update SampleInput to handle such cases
-           op=lambda tensors, equation: torch.einsum(equation, tensors),
+           op=lambda tensors, equation, optimize_path=None: torch.einsum(equation, tensors, optimize_path=optimize_path),
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
