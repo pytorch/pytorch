@@ -733,15 +733,28 @@ class FakeTensorMode(TorchDispatchMode):
         # is written to must be invalidated
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
+        # TODO: Find better approach for this
+        # Avoid circular import
+        from torch._decomp import decomposition_table
+        from torch._meta_registrations import meta_table
+
+        with self:
+            if func in meta_table:
+                r = meta_table[func](*args, **kwargs)
+                return r
+            if func in decomposition_table:
+                return decomposition_table[func](*args, **kwargs)
+
+            # Decomposes CompositeImplicitAutograd ops
+            r = func.decompose(*args, **kwargs)
+            if r is not NotImplemented:
+                return r
+
         # IDK: feels bad man, sym_numel on as_strided infinite loops otherwise
         if (
             has_symbolic_sizes
             and func not in self.functions_with_cpp_meta_impl_that_support_symint
         ):
-            # TODO: Find better approach for this
-            # Avoid circular import
-            from torch._decomp import decomposition_table
-            from torch._meta_registrations import meta_table
 
             with no_dispatch():
                 if func == aten.size.default:
@@ -752,17 +765,6 @@ class FakeTensorMode(TorchDispatchMode):
                     # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
                     return None
 
-            with self:
-                if func in meta_table:
-                    r = meta_table[func](*args, **kwargs)
-                    return r
-                if func in decomposition_table:
-                    return decomposition_table[func](*args, **kwargs)
-
-                # Decomposes CompositeImplicitAutograd ops
-                r = func.decompose(*args, **kwargs)
-                if r is not NotImplemented:
-                    return r
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
