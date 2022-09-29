@@ -8514,6 +8514,8 @@ element in :attr:`input` i.e.,
 .. math::
     \text{{out}}_i \sim \text{{Poisson}}(\text{{input}}_i)
 
+:attr:`input` must be non-negative.
+
 Args:
     input (Tensor): the input tensor containing the rates of the Poisson distribution
 
