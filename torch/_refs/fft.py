@@ -9,10 +9,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 from torch._decomp import register_decomposition
 from torch._prims_common import check, DimsType, ShapeType, TensorLikeType
-from torch._prims_common.wrappers import (
-    _maybe_convert_to_dtype,
-    out_wrapper,
-)
+from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
 
 __all__ = [
     # Transforms
@@ -79,8 +76,6 @@ def _maybe_promote_tensor_fft(
     """Helper to promote a tensor to a dtype supported by the FFT primitives"""
     cur_type = t.dtype
     new_type = _promote_type_fft(cur_type, require_complex)
-    if cur_type == new_type:
-        return t
     return _maybe_convert_to_dtype(t, new_type)
 
 

@@ -1320,8 +1320,8 @@ def isclose(
     # If the values of the integer tensors cannot be exactly represented
     # by the default scalar type then this may cause an incorrect result.
     if not utils.is_float_dtype(a.dtype) and not utils.is_complex_dtype(a.dtype):
-        a = _maybe_convert_to_dtype(a, torch.get_default_dtype())
-        b = _maybe_convert_to_dtype(b, torch.get_default_dtype())
+        a = prims.convert_element_type(a, torch.get_default_dtype())
+        b = prims.convert_element_type(b, torch.get_default_dtype())
 
     allowed_error = add(atol, abs(mul(b, rtol)))
     actual_error = abs(sub(a, b))
@@ -1336,10 +1336,12 @@ def isclose(
 
 def _lcm(a: TensorLikeType, b: TensorLikeType):
     dtype = a.dtype
+    # promoting to int32 to maintain 100% consistency with C++ and to
+    # prevent overflow in case of int8 and int16
     promote_to_int = dtype in (torch.int8, torch.int16)
     if promote_to_int:
-        a = _maybe_convert_to_dtype(a, torch.int32)
-        b = _maybe_convert_to_dtype(b, torch.int32)
+        a = prims.convert_element_type(a, torch.int32)
+        b = prims.convert_element_type(b, torch.int32)
 
     g = torch.gcd(a, b)
     # Avoid division by zero in case gcd(0, 0) == 0
@@ -1857,7 +1859,7 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
         # is_pinned issue #84925
         # and ("pin_memory" not in kwargs)
     ):
-        return _maybe_convert_to_dtype(a, dtype)
+        return prims.convert_element_type(a, kwargs.get("dtype", a.dtype))
 
     result = torch.empty_like(a, **kwargs)
     # TODO: non_blocking should be handled by `copy_to`
@@ -1930,7 +1932,7 @@ def _reduction(
         return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
 
     if result.dtype != result_dtype and result_dtype is not None:
-        result = _maybe_convert_to_dtype(result, result_dtype)
+        result = prims.convert_element_type(result, result_dtype)
 
     return result
 
@@ -1956,7 +1958,7 @@ def all(
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
-        return _maybe_convert_to_dtype(result, torch.uint8)
+        return prims.convert_element_type(result, torch.uint8)
 
     return result
 
@@ -1977,7 +1979,7 @@ def any(
 
     # Preserves uint8 -- probably a legacy mask thing
     if a.dtype is torch.uint8:
-        return _maybe_convert_to_dtype(result, torch.uint8)
+        return prims.convert_element_type(result, torch.uint8)
 
     return result
 
