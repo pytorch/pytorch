@@ -8010,6 +8010,7 @@ class TestConsistency(TestCase):
             'logical_xor': ['torch.bool', 'torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
             'native_layer_norm': ['torch.float32'],
             'nn.functional.layer_norm': ['torch.float32'],
+            'where': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
         }
 
     # These ops that are problematic. So never run them even when
