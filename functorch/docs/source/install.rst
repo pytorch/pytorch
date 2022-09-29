@@ -26,4 +26,3 @@ Please first install PyTorch and then run the following command:
 ::
 
   pip install functorch
-
