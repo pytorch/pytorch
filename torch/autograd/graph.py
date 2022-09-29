@@ -135,9 +135,24 @@ class save_on_cpu(saved_tensors_hooks):
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
 
+# NOTE [Allow mutation on tensors saved for backward]
+#
+# 1. Tensor gets saved for backward
+#    - remember the python object id and the version of the tensor
+#    - remember aliasing information (data_ptr of base + version)
+#    - save the original so we control its lifetime
+# 2. Any time a tensor gets in-placed
+#    - for each tensor aliased to it:
+#      - check using its object id and version to see if it has been saved
+#      - if it has been saved, clone it
+#      - delete the reference to the original
+# 3. during backward
+#    - if the clone exists, the tensor must've been modified in-place
+
 _cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-_view_funcs: Dict[Tuple[int, int], Callable] = dict()
-_sid_to_weakref: Dict[Tuple[int, int], weakref.ReferenceType] = dict()
+_original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_tid_to_weakhandle: Dict[Tuple[int, int], weakref.ReferenceType] = dict()
+_sid_to_tid: Dict[Tuple[int, int], Tuple[int, int]] = dict()
 _ctx_id = 0
 _inside_ctx = False
 
@@ -155,140 +170,81 @@ def _get_sid(t) -> Tuple[int, int]:
 class _Handle():
     pass
 
-# Lifetimes
-
-# We want to the lifetime of cloned vars to match the lifetime of the graph
-# So everytime we use a saved variable, we store a owning ref to it on the graph
-
 class _swap_with_cloned(saved_tensors_hooks):
     def __init__(self):
         def pack_hook(t):
             tid = _get_tid(t)
             sid = _get_sid(t)
-
-            # _sid_to_weakref tracks which storages+version are saved for backward
+            # Tensors saved for backward have an entry in _tid_to_weakhandle
             handle: Optional[_Handle] = None
-            if sid not in _sid_to_weakref or _sid_to_weakref[sid]() is None:
-                handle = _Handle()
-                _sid_to_weakref[sid] = weakref.ref(handle)
-            else:
-                handle = _sid_to_weakref[sid]()
 
-            # We save the original and the clone!
-            # We clone if in-place is done, can we free the original though?
-            # If during unpack time, there is a entry in _cloned that means
-            # it was modified in-place.
-            return _ctx_id, t, sid, tid, t._is_view(), handle
+            # # Save aliasing information
+            if sid not in _sid_to_tid:
+                _sid_to_tid[sid] = set()
+            _sid_to_tid[sid].add(tid)
+
+            # NB: The same tensor (of the same version) can be saved multiple times
+            if tid not in _tid_to_weakhandle or _tid_to_weakhandle[tid]() is None:
+                handle = _Handle()
+                _tid_to_weakhandle[tid] = weakref.ref(handle)
+                _original[handle] = t
+            else:
+                # Store an additional handle
+                handle = _tid_to_weakhandle[tid]()
+            return _ctx_id, handle
 
         def unpack_hook(tup):
-            ctx_id, t, sid, tid, is_view, handle = tup
-
+            ctx_id, handle = tup
             assert ctx_id == _ctx_id, (
-                "Trying to backward outside of the same context that the graph was created in")
-
+                "Trying to backward outside of the 'allow_mutation_on_saved_tensors' context"
+                "in which the graph was originally recorded.")
             if handle in _cloned:
                 res = _cloned[handle]
-                if is_view:
-                    view_func = _view_funcs[tid]
-                    res = view_func(res)
             else:
-                res = t
-
+                res = _original[handle]
             return res
 
         super().__init__(pack_hook, unpack_hook)
-
-def _maybe_clone_arg(t):
-    sid = _get_sid(t)
-    if sid not in _sid_to_weakref or _sid_to_weakref[sid]() is None:
-        return
-    handle = _sid_to_weakref[sid]()
-    if t._is_view():
-        if sid not in _cloned:
-            _cloned[handle] = t._base.clone()
-    else:
-        if sid not in _cloned:
-            _cloned[handle] = t.clone()
-
-# TODO: When we replay a view functions, do the modes matter?
-# TODO: Find a better way to get these (we may also be missing some).
-VIEW_FUNCTIONS = {
-    "numpy_T": "self",
-    "alias": "self",
-    "as_strided": "self",
-    "diagonal": "self",
-    "expand": "self",
-    "permute": "self",
-    "select": "self",
-    "slice": "self",
-    "split": "self",
-    "split_with_sizes": "self",
-    "squeeze": "self",
-    "t": "self",
-    "transpose": "self",
-    "unfold": "self",
-    "unsqueeze": "self",
-    "flatten": "self",
-    "view": "self",
-    "unbind": "self",
-    "_indices": "self",
-    "_values": "self",
-    "indices": "self",
-    "values": "self",
-    "crow_indices": "self",
-    "col_indices": "self",
-    "ccol_indices": "self",
-    "row_indices": "self",
-    # sparse_coo ctor output should really be views of both indices and values,
-    # but we only supports making as view of a single variable, and indices is
-    # discrete anyways.
-    # FIXME: clone indices on construction.
-    "sparse_coo_tensor_with_dims_and_tensors": "values",
-    "_reshape_alias": "self",
-}
 
 class _CloneArgBeforeMutateMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
-
-        # We may want to handle out= later
+        if type(args[0]) is int:
+            # wrapped number
+            args = [torch.tensor(args[0]), *args[1:]]
+        # (only for in-place ops now, we may want to handle out= later)
         if func.__name__.split('.')[0][-1] == "_":
-            _maybe_clone_arg(args[0])
+            # The first argument is assumed to be modified in-place
+            tid = _get_tid(args[0])
+            sid = _get_sid(args[0])
 
+            for tid in _sid_to_tid[sid]:
+                if tid in _tid_to_weakhandle:
+                    handle = _tid_to_weakhandle[tid]()
+                    if handle is not None and handle not in _cloned:
+                        _cloned[handle] = _original[handle].clone()
+                        del _original[handle]
         rs = func(*args, **kwargs)
-
-        # Eagerly save all the views, so we can replay them if necessary
-        if func.__name__.split('.')[0] in VIEW_FUNCTIONS.keys():
-            # What about multi-views like chunk?
-            tid = _get_tid(rs)
-            _view_funcs[tid] = func
         return rs
 
 @contextlib.contextmanager
 def allow_mutation_on_saved_tensors():
-    """Context manager under which mutating tensors that will be saved
-    for backward is allowed.
+    """Context manager under which mutating tensors saved for backward is allowed
 
-    When using this context manager, if tensors that are saved for backward
-    are mutated, instead of raising an error, a copy of that tensor before
-    mutation is stored to be used for the backward pass.
-
-    Args:
-        keep_graph (bool): If ``True``, allows one to backward through the graph
-                           multiple times and enables higher-order gradients.
-                           Defaults to ``False``.
+    Under this context manager, tensors saved for backward are cloned on mutation,
+    so the original version can still be used during backward. Normally, mutating a tensor
+    saved for backward will result in an error raised when it's used during backward.
     """
     global _inside_ctx, _ctx_id
     with _swap_with_cloned(), _CloneArgBeforeMutateMode():
         try:
             _ctx_id += 1
-            assert not _inside_ctx, "allow_mutation_on_saved_tensors cannot be nested"
+            if _inside_ctx:
+                raise RuntimeError("allow_mutation_on_saved_tensors contexts cannot be nested")
             _inside_ctx = True
             yield
         finally:
             _cloned.clear()
-            _view_funcs.clear()
-
             _ctx_id += 1
             _inside_ctx = False
