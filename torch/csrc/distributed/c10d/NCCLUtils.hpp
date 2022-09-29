@@ -12,6 +12,15 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+// ncclGetLastError() is enabled only for NCCL versions 2.13+
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 13)
+#define ENABLE_NCCL_GET_LAST_ERROR
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_GET_LAST_ERROR
+#endif
+
+
 namespace {
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
@@ -49,14 +58,6 @@ std::string getNcclErrorDetailStr(ncclResult_t error, c10::optional<std::string>
   return interpret + err;
 }
 } // namespace
-
-// ncclGetLastError() is enabled only for NCCL versions 2.13+
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
-    (NCCL_MINOR >= 13)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define ENABLE_NCCL_GET_LAST_ERROR
-#endif
 
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
