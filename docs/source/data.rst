@@ -427,7 +427,7 @@ Example::
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
 .. autoclass:: Subset
-.. autofunction:: torch.utils.data.collate
+.. autofunction:: torch.utils.data._utils.collate.collate
 .. autofunction:: torch.utils.data.default_collate
 .. autofunction:: torch.utils.data.default_convert
 .. autofunction:: torch.utils.data.get_worker_info

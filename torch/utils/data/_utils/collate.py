@@ -248,5 +248,18 @@ def default_collate(batch):
             >>> # Example with `List` inside the batch:
             >>> default_collate([[0, 1], [2, 3]])
             [tensor([0, 2]), tensor([1, 3])]
+            >>> # Two options to extend `default_collate` to handle specific type
+            >>> # Option 1: Write custom collate function and invoke `default_collate`
+            >>> def custom_collate(batch):
+            ...     elem = batch[0]
+            ...     if isinstance(elem, CustomType):  # Some custom condition
+            ...         return ...
+            ...     else:  # Fall back to `default_collate`
+            ...         return default_collate(batch)
+            >>> # Option 2: In-place modify `default_collate_fn_map`
+            >>> def collate_customtype_fn(batch, *, collate_fn_map=None):
+            ...     return ...
+            >>> default_collate_fn_map.update(CustoType, collate_customtype_fn)
+            >>> default_collate(batch)  # Handle `CustomType` automatically
     """
     return collate(batch, collate_fn_map=default_collate_fn_map)
