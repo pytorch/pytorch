@@ -132,8 +132,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
-      return torch::utils::getTHPMemoryFormat(
-          static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
+      return py::cast(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
     } else {
       return torch::jit::toPyObject(arguments[idx]);
     }
