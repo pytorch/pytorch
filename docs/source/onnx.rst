@@ -353,7 +353,7 @@ Visit the auto generated :doc:`list of supported TorchScript operators <../onnx_
 for details on which operator are supported in each ``opset_version``.
 
 Adding support for an aten or quantized operator
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If the operator is not in the list above:
 
@@ -499,8 +499,8 @@ ONNX operators that represent the function's behavior in ONNX. For example::
 
 Inline Autograd Function
 ~~~~~~~~~~~~~~~~~~~~~~~~
-In cases where a static symbolic method is not provided for its subsequent :class:`torch.autograd.Function`
-or where a function to register ``prim::PythonOp``as custom symbolic functions is not provided,
+In cases where a static symbolic method is not provided for its subsequent :class:`torch.autograd.Function` or
+where a function to register ``prim::PythonOp``as custom symbolic functions is not provided,
 :func:`torch.onnx.export` tries to inline the graph that corresponds to that :class:`torch.autograd.Function` such that
 this function is broken down into individual operators that were used within the function.
 The export should be successful as long as these individual operators are supported. For example::
