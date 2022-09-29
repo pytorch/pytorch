@@ -473,6 +473,9 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/ProcessGroup.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupGloo.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupMPI.cpp",
+    "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
+    "torch/csrc/distributed/c10d/UCCTracing.cpp",
+    "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
     "torch/csrc/distributed/c10d/Store.cpp",
     "torch/csrc/distributed/c10d/TCPStore.cpp",
@@ -774,9 +777,6 @@ libtorch_cuda_distributed_base_sources = [
 libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
-    "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
-    "torch/csrc/distributed/c10d/UCCTracing.cpp",
-    "torch/csrc/distributed/c10d/UCCUtils.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
 ]
