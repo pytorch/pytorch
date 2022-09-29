@@ -11,13 +11,27 @@ from typing import Any
 class GraphTraversal(object):
     """Represents a path through a graph."""
 
-    description: Any
-    edge_traversals: Any
-    immutable_state: Any
-    initial_state: Any
-    properties: Any
-    result_graph_index: Any
-    run_graph_index: Any
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    edge_traversals: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "edgeTraversals"}
+    )
+    immutable_state: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "immutableState"}
+    )
+    initial_state: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "initialState"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    result_graph_index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "resultGraphIndex"}
+    )
+    run_graph_index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "runGraphIndex"}
+    )
 
 
 # flake8: noqa

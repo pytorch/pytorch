@@ -11,13 +11,27 @@ from typing import Any
 class ResultProvenance(object):
     """Contains information about how and when a result was detected."""
 
-    conversion_sources: Any
-    first_detection_run_guid: Any
-    first_detection_time_utc: Any
-    invocation_index: Any
-    last_detection_run_guid: Any
-    last_detection_time_utc: Any
-    properties: Any
+    conversion_sources: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "conversionSources"}
+    )
+    first_detection_run_guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "firstDetectionRunGuid"}
+    )
+    first_detection_time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "firstDetectionTimeUtc"}
+    )
+    invocation_index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "invocationIndex"}
+    )
+    last_detection_run_guid: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "lastDetectionRunGuid"}
+    )
+    last_detection_time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "lastDetectionTimeUtc"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

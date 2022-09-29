@@ -11,7 +11,9 @@ from typing import Any
 class PropertyBag(object):
     """Key/value pairs that provide additional information about the object."""
 
-    tags: Any
+    tags: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "tags"}
+    )
 
 
 # flake8: noqa

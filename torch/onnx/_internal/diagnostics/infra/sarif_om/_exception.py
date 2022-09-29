@@ -11,11 +11,21 @@ from typing import Any
 class Exception(object):
     """Describes a runtime exception encountered during the execution of an analysis tool."""
 
-    inner_exceptions: Any
-    kind: Any
-    message: Any
-    properties: Any
-    stack: Any
+    inner_exceptions: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "innerExceptions"}
+    )
+    kind: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "kind"}
+    )
+    message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "message"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    stack: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "stack"}
+    )
 
 
 # flake8: noqa

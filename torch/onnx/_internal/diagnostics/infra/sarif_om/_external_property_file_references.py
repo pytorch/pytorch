@@ -11,23 +11,57 @@ from typing import Any
 class ExternalPropertyFileReferences(object):
     """References to external property files that should be inlined with the content of a root log file."""
 
-    addresses: Any
-    artifacts: Any
-    conversion: Any
-    driver: Any
-    extensions: Any
-    externalized_properties: Any
-    graphs: Any
-    invocations: Any
-    logical_locations: Any
-    policies: Any
-    properties: Any
-    results: Any
-    taxonomies: Any
-    thread_flow_locations: Any
-    translations: Any
-    web_requests: Any
-    web_responses: Any
+    addresses: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "addresses"}
+    )
+    artifacts: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "artifacts"}
+    )
+    conversion: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "conversion"}
+    )
+    driver: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "driver"}
+    )
+    extensions: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "extensions"}
+    )
+    externalized_properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "externalizedProperties"}
+    )
+    graphs: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "graphs"}
+    )
+    invocations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "invocations"}
+    )
+    logical_locations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "logicalLocations"}
+    )
+    policies: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "policies"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    results: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "results"}
+    )
+    taxonomies: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "taxonomies"}
+    )
+    thread_flow_locations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "threadFlowLocations"}
+    )
+    translations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "translations"}
+    )
+    web_requests: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "webRequests"}
+    )
+    web_responses: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "webResponses"}
+    )
 
 
 # flake8: noqa

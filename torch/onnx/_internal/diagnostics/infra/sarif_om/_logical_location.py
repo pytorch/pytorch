@@ -11,13 +11,27 @@ from typing import Any
 class LogicalLocation(object):
     """A logical location of a construct that produced a result."""
 
-    decorated_name: Any
-    fully_qualified_name: Any
-    index: Any
-    kind: Any
-    name: Any
-    parent_index: Any
-    properties: Any
+    decorated_name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "decoratedName"}
+    )
+    fully_qualified_name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "fullyQualifiedName"}
+    )
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    kind: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "kind"}
+    )
+    name: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "name"}
+    )
+    parent_index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "parentIndex"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
 
 
 # flake8: noqa

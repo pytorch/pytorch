@@ -11,12 +11,22 @@ from typing import Any
 class Rectangle(object):
     """An area within an image."""
 
-    bottom: Any
-    left: Any
-    message: Any
-    properties: Any
-    right: Any
-    top: Any
+    bottom: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "bottom"}
+    )
+    left: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "left"}
+    )
+    message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "message"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    right: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "right"}
+    )
+    top: Any = dataclasses.field(default=None, metadata={"schema_property_name": "top"})
 
 
 # flake8: noqa

@@ -11,15 +11,31 @@ from typing import Any
 class Notification(object):
     """Describes a condition relevant to the tool itself, as opposed to being relevant to a target being analyzed by the tool."""
 
-    message: Any
-    associated_rule: Any
-    descriptor: Any
-    exception: Any
-    level: Any
-    locations: Any
-    properties: Any
-    thread_id: Any
-    time_utc: Any
+    message: Any = dataclasses.field(metadata={"schema_property_name": "message"})
+    associated_rule: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "associatedRule"}
+    )
+    descriptor: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "descriptor"}
+    )
+    exception: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "exception"}
+    )
+    level: Any = dataclasses.field(
+        default="warning", metadata={"schema_property_name": "level"}
+    )
+    locations: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "locations"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    thread_id: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "threadId"}
+    )
+    time_utc: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "timeUtc"}
+    )
 
 
 # flake8: noqa

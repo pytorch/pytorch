@@ -11,18 +11,42 @@ from typing import Any
 class Region(object):
     """A region within an artifact where a result was detected."""
 
-    byte_length: Any
-    byte_offset: Any
-    char_length: Any
-    char_offset: Any
-    end_column: Any
-    end_line: Any
-    message: Any
-    properties: Any
-    snippet: Any
-    source_language: Any
-    start_column: Any
-    start_line: Any
+    byte_length: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "byteLength"}
+    )
+    byte_offset: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "byteOffset"}
+    )
+    char_length: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "charLength"}
+    )
+    char_offset: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "charOffset"}
+    )
+    end_column: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "endColumn"}
+    )
+    end_line: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "endLine"}
+    )
+    message: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "message"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    snippet: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "snippet"}
+    )
+    source_language: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "sourceLanguage"}
+    )
+    start_column: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "startColumn"}
+    )
+    start_line: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "startLine"}
+    )
 
 
 # flake8: noqa

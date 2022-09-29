@@ -11,11 +11,21 @@ from typing import Any
 class Attachment(object):
     """An artifact relevant to a result."""
 
-    artifact_location: Any
-    description: Any
-    properties: Any
-    rectangles: Any
-    regions: Any
+    artifact_location: Any = dataclasses.field(
+        metadata={"schema_property_name": "artifactLocation"}
+    )
+    description: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "description"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    rectangles: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "rectangles"}
+    )
+    regions: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "regions"}
+    )
 
 
 # flake8: noqa

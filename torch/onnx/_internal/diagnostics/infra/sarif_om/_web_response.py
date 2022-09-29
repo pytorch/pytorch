@@ -11,15 +11,33 @@ from typing import Any
 class WebResponse(object):
     """Describes the response to an HTTP request."""
 
-    body: Any
-    headers: Any
-    index: Any
-    no_response_received: Any
-    properties: Any
-    protocol: Any
-    reason_phrase: Any
-    status_code: Any
-    version: Any
+    body: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "body"}
+    )
+    headers: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "headers"}
+    )
+    index: Any = dataclasses.field(
+        default=-1, metadata={"schema_property_name": "index"}
+    )
+    no_response_received: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "noResponseReceived"}
+    )
+    properties: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "properties"}
+    )
+    protocol: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "protocol"}
+    )
+    reason_phrase: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "reasonPhrase"}
+    )
+    status_code: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "statusCode"}
+    )
+    version: Any = dataclasses.field(
+        default=None, metadata={"schema_property_name": "version"}
+    )
 
 
 # flake8: noqa
