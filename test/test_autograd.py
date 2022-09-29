@@ -8598,8 +8598,14 @@ class TestAllowMutationOnSaved(TestCase):
             a = torch.tensor([1 + 1j], requires_grad=True).clone()
             b = a.conj()
             out = (b**2).sum()
-            # What about the case when we modify b directly?
             a.sin_()
+            out.backward()
+
+            a = torch.tensor([1 + 1j], requires_grad=True).clone()
+            b = a.conj()
+            out = (b**2).sum()
+            # in this case, it is no longer a view it seems
+            b.sin_()
             out.backward()
 
     def test_backward_out_of_context(self):

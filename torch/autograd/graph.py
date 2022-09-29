@@ -178,7 +178,7 @@ class _swap_with_cloned(saved_tensors_hooks):
             # Tensors saved for backward have an entry in _tid_to_weakhandle
             handle: Optional[_Handle] = None
 
-            # # Save aliasing information
+            # Save aliasing information
             if sid not in _sid_to_tid:
                 _sid_to_tid[sid] = set()
             _sid_to_tid[sid].add(tid)
@@ -218,13 +218,15 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
             # The first argument is assumed to be modified in-place
             tid = _get_tid(args[0])
             sid = _get_sid(args[0])
-
-            for tid in _sid_to_tid[sid]:
-                if tid in _tid_to_weakhandle:
-                    handle = _tid_to_weakhandle[tid]()
-                    if handle is not None and handle not in _cloned:
-                        _cloned[handle] = _original[handle].clone()
-                        del _original[handle]
+            if sid in _sid_to_tid:
+                for tid in _sid_to_tid[sid]:
+                    if tid in _tid_to_weakhandle:
+                        handle = _tid_to_weakhandle[tid]()
+                        if handle is not None and handle not in _cloned:
+                            _cloned[handle] = _original[handle].clone()
+                            del _original[handle]
+            else:
+                assert not args[0]._is_view()
         rs = func(*args, **kwargs)
         return rs
 
