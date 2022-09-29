@@ -9,6 +9,9 @@ namespace diagnostics {
 
 /**
  * @brief Level of a diagnostic.
+ * @details The levels are defined by the SARIF specification, and are not
+ * modifiable. For alternative categories, please use Tag instead.
+ * @todo Introduce Tag to C++ api.
  */
 enum class Level : uint32_t {
   kNone,
