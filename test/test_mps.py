@@ -6048,6 +6048,17 @@ class TestAdvancedIndexing(TestCase):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
 
+    def test_masked_select(self):
+        x = torch.randn(3, 4)
+        x_mps = x.to("mps")
+        mask = x.ge(0.5)
+        mask_mps = x_mps.ge(0.5)
+
+        res = torch.masked_select(x, mask)
+        res_mps = torch.masked_select(x_mps, mask_mps)
+
+        self.assertEqual(res, res_mps)
+
     # examples from https://www.tutorialspoint.com/numpy/numpy_advanced_indexing.htm
     def test_indexing_get(self):
         def helper(dtype):
@@ -6390,10 +6401,10 @@ class TestAdvancedIndexing(TestCase):
             delta = torch.empty(i, dtype=torch.float32, device=device).uniform_(-1, 1)
 
             # cumsum not supported on 'mps', fallback on 'cpu'
-            indices = delta.to("cpu").cumsum(0).long().to("mps")
+            indices = delta.cpu().cumsum(0).long().to("mps")
 
             # abs for int64 is not supported on mps, fallback on 'cpu' to calculate it
-            input = torch.randn(indices.to("cpu").abs().to("mps").max() + 1, device=device)
+            input = torch.randn(indices.cpu().abs().max().to("mps") + 1, device=device)
             values = torch.randn(indices.size(0), device=device)
             output = input.index_put((indices,), values, accumulate=True)
 

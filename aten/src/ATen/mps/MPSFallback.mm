@@ -48,7 +48,6 @@ TORCH_LIBRARY_IMPL(aten, MPS, m) {
   m.impl("linalg_vector_norm", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("sgn.out", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
   m.impl("nonzero", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
-  m.impl("masked_select", torch::CppFunction::makeFromBoxedFunction<&mps_fallback>());
 }
 
 } // namespace at
