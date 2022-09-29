@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import Any, FrozenSet, List, Optional, Sequence, Set, Tuple
+from typing import Any, FrozenSet, List, Optional, Sequence, Set, Tuple, Type, TypeVar
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif_om
 
@@ -18,197 +18,97 @@ class Level(enum.Enum):
     ERROR = "error"
 
 
+@dataclasses.dataclass(frozen=True)
 class Rule:
-    _sarif_reporting_descriptor: sarif_om.ReportingDescriptor
-
-    def __init__(
-        self,
-        id: str,
-        name: str,
-        message_default_template: str,
-        short_description: Optional[str] = None,
-        full_description: Optional[str] = None,
-        help_uri: Optional[str] = None,
-    ) -> None:
-        self._sarif_reporting_descriptor = sarif_om.ReportingDescriptor(
-            id=id, name=name
-        )
-        self.message_default_template = message_default_template
-        self.short_description = short_description
-        self.full_description = full_description
-        self.help_uri = help_uri
+    id: str
+    name: str
+    message_default_template: str
+    short_description: Optional[str] = None
+    full_description: Optional[str] = None
+    help_uri: Optional[str] = None
 
     @classmethod
     def from_sarif(cls, **kwargs) -> Rule:
-        """Returns a rule from the SARIF representation of this rule."""
+        """Returns a rule from the SARIF reporting descriptor."""
+        short_description = (
+            kwargs["short_description"]["text"]
+            if "short_description" in kwargs
+            else None
+        )
+        full_description = (
+            kwargs["full_description"]["markdown"]
+            if "full_description" in kwargs
+            else None
+        )
+        help_uri = kwargs["help_uri"] if "help_uri" in kwargs else None
 
         rule = cls(
-            kwargs["id"],
-            kwargs["name"],
-            kwargs["message_strings"]["default"]["text"],
+            id=kwargs["id"],
+            name=kwargs["name"],
+            message_default_template=kwargs["message_strings"]["default"]["text"],
+            short_description=short_description,
+            full_description=full_description,
+            help_uri=help_uri,
         )
-        if "short_description" in kwargs:
-            rule.short_description = kwargs["short_description"]["text"]
-        if "full_description" in kwargs:
-            rule.full_description = kwargs["full_description"]["text"]
-        if "help_uri" in kwargs:
-            rule.help_uri = kwargs["help_uri"]
-
         return rule
 
     def sarif(self) -> sarif_om.ReportingDescriptor:
-        """Returns the SARIF representation of this rule."""
-        return self._sarif_reporting_descriptor
-
-    @property
-    def id(self) -> str:
-        """The unique identifier for the rule."""
-        return self._sarif_reporting_descriptor.id
-
-    @property
-    def name(self) -> str:
-        """A stable, opaque identifier for the rule."""
-        return self._sarif_reporting_descriptor.name
-
-    @property
-    def message_default_template(self) -> str:
-        """The default message template for the rule report."""
-        return self._sarif_reporting_descriptor.message_strings["default"].text
-
-    @message_default_template.setter
-    def message_default_template(self, new_message_default_template: str) -> None:
-        """Sets the default message template for the rule report."""
-        self._sarif_reporting_descriptor.message_strings = {
-            "default": sarif_om.Message(text=new_message_default_template)
-        }
-
-    @property
-    def short_description(self) -> Optional[str]:
-        """A brief description of the rule."""
-        return self._sarif_reporting_descriptor.short_description.text
-
-    @short_description.setter
-    def short_description(self, new_short_description: Optional[str]) -> None:
-        """Sets the short description of the rule."""
-        if new_short_description is None:
-            self._sarif_reporting_descriptor.short_description = None
-            return
-        self._sarif_reporting_descriptor.short_description = sarif_om.Message(
-            text=new_short_description
+        """Returns a SARIF reporting descriptor of this Rule."""
+        short_description = (
+            sarif_om.MultiformatMessageString(text=self.short_description)
+            if self.short_description is not None
+            else None
+        )
+        full_description = (
+            sarif_om.MultiformatMessageString(text="", markdown=self.full_description)
+            if self.full_description is not None
+            else None
+        )
+        return sarif_om.ReportingDescriptor(
+            id=self.id,
+            name=self.name,
+            short_description=short_description,
+            full_description=full_description,
+            help_uri=self.help_uri,
         )
 
-    @property
-    def full_description(self) -> Optional[str]:
-        """A comprehensive description of the rule in markdown."""
-        return self._sarif_reporting_descriptor.full_description.markdown
 
-    @full_description.setter
-    def full_description(self, new_full_description: Optional[str]) -> None:
-        """Sets the full description of the rule."""
-        if new_full_description is None:
-            self._sarif_reporting_descriptor.full_description = None
-            return
-        self._sarif_reporting_descriptor.full_description = sarif_om.Message(
-            text="", markdown=new_full_description
-        )
-
-    @property
-    def help_uri(self) -> Optional[str]:
-        """A URI where the rule is documented."""
-        return self._sarif_reporting_descriptor.help_uri
-
-    @help_uri.setter
-    def help_uri(self, new_help_uri: Optional[str]) -> None:
-        """Sets the help URI of the rule."""
-        self._sarif_reporting_descriptor.help_uri = new_help_uri
-
-
+@dataclasses.dataclass
 class Location:
-    _sarif_location: sarif_om.Location
-
-    def __init__(
-        self,
-        uri: str,
-        message: str,
-        line: Optional[int] = None,
-        start_column: Optional[int] = None,
-        end_column: Optional[int] = None,
-    ):
-        self._sarif_location = sarif_om.Location()
-        self.uri = uri
-        self.message = message
-        self.line = line
-        self.start_column = start_column
-        self.end_column = end_column
+    uri: str
+    message: str
+    line: Optional[int] = None
+    start_column: Optional[int] = None
+    end_column: Optional[int] = None
 
     def sarif(self) -> sarif_om.Location:
-        """Returns the SARIF Location object."""
-        return self._sarif_location
-
-    @property
-    def uri(self) -> str:
-        """The URI of the source code location."""
-        return self._sarif_location.physical_location.artifact_location.uri
-
-    @uri.setter
-    def uri(self, new_uri: str) -> None:
-        """Set the URI of the source code location."""
-        self._sarif_location.physical_location.artifact_location.uri = new_uri
-
-    @property
-    def message(self) -> str:
-        """The message associated with the location."""
-        return self._sarif_location.message.text
-
-    @message.setter
-    def message(self, new_message: str) -> None:
-        """Set the message associated with the location."""
-        self._sarif_location.message.text = new_message
-
-    @property
-    def line(self) -> Optional[int]:
-        """The line number of the source code location."""
-        return self._sarif_location.physical_location.region.start_line
-
-    @line.setter
-    def line(self, new_line: Optional[int]) -> None:
-        """Set the line number of the source code location."""
-        self._sarif_location.physical_location.region.start_line = new_line
-
-    @property
-    def start_column(self) -> Optional[int]:
-        """The start column number of the source code location."""
-        return self._sarif_location.physical_location.region.start_column
-
-    @start_column.setter
-    def start_column(self, new_start_column: Optional[int]) -> None:
-        """Set the start column number of the source code location."""
-        self._sarif_location.physical_location.region.start_column = new_start_column
-
-    @property
-    def end_column(self) -> Optional[int]:
-        """The end column number of the source code location."""
-        return self._sarif_location.physical_location.region.end_column
-
-    @end_column.setter
-    def end_column(self, new_end_column: Optional[int]) -> None:
-        """Set the end column number of the source code location."""
-        self._sarif_location.physical_location.region.end_column = new_end_column
+        """Returns the SARIF representation of this location."""
+        return sarif_om.Location(
+            physical_location=sarif_om.PhysicalLocation(
+                artifact_location=sarif_om.ArtifactLocation(uri=self.uri),
+                region=sarif_om.Region(
+                    start_line=self.line,
+                    start_column=self.start_column,
+                    end_line=self.line,
+                    end_column=self.end_column,
+                ),
+            ),
+            message=sarif_om.Message(text=self.message),
+        )
 
 
+@dataclasses.dataclass
 class Stack:
-    _sarif_stack: sarif_om.Stack
-
-    def __init__(
-        self,
-        message: Optional[str] = None,
-        **kwargs,
-    ) -> None:
-        self._sarif_stack = sarif_om.Stack(message=message, **kwargs)
+    frame_locations: List[Location] = dataclasses.field(default_factory=list)
 
     def sarif(self) -> sarif_om.Stack:
-        """Returns the underlying SARIF stack object."""
-        return self._sarif_stack
+        """Returns the SARIF representation of this stack."""
+        return sarif_om.Stack(
+            frames=[
+                sarif_om.StackFrame(location=loc.sarif())
+                for loc in self.frame_locations
+            ]
+        )
 
     def add_frame(
         self,
@@ -219,89 +119,62 @@ class Stack:
         end_column: Optional[int] = None,
     ) -> None:
         """Adds a frame to the stack."""
-        self._sarif_stack.frames.append(
+        self.frame_locations.append(
             Location(
-                uri,
-                message,
-                line,
-                start_column,
-                end_column,
-            ).sarif()
+                uri=uri,
+                message=message,
+                line=line,
+                start_column=start_column,
+                end_column=end_column,
+            )
         )
 
 
+# This is a workaround for mypy not supporting Self from typing_extensions.
+_Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
+
+
+@dataclasses.dataclass
 class Diagnostic:
-    _sarif_result: sarif_om.Result
-    _locations: List[Location]
-    _stacks: List[Stack]
-    _rule: Rule
-    _additional_message: str
-
-    def __init__(
-        self,
-        rule: Rule,
-        level: Level,
-        message_args: Optional[Tuple[Any, ...]],
-        **kwargs,
-    ) -> None:
-        if message_args is None:
-            message_args = tuple()
-        message = rule.message_default_template.format(*message_args)
-        self._sarif_result = sarif_om.Result(
-            message=message, level=level.value, rule_id=rule.id
-        )
-        self._rule = rule
-        self._locations = []
-        self._stacks = []
-        self._additional_message = ""
+    rule: Rule
+    level: Level
+    message_args: Optional[Tuple[Any, ...]]
+    locations: List[Location] = dataclasses.field(default_factory=list)
+    stacks: List[Stack] = dataclasses.field(default_factory=list)
+    additional_message: Optional[str] = None
 
     def sarif(self) -> sarif_om.Result:
-        """Returns the SARIF Result object."""
-        self._sarif_result.locations = [
-            location.sarif() for location in self._locations
-        ]
-        self._sarif_result.stacks = [stack.sarif() for stack in self._stacks]
+        """Returns the SARIF Result representation of this diagnostic."""
+        if self.message_args is None:
+            self.message_args = tuple()
+        message = self.rule.message_default_template.format(*self.message_args)
+        if self.additional_message is not None:
+            message = f"{message}\n{self.additional_message}"
+        sarif_result = sarif_om.Result(
+            message=sarif_om.Message(text=message),
+            level=self.level.value,
+            rule_id=self.rule.id,
+        )
+        sarif_result.locations = [location.sarif() for location in self.locations]
+        sarif_result.stacks = [stack.sarif() for stack in self.stacks]
+        return sarif_result
 
-        return self._sarif_result
-
-    @property
-    def message(self) -> str:
-        """The message associated with the diagnostic."""
-        return self._sarif_result.message.text
-
-    @property
-    def level(self) -> Level:
-        """The level of the diagnostic."""
-        return getattr(Level, self._sarif_result.level.upper())
-
-    @property
-    def rule(self) -> Rule:
-        """The rule associated with the diagnostic."""
-        return self._rule
-
-    @property
-    def locations(self) -> Sequence[Location]:
-        """The locations of the diagnostic."""
-        return self._locations
-
-    @property
-    def stacks(self) -> Sequence[Stack]:
-        """The stacks of the diagnostic."""
-        return self._stacks
-
-    def with_location(self, location: Location) -> "Diagnostic":
+    def with_location(self: _Diagnostic, location: Location) -> _Diagnostic:
         """Adds a location to the diagnostic."""
-        self._locations.append(location)
+        self.locations.append(location)
         return self
 
-    def with_stack(self, stack: Stack) -> "Diagnostic":
+    def with_stack(self: _Diagnostic, stack: Stack) -> _Diagnostic:
         """Adds a stack to the diagnostic."""
-        self._stacks.append(stack)
+        self.stacks.append(stack)
         return self
 
-    def with_additional_message(self, message: str) -> "Diagnostic":
+    def with_additional_message(self: _Diagnostic, message: str) -> _Diagnostic:
         """Adds an additional message to the diagnostic."""
-        self._sarif_result.message.text += f"\n{message}"
+        if self.additional_message is None:
+            self.additional_message = message
+        else:
+            self.additional_message = f"{self.additional_message}\n{message}"
         return self
 
 
@@ -341,49 +214,30 @@ class RuleCollection:
         )()
 
 
+@dataclasses.dataclass(frozen=True)
 class DiagnosticTool:
-    _sarif_tool: sarif_om.Tool
-    _rules: RuleCollection
-    _triggered_rules: Set[Rule]
+    name: str
+    version: str
+    rules: RuleCollection
+    diagnostic_type: Type[Diagnostic] = dataclasses.field(default=Diagnostic)
+    _triggered_rules: Set[Rule] = dataclasses.field(init=False, default_factory=set)
 
-    def __init__(
-        self,
-        name: str,
-        version: str,
-        rules: RuleCollection,
-        diagnostic_type: type = Diagnostic,
-    ) -> None:
-        self._sarif_tool = sarif_om.Tool(
-            driver=sarif_om.ToolComponent(name=name, version=version)
-        )
-        self._rules = rules
-        self._triggered_rules = set()
-        if not issubclass(diagnostic_type, Diagnostic):
+    def __post_init__(self) -> None:
+        if not issubclass(self.diagnostic_type, Diagnostic):
             raise TypeError(
                 "Expected diagnostic_type to be a subclass of Diagnostic, "
-                f"but got {diagnostic_type}"
+                f"but got {self.diagnostic_type}"
             )
-        self._diagnostic_type = diagnostic_type
 
     def sarif(self) -> sarif_om.Tool:
-        """Returns the SARIF Tool object."""
-        self._sarif_tool.driver.rules = [rule.sarif() for rule in self._triggered_rules]
-        return self._sarif_tool
-
-    @property
-    def name(self) -> str:
-        """The name of the tool."""
-        return self._sarif_tool.driver.name
-
-    @property
-    def version(self) -> str:
-        """The version of the tool."""
-        return self._sarif_tool.driver.version
-
-    @property
-    def rules(self) -> RuleCollection:
-        """The rules supported by the tool."""
-        return self._rules
+        """Returns the SARIF Tool representation."""
+        return sarif_om.Tool(
+            driver=sarif_om.ToolComponent(
+                name=self.name,
+                version=self.version,
+                rules=[rule.sarif() for rule in self._triggered_rules],
+            )
+        )
 
     def create_diagnostic(
         self,
@@ -406,18 +260,18 @@ class DiagnosticTool:
         Raises:
             ValueError: If the rule is not supported by the tool.
         """
-        if rule not in self._rules:
+        if rule not in self.rules:
             raise ValueError(
                 f"Rule '{rule.id}:{rule.name}' is not supported by this tool '{self.name} {self.version}'."
-                f" Supported rules are: {self._rules._rule_id_name_set}"
+                f" Supported rules are: {self.rules._rule_id_name_set}"
             )
         self._triggered_rules.add(rule)
-        return self._diagnostic_type(rule, level, message_args, **kwargs)
+        return self.diagnostic_type(rule, level, message_args, **kwargs)
 
 
 class Invocation:
-    _sarif_invocation: sarif_om.Invocation
     # TODO: Implement this.
+    pass
 
 
 @dataclasses.dataclass
@@ -427,41 +281,26 @@ class DiagnosticOptions:
     """
 
 
+@dataclasses.dataclass
 class DiagnosticContext:
-    _sarif_run: sarif_om.Run
-    _diagnostics: List[Diagnostic]
-    _tool: DiagnosticTool
-    _options: DiagnosticOptions
-    _invocation: Invocation
-    _is_active: bool
-
-    def __init__(
-        self, tool: DiagnosticTool, options: Optional[DiagnosticOptions]
-    ) -> None:
-        self._tool = tool
-        self._diagnostics = []
-        self._is_active = True
-        self._invocation = Invocation()
+    tool: DiagnosticTool
+    options: Optional[DiagnosticOptions] = None
+    _diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
+    _invocation: Invocation = dataclasses.field(init=False)
+    _is_active: bool = dataclasses.field(init=False, default=True)
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.end()
         return True
 
     def sarif(self) -> sarif_om.Run:
         """Returns the SARIF Run object."""
-        self._sarif_run = sarif_om.Run(tool=self._tool.sarif())
-        self._sarif_run.results = [
-            diagnostic.sarif() for diagnostic in self._diagnostics
-        ]
-        return self._sarif_run
-
-    @property
-    def diagnostics(self) -> Sequence[Diagnostic]:
-        """The diagnostics collected in the context."""
-        return self._diagnostics
+        return sarif_om.Run(
+            tool=self.tool.sarif(),
+            results=[diagnostic.sarif() for diagnostic in self._diagnostics],
+        )
 
     def diagnose(
         self,
@@ -488,13 +327,6 @@ class DiagnosticContext:
         if not self._is_active:
             raise RuntimeError("The diagnostics context is not active.")
 
-        diagnostic = self._tool.create_diagnostic(rule, level, message_args, **kwargs)
+        diagnostic = self.tool.create_diagnostic(rule, level, message_args, **kwargs)
         self._diagnostics.append(diagnostic)
         return diagnostic
-
-    def end(self) -> None:
-        """Ends the context."""
-        print("end is called on DiagnosticContext")
-        self._is_active = False
-        # TODO: Update info in invocation.
-        # TODO: Emit report.

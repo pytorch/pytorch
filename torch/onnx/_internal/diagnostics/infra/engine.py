@@ -1,5 +1,7 @@
 """A diagnostic engine based on SARIF."""
 
+from __future__ import annotations
+
 from typing import List, Optional
 
 from torch.onnx._internal.diagnostics import infra
@@ -10,9 +12,10 @@ from torch.onnx._internal.diagnostics.infra.sarif_om import version as sarif_ver
 class DiagnosticEngine:
     """A generic diagnostic engine based on SARIF.
 
-    This class is the main interface for diagnostics. It manages the start and finish of diagnostic contexts.
-    A DiagnosticContext provides the entry point for emitting Diagnostics.
-    Each DiagnosticContext is powered by a DiagnosticTool, which can be customized with custom RuleCollection and Diagnostic type.
+    This class is the main interface for diagnostics. It manages the creation of diagnostic contexts.
+    A DiagnosticContext provides the entry point for recording Diagnostics.
+    Each DiagnosticContext is powered by a DiagnosticTool, which can be customized with
+    custom RuleCollection and Diagnostic type.
     See infra.DiagnosticContext and infra.DiagnosticTool for more details.
 
     Examples:
@@ -49,21 +52,16 @@ class DiagnosticEngine:
     """
 
     _contexts: List[infra.DiagnosticContext]
-    _sarif_version: str = sarif_version.SARIF_VERSION
-    _sarif_schema_uri: str = sarif_version.SARIF_SCHEMA_LINK
 
     def __init__(self) -> None:
         self._contexts = []
 
-    def _sarif_log(self, runs: List[sarif_om.Run]) -> sarif_om.SarifLog:
-        return sarif_om.SarifLog(
-            version=self._sarif_version,
-            schema_uri=self._sarif_schema_uri,
-            runs=runs,
-        )
-
     def sarif_log(self) -> sarif_om.SarifLog:
-        return self._sarif_log([context.sarif() for context in self._contexts])
+        return sarif_om.SarifLog(
+            version=sarif_version.SARIF_VERSION,
+            schema_uri=sarif_version.SARIF_SCHEMA_LINK,
+            runs=[context.sarif() for context in self._contexts],
+        )
 
     def __str__(self) -> str:
         # TODO: pretty print.
@@ -77,11 +75,9 @@ class DiagnosticEngine:
 
     def clear(self) -> None:
         """Clears all diagnostic contexts."""
-        for context in self._contexts:
-            context.end()
-        self._contexts = []
+        self._contexts.clear()
 
-    def start_diagnostic_context(
+    def create_diagnostic_context(
         self,
         tool: infra.DiagnosticTool,
         options: Optional[infra.DiagnosticOptions] = None,

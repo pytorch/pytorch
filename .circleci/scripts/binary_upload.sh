@@ -24,8 +24,9 @@ if [[ "${DRY_RUN}" = "disabled" ]]; then
   AWS_S3_CP="aws s3 cp"
 fi
 
+# Sleep 2 minutes between retries for conda upload
 retry () {
-  "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+  "$@"  || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@") || (sleep 5m && "$@")
 }
 
 do_backup() {

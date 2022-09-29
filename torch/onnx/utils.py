@@ -174,16 +174,15 @@ def setup_onnx_logging(verbose: bool):
 
 @contextlib.contextmanager
 @_beartype.beartype
-def _setup_onnx_diagnostic():
+def _create_diagnostic_context():
     engine = diagnostics.engine
-    _previous_context = diagnostics.context
-    diagnostics.context = engine.start_diagnostic_context(
+    diagnostics.context = engine.create_diagnostic_context(
         diagnostics.ExportDiagnosticTool()
     )
     try:
         yield diagnostics.context
     finally:
-        diagnostics.context = _previous_context
+        diagnostics.context = engine.background_context
 
 
 @contextlib.contextmanager
@@ -195,7 +194,7 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         model
     ) as apex_ctx, setup_onnx_logging(
         verbose
-    ) as log_ctx, _setup_onnx_diagnostic() as diagnostic_ctx:
+    ) as log_ctx, _create_diagnostic_context() as diagnostic_ctx:
         yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
@@ -587,6 +586,12 @@ def _optimize_graph(
     _C._jit_pass_dce(graph)
     _C._jit_pass_lint(graph)
 
+    # CSE should improve perf when Autocast is used with disabled cache
+    # Autocast is disabled due to a limitation on tracer as described at https://github.com/pytorch/pytorch/issues/84092
+    # Must run before _C._jit_pass_erase_number_types to prevent type substitution
+    if _C._jit_pass_cse(graph):
+        _C._jit_pass_onnx_lint(graph)
+
     _C._jit_pass_canonicalize_graph_fuser_ops(graph)
     _C._jit_pass_lint(graph)
     _C._jit_pass_peephole(graph, True)
@@ -646,6 +651,7 @@ def _optimize_graph(
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         _C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     _C._jit_pass_onnx_lint(graph)
+
     graph = _C._jit_pass_onnx(graph, operator_export_type)
     _C._jit_pass_onnx_lint(graph)
     _C._jit_pass_lint(graph)
@@ -869,11 +875,10 @@ def _trace_and_get_graph_from_model(model, args):
     orig_state_dict_keys = torch.jit._unique_state_dict(model).keys()
 
     # Disable Autocast cache because it replaces kernel's weight and bias
-    # to be replaced by (undesired) constants
+    # by (undesired) constants.
+    # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
     # TODO: https://github.com/pytorch/pytorch/issues/84092
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
-    # When weights are not reused, there is no perf impact
-    # ONNX runtimes can also apply CSE optimization to compensate the lack of cache here
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
         model,

@@ -33,7 +33,7 @@ def _assert_has_diagnostics(
 
 
 @contextlib.contextmanager
-def assertAllDiagnostics(
+def assert_all_diagnostics(
     test_suite: common_utils.TestCase,
     engine: infra.DiagnosticEngine,
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
@@ -42,7 +42,7 @@ def assertAllDiagnostics(
     Context manager to assert that all diagnostics are emitted.
 
     Usage:
-        with assertAllDiagnostics(
+        with assert_all_diagnostics(
             self,
             diagnostics.engine,
             {(rule, infra.Level.Error)},
@@ -69,7 +69,7 @@ def assertAllDiagnostics(
         _assert_has_diagnostics(engine, rule_level_pairs)
 
 
-def assertDiagnostic(
+def assert_diagnostic(
     test_suite: common_utils.TestCase,
     engine: infra.DiagnosticEngine,
     rule: infra.Rule,
@@ -79,7 +79,7 @@ def assertDiagnostic(
     Context manager to assert that a diagnostic is emitted.
 
     Usage:
-        with assertDiagnostic(
+        with assert_diagnostic(
             self,
             diagnostics.engine,
             rule,
@@ -100,7 +100,7 @@ def assertDiagnostic(
         AssertionError: If the diagnostic is not emitted.
     """
 
-    return assertAllDiagnostics(test_suite, engine, {(rule, level)})
+    return assert_all_diagnostics(test_suite, engine, {(rule, level)})
 
 
 class TestONNXDiagnostics(common_utils.TestCase):
@@ -109,11 +109,11 @@ class TestONNXDiagnostics(common_utils.TestCase):
     def setUp(self):
         engine = diagnostics.engine
         engine.clear()
-        return super().setUp()
+        super().setUp()
 
     def test_assert_diagnostic_raises_when_diagnostic_not_found(self):
         with self.assertRaises(AssertionError):
-            with assertDiagnostic(
+            with assert_diagnostic(
                 self,
                 diagnostics.engine,
                 diagnostics.rules.node_missing_onnx_shape_inference,
@@ -136,7 +136,7 @@ class TestONNXDiagnostics(common_utils.TestCase):
             def forward(self, x):
                 return CustomAdd.apply(x, x)
 
-        with assertDiagnostic(
+        with assert_diagnostic(
             self,
             diagnostics.engine,
             diagnostics.rules.node_missing_onnx_shape_inference,
@@ -150,7 +150,7 @@ class TestONNXDiagnostics(common_utils.TestCase):
             def forward(self, x):
                 return torch.diagonal(x)
 
-        with assertDiagnostic(
+        with assert_diagnostic(
             self,
             diagnostics.engine,
             diagnostics.rules.operator_supported_in_newer_opset_version,
@@ -167,7 +167,7 @@ class TestONNXDiagnostics(common_utils.TestCase):
     def test_diagnose_outside_export_is_recorded_in_background(self):
         sample_rule = diagnostics.rules.missing_custom_symbolic_function
         sample_level = diagnostics.levels.ERROR
-        with assertDiagnostic(
+        with assert_diagnostic(
             self,
             diagnostics.engine,
             sample_rule,
@@ -196,7 +196,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
         self.diagnostic_tool = infra.DiagnosticTool("test_tool", "1.0.0", self.rules)
         with contextlib.ExitStack() as stack:
             self.context = stack.enter_context(
-                self.engine.start_diagnostic_context(self.diagnostic_tool)
+                self.engine.create_diagnostic_context(self.diagnostic_tool)
             )
             self.addCleanup(stack.pop_all().close)
         return super().setUp()
@@ -215,7 +215,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             )
 
     def test_diagnostics_records_accordingly_in_nested_runs(self):
-        with self.engine.start_diagnostic_context(self.diagnostic_tool) as context:
+        with self.engine.create_diagnostic_context(self.diagnostic_tool) as context:
             context.diagnose(self.rules.rule_without_message_args, infra.Level.WARNING)
             sarif_log = self.engine.sarif_log()
             self.assertEqual(len(sarif_log.runs), 2)
@@ -226,16 +226,6 @@ class TestDiagnosticsInfra(common_utils.TestCase):
         self.assertEqual(len(sarif_log.runs), 2)
         self.assertEqual(len(sarif_log.runs[0].results), 1)
         self.assertEqual(len(sarif_log.runs[1].results), 1)
-
-    def test_diagnose_raises_runtime_error_when_context_is_inactive(self):
-        self.engine.clear()
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "The diagnostics context is not active.",
-        ):
-            self.context.diagnose(
-                self.rules.rule_without_message_args, infra.Level.WARNING
-            )
 
     def test_diagnose_with_custom_rules(self):
         custom_rules = infra.RuleCollection.custom_collection_from_list(
@@ -254,12 +244,12 @@ class TestDiagnosticsInfra(common_utils.TestCase):
             ],
         )
 
-        with self.engine.start_diagnostic_context(
+        with self.engine.create_diagnostic_context(
             tool=infra.DiagnosticTool(
                 name="custom_tool", version="1.0", rules=custom_rules
             )
         ) as diagnostic_context:
-            with assertAllDiagnostics(
+            with assert_all_diagnostics(
                 self,
                 self.engine,
                 {

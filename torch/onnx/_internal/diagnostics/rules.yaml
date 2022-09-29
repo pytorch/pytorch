@@ -4,6 +4,7 @@
 #       For example: pre defined keys for message_strings for logging on different levels.
 # TODO: Based on above, create helper script to generate new rules.
 # TODO: Separate rules into individual files.
+# TODO: These rules are for demonstration purposes only. They are not complete.
 
 - id: POE0001
   name: node-missing-onnx-shape-inference
