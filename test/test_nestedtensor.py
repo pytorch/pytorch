@@ -825,7 +825,7 @@ class TestNestedTensorDeviceType(TestCase):
         # previously creating a new NT with a buffer that was the same size as the
         # original.
         nt_contiguous = torch.nested.nested_tensor([torch.randn(2, 20, device=device, dtype=dtype),
-                                             torch.randn(4, 20, device=device, dtype=dtype)])
+                                                    torch.randn(4, 20, device=device, dtype=dtype)])
         # Split up the last dimension which has a consistent size of 20 into 5 chunks
         chunks = nt_contiguous.chunk(5, dim=-1)
 
