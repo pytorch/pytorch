@@ -4690,18 +4690,18 @@ class TestNLLLoss(TestCase):
         all_zeros = torch.zeros(shape, device='mps')
 
         prob_tensor = all_ones * 0.5
-        ## probability of drawing "1" is 0.5
+        # probability of drawing "1" is 0.5
         mps_out = torch.bernoulli(prob_tensor)
         # We can't check reliably the mean and std.
         # Just make sure we don't return constant values
         self.assertNotEqual(mps_out.to('cpu').mean(), 0.)
         self.assertNotEqual(mps_out.to('cpu').std() ** 2, 0.)
 
-        ## probability of drawing "1" is 0
+        # probability of drawing "1" is 0
         mps_out = torch.bernoulli(all_zeros)
         self.assertEqual(mps_out, all_zeros)
 
-        ## probability of drawing "1" is 1
+        # probability of drawing "1" is 1
         mps_out = torch.bernoulli(all_ones)
         self.assertEqual(mps_out, all_ones)
 
