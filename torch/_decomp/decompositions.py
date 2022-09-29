@@ -1369,6 +1369,11 @@ def nop_decomposition(x):
     return aten.alias(x)
 
 
+@register_decomposition(aten._efficientzerotensor.default)
+def efficient_zero(*args, **kwargs):
+    return torch.zeros(*args, **kwargs)
+
+
 @register_decomposition(aten.cudnn_batch_norm)
 def cudnn_batch_norm(
     input: Tensor,
