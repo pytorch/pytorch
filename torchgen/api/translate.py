@@ -9,7 +9,6 @@ from torchgen.api.types import (
     Expr,
     intArrayRefT,
     iOptTensorListRefT,
-    iTensorListRefT,
     layoutT,
     ListCType,
     longT,
@@ -27,7 +26,6 @@ from torchgen.api.types import (
     SpecialArgName,
     symIntArrayRefT,
     SymIntT,
-    tensorListT,
     tensorOptionsT,
     tensorT,
     VectorCType,
@@ -183,12 +181,6 @@ def translate(
             ctx[
                 NamedCType(t.name, BaseCType(opmath_t))
             ] = f"static_cast<opmath_t>({b.expr})"
-
-        # [Note: ITensorListRef]
-        if t.type == BaseCType(tensorListT):
-            ctx[
-                NamedCType(t.name, BaseCType(iTensorListRefT))
-            ] = f"at::ITensorListRef({b.expr})"
 
         # [Note: IOptTensorListRef]
         if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):

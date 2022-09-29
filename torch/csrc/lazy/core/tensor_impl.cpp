@@ -135,7 +135,6 @@ void LTCTensorImpl::shallow_copy_from(
 
 c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
   return c10::fromIntArrayRef(strides_custom());
-  ;
 }
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
