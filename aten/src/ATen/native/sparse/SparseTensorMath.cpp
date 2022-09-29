@@ -372,14 +372,14 @@ Tensor norm_sparse(const SparseTensor& self, const Scalar& p) {
   return norm_sparse(self, p, IntArrayRef{}, false, c10::nullopt);
 }
 
-Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, OptionalIntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
+Tensor norm_sparse(const SparseTensor& self, const optional<Scalar>& p, IntArrayRef dim, bool keepdim, optional<ScalarType> dtype) {
   AT_ASSERT(self.is_sparse());
-  if (dim.has_value() && dim.value().size() > 0) {
+  if (dim.size() > 0) {
     // Only full reductions are supported, so check if that is the case
     int64_t ndim = self.dim();
-    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.value().size();
+    bool passed_full_reduction_check = static_cast<size_t>(ndim) == dim.size();
     if (passed_full_reduction_check) {
-      auto dim_ = dim.value().vec();
+      auto dim_ = dim.vec();
       maybe_wrap_dims(dim_, ndim);
       std::vector<bool> dims_check(ndim, false);
       // Need to check for duplicates, and fail if any are found
