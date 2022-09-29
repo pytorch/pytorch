@@ -42,7 +42,7 @@ class DiagnosticEngine:
         >>> engine = DiagnosticEngine()
 
         Step 4: Start a new diagnostic context.
-        >>> with engine.start_diagnostic_context(tool) as context:
+        >>> with engine.create_diagnostic_context(tool) as context:
 
         Step 5: Add diagnostics in your code.
         ...     context.diagnose(rules.rule1, infra.Level.ERROR)
