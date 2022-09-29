@@ -108,7 +108,7 @@ def collate(batch, *, collate_fn_map: Optional[Dict[Union[Type, Tuple[Type, ...]
             >>> # Extend `default_collate` by in-place modifying `default_collate_fn_map`
             >>> default_collate_fn_map.update({torch.Tensor: collate_tensor_fn})
 
-        Notes:
+        Note:
             Each collate function requires a positional argument for batch and a keyword argument
             for the dictionary of collate functions as `collate_fn_map`.
     """
