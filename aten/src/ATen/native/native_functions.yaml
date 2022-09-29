@@ -3557,6 +3557,10 @@
 #   dispatch:
 #     CUDA: cusparselt_linear
 
+- func: cusparselt_spmma(Tensor A, int m, int n, int k) -> float
+  dispatch:
+    CUDA: cusparselt_spmma
+
 - func: cusparselt_spmma2(Tensor A, int m, int n, int k) -> float
   dispatch:
     CUDA: cusparselt_spmma2

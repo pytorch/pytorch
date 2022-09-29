@@ -30,6 +30,7 @@ for output_channel, input_channel in zip(output_channels, input_channels):
 
     # cusparselt kernel benchmark of spmma2 -- timing is done in C++ backend
     cusparselt_time = torch.cusparselt_spmma2(torch.rand(2, 2, device='cuda'), output_channel, first_activation_dim, input_channel)
+    # cusparselt_time = torch.cusparselt_spmma(torch.rand(2, 2, device='cuda'), output_channel, first_activation_dim, input_channel)
     print(cusparselt_time, dense_time)
     print("output_channel =", output_channel, "; input_channel =", input_channel, "; speedup =", cusparselt_time / dense_time)
 
