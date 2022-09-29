@@ -126,6 +126,9 @@ void initPythonBindings(PyObject* module) {
       .def_readonly("tensor_metadata", &Inputs::tensor_metadata_);
 
   py::class_<TensorMetadata>(m, "_TensorMetadata")
+      .def_readonly("impl_ptr", &TensorMetadata::impl_)
+      .def_readonly("storage_data_ptr", &TensorMetadata::data_)
+      .def_readonly("id", &TensorMetadata::id_)
       .def_property_readonly(
           "layout",
           [](const TensorMetadata& metadata) {
@@ -133,12 +136,7 @@ void initPythonBindings(PyObject* module) {
                 torch::autograd::utils::wrap(metadata.layout_);
             return py::reinterpret_borrow<py::object>(layout_obj);
           })
-      .def_property_readonly("device", [](const TensorMetadata& metadata) {
-        // Have to pull a copy of the existing Python Device object.
-        PyObject* thp_device = THPDevice_New(
-            c10::Device(metadata.device_type_, metadata.device_index_));
-        return py::reinterpret_borrow<py::object>(thp_device);
-      });
+      .def_property_readonly("device", &TensorMetadata::device);
 
   using torch_op_t = ExtraFields<EventType::TorchOp>;
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")

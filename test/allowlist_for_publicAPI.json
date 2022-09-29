@@ -347,16 +347,6 @@
   "torch.cuda.amp.common": [
     "find_spec"
   ],
-  "torch.cuda.amp.grad_scaler": [
-    "Any",
-    "Dict",
-    "Enum",
-    "List",
-    "Optional",
-    "Tuple",
-    "amp_definitely_not_available",
-    "defaultdict"
-  ],
   "torch.cuda.nccl": [
     "init_rank",
     "is_available",
@@ -402,14 +392,6 @@
     "timedelta",
     "ProcessGroupMPI",
     "ProcessGroupNCCL"
-  ],
-  "torch.distributed.algorithms.model_averaging.utils": [
-    "Dict",
-    "Iterable",
-    "Iterator",
-    "ProcessGroup",
-    "Union",
-    "group"
   ],
   "torch.distributed.autograd": [
     "DistAutogradContext",
@@ -474,67 +456,10 @@
     "List",
     "timedelta"
   ],
-  "torch.distributed.fsdp.flatten_params_wrapper": [
-    "Any",
-    "Dict",
-    "Generator",
-    "Iterator",
-    "List",
-    "NamedTuple",
-    "Optional",
-    "ParamOffset",
-    "Sequence",
-    "SharedParamInfo",
-    "Tensor",
-    "Tuple",
-    "Union",
-    "accumulate"
-  ],
-  "torch.distributed.fsdp.utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "OrderedDict",
-    "Set",
-    "Tuple",
-    "Union"
-  ],
-  "torch.distributed.fsdp.wrap": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Generator",
-    "Optional",
-    "Set",
-    "Tuple",
-    "Type",
-    "cast"
-  ],
   "torch.distributed.nn": [
     "Function",
     "ReduceOp",
     "group"
-  ],
-  "torch.distributed.nn.api.remote_module": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Iterator",
-    "List",
-    "Mapping",
-    "Module",
-    "Optional",
-    "Parameter",
-    "RemovableHandle",
-    "Set",
-    "Tensor",
-    "Tuple",
-    "Type",
-    "TypeVar",
-    "Union",
-    "device",
-    "dtype"
   ],
   "torch.distributed.nn.functional": [
     "Function",
@@ -778,26 +703,6 @@
     "dispatch",
     "hashable",
     "isvar"
-  ],
-  "torch.fx.graph": [
-    "Any",
-    "Argument",
-    "Callable",
-    "Dict",
-    "FrozenSet",
-    "List",
-    "NamedTuple",
-    "Node",
-    "Optional",
-    "Set",
-    "Target",
-    "TransformCodeFunc",
-    "Tuple",
-    "Type",
-    "compatibility",
-    "contextmanager",
-    "dataclass",
-    "map_arg"
   ],
   "torch.fx.graph_module": [
     "Any",
@@ -1468,10 +1373,6 @@
   "torch.random": [
     "Generator"
   ],
-  "torch.return_types": [
-    "attr",
-    "pytree_register_structseq"
-  ],
   "torch.serialization": [
     "Any",
     "BinaryIO",
@@ -1645,18 +1546,6 @@
     "Serialization",
     "wrapper_singleton"
   ],
-  "torch.utils.cpp_extension": [
-    "ExtensionVersioner",
-    "FileBaton",
-    "GeneratedFileCleaner",
-    "List",
-    "Optional",
-    "TorchVersion",
-    "Tuple",
-    "Union",
-    "build_ext",
-    "get_hip_file_path"
-  ],
   "torch.utils.data": [
     "_DatasetKind",
     "argument_validation",
@@ -1680,26 +1569,6 @@
   "torch.utils.dlpack": [
     "Any",
     "to_dlpack"
-  ],
-  "torch.utils.hipify.hipify_python": [
-    "Dict",
-    "HipifyFinalResult",
-    "HipifyResult",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Mapping",
-    "Optional"
-  ],
-  "torch.utils.hooks": [
-    "Any",
-    "OrderedDict"
-  ],
-  "torch.utils.show_pickle": [
-    "Any",
-    "BinaryIO",
-    "IO",
-    "Union"
   ],
   "torch": [
     "BFloat16Storage",
