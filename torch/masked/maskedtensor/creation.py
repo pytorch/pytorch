@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-from .core import MaskedTensor, is_masked_tensor
+from .core import MaskedTensor
 
 __all__ = [
     "as_masked_tensor",

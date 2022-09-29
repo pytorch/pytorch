@@ -131,13 +131,13 @@ class TestBasics(TestCase):
     def test_diff_dim(self, device):
         data = torch.randn((3, 4, 5), device=device)
         mask = _create_random_mask((3, 4), device=device)
-        with self.assertRaisesRegex(ValueError, "data.dim\(\) must equal mask.dim\(\)"):
+        with self.assertRaisesRegex(ValueError, "data.dim\\(\\) must equal mask.dim\\(\\)"):
             masked_tensor(data, mask)
 
     def test_diff_sizes(self, device):
         data = torch.randn((3, 4), device=device)
         mask = _create_random_mask((3, 3), device=device)
-        with self.assertRaisesRegex(ValueError, "data.size\(\) must equal mask.size\(\)"):
+        with self.assertRaisesRegex(ValueError, "data.size\\(\\) must equal mask.size\\(\\)"):
             masked_tensor(data, mask)
 
     def test_grad_warning(self, device):
