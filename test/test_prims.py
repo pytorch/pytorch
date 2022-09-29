@@ -781,7 +781,7 @@ class TestDecomp(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     @dtypes(torch.float16, torch.float32)
-    def test_decomposition_data_dependent_control_flow(self, device, dtype):
+    def test_masked_fill_decomposition_under_nvprim_context(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
 
@@ -792,7 +792,7 @@ class TestDecomp(TestCase):
         def func(x, mask, y):
             return torch.masked_fill(x, mask, y)
 
-        # mimicing real use-case for TorchRefsNvfuserCapabilityMode context
+        # mimics real use-case for TorchRefsNvfuserCapabilityMode context
         gm = make_fx(func, decomposition_table={})(x, mask, y)
 
         with TorchRefsNvfuserCapabilityMode():

@@ -164,11 +164,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # implementations.
         # There're other ways to implement this functionality,
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
-        if (
-            func is None
-            and isinstance(orig_func, torch._ops.OpOverload)
-            and orig_func not in skip_decomposition_table
-        ):
+        if func is None and isinstance(orig_func, torch._ops.OpOverload):
             func = torch._decomp.decomposition_table.get(orig_func, None)
 
         if func is not None:
@@ -194,7 +190,11 @@ def _is_node_supported_nvfuser(node):
 
 def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     with torch_function_mode:
-        gm = get_isolated_graphmodule(func, args, kwargs)
+        try:
+            gm = get_isolated_graphmodule(func, args, kwargs)
+        except:
+            warn("get_isolated_graphmodule failed on ", func, args, kwargs)
+            return True
 
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
