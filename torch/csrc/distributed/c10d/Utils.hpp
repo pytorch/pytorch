@@ -88,6 +88,13 @@ inline int parseEnvVarInt(const char* envVarName) {
   return C10D_ENV_NOT_SET;
 }
 
+inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
+    int val = parseEnvVarInt(envVarName);
+    if (val == C10D_ENV_NOT_SET)
+      return defaultVal;
+    return val;
+}
+
 inline bool parseEnvVarFlag(const char* envVarName) {
     int val = parseEnvVarInt(envVarName);
     if (val == 1) {
