@@ -4,24 +4,26 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Any, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _message, _property_bag
 
 
 @dataclasses.dataclass
 class EdgeTraversal(object):
     """Represents the traversal of a single edge during a graph traversal."""
 
-    edge_id: Any = dataclasses.field(metadata={"schema_property_name": "edgeId"})
+    edge_id: str = dataclasses.field(metadata={"schema_property_name": "edgeId"})
     final_state: Any = dataclasses.field(
         default=None, metadata={"schema_property_name": "finalState"}
     )
-    message: Any = dataclasses.field(
+    message: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "message"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    step_over_edge_count: Any = dataclasses.field(
+    step_over_edge_count: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "stepOverEdgeCount"}
     )
 
