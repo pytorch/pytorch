@@ -423,6 +423,14 @@ void ValueCache::store<CallType::PyOptimizerCall>(
       }
     }
     std::vector<std::pair<std::string, void*>> states_;
+    py::dict state_handle = py::handle((PyObject*)key).attr("state");
+    for (auto& it : state_handle) {
+      TORCH_INTERNAL_ASSERT(
+          py::isinstance<py::dict>(it.second), "Expects a dict type element");
+      for (auto& state_elem : py::cast<py::dict>(it.second)) {
+        check_and_store(state_elem.first, state_elem.second, states_);
+      }
+    }
 
     cache.optimizer_data_[key] = {cls, params_, states_};
   }
