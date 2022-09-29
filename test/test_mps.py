@@ -7018,6 +7018,7 @@ class TestConsistency(TestCase):
     # by doing `EXPECTTEST_ACCEPT=1 python test_mps.py TestConsistencyCPU`
     # You most likely do NOT want to modify this manually
     ALLOWLIST_OP = {
+<<<<<<< HEAD
         '__getitem__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         '__radd__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         '__rand__': ['b8', 'i16', 'i32', 'i64', 'u8'],
@@ -7264,7 +7265,9 @@ class TestConsistency(TestCase):
         'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
+        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'native_layer_norm': ['f32'],
+        'nn.functional.layer_norm': ['f32']}
 
 
     ALLOWLIST_OP_GRAD = {
