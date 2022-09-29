@@ -137,7 +137,8 @@ void host_softmax(
   if (MaskedSoftMax) {
     TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");
     int64_t mask_type = mask_type_.value();
-    TORCH_CHECK((mask_type == 0) || (mask_type == 1), "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask)");
+    // If mask_type == 2, then mask_.sizes() must equal input_.sizes()
+    TORCH_CHECK((mask_type == 0) || (mask_type == 1) || (mask_type == 2), "Mask Type should be 0 (src_mask) or 1 (src_key_padding_mask), or 2 (default_mask)");
 
     // TODO: Add support for TxT src_mask
     TORCH_CHECK(mask_type != 0, "src_mask not currently supported on CPU");
