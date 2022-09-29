@@ -849,7 +849,7 @@ matmul_nested_helper(
 }
 
 Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
-  // self [N, n_heads, *, head_dim
+  // self [N, n_heads, *, head_dim]
   // mat2 [N, n_heads, head_dim, *]
   const auto self_ptr = get_nested_tensor_impl(self);
   const auto mat2_ptr = get_nested_tensor_impl(mat2);
@@ -1010,6 +1010,22 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
     self_dim_size,
     "second last dimension of mat2 has sizes",
     mat2_dim_size);
+
+  // use bmm inference-only fast path for [N, n_heads, *, head_dim] [N, n_heads, head_dim, *]
+  if (self_dim == 4 && mat2_dim == 4) {
+    auto n_heads = self_sizes.select(0, 1).select(0, 0).item<int64_t>();
+    auto self_first_dim_n_heads = at::all(self_sizes.select(1, 0) == n_heads).item<bool>();
+    auto mat2_first_dim_n_heads = at::all(mat2_sizes.select(1, 0) == n_heads).item<bool>();
+    if (self_first_dim_n_heads && mat2_first_dim_n_heads) {
+      TORCH_WARN(
+        "matmul(): using bmm fast path for nested matmul which is currently inference only.",
+        "This path is automatically turned on when inputs have shape self: [N, n_heads, *_1, *_2],"
+        " and mat2: [N, n_heads, *_2, *_3]"
+      );
+      return matmul_with_bmm_nested(self, mat2);
+    }
+  }
+
   // Construct output size from input sizes
   Tensor output_sizes = self_sizes.clone();
   // The last entry in every row of output_sizes should be last column of mat2_sizes
