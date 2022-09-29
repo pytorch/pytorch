@@ -57,7 +57,7 @@ inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITen
   return format.value();
 }
 
-TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
+TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -65,10 +65,10 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
   auto materialized = tensors.materialize();
 
   cat_check_no_zero_dim(materialized);
-  dim = at::legacy_cat_wrap_dim(dim, tensors);
+  dim = at::legacy_cat_wrap_dim(dim, materialized);
 
   // Checking names before the actual dimensions.
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
 
   TORCH_CHECK(
       materialized.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
@@ -367,7 +367,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 }
 
 TORCH_IMPL_FUNC(cat_out_cpu)
-(ITensorListRef tensors,
+(const ITensorListRef& tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
@@ -515,16 +515,16 @@ static void check_cat_sparse_dims(Tensor const &t,
             ", but tensor at position ", pos, " has ", t.sparse_dim(), ", ", t.dense_dim(), ".");
 }
 
-static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
+static Tensor cat_sparse_impl(const MaterializedITensorListRef& tensors, int64_t dim) {
   std::vector<Tensor> indices;
   std::vector<Tensor> values;
-  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
-  int64_t sparse_dim = tensors[0].sparse_dim();
-  int64_t dense_dim = tensors[0].dense_dim();
-  IntArrayRef sizes = tensors[0].sizes();
+  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].get().dim());
+  int64_t sparse_dim = tensors[0].get().sparse_dim();
+  int64_t dense_dim = tensors[0].get().dense_dim();
+  IntArrayRef sizes = tensors[0].get().sizes();
   if (wrapped < sparse_dim) {
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       indices.push_back(t._indices());
       values.push_back(t._values());
@@ -543,7 +543,7 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
     int64_t col = 0;
     int64_t cumulative_offset = 0;
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       int64_t this_piece_size = t._nnz();
       // cumulative_offset is zero for the first piece, so
       // don't waste time doing this operation unless i > 0.
@@ -559,10 +559,10 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
         idxs,
         vals,
         sizes_copy,
-        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
-        tensors[0].options().layout_opt(),
-        tensors[0].options().device_opt(),
-        tensors[0].options().pinned_memory_opt());
+        optTypeMetaToScalarType(tensors[0].get().options().dtype_opt()),
+        tensors[0].get().options().layout_opt(),
+        tensors[0].get().options().device_opt(),
+        tensors[0].get().options().pinned_memory_opt());
   }
   else {
     // Catting along a dense dimension requires us to create new values.
@@ -584,15 +584,19 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
     // The dimension in each tensor's values object that corresponds to the overall dimension along which we're catting.
     int64_t values_dim = wrapped - sparse_dim + 1;
     // The final size along the catted dimension.
-    const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
-      return l + r._values().size(values_dim);
-    });
-    auto zeros_sizes = tensors[0]._values().sizes().vec();
+    const int64_t total_size = std::accumulate(
+        tensors.begin(),
+        tensors.end(),
+        static_cast<int64_t>(0),
+        [values_dim](int64_t l, const Tensor& r) {
+          return l + r._values().size(values_dim);
+        });
+    auto zeros_sizes = tensors[0].get()._values().sizes().vec();
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       // dimension 0 of values corresponds to the number of values,
       // rather than to any logical dimension of the sparse tensor.
@@ -622,16 +626,17 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
         at::cat(idxs_pieces, 1),
         at::cat(vals_pieces),
         sizes_copy,
-        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
-        tensors[0].options().layout_opt(),
-        tensors[0].options().device_opt(),
-        tensors[0].options().pinned_memory_opt());
+        optTypeMetaToScalarType(tensors[0].get().options().dtype_opt()),
+        tensors[0].get().options().layout_opt(),
+        tensors[0].get().options().device_opt(),
+        tensors[0].get().options().pinned_memory_opt());
   }
 }
 
-Tensor cat_sparse(TensorList tensors, int64_t dim) {
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
-  auto result = cat_sparse_impl(tensors, at::legacy_cat_wrap_dim(dim, tensors));
+Tensor cat_sparse(const ITensorListRef& tensors, int64_t dim) {
+  auto materialized = tensors.materialize();
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
+  auto result = cat_sparse_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }

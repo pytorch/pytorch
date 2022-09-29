@@ -42,6 +42,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsViewGroup,
     OperatorName,
+    SchemaKind,
     Type,
     Variant,
 )
@@ -272,7 +273,7 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == "at::TensorList":
+            if arg.type in ("at::TensorList", "const at::ITensorListRef &"):
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -297,6 +298,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
+            assert (
+                f.func.kind() != SchemaKind.inplace
+            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
