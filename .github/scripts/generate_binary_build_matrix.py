@@ -90,7 +90,7 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     ret: List[Dict[str, str]] = []
     arches = ["cpu"]
     python_versions = FULL_PYTHON_VERSIONS
-    if os == "linux" or "windows":
+    if os == "linux" or os == "windows":
         arches += CUDA_ARCHES
     elif os == "macos-arm64":
         python_versions = list_without(python_versions, ["3.7"])
