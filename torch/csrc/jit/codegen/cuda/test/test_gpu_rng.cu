@@ -88,6 +88,7 @@ at::Tensor generate_uniform(int64_t size, at::ScalarType dtype) {
         0,
         at::cuda::getCurrentCUDAStream()>>>(
         result.data_ptr<float>(), size, rng_engine_inputs);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     TORCH_CHECK(dtype == kDouble);
     int64_t block = 128;
@@ -99,6 +100,7 @@ at::Tensor generate_uniform(int64_t size, at::ScalarType dtype) {
         0,
         at::cuda::getCurrentCUDAStream()>>>(
         result.data_ptr<double>(), size, rng_engine_inputs);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
   return result;
 }
