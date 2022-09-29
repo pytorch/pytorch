@@ -4,36 +4,50 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from typing_extensions import Literal
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _exception,
+    _location,
+    _message,
+    _property_bag,
+    _reporting_descriptor_reference,
+)
 
 
 @dataclasses.dataclass
 class Notification(object):
     """Describes a condition relevant to the tool itself, as opposed to being relevant to a target being analyzed by the tool."""
 
-    message: Any = dataclasses.field(metadata={"schema_property_name": "message"})
-    associated_rule: Any = dataclasses.field(
+    message: _message.Message = dataclasses.field(
+        metadata={"schema_property_name": "message"}
+    )
+    associated_rule: Optional[
+        _reporting_descriptor_reference.ReportingDescriptorReference
+    ] = dataclasses.field(
         default=None, metadata={"schema_property_name": "associatedRule"}
     )
-    descriptor: Any = dataclasses.field(
-        default=None, metadata={"schema_property_name": "descriptor"}
-    )
-    exception: Any = dataclasses.field(
+    descriptor: Optional[
+        _reporting_descriptor_reference.ReportingDescriptorReference
+    ] = dataclasses.field(default=None, metadata={"schema_property_name": "descriptor"})
+    exception: Optional[_exception.Exception] = dataclasses.field(
         default=None, metadata={"schema_property_name": "exception"}
     )
-    level: Any = dataclasses.field(
+    level: Literal["none", "note", "warning", "error"] = dataclasses.field(
         default="warning", metadata={"schema_property_name": "level"}
     )
-    locations: Any = dataclasses.field(
+    locations: Optional[List[_location.Location]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "locations"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    thread_id: Any = dataclasses.field(
+    thread_id: Optional[int] = dataclasses.field(
         default=None, metadata={"schema_property_name": "threadId"}
     )
-    time_utc: Any = dataclasses.field(
+    time_utc: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "timeUtc"}
     )
 

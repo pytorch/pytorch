@@ -4,23 +4,25 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import _property_bag
 
 
 @dataclasses.dataclass
 class ToolComponentReference(object):
     """Identifies a particular toolComponent object, either the driver or an extension."""
 
-    guid: Any = dataclasses.field(
+    guid: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "guid"}
     )
-    index: Any = dataclasses.field(
+    index: int = dataclasses.field(
         default=-1, metadata={"schema_property_name": "index"}
     )
-    name: Any = dataclasses.field(
+    name: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "name"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 

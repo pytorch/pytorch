@@ -4,23 +4,30 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
+from typing import List, Optional
+
+from torch.onnx._internal.diagnostics.infra.sarif_om import (
+    _edge,
+    _message,
+    _node,
+    _property_bag,
+)
 
 
 @dataclasses.dataclass
 class Graph(object):
     """A network of nodes and directed edges that describes some aspect of the structure of the code (for example, a call graph)."""
 
-    description: Any = dataclasses.field(
+    description: Optional[_message.Message] = dataclasses.field(
         default=None, metadata={"schema_property_name": "description"}
     )
-    edges: Any = dataclasses.field(
+    edges: Optional[List[_edge.Edge]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "edges"}
     )
-    nodes: Any = dataclasses.field(
+    nodes: Optional[List[_node.Node]] = dataclasses.field(
         default=None, metadata={"schema_property_name": "nodes"}
     )
-    properties: Any = dataclasses.field(
+    properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
 
