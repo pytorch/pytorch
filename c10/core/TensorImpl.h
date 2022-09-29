@@ -227,8 +227,11 @@ struct C10_API NamedTensorMetaInterface {
 };
 
 template <typename T>
+#if 0
 using strong_bool = strong::
     type<bool, T, strong::regular, strong::iostreamable, strong::boolean>;
+#endif
+using strong_bool = bool;
 
 // For ease of copy pasting
 #if 0
