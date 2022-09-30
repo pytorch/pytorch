@@ -26,11 +26,16 @@ if not TEST_CUDA:
 
 
 class TestExtendedCUDAIsAvail(TestCase):
+    SUBPROCESS_REMINDER_MSG = (
+        "\n REMINDER: Tests defined in test_cuda_nvml_based_avail.py must be run in a process "
+        "where there CUDA Driver API has not been initialized. Before further debugging, ensure you are either using "
+        "run_test.py or have added --subprocess to run each test in a different subprocess.")
 
     def setUp(self):
         super().setUp()
         torch.cuda.device_count.cache_clear()  # clear the lru_cache on this method before our test
-        del os.environ['PYTORCH_NVML_BASED_CUDA_CHK']
+        if os.getenv('PYTORCH_NVML_BASED_CUDA_CHK'):
+            del os.environ['PYTORCH_NVML_BASED_CUDA_CHK']
 
     @staticmethod
     def in_bad_fork_test() -> bool:
@@ -55,7 +60,7 @@ class TestExtendedCUDAIsAvail(TestCase):
             with multiprocessing.get_context("fork").Pool(1) as pool:
                 in_bad_fork = pool.apply(TestExtendedCUDAIsAvail.in_bad_fork_test)
             if os.getenv('PYTORCH_NVML_BASED_CUDA_CHK') == '1' and nvml_avail:
-                assert not in_bad_fork
+                self.assertFalse(in_bad_fork, TestExtendedCUDAIsAvail.SUBPROCESS_REMINDER_MSG)
             else:
                 assert in_bad_fork
 
