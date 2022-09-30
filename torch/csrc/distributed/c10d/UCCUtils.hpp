@@ -2,8 +2,8 @@
 
 #ifdef USE_C10D_UCC
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <ucc/api/ucc.h>
 
 namespace c10d {

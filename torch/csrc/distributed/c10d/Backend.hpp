@@ -10,12 +10,12 @@
 #include <ATen/ATen.h>
 #include <c10/macros/Macros.h>
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Work.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
-#include <c10d/debug.h>
-#include <c10d/sequence_num.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 constexpr auto kDefaultTimeout =
     std::chrono::milliseconds(30 * 60 * 1000);
