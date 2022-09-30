@@ -143,6 +143,7 @@ PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.NCCL,
     dist.Backend.GLOO,
     dist.Backend.MPI,
+    dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported with use_cuda=True
@@ -150,6 +151,7 @@ CUDA_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.GLOO,
     dist.Backend.MPI,
     dist.Backend.NCCL,
+    dist.Backend.UCC,
 ]
 
 # Allowlist of distributed backends where profiling is supported for p2p ops
@@ -157,6 +159,7 @@ SEND_RECV_PROFILING_SUPPORTED_BACKENDS = [
     dist.Backend.MPI,
     dist.Backend.GLOO,
     dist.Backend.NCCL,
+    dist.Backend.UCC,
 ]
 
 # Dummy NamedTuple data structures to test DDP support for NamedTuple types.
@@ -3828,6 +3831,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu(self):
             group, group_id, rank = self._init_global_test()
@@ -3845,6 +3849,7 @@ class DistributedTest:
 
         @sandcastle_skip_if(BACKEND == "mpi", "MPI doesn't support broadcast multigpu")
         @sandcastle_skip_if(BACKEND == "nccl", "CUDA all_reduce multigpu skipped for NCCL")
+        @sandcastle_skip_if(BACKEND == "ucc", "UCC all_reduce multigpu skipped")
         @skip_if_no_gpu
         def test_all_reduce_multigpu_complex(self):
             group, group_id, rank = self._init_global_test()

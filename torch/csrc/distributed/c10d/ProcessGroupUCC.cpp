@@ -957,7 +957,11 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     const char* prof_title) {
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
-      opType, torch_ucc_config.enable_profiling ? prof_title : nullptr, logger);
+      opType, prof_title, inputTensors, logger);
+
+  if (opType == OpType::RECV) {
+    work->sourceRank_ = coll.root;
+  }
 
   RECORD_COMMS_TRACE(
       logger->trace_generator,
@@ -1057,7 +1061,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
         tensor.device(),
         inputTensors,
         outputTensors[0],
-        "ucc:allgatherv");
+        "ucc:all_gather");
   } else {
     WorkData* data = new WorkData();
     std::vector<at::Tensor> flat_output(outputTensors.size());
@@ -1189,7 +1193,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce(
       tensor.device(),
       tensors,
       tensors,
-      "ucc:allreduce");
+      "ucc:all_reduce");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce_coalesced(
