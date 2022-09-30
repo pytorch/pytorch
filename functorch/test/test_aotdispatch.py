@@ -886,7 +886,6 @@ symbolic_aot_autograd_failures = {
     xfail('nanmean', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nanmedian', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('nansum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('native_layer_norm', ''),  # could not find kernel
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_avg_pool2d', ''),  # aten._adaptive_avg_pool2d_backward.default - couldn't ...
@@ -930,7 +929,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.interpolate', 'trilinear'),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.kl_div', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.l1_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.layer_norm', ''),  # could not find kernel
     xfail('nn.functional.linear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.local_response_norm', ''),  # aten.fill.Scalar - couldn't find symbolic meta functio...
     xfail('nn.functional.max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
