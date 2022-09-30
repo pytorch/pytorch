@@ -5128,10 +5128,10 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
                   kwargs={'path': [(0, 2), (0, 1), (0, 1)]}))
     inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                   args=('jk,ikl,ijk,lm->mk',),
-                  kwargs={'path': True}))
+                  kwargs={'path': 'use_opt_einsum'}))
     inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                   args=('jk,ikl,ijk,lm->mk',),
-                  kwargs={'path': False}))
+                  kwargs={'path': 'skip_path_calculation'}))
     return inputs
 
 

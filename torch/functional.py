@@ -255,7 +255,7 @@ def einsum(*args: Any,
 
         Using opt_einsum to compute an optimal path does incur a constant amount of performance overhead. One can use
         the `path` kwarg to specify an already optimized path by passing in a List or to simply bypass the
-        calculation by passing in `False`. See the `path` keyword argument below for more details.
+        calculation by passing in `skip_path_calculation`. See the `path` keyword argument below for more details.
 
     .. note::
 
