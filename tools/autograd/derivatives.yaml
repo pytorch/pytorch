@@ -1393,7 +1393,7 @@
     AutogradNestedTensor:
       self: _nested_select_backward(grad, self, dim, index)
 
-- name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
+- name: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, int index) -> Tensor
   grad_output: grad.select(dim, index)
   result: auto_linear
 

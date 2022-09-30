@@ -214,6 +214,7 @@ symint:
   - new_empty_strided
   - embedding_dense_backward
   - _reshape_alias_copy
+  - select_backward
 autograd:
   - max_pool3d
   - native_group_norm

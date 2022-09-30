@@ -466,9 +466,9 @@ at::Tensor LazyNativeFunctions::pixel_unshuffle(
   return at::functionalization::functionalize_aten_op<ATEN_OP(
       pixel_unshuffle)>::call(self, downscale_factor);
 }
-at::Tensor LazyNativeFunctions::select_backward(
+at::Tensor LazyNativeFunctions::select_backward_symint(
     const at::Tensor& grad_output,
-    at::IntArrayRef input_sizes,
+    c10::SymIntArrayRef input_sizes,
     int64_t dim,
     int64_t index) {
   return at::functionalization::functionalize_aten_op<ATEN_OP(
