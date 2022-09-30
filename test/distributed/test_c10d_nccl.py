@@ -815,7 +815,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # anticpate an error
         with self.assertRaisesRegex(
-            RuntimeError, "input tensor must be the same type as the outut tensor."
+            RuntimeError, "input tensor must be the same type as the output tensor."
         ):
             tensor = torch.tensor([self.rank], dtype=torch.float).cuda(local_device_id)
             output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(
