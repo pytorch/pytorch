@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.ao.nn.intrinsic as nni
+import torch.nn.intrinsic as nni
 import torch.nn.functional as F
 from torch.nn import init
 from torch.nn.parameter import Parameter

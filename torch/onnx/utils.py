@@ -38,7 +38,6 @@ import torch.serialization
 from torch import _C
 from torch.onnx import (  # noqa: F401
     _constants,
-    _deprecation,
     _exporter_states,
     _patch_torch,
     errors,
@@ -46,7 +45,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import _beartype, registration
 
 __all__ = [
     "is_in_onnx_export",
@@ -921,7 +920,12 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> Tuple[_C.Graph, List[_C.IValue], Optional[Any], Optional[_C.ScriptModule]]:
+) -> Tuple[
+    _C.Graph,
+    List[_C.IValue],
+    Optional[Any],
+    Optional[Union[_C.ScriptModule, _C.ScriptFunction]],
+]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         _check_flatten_did_not_remove(args, flattened_args)
@@ -1207,8 +1211,8 @@ def export_to_pretty_string(
         opset_version = _constants.ONNX_DEFAULT_OPSET
     if custom_opsets is None:
         custom_opsets = {}
-    GLOBALS.export_onnx_opset_version = opset_version
-    GLOBALS.operator_export_type = operator_export_type
+    symbolic_helper._set_opset_version(opset_version)
+    symbolic_helper._set_operator_export_type(operator_export_type)
 
     with exporter_context(model, training, verbose):
         val_keep_init_as_ip = _decide_keep_init_as_input(
@@ -1247,68 +1251,42 @@ def export_to_pretty_string(
 
 @_beartype.beartype
 def unconvertible_ops(
-    model,
-    args,
-    training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
-    opset_version: Optional[int] = None,
-) -> Tuple[_C.Graph, List[str]]:
-    """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
-
-    The list is approximated because some ops may be removed during the conversion
-    process and don't need to be converted. Some other ops may have partial support
-    that will fail conversion with particular inputs. Please open a Github Issue
-    for op support requests.
+    model, args, training=_C_onnx.TrainingMode.EVAL, opset_version=None
+):
+    r"""
+    Converts the model with operator_export_type set to
+    torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
+    all the ops that are not supported/implemented by the exporter.
 
     Args:
-        model: Same as the `model` parameter in :func:`torch.onnx.export`.
-        args: Same as the `args` parameter in :func:`torch.onnx.export`.
-        training: Same as the `training` parameter in :func:`torch.onnx.export`.
-        opset_version: Same as the `opset_version` parameter in :func:`torch.onnx.export`.
+        model: Same as corresponding arg to torch.onnx.export.
+        args: Same as corresponding arg to torch.onnx.export.
+        training: Same as corresponding arg to torch.onnx.export.
+        opset_version: Same as corresponding arg to torch.onnx.export.
 
     Returns:
-        The JIT graph and a list of unconvertible ops in the format of "domain::op".
+        Tuple[torch._C.Graph, List[str]], where the list includes the names
+        of the unconvertible ops.
     """
 
     opset_version = opset_version or _constants.ONNX_DEFAULT_OPSET
-    GLOBALS.export_onnx_opset_version = opset_version
-
-    try:
-        with exporter_context(model, training, verbose=False):
-            # Create a mostly clean JIT graph that contains the plain aten and
-            # other ops we can check with the symbolic registry.
-            # NOTE: We don't want to actually convert any ops to ONNX or run any
-            # symbolic functions because there is a higher chance that a pass
-            # fails or an unconvertible op messes up the graph during ONNX conversion.
-            # This way we can always generate a list just by looking at the names
-            # of the ops in the graph.
-            args = _decide_input_format(model, args)
-            model = _pre_trace_quant_model(model, args)
-            graph, _, _, module = _create_jit_graph(model, args)
-            _C._jit_pass_inline(graph)
-            _C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
-            _C._jit_pass_erase_number_types(graph)
-            _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
-    except Exception as e:
-        raise errors.OnnxExporterError(
-            "Failed to discover unconvertible ops because of errors during the JIT graph "
-            "generation process."
-        ) from e
-
-    unsupported_ops = []
+    symbolic_helper._set_opset_version(opset_version)
+    # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
+    # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
+    with exporter_context(model, training, False):
+        args = _decide_input_format(model, args)
+        graph, params_dict, torch_out = _model_to_graph(
+            model,
+            args,
+            # So that if an op connot be converted to ONNX, it will be kept
+            # as-is rather than cause a failure.
+            operator_export_type=_C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH,
+        )
+    unsupported_ops = list()
+    supported_namespaces = {"onnx", "prim", "quantized"}
     for node in graph.nodes():
-        domain_op = node.kind()
-        if domain_op.startswith("onnx::") or domain_op.startswith("prim::"):
-            # We consider onnx and prim ops as supported ops, even though some "prim"
-            # ops are not implemented as symbolic functions, because they may be
-            # eliminated in the conversion passes. Users may still see errors caused
-            # by prim ops even though they don't show up in the list.
-            continue
-        if not registration.registry.is_registered_op(domain_op, opset_version):
-            # We consider all registered ops supported, even though some of them are
-            # only partially supported, because there is not yet a good way to check
-            # if an op is fully supported.
-            # TODO(justinchuby): Create a way to check if an op is fully supported.
-            unsupported_ops.append(domain_op)
+        if node.kind().split(":")[0] not in supported_namespaces:
+            unsupported_ops.append(node.kind())
     return graph, unsupported_ops
 
 
@@ -1427,8 +1405,6 @@ def _export(
     onnx_shape_inference=True,
     export_modules_as_functions=False,
 ):
-    assert GLOBALS.in_onnx_export is False
-
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
@@ -1439,35 +1415,21 @@ def _export(
             "unwrap model from torch.nn.DataParallel. Try "
             "torch.onnx.export(model.module, ...)"
         )
-
-    GLOBALS.onnx_shape_inference = onnx_shape_inference
-
-    if opset_version is None:
-        opset_version = _constants.ONNX_DEFAULT_OPSET
-
-    if export_modules_as_functions and opset_version < 15:
-        raise ValueError(
-            "`export_modules_as_functions` is not supported for `opset_version` < 15."
-            "This is because `opset_version` < 15 implies IR version < 8, which means "
-            "no local function support. "
-        )
-    if not operator_export_type:
-        if _C_onnx._CAFFE2_ATEN_FALLBACK:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
-        else:
-            operator_export_type = _C_onnx.OperatorExportTypes.ONNX
-
-    # By default, training=TrainingMode.EVAL,
-    # which is good because running a model in training mode could result in
-    # internal buffers getting updated, dropout getting applied, etc.
-    # If you really know what you're doing, you can turn
-    # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
-    # (to preserve whatever the original training mode was.)
-    GLOBALS.export_onnx_opset_version = opset_version
-    GLOBALS.operator_export_type = operator_export_type
-
+    assert GLOBALS.in_onnx_export is False
+    GLOBALS.in_onnx_export = True
     try:
-        GLOBALS.in_onnx_export = True
+
+        symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
+
+        if opset_version is None:
+            opset_version = _constants.ONNX_DEFAULT_OPSET
+
+        if export_modules_as_functions and opset_version < 15:
+            raise ValueError(
+                "`export_modules_as_functions` is not supported for `opset_version` < 15."
+                "This is because `opset_version` < 15 implies IR version < 8, which means "
+                "no local function support. "
+            )
 
         module_typenames_to_export_as_functions: Set[str] = set()
         if isinstance(model, (torch.nn.Module, torch.jit.ScriptModule)):
@@ -1475,6 +1437,20 @@ def _export(
                 model, export_modules_as_functions
             )
 
+        if not operator_export_type:
+            if _C_onnx._CAFFE2_ATEN_FALLBACK:
+                operator_export_type = _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK
+            else:
+                operator_export_type = _C_onnx.OperatorExportTypes.ONNX
+
+        # By default, training=TrainingMode.EVAL,
+        # which is good because running a model in training mode could result in
+        # internal buffers getting updated, dropout getting applied, etc.
+        # If you really know what you're doing, you can turn
+        # training=TrainingMode.TRAINING or training=TrainingMode.PRESERVE,
+        # (to preserve whatever the original training mode was.)
+        symbolic_helper._set_opset_version(opset_version)
+        symbolic_helper._set_operator_export_type(operator_export_type)
         with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(
                 keep_initializers_as_inputs, operator_export_type, opset_version
@@ -1693,8 +1669,8 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
 
 
 @_beartype.beartype
-def _add_block(node: _C.Node) -> _C.Block:
-    return node.addBlock()
+def _add_block(node: _C.Node):
+    return node.addBlock()  # type: ignore[attr-defined]
 
 
 @_beartype.beartype
@@ -1703,8 +1679,9 @@ def _add_input_to_block(block: _C.Block):
 
 
 @_beartype.beartype
-def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
-    return block.registerOutput(value)
+def _add_output_to_block(block: _C.Block, value: _C.Value):
+    new_output = block.registerOutput(value)  # type: ignore[attr-defined]
+    return new_output
 
 
 @_beartype.beartype
@@ -1722,7 +1699,7 @@ def _should_aten_fallback(
 
 
 @_beartype.beartype
-def _need_symbolic_context(symbolic_fn: Callable) -> bool:
+def _need_symbolic_context(symbolic_fn) -> bool:
     """Checks if the first argument to symbolic_fn is annotated as type `torch.onnx.SymbolicContext`."""
     params = tuple(inspect.signature(symbolic_fn).parameters.values())
     # When the annotation is postpone-evaluated, the annotation is a string
@@ -1738,32 +1715,6 @@ def _need_symbolic_context(symbolic_fn: Callable) -> bool:
 
 
 @_beartype.beartype
-def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
-    """Decorator that provides the symbolic context to the symbolic function if needed."""
-    if _need_symbolic_context(symbolic_fn):
-
-        # TODO(justinchuby): Update the module name of GraphContext when it is public
-        warnings.warn(
-            "The first argument to symbolic functions is deprecated in 1.13 and will be "
-            "removed in the future. Please annotate treat the first argument (g) as GraphContext "
-            "and use context information from the object instead.",
-            category=FutureWarning,
-        )
-
-        def wrapper(graph_context: jit_utils.GraphContext, *args, **kwargs):
-            symbolic_context = _exporter_states.SymbolicContext(
-                params_dict=graph_context.params_dict,
-                env=graph_context.env,
-                cur_node=graph_context.original_node,
-                onnx_block=graph_context.block,
-            )
-            return symbolic_fn(symbolic_context, graph_context, *args, **kwargs)
-
-        return wrapper
-    return symbolic_fn
-
-
-@_beartype.beartype
 def _get_aten_op_overload_name(n: _C.Node) -> str:
 
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
@@ -1775,9 +1726,9 @@ def _get_aten_op_overload_name(n: _C.Node) -> str:
 
 @_beartype.beartype
 def _run_symbolic_function(
-    graph: _C.Graph,
+    g: _C.Graph,
     block: _C.Block,
-    node: _C.Node,
+    n: _C.Node,
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -1794,7 +1745,7 @@ def _run_symbolic_function(
     opset_version = GLOBALS.export_onnx_opset_version
 
     # See Note [Export inplace]
-    node_kind = node.kind()
+    node_kind = n.kind()
     if node_kind.endswith("_"):
         # Treat relu_ -> relu; add_ -> add etc.
         ns_op_name = node_kind[:-1]
@@ -1802,15 +1753,6 @@ def _run_symbolic_function(
         ns_op_name = node_kind
 
     namespace, op_name = ns_op_name.split("::")
-
-    graph_context = jit_utils.GraphContext(
-        graph=graph,
-        block=block,
-        opset=opset_version,
-        original_node=node,
-        params_dict=_params_dict,
-        env=env,
-    )
 
     try:
         # Caffe2-specific: Quantized op symbolics are registered for opset 9 only.
@@ -1829,29 +1771,32 @@ def _run_symbolic_function(
         if symbolic_function_group is not None:
             symbolic_fn = symbolic_function_group.get(opset_version)
             if symbolic_fn is not None:
-                attrs = {
-                    k: symbolic_helper._node_get(node, k) for k in node.attributeNames()
-                }
-                return symbolic_fn(graph_context, *inputs, **attrs)
+                attrs = {k: symbolic_helper._node_get(n, k) for k in n.attributeNames()}
+                if _need_symbolic_context(symbolic_fn):
+                    # TODO(justinchuby): Refactor how we check for the need of the symbolic context
+                    ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
+                    return symbolic_fn(ctx, g, *inputs, **attrs)
+                # PythonOp symbolic need access to the node to resolve the name conflict,
+                # this is inconsistent with regular op symbolic.
+                if op_name == "PythonOp":
+                    inputs = (n, *inputs)
+                return symbolic_fn(g, *inputs, **attrs)
 
         attrs = {
-            k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
-            for k in node.attributeNames()
+            k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+            for k in n.attributeNames()
         }
         if namespace == "onnx":
             # Clone node to trigger ONNX shape inference
-            return graph_context.op(op_name, *inputs, **attrs, outputs=node.outputsSize())  # type: ignore[attr-defined]
+            return g.op(op_name, *inputs, **attrs, outputs=n.outputsSize())  # type: ignore[attr-defined]
 
         if _should_aten_fallback(ns_op_name, opset_version, operator_export_type):
             # Direct ATen export requested
-            outputs = node.outputsSize()
+            outputs = n.outputsSize()
             attrs["outputs"] = outputs
             # `overload_name` is set for non-Caffe2 builds only
-            return graph_context.at(
-                op_name,
-                *inputs,
-                overload_name=_get_aten_op_overload_name(node),
-                **attrs,
+            return g.at(  # type: ignore[attr-defined]
+                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
 
         raise errors.UnsupportedOperatorError(
@@ -1872,14 +1817,11 @@ def _run_symbolic_function(
         ):
             # Emit ATen op for non-Caffe2 builds when `operator_export_type==ONNX_ATEN_FALLBACK`
             attrs = {
-                k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
-                for k in node.attributeNames()
+                k + "_" + n.kindOf(k)[0]: symbolic_helper._node_get(n, k)
+                for k in n.attributeNames()
             }
-            return graph_context.at(
-                op_name,
-                *inputs,
-                overload_name=_get_aten_op_overload_name(node),
-                **attrs,
+            return g.at(  # type: ignore[attr-defined]
+                op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
         raise
     except TypeError as e:
@@ -1932,13 +1874,10 @@ def register_custom_op_symbolic(
 
     _verify_custom_op_name(symbolic_name)
 
-    registration.custom_onnx_symbolic(
-        symbolic_name,
-        opset_version,
-        decorate=[
-            _symbolic_context_handler,
-        ],
-    )(symbolic_fn)
+    versions = range(
+        max(_constants.ONNX_MIN_OPSET, opset_version), _constants.ONNX_MAX_OPSET + 1
+    )
+    registration.custom_onnx_symbolic(symbolic_name, versions)(symbolic_fn)
 
 
 @_beartype.beartype
@@ -1957,7 +1896,9 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
 
     _verify_custom_op_name(symbolic_name)
 
-    registration.registry.unregister(symbolic_name, opset_version)
+    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
+        if version >= opset_version:
+            registration.registry.unregister(symbolic_name, version)
 
 
 @_beartype.beartype

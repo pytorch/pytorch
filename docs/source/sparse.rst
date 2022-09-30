@@ -470,7 +470,7 @@ ncols, *densesize)`` where ``len(batchsize) == B`` and
 
    The batches of sparse CSR tensors are dependent: the number of
    specified elements in all batches must be the same. This somewhat
-   artificial constraint allows efficient storage of the indices of
+   artifical constraint allows efficient storage of the indices of
    different CSR batches.
 
 .. note::

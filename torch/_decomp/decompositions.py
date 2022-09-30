@@ -362,6 +362,20 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
+@register_decomposition(aten.huber_loss)
+@pw_cast_for_opmath
+def huber_loss(
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    delta: float = 1.0,
+) -> Tensor:
+    assert delta > 0, "huber_loss does not support non-positive values for delta."
+    z = (self - target).abs()
+    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
+    return apply_loss_reduction(loss, reduction)
+
+
 @register_decomposition(aten.huber_loss_backward)
 @pw_cast_for_opmath
 def huber_loss_backward(
@@ -821,9 +835,6 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 
 @register_decomposition(aten._softmax)
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
-    # eager softmax returns a contiguous tensor. Ensure that decomp also returns
-    # a contiguous tensor.
-    x = x.contiguous()
     if half_to_float:
         assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
@@ -840,9 +851,6 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 @register_decomposition(aten._log_softmax)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
-    # eager log_softmax returns a contiguous tensor. Ensure that decomp also
-    # returns a contiguous tensor.
-    x = x.contiguous()
     if half_to_float:
         assert x.dtype == torch.half
     computation_dtype, result_dtype = utils.elementwise_dtypes(
@@ -1230,8 +1238,8 @@ def native_batch_norm(
             running_var.copy_(momentum * unbiased_var + (1 - momentum) * running_var)
     else:
         assert running_mean is not None and running_var is not None
-        running_mean = running_mean.to(dtype=computation_dtype, copy=True)
-        running_var = running_var.to(dtype=computation_dtype, copy=True)
+        running_mean = running_mean.to(dtype=computation_dtype)
+        running_var = running_var.to(dtype=computation_dtype)
         mean = running_mean
         invstd = 1 / (torch.sqrt(running_var + eps))
         # Very annoying inconsistency where CPU and CUDA give different shapes

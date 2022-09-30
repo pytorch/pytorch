@@ -445,8 +445,7 @@ int register_linear_params() {
                 bias = std::move(std::get<1>(state));
 
 #ifdef USE_FBGEMM
-                if (at::globalContext().qEngine() == at::QEngine::FBGEMM ||
-                    at::globalContext().qEngine() == at::QEngine::X86) {
+                if (at::globalContext().qEngine() == at::QEngine::FBGEMM) {
                   if (weight.scalar_type() == at::kQInt8) {
                     return PackedLinearWeight::prepack(
                         std::move(weight), std::move(bias));

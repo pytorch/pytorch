@@ -394,79 +394,6 @@ class TestAutograd(TestCase):
                 # if forward AD ends up being implemented for torch.igamma, choose a different op
                 torch.igamma(dual_x, dual_x)
 
-    def test_will_engine_execute_node(self):
-        counter = [0]
-
-        class MyFunction(Function):
-            @staticmethod
-            def forward(ctx, x):
-                return x * 2
-
-            @staticmethod
-            def backward(ctx, gO):
-                return gO * 2
-
-        def get_grad_fn(t):
-            if t.requires_grad and t.grad_fn is None:
-                return t.clone().grad_fn.next_functions[0][0]
-            else:
-                return t.grad_fn
-
-        a = torch.randn(2, 3, 4, requires_grad=True)
-        a2 = torch.randn(2, 3, 4, requires_grad=True)
-        b = a * a2
-        b2 = b.cos()
-        c = MyFunction.apply(b)
-
-        should_execute = list(map(get_grad_fn, (a, b, c)))
-        should_not_execute = list(map(get_grad_fn, (a2, b2)))
-
-        def fn(x):
-            counter[0] += 1
-
-            for g in should_execute:
-                self.assertTrue(torch._C._will_engine_execute_node(g))
-
-            for g in should_not_execute:
-                self.assertFalse(torch._C._will_engine_execute_node(g))
-
-        b.register_hook(fn)
-        c.register_hook(fn)
-
-        # .backward(inputs=) is OK
-        out = c.sum()
-        torch.autograd.backward(out, inputs=(a,), retain_graph=True)
-        self.assertEqual(counter[0], 2)
-
-        # .backward() is OK
-        should_execute = list(map(get_grad_fn, (a, a2, b, c)))
-        should_not_execute = list(map(get_grad_fn, (b2,)))
-        torch.autograd.backward(out, retain_graph=True)
-
-        # .grad is NOT OK when leaf is passed (this is the current state, subject to change)
-        with self.assertRaisesRegex(RuntimeError, "are currently running autograd.grad()"):
-            torch.autograd.grad(out, (a,))
-
-        # .grad is OK when non-leaf is passed
-        a = torch.randn(1, 2, 3, requires_grad=True) * 2
-        b = a * 2
-
-        def fn(x):
-            # Check a non-leaf
-            counter[0] += 1
-            self.assertTrue(torch._C._will_engine_execute_node(b.grad_fn))
-        b.register_hook(fn)
-        counter[0] = 0
-        torch.autograd.grad(b.sum(), (a,))
-        self.assertEqual(counter[0], 1)
-
-        # Verify other errors are raised
-        with self.assertRaisesRegex(RuntimeError, "during the backward pass"):
-            torch._C._will_engine_execute_node(out.grad_fn)
-
-        with self.assertRaisesRegex(RuntimeError, "expects an grad_fn"):
-            torch._C._will_engine_execute_node(out)
-
     def test_accumulate_grad(self):
         grad_output = torch.ones(5, 5)
 
@@ -3569,12 +3496,12 @@ class TestAutograd(TestCase):
         assert out_shape == torch.Size([10, 5])
         assert grad_shape == torch.Size([5, 10])
 
-        out = torch.nested.as_nested_tensor([
+        out = torch.nested_tensor([
             torch.randn(10, 5, requires_grad=True),
             torch.randn(10, 5, requires_grad=True),
             torch.randn(10, 5, requires_grad=True)]
         )
-        grad = torch.nested.as_nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
+        grad = torch.nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
         out_shape, grad_shape = _calculate_shape(out, grad, False)
 
         assert torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]))
@@ -6718,32 +6645,6 @@ for shape in [(1,), ()]:
         self.assertEqual(2 * 5 * 5 * a, a.grad)
         self.assertEqual(2 * 3 * 3 * b, b.grad)
 
-    def test_disabling_saved_tensor_hooks(self):
-        with torch.autograd.graph._disable_saved_tensors_hooks("error message"):
-            with self.assertRaisesRegex(RuntimeError, "error message"):
-                with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
-                    pass
-
-        self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
-
-        with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
-            with self.assertRaisesRegex(RuntimeError, "error message"):
-                with torch.autograd.graph._disable_saved_tensors_hooks("error message"):
-                    pass
-
-        self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
-
-    def test_disabling_saved_tensor_hooks_nested(self):
-        with torch.autograd.graph._disable_saved_tensors_hooks("outer"):
-            with self.assertRaisesRegex(RuntimeError, "inner"):
-                with torch.autograd.graph._disable_saved_tensors_hooks("inner"):
-                    with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
-                        pass
-
-            self.assertFalse(torch._C._autograd._saved_tensors_hooks_is_enabled())
-
-        self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
-
     def test_save_on_cpu_and_checkpoint(self):
         a = torch.randn(2, 2, requires_grad=True)
 
@@ -9204,12 +9105,12 @@ class TestAutogradMultipleDispatch(TestCase):
         # test registered AutogradNestedTensor formula
         a = torch.arange(6, dtype=torch.float, device=device).reshape(2, 3).requires_grad_(True)
         b = torch.arange(8, dtype=torch.float, device=device).reshape(2, 4).requires_grad_(True)
-        nt = torch.nested.as_nested_tensor([a, b], dtype=torch.float, device=device)
+        nt = torch.nested_tensor([a, b], dtype=torch.float, device=device)
 
         nt_out = torch._test_autograd_multiple_dispatch(nt)
         c = torch.randn(2, 3, device=device)
         d = torch.randn(2, 4, device=device)
-        nt_grad = torch.nested.nested_tensor([c, d], dtype=torch.float, device=device)
+        nt_grad = torch.nested_tensor([c, d], dtype=torch.float, device=device)
         nt_out.backward(nt_grad)
 
         # bogus gradient for AutogradNestedTensor is grad * grad
@@ -9230,12 +9131,12 @@ class TestAutogradMultipleDispatch(TestCase):
         # test registered AutogradNestedTensor formula
         a = torch.arange(6, dtype=torch.float, device=device).reshape(2, 3).requires_grad_(True)
         b = torch.arange(8, dtype=torch.float, device=device).reshape(2, 4).requires_grad_(True)
-        nt = torch.nested.as_nested_tensor([a, b], dtype=torch.float, device=device)
+        nt = torch.nested_tensor([a, b], dtype=torch.float, device=device)
 
         nt_out = torch._test_autograd_multiple_dispatch(nt, True)
         c = torch.randn(2, 3, device=device)
         d = torch.randn(2, 4, device=device)
-        nt_grad = torch.nested.nested_tensor([c, d], dtype=torch.float, device=device)
+        nt_grad = torch.nested_tensor([c, d], dtype=torch.float, device=device)
         nt_out.backward(nt_grad)
 
         # bogus gradient for AutogradNestedTensor is grad * grad + grad
@@ -9300,9 +9201,9 @@ class TestAutogradMultipleDispatch(TestCase):
         foo(inp).backward()
 
         # sum's input is saved for Nested Tensors
-        nt = torch.nested.nested_tensor([torch.rand(2), torch.rand(2)], device=device, requires_grad=True)
+        nt = torch.nested_tensor([torch.rand(2), torch.rand(2)], device=device).requires_grad_()
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
-            foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)], device=device))
+            foo(nt).backward(torch.nested_tensor([torch.rand(1), torch.rand(1)], device=device))
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence

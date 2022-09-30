@@ -806,9 +806,8 @@ class TestSymbolicTracing(TestCase):
         shape_env = self._test_dynamic(f, [(3, 4)], test_inputs)
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(4, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(25, 5)))
-        # TODO: There should eventually be guards for contiguity, but they're
-        # not currently being done yet
-        assert len(shape_env.guards) == 1, "\n" + shape_env.format_guards()
+        # one guard for size/stride contiguity, and one substantive guard
+        assert len(shape_env.guards) == 2, "\n" + shape_env.format_guards()
 
     def test_binary_broadcast(self):
         def f(a, b):
@@ -903,16 +902,14 @@ def forward(self, a_1):
         def f(a, b):
             return a * b
 
-        # NB: Numbers are carefully chosen to avoid duck shaping from applying
-
-        fx_g = _trace(f, (5, 6), (5, 6))
+        fx_g = _trace(f, (5, 5), (5, 5))
         self._assert_no_guards(fx_g, 2)
 
-        fx_g = _trace(f, (5, 6, 7), (5, 6, 7))
+        fx_g = _trace(f, (5, 5, 5), (5, 5, 5))
         self._assert_no_guards(fx_g, 3)
 
-        fx_g = _trace(f, (5, 1), (1, 6))
-        self._assert_no_guards(fx_g, 2)
+        fx_g = _trace(f, (5, 1), (1, 5))
+        self._assert_no_guards(fx_g, 3)
 
         def f(a, b, c, d):
             a = a + b
@@ -939,7 +936,7 @@ def forward(self, a_1):
         fx_g = _trace(f, (4, 2), 8)
         self._assert_no_guards(fx_g, 2)
 
-        fx_g = _trace(f, (4, 2), (8, 5))
+        fx_g = _trace(f, (4, 2), (8, 4))
         self._assert_no_guards(fx_g, 3)
 
         fx_g = _trace(f, (2, 3, 4), 24)

@@ -844,7 +844,7 @@ class TestTransformers(NNTestCase):
 
         aligned_mask = torch.Tensor([[0, 0, 1]]).to(torch.bool)
         not_aligned_mask = torch.Tensor([[1, 0, 1]]).to(torch.bool)
-        nested_tensor_return_value = torch.nested.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
+        nested_tensor_return_value = torch.nested_tensor([torch.ones((2, 2), dtype=torch.float)])
         tensor_return_value = torch.ones((1, 3, 2), dtype=torch.float)
 
         # Left aligned mask results in sparsity fastpath

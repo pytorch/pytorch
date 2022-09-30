@@ -17,7 +17,6 @@ Function Transforms
     jacrev
     jacfwd
     hessian
-    functionalize
 
 Utilities for working with torch.nn.Modules
 -------------------------------------------

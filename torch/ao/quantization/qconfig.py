@@ -229,7 +229,7 @@ def get_default_qconfig(backend='fbgemm', version=0):
 
     Args:
       * `backend`: a string representing the target backend. Currently supports `fbgemm`,
-        `qnnpack`, `onednn` and `x86`.
+        `qnnpack` and `onednn`.
 
     Return:
         qconfig
@@ -243,9 +243,6 @@ def get_default_qconfig(backend='fbgemm', version=0):
                               weight=default_weight_observer)
         elif backend == 'onednn':
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
-                              weight=default_per_channel_weight_observer)
-        elif backend == 'x86':
-            qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                               weight=default_per_channel_weight_observer)
         else:
             qconfig = default_qconfig
@@ -303,7 +300,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
 
     Args:
       * `backend`: a string representing the target backend. Currently supports `fbgemm`,
-        `qnnpack`, `onednn` and `x86`.
+        `qnnpack` and `onednn`.
       * `version`: version, for backwards compatibility. Can be `None` or `1`.
 
     Return:
@@ -328,12 +325,6 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                 quant_min=0,
                                                                 quant_max=255),
                               weight=default_per_channel_weight_fake_quant)
-        if backend == 'x86':
-            qconfig = QConfig(activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                                quant_min=0,
-                                                                quant_max=255,
-                                                                reduce_range=True),
-                              weight=default_per_channel_weight_fake_quant)
         else:
             qconfig = default_qat_qconfig
     # Use the fused observe + fake_quant modules for doing QAT.
@@ -354,12 +345,6 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
                                                                                  quant_max=255),
-                              weight=default_fused_per_channel_wt_fake_quant)
-        elif backend == 'x86':
-            qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
-                                                                                 quant_min=0,
-                                                                                 quant_max=255,
-                                                                                 reduce_range=True),
                               weight=default_fused_per_channel_wt_fake_quant)
         else:
             qconfig = default_qat_qconfig_v2

@@ -755,7 +755,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
-      "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
   });
@@ -1053,7 +1053,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
   }
   THPUtils_assertRet(
       -1,
-      grad.sym_sizes().equals(var.sym_sizes()),
+      grad.sizes().equals(var.sizes()),
       "assigned grad has data of a different size");
 
   var.mutable_grad() = grad;
