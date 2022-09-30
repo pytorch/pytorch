@@ -250,7 +250,7 @@ test_dynamo_shard() {
 }
 
 test_inductor() {
-  time python test/run_test.py --core --continue-through-error --verbose
+  time python test/run_test.py -i test_ops --continue-through-error --verbose
 }
 
 test_python_gloo_with_tls() {
