@@ -3673,11 +3673,11 @@ class TestLinalg(TestCase):
 
         # use path optimization; requires opt_einsum to be installed
         if TEST_OPT_EINSUM:
-            res = torch.einsum(*args, optimize_path=True)
+            res = torch.einsum(*args, path=True)
             self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
         # skip path optimization
-        res = torch.einsum(*args, optimize_path=False)
+        res = torch.einsum(*args, path=False)
         self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
     @dtypes(torch.double, torch.cdouble)
@@ -3773,7 +3773,7 @@ class TestLinalg(TestCase):
     def test_einsum_contraction_path(self, device, dtype):
         def check(equation, *operands, path=None):
             np_ops = [op.cpu().numpy() for op in operands]
-            res = torch.einsum(equation, *operands, optimize_path=path)
+            res = torch.einsum(equation, *operands, path=path)
             ref = np.einsum(equation, *np_ops, optimize=('einsum_path', *path))
             self.assertEqual(res, torch.from_numpy(np.array(ref)))
 
@@ -3934,9 +3934,9 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
-        def check(*args, regex, exception=RuntimeError, optimize_path=None):
+        def check(*args, regex, exception=RuntimeError, path=None):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
-                torch.einsum(*args, optimize_path=optimize_path)
+                torch.einsum(*args, path=path)
 
         x = make_tensor((2,), dtype=torch.float32, device=device)
         y = make_tensor((2, 3), dtype=torch.float32, device=device)
@@ -3965,10 +3965,10 @@ class TestLinalg(TestCase):
               r' seen size 2')
 
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
-        check('a', [x], regex=r'optimize_path should not be an empty list', optimize_path=[])
-        check('a', [x], regex=r'size 1 but got 2', optimize_path=[(0, 1)])
-        check('a,ab', [x, y], regex=r'cannot contract an operand with itself', optimize_path=[(0, 0)])
-        check('a,ab', [x, y], regex=r'out of bounds', optimize_path=[(1, 2)])
+        check('a', [x], regex=r'path should not be an empty list', path=[])
+        check('a', [x], regex=r'size 1 but got 2', path=[(0, 1)])
+        check('a,ab', [x, y], regex=r'cannot contract an operand with itself', path=[(0, 0)])
+        check('a,ab', [x, y], regex=r'out of bounds', path=[(1, 2)])
 
     def _gen_shape_inputs_linalg_triangular_solve(self, shape, dtype, device, well_conditioned=False):
         make_arg = partial(make_tensor, dtype=dtype, device=device)
