@@ -315,7 +315,8 @@ def non_kwarg_to(fake_mode, func, *args, **kwargs):
     input_device = new_kwargs["device"]
     out_device = input_device if input_device else new_kwargs["input"].device
     new_kwargs["device"] = torch.device("meta")
-    r = func(*args, **new_kwargs)
+    inp = new_kwargs.pop("input")
+    r = func(inp, **new_kwargs)
     return fake_mode.fake_tensor_converter(fake_mode, r, out_device)
 
 
@@ -379,7 +380,7 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     )
 
     out_device = new_kwargs["input"].device
-    with in_kernel_invocation_manager(fake_mode):
+    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
     return FakeTensor(fake_mode, out, out_device)
@@ -405,7 +406,7 @@ def index_put(fake_mode, func, *args, **kwargs):
 # same with index_put, but return the input
 @register_op_impl(aten.index_put_.default)
 def index_put_(fake_mode, func, *args, **kwargs):
-    with in_kernel_invocation_manager(fake_mode):
+    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
@@ -428,11 +429,11 @@ def nyi(fake_mode, func, *args, **kwargs):
 
 
 @contextlib.contextmanager
-def in_kernel_invocation_manager(fake_mode, *, in_kernel=True):
+def in_kernel_invocation_manager(fake_mode):
     # See: note [Fake Tensor Dispatch Keys]
     prev_in_kernel = fake_mode.in_kernel_invocation
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
-    assert meta_in_tls == prev_in_kernel
+    assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
 
     fake_mode.in_kernel_invocation = in_kernel
     torch._C._set_meta_in_tls_dispatch_include(in_kernel)
@@ -782,13 +783,15 @@ class FakeTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
-        with self, in_kernel_invocation_manager(self, in_kernel=False):
+        # invoke aten-aten decomps
+        with self:
             if (
                 func in decomposition_table
                 and aten_to_aten_decomp(func)
                 and func not in _disabled_meta_decomps
             ):
-                return decomposition_table[func](*args, **kwargs)
+                return decomposition_table[func](*args, **kwargs
+    
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
