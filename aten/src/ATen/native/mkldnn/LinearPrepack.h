@@ -2,7 +2,7 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/native/mkldnn/Common.h>
-#include <ATen/native/mkldnn/OpContext.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 #if AT_MKLDNN_ENABLED()
 

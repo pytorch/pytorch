@@ -15,11 +15,6 @@ const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
     {"relu", ideep::attr_t::fuse_relu()},
 };
 
-using AttrFunction = std::function<ideep::attr_t(
-    std::vector<c10::optional<at::Scalar>>,
-    c10::optional<std::string>)>;
-const std::map<std::string, AttrFunction>& fx_fusion_attr_map();
-
 using SerializationTypeConvPrePack = std::tuple<
     Tensor,
     c10::optional<Tensor>,
