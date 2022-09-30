@@ -477,8 +477,11 @@ def export(
               only if the type of the ``nn.Module`` is found in the set.
 
     Raises:
-      CheckerError: If the ONNX checker detects an invalid ONNX graph. Will still export the
-        model to the file ``f`` even if this is raised.
+        :class:`errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
+        :class:`errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
+            uses an operator that is not supported by the exporter.
+        :class:`errors.OnnxExporterError`: Other errors that can occur during export.
+            All errors are subclasses of :class:`errors.OnnxExporterError`.
     """
 
     _export(

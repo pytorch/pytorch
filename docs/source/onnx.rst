@@ -332,7 +332,7 @@ an op named ``foo`` would look something like::
       """
       ...
 
-The :mod:``torch._C`` types are Python wrappers around the types defined in C++ in
+The ``torch._C`` types are Python wrappers around the types defined in C++ in
 `ir.h <https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/ir/ir.h>`_.
 
 The process for adding a symbolic function depends on the type of operator.

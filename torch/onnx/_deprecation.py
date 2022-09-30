@@ -1,6 +1,7 @@
 """Utility for deprecating functions."""
 
 import functools
+import textwrap
 import warnings
 
 
@@ -25,6 +26,16 @@ def deprecated(since: str, removed_in: str, instructions: str):
                 stacklevel=2,
             )
             return function(*args, **kwargs)
+
+
+        wrapper.__doc__ = textwrap.dedent(
+            f"""\
+            .. warning::
+                Deprecated: `{function.__name__}` is deprecated in version {since} and will be
+                removed in version {removed_in}. Please {instructions}.
+
+            """
+        ) + (function.__doc__ or "")
 
         return wrapper
 
