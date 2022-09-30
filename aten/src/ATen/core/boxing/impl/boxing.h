@@ -226,20 +226,17 @@ struct BoxedKernelWrapper<
     torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
     boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
 
-    return guts::if_constexpr<!std::is_same<void, Result>::value>(
-      [&] (auto delay_check) {
-        // op has pushed one or more values onto the stack.
-        return delay_check(PopResult<Result>::call(stack));
-      },
-      [&] {
-        // op returns void, boxed kernel has pushed nothing onto stack.
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          stack.size() == 0,
-          "Boxed kernel was expected to return no values on the stack, ",
-          "but instead returned ", stack.size(), " values."
-        );
-      }
-    );
+    if constexpr (!std::is_same_v<void, Result>) {
+      // op has pushed one or more values onto the stack.
+      return PopResult<Result>::call(stack);
+    } else {
+      // op returns void, boxed kernel has pushed nothing onto stack.
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        stack.size() == 0,
+        "Boxed kernel was expected to return no values on the stack, ",
+        "but instead returned ", stack.size(), " values."
+      );
+    }
   }
 };
 
