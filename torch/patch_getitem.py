@@ -248,7 +248,14 @@ def __getitem__(self_, index_):
     return self
 
 
+def __setitem__(self_, index_, val):
+    sliced = self_[index_]
+    if (sliced.storage().data_ptr() != self_.storage().data_ptr()):
+        raise RuntimeError("__getitem__ returned a copy!")
+    sliced.copy_(val)
+
 torch.Tensor.__getitem__ = __getitem__
+torch.Tensor.__setitem__ = __setitem__
 
 
 if __name__ == '__main__':
