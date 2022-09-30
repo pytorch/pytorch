@@ -2987,6 +2987,7 @@ class FullyShardedDataParallel(nn.Module):
         for handle in self._handles:
             handle._training_state = HandleTrainingState.SUMMON_FULL_PARAMS
 
+        self._clear_grads_if_needed()
         free_unsharded_flat_params = [handle.needs_unshard() for handle in self._handles]
         self._unshard(self._handles)
         torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
