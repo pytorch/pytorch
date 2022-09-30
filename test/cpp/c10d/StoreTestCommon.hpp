@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 #include "TestUtils.hpp"
 
 #include <gtest/gtest.h>

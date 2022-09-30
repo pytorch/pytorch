@@ -1,4 +1,4 @@
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 
 namespace c10d {
 

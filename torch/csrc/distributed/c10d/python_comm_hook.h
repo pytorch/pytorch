@@ -1,10 +1,10 @@
 #pragma once
 
-#include <c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/utils/pybind.h>
 
 namespace c10d {

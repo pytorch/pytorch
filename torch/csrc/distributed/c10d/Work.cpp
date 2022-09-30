@@ -1,6 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 
-#include <c10d/Work.hpp>
+#include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d {
 

@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 
 #ifdef USE_C10D_MPI
 
