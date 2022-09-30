@@ -1211,7 +1211,7 @@ class TestFSDPOptimState(FSDPTest):
                     wrapped_model, wrapped_optim, optim_input=wrapped_optim_input,
                 )
         if "fsdp_osd" not in locals():
-            fsdp_osd = {}
+            fsdp_osd = {}  # may not be defined due to previous method erroring
         if should_check_method_fn("flatten_sharded_optim_state_dict"):
             with context_fn():
                 FSDP.flatten_sharded_optim_state_dict(
