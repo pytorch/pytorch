@@ -2654,27 +2654,18 @@ def batch_norm(
         return res
 
 
+@_onnx_symbolic("aten::native_layer_norm")
+@symbolic_helper.quantized_args(True, False, False, False)
+@symbolic_helper.parse_args("v", "is", "v", "v", "f")
 @_beartype.beartype
-def _layer_norm_returns_normalized_input_mean_rstd(
+def native_layer_norm(
     g: jit_utils.GraphContext,
     input: _C.Value,
     normalized_shape: Sequence[int],
     weight: _C.Value,
     bias: _C.Value,
     eps: float,
-    cudnn_enable: bool,
-    return_mean_rstd: bool,
-) -> Tuple[_C.Value, Optional[_C.Value], Optional[_C.Value]]:
-    if symbolic_helper.is_caffe2_aten_fallback():
-        return g.at(
-            "layer_norm",
-            input,
-            weight,
-            bias,
-            normalized_shape_i=normalized_shape,
-            eps_f=eps,
-            cudnn_enable_i=cudnn_enable,
-        )
+) -> Tuple[_C.Value, _C.Value, _C.Value]:
     axes = [-i for i in range(len(normalized_shape), 0, -1)]
 
     two_cst = symbolic_helper._generate_wrapped_number(g, 2.0)
@@ -2693,23 +2684,9 @@ def _layer_norm_returns_normalized_input_mean_rstd(
     if not (bias is None or symbolic_helper._is_none(bias)):
         normalized = add(g, normalized, bias)
 
-    if return_mean_rstd:
-        # rdenominator = 1 / sqrt(variance + eps)
-        rdenominator = reciprocal(g, denominator)
-        return normalized, mean, rdenominator
-    return normalized, None, None
-
-
-@_onnx_symbolic("aten::native_layer_norm")
-@symbolic_helper.quantized_args(True, False, False, False)
-@symbolic_helper.parse_args("v", "is", "v", "v", "f")
-@_beartype.beartype
-def native_layer_norm(
-    g: jit_utils.GraphContext, input, normalized_shape, weight, bias, eps
-):
-    return _layer_norm_returns_normalized_input_mean_rstd(
-        g, input, normalized_shape, weight, bias, eps, False, True
-    )
+    # rdenominator := 1 / sqrt(variance + eps)
+    rdenominator = reciprocal(g, denominator)
+    return normalized, mean, rdenominator
 
 
 @_onnx_symbolic("aten::layer_norm")
@@ -2718,16 +2695,24 @@ def native_layer_norm(
 @_beartype.beartype
 def layer_norm(
     g: jit_utils.GraphContext,
-    input,
-    normalized_shape,
-    weight,
-    bias,
-    eps,
-    cudnn_enable,
-):
-    normalized, _, _ = _layer_norm_returns_normalized_input_mean_rstd(
-        g, input, normalized_shape, weight, bias, eps, cudnn_enable, False
-    )
+    input: _C.Value,
+    normalized_shape: Sequence[int],
+    weight: _C.Value,
+    bias: _C.Value,
+    eps: float,
+    cudnn_enable: bool,
+) -> _C.Value:
+    if symbolic_helper.is_caffe2_aten_fallback():
+        return g.at(
+            "layer_norm",
+            input,
+            weight,
+            bias,
+            normalized_shape_i=normalized_shape,
+            eps_f=eps,
+            cudnn_enable_i=cudnn_enable,
+        )
+    normalized, _, _ = native_layer_norm(g, input, normalized_shape, weight, bias, eps)
     return normalized
 
 
