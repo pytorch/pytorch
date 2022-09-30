@@ -295,21 +295,21 @@ template <typename F, F Func, typename A, typename B, typename C, typename... T>
 struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
   static std::tuple<Tensor,optional<int64_t>> apply(
       const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-      OptionalArrayRef<int64_t> output_size, IntArrayRef input_size,
+      OptionalSymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
     auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
     TORCH_INTERNAL_ASSERT(input_size.size() > 0);
 
     // input_size is wrong so we correct it
-    DimVector physical_input_size(input_size.begin(), input_size.end());
-    physical_input_size[0] = grad_output_.sizes()[0];
+    c10::SymDimVector physical_input_size(input_size.begin(), input_size.end());
+    physical_input_size[0] = grad_output_.sym_sizes()[0];
 
     auto out = Func(
         grad_output_,
         output_size,
         physical_input_size,
         std::forward<T>(extra_args)...);
-    return std::make_tuple(reshape_dim_outof(0, grad_output.sizes()[*grad_output_bdim], out), 0);
+    return std::make_tuple(reshape_dim_outof_symint(0, grad_output.sym_sizes()[*grad_output_bdim], out), 0);
   }
 
 };
