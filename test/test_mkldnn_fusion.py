@@ -1,6 +1,7 @@
 # Owner(s): ["module: mkldnn"]
 import itertools
 import unittest
+from typing import NamedTuple, List
 
 import torch
 from torch import nn
@@ -13,12 +14,11 @@ from test_tensorexpr import warmup_and_run_forward
 FUSION_GROUP = 'prim::TensorExprGroup'
 
 
-class EltwiseFusionOp:
-    def __init__(self, attr, pointwise_module, scalars=[], algorithm=""):
-        self.attr = attr
-        self.pointwise_module = pointwise_module
-        self.scalars = scalars
-        self.algorithm = algorithm
+class EltwiseFusionOp(NamedTuple):
+    attr : str
+    pointwise_module : nn.Module
+    scalars : List = []
+    algorithm : str = ""
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
