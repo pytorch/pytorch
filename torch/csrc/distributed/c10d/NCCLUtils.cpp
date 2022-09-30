@@ -66,7 +66,7 @@ std::string getNcclErrorDetailStr(
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
   if (processGroupFailureReason != c10::nullopt) {
-    return (*processGroupFailureReason).c_str();
+    return *processGroupFailureReason;
   }
   std::string interpret;
   std::string err;
