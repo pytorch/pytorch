@@ -3653,7 +3653,7 @@ class FullyShardedDataParallel(nn.Module):
     def _warn_optim_input(optim_input):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated. You may remove it "
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
                 "from your code without changing its functionality."
             )
 
