@@ -820,7 +820,13 @@ def prepare_n_shadows_model(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)
         list_of_node_name_to_qconfig.append(node_name_to_qconfig)
 
-    # Iterate through each quantization region in the model
+    # For each region in the model, do the following:
+    #   For each qconfig for that region, do the following:
+    #     1. create a copy of the region wrapped in a module
+    #     2. pass original args, original kwargs, and expected output to module
+    #     3. add an output comparison logger and hook it up to compare
+    #        actual output to expected output
+    #     4. run `prepare_fx` on the module
     for (subgraph_idx, (match_name, nodes_in_this_subgraph)) in \
             enumerate(subgraphs_dedup.items()):
         handle_subgraph(
@@ -830,11 +836,15 @@ def prepare_n_shadows_model(
     mt.recompile()
     return mt
 
+# TODO(future PR): align API signature with other similar quantization
+# functions (enable_fake_quant, etc)
 def loggers_set_enabled(model: torch.nn.Module, enabled: bool) -> None:
     for name, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.enabled = enabled
 
+# TODO(future PR): align API signature with other similar quantization
+# functions (enable_fake_quant, etc)
 def loggers_set_save_activations(
     model: torch.nn.Module,
     save_activations: bool,
@@ -844,7 +854,13 @@ def loggers_set_save_activations(
             child.save_activations = save_activations
 
 def convert_n_shadows_model(model: GraphModule) -> GraphModule:
+    """
+    Given a model from `prepare_n_shadows_model`, runs `convert_fx`
+    on each shadow submodule.
+    """
     for node in model.graph.nodes:
+        # TODO(future PR): consider matching in a safer way than
+        # node name string match
         if node.name.startswith(SHADOW_WRAPPER_NODE_NAME_PREFIX):
             orig_mod = getattr(model, node.name)
             converted_mod = torch.ao.quantization.quantize_fx.convert_fx(
