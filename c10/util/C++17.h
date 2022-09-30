@@ -8,6 +8,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -22,9 +23,9 @@
     "You're trying to build PyTorch with a too old version of Clang. We need Clang 4 or later."
 #endif
 
-#if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201402L)) || \
-    (!defined(_MSC_VER) && __cplusplus < 201402L)
-#error You need C++14 to compile PyTorch
+#if (defined(_MSC_VER) && (!defined(_MSVC_LANG) || _MSVC_LANG < 201703L)) || \
+    (!defined(_MSC_VER) && __cplusplus < 201703L)
+#error You need C++17 to compile PyTorch
 #endif
 
 #if defined(_WIN32) && (defined(min) || defined(max))
@@ -37,14 +38,8 @@
 
 namespace c10 {
 
-// in c++17 std::result_of has been superceded by std::invoke_result.  Since
-// c++20, std::result_of is removed.
 template <typename F, typename... args>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
 using invoke_result = typename std::invoke_result<F, args...>;
-#else
-using invoke_result = typename std::result_of<F && (args && ...)>;
-#endif
 
 template <typename F, typename... args>
 using invoke_result_t = typename invoke_result<F, args...>::type;
@@ -60,8 +55,6 @@ make_unique_base(Args&&... args) {
   return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
 }
 
-#if defined(__cpp_lib_logical_traits) && !(defined(_MSC_VER) && _MSC_VER < 1920)
-
 template <class... B>
 using conjunction = std::conjunction<B...>;
 template <class... B>
@@ -71,54 +64,8 @@ using bool_constant = std::bool_constant<B>;
 template <class B>
 using negation = std::negation<B>;
 
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/conjunction
-template <class...>
-struct conjunction : std::true_type {};
-template <class B1>
-struct conjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct conjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), conjunction<Bn...>, B1> {};
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/disjunction
-template <class...>
-struct disjunction : std::false_type {};
-template <class B1>
-struct disjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct disjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), B1, disjunction<Bn...>> {};
-
-// Implementation taken from
-// http://en.cppreference.com/w/cpp/types/integral_constant
-template <bool B>
-using bool_constant = std::integral_constant<bool, B>;
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/negation
-template <class B>
-struct negation : bool_constant<!bool(B::value)> {};
-
-#endif
-
-#ifdef __cpp_lib_void_t
-
 template <class T>
 using void_t = std::void_t<T>;
-
-#else
-
-// Implementation taken from http://en.cppreference.com/w/cpp/types/void_t
-// (it takes CWG1558 into account and also works for older compilers)
-template <typename... Ts>
-struct make_void {
-  typedef void type;
-};
-template <typename... Ts>
-using void_t = typename make_void<Ts...>::type;
-
-#endif
 
 #if defined(USE_ROCM)
 // rocm doesn't like the C10_HOST_DEVICE
@@ -127,50 +74,10 @@ using void_t = typename make_void<Ts...>::type;
 #define CUDA_HOST_DEVICE C10_HOST_DEVICE
 #endif
 
-#ifdef __cpp_lib_apply
-
 template <class F, class Tuple>
 CUDA_HOST_DEVICE inline constexpr decltype(auto) apply(F&& f, Tuple&& t) {
   return std::apply(std::forward<F>(f), std::forward<Tuple>(t));
 }
-
-#else
-
-// Implementation from http://en.cppreference.com/w/cpp/utility/apply (but
-// modified)
-// TODO This is an incomplete implementation of std::apply, not working for
-// member functions.
-namespace detail {
-template <class F, class Tuple, std::size_t... INDEX>
-#if defined(_MSC_VER)
-// MSVC has a problem with the decltype() return type, but it also doesn't need
-// it
-C10_HOST_DEVICE constexpr auto apply_impl(
-    F&& f,
-    Tuple&& t,
-    std::index_sequence<INDEX...>)
-#else
-// GCC/Clang need the decltype() return type
-CUDA_HOST_DEVICE constexpr decltype(auto) apply_impl(
-    F&& f,
-    Tuple&& t,
-    std::index_sequence<INDEX...>)
-#endif
-{
-  return std::forward<F>(f)(std::get<INDEX>(std::forward<Tuple>(t))...);
-}
-} // namespace detail
-
-template <class F, class Tuple>
-CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
-  return detail::apply_impl(
-      std::forward<F>(f),
-      std::forward<Tuple>(t),
-      std::make_index_sequence<
-          std::tuple_size<std::remove_reference_t<Tuple>>::value>{});
-}
-
-#endif
 
 #undef CUDA_HOST_DEVICE
 
@@ -219,68 +126,6 @@ struct function_takes_identity_argument<
     void_t<decltype(std::declval<Func>()(_identity()))>> : std::true_type {};
 #endif
 
-template <bool Condition>
-struct _if_constexpr;
-
-template <>
-struct _if_constexpr<true> final {
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          function_takes_identity_argument<ThenCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& thenCallback,
-      ElseCallback&& /* elseCallback */) {
-    // The _identity instance passed in can be used to delay evaluation of an
-    // expression, because the compiler can't know that it's just the identity
-    // we're passing in.
-    return thenCallback(_identity());
-  }
-
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          !function_takes_identity_argument<ThenCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& thenCallback,
-      ElseCallback&& /* elseCallback */) {
-    return thenCallback();
-  }
-};
-
-template <>
-struct _if_constexpr<false> final {
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          function_takes_identity_argument<ElseCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& /* thenCallback */,
-      ElseCallback&& elseCallback) {
-    // The _identity instance passed in can be used to delay evaluation of an
-    // expression, because the compiler can't know that it's just the identity
-    // we're passing in.
-    return elseCallback(_identity());
-  }
-
-  template <
-      class ThenCallback,
-      class ElseCallback,
-      std::enable_if_t<
-          !function_takes_identity_argument<ElseCallback>::value,
-          void*> = nullptr>
-  static decltype(auto) call(
-      ThenCallback&& /* thenCallback */,
-      ElseCallback&& elseCallback) {
-    return elseCallback();
-  }
-};
 } // namespace detail
 
 /*
@@ -341,7 +186,6 @@ template <bool Condition, class ThenCallback, class ElseCallback>
 decltype(auto) if_constexpr(
     ThenCallback&& thenCallback,
     ElseCallback&& elseCallback) {
-#if defined(__cpp_if_constexpr)
   // If we have C++17, just use it's "if constexpr" feature instead of wrapping
   // it. This will give us better error messages.
   if constexpr (Condition) {
@@ -363,17 +207,10 @@ decltype(auto) if_constexpr(
       return static_cast<ElseCallback&&>(elseCallback)();
     }
   }
-#else
-  // C++14 implementation of if constexpr
-  return detail::_if_constexpr<Condition>::call(
-      static_cast<ThenCallback&&>(thenCallback),
-      static_cast<ElseCallback&&>(elseCallback));
-#endif
 }
 
 template <bool Condition, class ThenCallback>
 decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
-#if defined(__cpp_if_constexpr)
   // If we have C++17, just use it's "if constexpr" feature instead of wrapping
   // it. This will give us better error messages.
   if constexpr (Condition) {
@@ -388,11 +225,6 @@ decltype(auto) if_constexpr(ThenCallback&& thenCallback) {
       return static_cast<ThenCallback&&>(thenCallback)();
     }
   }
-#else
-  // C++14 implementation of if constexpr
-  return if_constexpr<Condition>(
-      static_cast<ThenCallback&&>(thenCallback), [](auto) {});
-#endif
 }
 
 // GCC 4.8 doesn't define std::to_string, even though that's in C++11. Let's

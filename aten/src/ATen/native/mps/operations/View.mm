@@ -274,7 +274,7 @@ Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)
 } // namespace mps
 
 // implementation of as_strided() op
-Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_)
+Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size, IntArrayRef stride, c10::optional<int64_t> storage_offset_)
 {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   auto result = detail::make_tensor<TensorImpl>(c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
