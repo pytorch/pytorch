@@ -27,6 +27,11 @@ if not TEST_CUDA:
 
 class TestExtendedCUDAIsAvail(TestCase):
 
+    def setUp(self):
+        super().setUp()
+        torch.cuda.device_count.cache_clear()  # clear the lru_cache on this method before our test
+        del os.environ['PYTORCH_NVML_BASED_CUDA_CHK']
+
     @staticmethod
     def in_bad_fork_test() -> bool:
         _ = torch.cuda.is_available()
@@ -40,22 +45,19 @@ class TestExtendedCUDAIsAvail(TestCase):
     @parametrize("nvml_avail", [True, False])
     @parametrize("avoid_init", ['1', '0', None])
     def test_cuda_is_available(self, avoid_init, nvml_avail):
-        if avoid_init:
-            os.environ['PYTORCH_NVML_BASED_CUDA_CHK'] = avoid_init
-        else:
-            del os.environ['PYTORCH_NVML_BASED_CUDA_CHK']
-        torch.cuda.device_count.cache_clear()  # clear the lru_cache on this method before our test
-        if nvml_avail:
-            _ = torch.cuda.is_available()
-        else:
-            with patch.object(torch.cuda, '_device_count_nvml', return_value=-1):
+        patch_env = {"PYTORCH_NVML_BASED_CUDA_CHK": avoid_init} if avoid_init else {}
+        with patch.dict(os.environ, **patch_env):
+            if nvml_avail:
                 _ = torch.cuda.is_available()
-        with multiprocessing.get_context("fork").Pool(1) as pool:
-            in_bad_fork = pool.apply(TestExtendedCUDAIsAvail.in_bad_fork_test)
-        if os.getenv('PYTORCH_NVML_BASED_CUDA_CHK') == '1' and nvml_avail:
-            assert not in_bad_fork
-        else:
-            assert in_bad_fork
+            else:
+                with patch.object(torch.cuda, '_device_count_nvml', return_value=-1):
+                    _ = torch.cuda.is_available()
+            with multiprocessing.get_context("fork").Pool(1) as pool:
+                in_bad_fork = pool.apply(TestExtendedCUDAIsAvail.in_bad_fork_test)
+            if os.getenv('PYTORCH_NVML_BASED_CUDA_CHK') == '1' and nvml_avail:
+                assert not in_bad_fork
+            else:
+                assert in_bad_fork
 
 
 instantiate_parametrized_tests(TestExtendedCUDAIsAvail)
