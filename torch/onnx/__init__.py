@@ -28,6 +28,8 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset17,
     utils,
 )
+
+# TODO(After 1.13 release): Remove the deprecated SymbolicContext
 from ._exporter_states import ExportTypes, SymbolicContext
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
@@ -89,7 +91,7 @@ producer_version = _C_onnx.PRODUCER_VERSION
 
 
 @_deprecation.deprecated(
-    since="1.12.0", removed_in="TBD", instructions="use `torch.onnx.export` instead"
+    since="1.12.0", removed_in="1.14", instructions="use `torch.onnx.export` instead"
 )
 def _export(*args, **kwargs):
     return utils._export(*args, **kwargs)

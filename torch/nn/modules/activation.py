@@ -684,7 +684,7 @@ class GELU(Module):
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
-        return 'approximate={}'.format(self.approximate)
+        return 'approximate={}'.format(repr(self.approximate))
 
 
 class Hardshrink(Module):
