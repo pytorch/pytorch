@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/dlpack.h>
 #include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
@@ -43,24 +42,6 @@ struct TORCH_API XPUHooksInterface {
         "Cannot query detailed XPU version without Intel Extension for Pytorch. ",
         XPU_HELP);
   }
-
-  virtual Device getATenDeviceFromDLPackDevice(
-      const DLDevice& dl_device,
-      void* data) const {
-    TORCH_CHECK(
-        false,
-        "Cannot get XPU device without Intel Extension for Pytorch. ",
-        XPU_HELP);
-  };
-
-  virtual DLDevice getDLPackDeviceFromATenDevice(
-      const Device& aten_device,
-      void* data) const {
-    TORCH_CHECK(
-        false,
-        "Cannot get XPU DL device without Intel Extension for Pytorch. ",
-        XPU_HELP);
-  };
 };
 
 struct TORCH_API XPUHooksArgs {};
