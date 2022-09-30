@@ -2015,7 +2015,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .add_owned_input(pivots.contiguous())
       .build();
 
-    unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n));
+    unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n), m);
 
     // Transform the permutation into a permutation matrix
     P.zero_();
