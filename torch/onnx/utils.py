@@ -1678,15 +1678,6 @@ def _add_output_to_block(block: _C.Block, value: _C.Value):
     return new_output
 
 
-# Note [Export inplace]
-# ~~~~~~~~~~~~~~~~~~~~~
-# In abstract, it would be better for us to export inplace annotations,
-# than to not export them, since it is useful information that can
-# help the target of an ONNX export export more efficiently.  However,
-# ONNX doesn't currently formalize inplace. Fortunately, it's sound to drop
-# inplace annotations, but we are losing information this way.
-
-
 @_beartype.beartype
 def _should_aten_fallback(
     name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes

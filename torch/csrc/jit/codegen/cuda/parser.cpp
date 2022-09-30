@@ -2312,7 +2312,7 @@ class IrParser {
 
               auto data_type = DataType::Null;
               if (const auto opt_ivalue = toIValue(node->input(2))) {
-                if (!opt_ivalue.value().isNone()) {
+                if (!opt_ivalue->isNone()) {
                   data_type = aten_to_data_type(opt_ivalue->toScalarType());
                 }
               }

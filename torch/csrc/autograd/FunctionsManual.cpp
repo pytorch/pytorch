@@ -357,12 +357,12 @@ Tensor _nested_from_padded_backward(
   if (do_transform_0213) {
     auto new_sizes = {
         input.size(0), input.size(2), (input.size(1) * input.size(3))};
-    auto out = nested_to_padded_tensor(grad, 0, new_sizes);
+    auto out = grad.to_padded_tensor(0, new_sizes);
     auto expand_last_dim_size = {
         input.size(0), input.size(2), input.size(1), input.size(3)};
     return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
   }
-  return nested_to_padded_tensor(grad, 0, input.sizes());
+  return grad.to_padded_tensor(0, input.sizes());
 }
 
 Tensor linalg_vector_norm_jvp(
@@ -657,6 +657,13 @@ Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
     int64_t dim) {
+  if (inp.numel() == 0) {
+    // When input has a zero sized dimension (empty tensor),
+    // we don't need to actually compute the grads.
+    // So we just reshape `grad` as `input`.
+    return grad.expand_as(inp);
+  }
+
   if (inp.size(dim) == 1) {
     return grad;
   }
@@ -677,18 +684,6 @@ Tensor prod_safe_zeros_backward(
   return grad * (exclusive_normal * exclusive_reverse).conj();
 }
 
-// checking the storage also encompasses FakeTensors, which report device and
-// dispatch keys as non-meta when not in an composite explicit kernel
-// invocation. because these backwards are implicit kernels fake tensors do not
-// appear as meta.
-bool is_meta_in_composite_kernels(const Tensor& t) {
-  if (t.is_meta()) {
-    return true;
-  }
-  return t.has_storage() &&
-      t.storage().data_ptr().device() == c10::DeviceType::Meta;
-}
-
 // note that the gradient for prod is equivalent to:
 // cumprod(exclusive, normal) * cumprod(exclusive, reverse), e.g.:
 // input:                        [    a,     b,     c]
@@ -703,7 +698,8 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (is_meta_in_composite_kernels(input)) {
+  if (input.is_meta() || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
   }
@@ -728,11 +724,14 @@ Tensor prod_backward(
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  if (!keepdim && input.dim() != 1) {
+  if (!keepdim) {
+    // `prod` reduces the dimension at `dim`,
+    // so, unsqueeze `grad` and `result` at dim.
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (is_meta_in_composite_kernels(input)) {
+  if (input.is_meta() || isTensorSubclassLike(input)) {
+    // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input, dim);
   }
 
@@ -2751,9 +2750,16 @@ static inline int64_t _min_storage_size(
 Tensor as_strided_backward(
     Tensor grad,
     TensorGeometry input_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset_) {
+    c10::SymIntArrayRef sym_sizes,
+    c10::SymIntArrayRef sym_strides,
+    optional<c10::SymInt> sym_storage_offset_) {
+  // TODO: properly use sym
+  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
+  auto strides = c10::asIntArrayRefSlow(sym_strides);
+  auto storage_offset_ = sym_storage_offset_.has_value()
+      ? c10::make_optional(sym_storage_offset_->expect_int())
+      : c10::nullopt;
+
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,
@@ -2872,9 +2878,9 @@ Tensor as_strided_scatter_backward(
     Tensor grad,
     TensorGeometry input_geometry,
     TensorGeometry src_geometry,
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    optional<int64_t> storage_offset) {
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    optional<c10::SymInt> storage_offset) {
   // Note [as_strided_scatter backward support]
   // as_strided_scatter handling for autograd is a beast, and is non-trivial to
   // implement for arbitrarily strided inputs. Most uses for as_strided with
@@ -2883,10 +2889,11 @@ Tensor as_strided_scatter_backward(
   // inputs. We can assume that the input was a contiguous tensor. Also, we'll
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
-  auto grad_slice = grad_.as_strided(sizes, strides, storage_offset);
+  auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
+  // TODO: geometry should return symints
   auto result =
       grad_.new_empty_strided(input_geometry.sizes(), input_geometry.strides());
-  auto result_slice = result.as_strided(sizes, strides, storage_offset);
+  auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;
 }
@@ -5652,18 +5659,19 @@ Tensor lu_unpack_backward(
   }
 }
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
   Tensor out_fw_grad;
 
+  auto materialized = tensors.materialize();
   auto any_defined = false;
-  for (const auto& t : tensors) {
+  for (const Tensor& t : materialized) {
     any_defined |= isFwGradDefined(t);
   }
 
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
-    for (auto& t : tensors) {
+    for (const Tensor& t : materialized) {
       fw_grads.push_back(
           isFwGradDefined(t)
               ? t._fw_grad(/*level*/ 0)

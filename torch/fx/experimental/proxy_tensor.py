@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import weakref
 import operator
 
-from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
+from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporarily, _get_current_dispatch_mode
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, PySymInt, PySymFloat
 from torch.fx import Proxy
@@ -167,9 +167,9 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
 def maybe_disable_fake_tensor_mode():
     # TODO: figure out if this API generally makes sense and bake it into the
     # library
-    mb_fake_mode = torch._C._get_torch_dispatch_mode()
+    mb_fake_mode = _get_current_dispatch_mode()
     if isinstance(mb_fake_mode, FakeTensorMode):
-        return enable_torch_dispatch_mode(mb_fake_mode.inner, replace=mb_fake_mode)
+        return _pop_mode_temporarily()
     else:
         return nullcontext()
 
@@ -432,7 +432,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     @contextmanager
     def restore(self):
         with self.sym_mode.enable(True):
-            with super().restore():
+            with self:
                 yield
 
     def inner_torch_dispatch(self, func, types, args=(), kwargs=None):
@@ -442,7 +442,8 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-        return proxy_call(self, func, args, kwargs)
+        out = proxy_call(self, func, args, kwargs)
+        return out
 
 
 SymInt = torch.SymIntNode
@@ -603,22 +604,17 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         sym_mode = proxy_mode.sym_mode
 
         # todo: Figure out a more informative name for symints
-        def wrap_fake_symbolic(x, sym_shape):
+        def wrap_fake_symbolic(x):
             if isinstance(x, torch.Tensor):
-                val = FakeTensor(fake_tensor_mode, torch.empty(sym_shape, device="meta", requires_grad=x.requires_grad), x.device)
-                return val
+                return fake_tensor_mode.from_tensor(x, shape_env=shape_env)
             return x
 
         wrap_fn_map = {
             "real": lambda x: x,
             "fake": wrap_fake_concrete,
+            "symbolic": wrap_fake_symbolic,
         }
-        if tracing_mode == "symbolic":
-            flat_shapes = shape_env.create_shapes_for_args(args)
-            flat_args, spec = pytree.tree_flatten(args)
-            args = pytree.tree_unflatten(list(map(lambda a: wrap_fake_symbolic(a[0], a[1]), zip(flat_args, flat_shapes))), spec)
-        else:
-            args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
+        args = pytree.tree_map(wrap_fn_map[tracing_mode], args)
 
         if not hasattr(inspect.unwrap(f), '__code__') or inspect.unwrap(f).__code__.co_flags & inspect.CO_VARARGS:
             # FX doesn't support varargs, so we gotta fake up a wrapper
@@ -641,12 +637,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
 
 def get_torch_dispatch_modes():
-    modes = [torch._C._get_torch_dispatch_mode()]
-    if modes[-1] is None:
-        return list()
-    while modes[-1].inner is not None:
-        modes.append(modes[-1].inner)
-    return modes
+    return torch.utils._python_dispatch._get_current_dispatch_mode_stack()
 
 
 @contextlib.contextmanager
