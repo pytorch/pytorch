@@ -138,7 +138,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const In
                                                           withShape: @[@-1]
                                                                name: nil];
     if (needsScatter) {
-      MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: 0
+      MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: (NSInteger) 0
                                                     withDataTensor: reshapedInputTensor
                                                      updatesTensor: cachedGraph->updatesTensor
                                                      indicesTensor: reshapedIndicesTensor
