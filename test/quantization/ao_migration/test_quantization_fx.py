@@ -169,7 +169,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
 
     # we removed matching test for torch.quantization.fx.quantization_types
     # old: torch.quantization.fx.quantization_types
-    # new: torch.ao.quantization.quantization_types
+    # new: torch.ao.quantization.utils
     # both are valid, but we'll deprecate the old path in the future
 
     def test_package_import_fx_utils(self):
