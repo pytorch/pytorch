@@ -1012,7 +1012,7 @@ def get_selected_tests(options, test_times: Dict[str, float]) -> List[TestJob]:
     # sharding
     which_shard, num_shards = options.shard or (1, 1)
 
-    assert min(options.shard) > 0, "Shards must be positive numbers"
+    assert min(which_shard, num_shards) > 0, "Shards must be positive numbers"
     assert which_shard <= num_shards, "Selected shard must be less than or equal to total number of shards"
     assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
 
