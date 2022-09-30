@@ -1543,7 +1543,7 @@ class TestFreezing(JitTestCase):
                 self.sum += inp.relu()
                 return self.sum
 
-        class ModWithDict(torch.nn.Module):
+        class WrapperModule(torch.nn.Module):
             impl: ModuleInterface
 
             def __init__(self):
@@ -1553,7 +1553,7 @@ class TestFreezing(JitTestCase):
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.impl.forward(x)
 
-        m = torch.jit.script(ModWithDict())
+        m = torch.jit.script(WrapperModule())
         m.eval()
         m_frozen = torch.jit.freeze(m)
 
@@ -1576,7 +1576,7 @@ class TestFreezing(JitTestCase):
             def forward(self, inp: torch.Tensor) -> torch.Tensor:
                 return inp.sin()
 
-        class ModWithDict(torch.nn.Module):
+        class WrapperModule(torch.nn.Module):
             impl: ModuleInterface
 
             def __init__(self):
@@ -1594,10 +1594,114 @@ class TestFreezing(JitTestCase):
                     self.impl = self.option2
                 return self.impl(x)
 
-        m = torch.jit.script(ModWithDict())
+        m = torch.jit.script(WrapperModule())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute"):
+        with self.assertRaisesRegex(RuntimeError, "Freezing does not support SetAttr on an interface type"):
             m_frozen = torch.jit.freeze(m)
+
+    def test_freeze_recursive_interfaces(self):
+        @torch.jit.interface
+        class InnerInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        @torch.jit.interface
+        class OuterInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class InnerImpl(torch.nn.Module):
+            def __init__(self):
+                super(InnerImpl, self).__init__()
+                self.x = torch.ones((2, 2))
+
+            def forward(self, inp):
+                return inp.cos() * self.x
+
+        class OuterImpl(torch.nn.Module):
+            inner_impl: InnerInterface
+
+            def __init__(self):
+                super(OuterImpl, self).__init__()
+                self.inner_impl = InnerImpl()
+
+            def forward(self, inp):
+                return inp.relu() + self.inner_impl(inp.sin())
+
+        class WrapperModule(torch.nn.Module):
+            outer_impl: OuterInterface
+
+            def __init__(self):
+                super(WrapperModule, self).__init__()
+                self.outer_impl = OuterImpl()
+
+            def forward(self, inp):
+                return self.outer_impl(inp) + inp
+
+        m = WrapperModule()
+        x = torch.rand((2, 2))
+        expected = m(x)
+
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        m_s = torch.jit.freeze(m_s)
+        actual = m_s(x)
+
+        self.assertEqual(expected, actual)
+
+    def test_freeze_recursive_interfaces_same_name(self):
+        @torch.jit.interface
+        class InnerInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        @torch.jit.interface
+        class OuterInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class InnerImpl(torch.nn.Module):
+            def __init__(self):
+                super(InnerImpl, self).__init__()
+                self.x = torch.ones((2, 2))
+
+            def forward(self, inp):
+                return inp.cos() * self.x
+
+        class OuterImpl(torch.nn.Module):
+            impl: InnerInterface
+
+            def __init__(self):
+                super(OuterImpl, self).__init__()
+                self.impl = InnerImpl()
+                self.x = torch.ones((2, 2)) * 5
+
+            def forward(self, inp):
+                return self.other_method(inp)
+
+            def other_method(self, inp):
+                return inp.relu() + self.impl(inp.sin()) + self.x
+
+        class WrapperModule(torch.nn.Module):
+            impl: OuterInterface
+
+            def __init__(self):
+                super(WrapperModule, self).__init__()
+                self.impl = OuterImpl()
+
+            def forward(self, inp):
+                return self.impl(inp) + inp
+
+        m = WrapperModule()
+        x = torch.rand((2, 2))
+        expected = m(x)
+
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        m_s = torch.jit.freeze(m_s)
+        actual = m_s(x)
+
+        self.assertEqual(expected, actual)
 
     def test_freeze_non_module_class_getattr(self):
         class BoxCoder(object):

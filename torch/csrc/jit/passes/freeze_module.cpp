@@ -30,6 +30,19 @@ std::vector<std::string> splitName(const std::string& name) {
   return result;
 }
 
+template <typename Iter>
+std::string concatName(const Iter& begin, const Iter& end) {
+  std::string combined_name = "";
+  for (Iter it = begin; it != end; ++it) {
+    const std::string& sub_name = *it;
+    if (!combined_name.empty()) {
+      combined_name += ".";
+    }
+    combined_name += sub_name;
+  }
+  return combined_name;
+}
+
 class AttributePropagator {
  public:
   AttributePropagator(
@@ -113,17 +126,22 @@ class AttributePropagator {
       LowerSimpleTuples(subgraph);
     };
 
+    std::unordered_map<std::string, std::unordered_set<std::string>>
+        interfacesToRetype;
+
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Analyzing function: " + function->name());
       auto graph = toGraphFunction(*function).graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
-        inlineInterfaceCalls(graph);
+        inlineInterfaceCalls(graph, interfacesToRetype);
       }
       // Record Attributes that are explicitly set in the module.
       // They cannot be folded.
       recordMutableAttrs(graph);
     }
+
+    reassignInterfaceTypes(interfacesToRetype);
 
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Propagating function: " + function->name());
@@ -187,6 +205,51 @@ class AttributePropagator {
     return c10::nullopt;
   }
 
+  bool _loadModulePath(Value* input, std::shared_ptr<Graph>& graph) {
+    if (!input->type()->cast<InterfaceType>() &&
+        !input->type()->expectRef<ClassType>().is_module()) {
+      return false;
+    }
+
+    Node* node = input->node();
+    names_.clear();
+    while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
+      if (node->kind() == prim::GetAttr) {
+        names_.push_front(node->s(attr::name));
+        node = node->inputs()[0]->node();
+      } else {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  c10::optional<std::deque<std::string>> getModulePath(
+      Value* input,
+      std::shared_ptr<Graph>& graph) {
+    bool success = _loadModulePath(input, graph);
+    if (!success) {
+      return c10::nullopt;
+    }
+    return names_;
+  }
+
+  template <typename Iter>
+  bool getModuleFromPath(
+      Module& attrModule,
+      const Iter& begin,
+      const Iter& end) {
+    for (Iter it = begin; it != end; ++it) {
+      const std::string& moduleName = *it;
+      if (preservedAttrs_.count(attrModule.attr(moduleName))) {
+        return false;
+      }
+      attrModule = attrModule.attr(moduleName).toModule();
+    }
+    return true;
+  }
+
   // findConstantAttr function locates the sub Module where attributes are
   // defined. The algorithm chases getAttr chains to locate the submodules.
   // For example:
@@ -237,22 +300,14 @@ class AttributePropagator {
       return false;
     }
 
-    Node* node = input->node();
-    names_.clear();
-    while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
-      if (node->kind() == prim::GetAttr) {
-        names_.push_front(node->s(attr::name));
-        node = node->inputs()[0]->node();
-      } else {
-        return false;
-      }
+    // loads the path into this->names_
+    if (!_loadModulePath(input, graph)) {
+      return false;
     }
 
-    for (auto& moduleName : names_) {
-      if (preservedAttrs_.count(attrModule.attr(moduleName))) {
-        return false;
-      }
-      attrModule = attrModule.attr(moduleName).toModule();
+    // reassigns attrModule to the module in names_
+    if (!getModuleFromPath(attrModule, names_.begin(), names_.end())) {
+      return false;
     }
 
     auto attr = attrModule.attr(name);
@@ -435,7 +490,10 @@ class AttributePropagator {
     return inlined;
   }
 
-  void inlineInterfaceCalls(std::shared_ptr<Graph>& graph) {
+  void inlineInterfaceCalls(
+      std::shared_ptr<Graph>& graph,
+      std::unordered_map<std::string, std::unordered_set<std::string>>&
+          interfacesToRetype) {
     auto block = graph->block();
     std::stack<Block*> blocks({block});
 
@@ -461,6 +519,32 @@ class AttributePropagator {
           inlineInterfaceCall(n, attr);
           // Reset the GetAttr to concrete module type.
           n->output()->setType(attr.type());
+
+          // Record this so that we can reassign the type later
+          // in reassignInterfaceTypes()
+          auto path = getModulePath(input, graph);
+          TORCH_INTERNAL_ASSERT(path.has_value());
+          auto path_str = concatName(path->begin(), path->end());
+          interfacesToRetype[path_str].insert(name);
+        } else if (n->kind() == prim::SetAttr) {
+          auto name = n->s(attr::name);
+          auto attrModule = module_;
+          auto input = n->inputs()[0];
+
+          // note: this will modify attrModule until it is the parent of the
+          // "name" attr. In other words, attrModule is now the module that
+          // matches "input".
+          TORCH_CHECK(
+              findConstantAttr(input, name, attrModule, graph),
+              "failed to freeze interface attribute '" + name + "'");
+
+          const auto& attrType = attrModule.type()->getAttribute(name);
+          TORCH_INTERNAL_ASSERT(
+              !attrType->cast<InterfaceType>(),
+              "Freezing does not support SetAttr on an interface type. ",
+              "SetAttr is attempted on '",
+              name,
+              "'");
         } else if (n->kind() == prim::fork) {
           applyToForkSubgraph(
               n,
@@ -469,8 +553,26 @@ class AttributePropagator {
               std::bind(
                   &AttributePropagator::inlineInterfaceCalls,
                   *this,
-                  std::placeholders::_1));
+                  std::placeholders::_1,
+                  interfacesToRetype));
         }
+      }
+    }
+  }
+
+  void reassignInterfaceTypes(
+      const std::unordered_map<std::string, std::unordered_set<std::string>>&
+          interfacesToRetype) {
+    for (const auto& it : interfacesToRetype) {
+      const std::string& modulePath = it.first;
+      const std::vector<std::string>& splitPath = splitName(modulePath);
+      Module attrModule = module_;
+      getModuleFromPath(attrModule, splitPath.begin(), splitPath.end());
+
+      for (const std::string& name : it.second) {
+        auto subvalue = attrModule.attr(name);
+        auto subvalueType = subvalue.type();
+        attrModule.type()->unsafeChangeAttributeType(name, subvalueType);
       }
     }
   }
