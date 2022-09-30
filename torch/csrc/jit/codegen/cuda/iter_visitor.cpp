@@ -214,10 +214,10 @@ void IterVisitor::traverseBetween(
 
 void IterVisitor::traverseTo(
     Fusion* fusion,
-    const std::vector<Val*>& To,
+    const std::vector<Val*>& to,
     bool traverse_all_paths,
     bool traverse_into_members) {
-  traverseBetween(fusion, {}, To, traverse_all_paths, traverse_into_members);
+  traverseBetween(fusion, {}, to, traverse_all_paths, traverse_into_members);
 }
 
 void IterVisitor::traverseHelper(Fusion* fusion, bool traverse_all_paths) {

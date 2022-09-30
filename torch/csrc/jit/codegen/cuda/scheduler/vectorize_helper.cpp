@@ -105,6 +105,7 @@ size_t collectMaxVectorizeSizeWithContigMerge(
       tv->getMaybeRFactorDomain(),
       tv->domain()->contiguity(),
       {},
+      {},
       getAllDivisibleSplits(tv->fusion()),
       {},
       true);

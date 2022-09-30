@@ -916,7 +916,8 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
       target_tv->domain()->domain(),
       target_tv->getMaybeRFactorDomain(),
       target_tv->domain()->contiguity(),
-      initial_indexable_map,
+      {},
+      indexing.indexMap(),
       GpuLower::current()->divisbleSplitSet(),
       GpuLower::current()->caMap(),
       GpuLower::current()->haloInfo(),
@@ -995,7 +996,7 @@ IndexFromIdGraph getPredicateIndexingFromIdGraph(
   // generation logic that uses the index math generated here will take
   // contiguity into account. Send an empty ContigID class so nothing is marked
   // as contiguous.
-  ContigIDs contig_finder({}, {}, {}, {}, {});
+  auto contig_finder = ContigIDs::getNonContigIDs();
 
   // Run second backward traversal to map back to the consumer_tv
   auto target_indexing = indexing.updateIndexCompute(

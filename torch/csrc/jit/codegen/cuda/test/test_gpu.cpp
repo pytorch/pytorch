@@ -21369,7 +21369,9 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
               pred->value()->definition()->as<BinaryOp>()->lhs() ==
                   hoisted_index,
               "Invalid predicate: ",
-              pred->value()->toInlineString());
+              pred->value()->toInlineString(),
+              ", ",
+              expr->toString());
           TORCH_CHECK(arith_expr->inputs().size() == 1);
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 0);
@@ -21378,19 +21380,25 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(
               is_index_times_ns(t0_index, hoisted_index, "T0.stride[1]"),
               "Invalid index: ",
-              t0_index->toInlineString());
+              t0_index->toInlineString(),
+              ", ",
+              expr->toString());
         } else if (out_ti->view()->name() == 2) {
           // Ref: T3[*, hoisted_index] = T2[*, hoisted_index];
           auto out_index = out_ti->index(1);
           TORCH_CHECK(
               out_index == hoisted_index,
               "Invalid index: ",
-              out_index->toInlineString());
+              out_index->toInlineString(),
+              ", ",
+              expr->toString());
           TORCH_CHECK(
               pred->value()->definition()->as<BinaryOp>()->lhs() ==
                   hoisted_index,
               "Invalid predicate: ",
-              pred->value()->toInlineString());
+              pred->value()->toInlineString(),
+              ", ",
+              expr->toString());
           TORCH_CHECK(arith_expr->inputs().size() == 1);
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 1);
@@ -21398,19 +21406,25 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(
               in0_index == hoisted_index,
               "Invalid index: ",
-              in0_index->toInlineString());
+              in0_index->toInlineString(),
+              ", ",
+              expr->toString());
         } else if (out_ti->view()->name() == 3) {
           // Ref: T3[hoisted_index] = T2[hoisted_index];
           auto out_index = out_ti->index(0);
           TORCH_CHECK(
               out_index == hoisted_index,
               "Invalid index: ",
-              out_index->toInlineString());
+              out_index->toInlineString(),
+              ", ",
+              expr->toString());
           TORCH_CHECK(
               pred->value()->definition()->as<BinaryOp>()->lhs() ==
                   hoisted_index,
               "Invalid predicate: ",
-              pred->value()->toInlineString());
+              pred->value()->toInlineString(),
+              ", ",
+              expr->toString());
           TORCH_CHECK(arith_expr->inputs().size() == 1);
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 2);
@@ -21418,14 +21432,18 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(
               in0_index == hoisted_index,
               "Invalid index: ",
-              in0_index->toInlineString());
+              in0_index->toInlineString(),
+              ", ",
+              expr->toString());
         } else if (out_ti->view()->name() == 4) {
           // Ref: T4[0] = T3[hoisted_index];
           TORCH_CHECK(
               pred->value()->definition()->as<BinaryOp>()->lhs() ==
                   hoisted_index,
               "Invalid predicate: ",
-              pred->value()->toInlineString());
+              pred->value()->toInlineString(),
+              ", ",
+              expr->toString());
           TORCH_CHECK(arith_expr->inputs().size() == 1);
           auto in0 = arith_expr->inputs().front()->as<kir::TensorIndex>();
           TORCH_CHECK(in0->view()->name() == 3);
@@ -21433,19 +21451,25 @@ TEST_F(NVFuserTest, FusionIndexHoist1_CUDA) {
           TORCH_CHECK(
               in0_index == hoisted_index,
               "Invalid index: ",
-              in0_index->toInlineString());
+              in0_index->toInlineString(),
+              ", ",
+              expr->toString());
         } else if (out_ti->view()->name() == 5) {
           // Ref: T5[hoisted_index] = T4[0]
           auto out_index = out_ti->index(0);
           TORCH_CHECK(
               out_index == hoisted_index,
               "Invalid index: ",
-              out_index->toInlineString());
+              out_index->toInlineString(),
+              ", ",
+              expr->toString());
           TORCH_CHECK(
               pred->value()->definition()->as<BinaryOp>()->lhs() ==
                   hoisted_index,
               "Invalid predicate: ",
-              pred->value()->toInlineString());
+              pred->value()->toInlineString(),
+              ", ",
+              expr->toString());
         }
       }
     }

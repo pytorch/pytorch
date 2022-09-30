@@ -161,22 +161,49 @@ class ContigIDs : public OptInDispatch {
       const std::vector<IterDomain*>& ids,
       const std::vector<IterDomain*>& root_domain,
       const std::vector<bool>& root_contiguity,
-      std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
+      const std::unordered_set<IterDomain*>& final_ids,
+      const std::unordered_map<IterDomain*, Val*>& index_map,
       const std::unordered_set<Split*>& divisible_splits,
       std::unordered_map<IterDomain*, IterDomain*> p2c_id_map = {},
-      bool ignore_indexability = false);
+      bool ignore_indexability = false,
+      bool ignore_consistent_ordering = false);
 
+  //! \param ids IterDomains on the leaves of the domain we're looking for
+  //! contiguous indexing into.
+  //! \param root_domain the root domain of the domain we're looking for
+  //! contiguous indexing into.
+  //! \param root_contiguity the contiguity of the root_domain.
+  //! \param concrete_to_ref concrete ids of the exact map that the reference
+  //! index is using for indexing.
+  //! \param divisible_splits a set of all splits in the fusion that are
+  //! divisible.
+  //! \param ca_map compute at map of the fusion.
+  //! \param halo_info halo information of the fusion.
+  //! \param concrete_info concretized broadcast information of the fusion.
+  //! \param p2c_id_map map from producer to consumer ids used for indexing
+  //! producer tensors.
+  //! \param ignore_consistent_ordering true for actual indexing into tensors
+  //! but false for predicate analysis. Ordering of merges don't matter for
+  //! predicate generation as they don't map to a physical address.
+  //! \param ignore_indexability can only be true if providing a real
+  //! concrete_to_ref map. As what it's checking is if the index is actually
+  //! indexable based on the reference.
   ContigIDs(
       const std::vector<IterDomain*>& ids,
       const std::vector<IterDomain*>& root_domain,
       const std::vector<bool>& root_contiguity,
-      std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
+      const std::unordered_set<IterDomain*>& final_ids,
+      const std::unordered_map<IterDomain*, Val*>& index_map,
       const std::unordered_set<Split*>& divisible_splits,
       std::shared_ptr<const ComputeAtMap> ca_map,
       std::shared_ptr<const HaloInfo> halo_info,
       std::shared_ptr<const ConcretizedBroadcastDomains> concrete_info,
       std::unordered_map<IterDomain*, IterDomain*> p2c_id_map = {},
-      bool ignore_indexability = false);
+      bool ignore_indexability = false,
+      bool ignore_consistent_ordering = false);
+
+  //! Return an empty ContigIDs with no contiguous ID
+  static ContigIDs getNonContigIDs();
 
   const std::unordered_set<IterDomain*>& contigIDs() const {
     return contig_ids_;
@@ -189,6 +216,14 @@ class ContigIDs : public OptInDispatch {
 
   const std::unordered_map<IterDomain*, IterDomain*>& rootToIndexedID() const {
     return root_to_indexed_id_;
+  }
+
+  VectorOfUniqueEntries<IterDomain*> indexedRootIDs(IterDomain* id) const {
+    auto root_ids_it = consistent_transform_info_->idToRootIds().find(id);
+    if (root_ids_it == consistent_transform_info_->idToRootIds().end()) {
+      return {};
+    }
+    return root_ids_it->second;
   }
 
  private:
@@ -233,9 +268,12 @@ class ContigIDs : public OptInDispatch {
   const std::vector<IterDomain*>& root_domain_;
   //! Contiguity of root_domain_
   const std::vector<bool>& root_contiguity_;
-  //! Mapping of concrete to reference domains. If a concrete domain
-  //! is not mapped, it is not indexable as there's no mapped index.
-  const std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref_;
+  //! Domains where indexing/predicates cannot be done with their
+  //! consumers domains
+  const std::unordered_set<IterDomain*>& final_ids_;
+  //! Mapping of concrete domains to indices. Just used to check if
+  //! there's an index for an IterDomain.
+  const std::unordered_map<IterDomain*, Val*> index_map_;
   // Divisible split information as we can still consider iter domains
   // contiguous through divisible splits.
   const std::unordered_set<Split*>& divisible_splits_;
@@ -247,7 +285,9 @@ class ContigIDs : public OptInDispatch {
   //! Producer-to-consumer index map in the case of analyzing replayed
   //! producer tensors
   const std::unordered_map<IterDomain*, IterDomain*> p2c_id_map_;
+
   const bool ignore_indexability_ = false;
+  const bool ignore_consistent_ordering_ = false;
 
   //! Mapping of root domain to bool indicating contiguity
   std::unordered_map<IterDomain*, bool> is_contig_root_;

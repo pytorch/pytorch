@@ -390,16 +390,20 @@ ContigIDs::ContigIDs(
     const std::vector<IterDomain*>& ids,
     const std::vector<IterDomain*>& root_domain,
     const std::vector<bool>& root_contiguity,
-    std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
+    const std::unordered_set<IterDomain*>& final_ids,
+    const std::unordered_map<IterDomain*, Val*>& index_map,
     const std::unordered_set<Split*>& divisible_splits,
     std::unordered_map<IterDomain*, IterDomain*> p2c_id_map,
-    bool ignore_indexability)
+    bool ignore_indexability,
+    bool ignore_consistent_ordering)
     : root_domain_(root_domain),
       root_contiguity_(root_contiguity),
-      concrete_to_ref_(std::move(concrete_to_ref)),
+      final_ids_(final_ids),
+      index_map_(index_map),
       divisible_splits_(divisible_splits),
       p2c_id_map_(std::move(p2c_id_map)),
       ignore_indexability_(ignore_indexability),
+      ignore_consistent_ordering_(ignore_consistent_ordering),
       non_divisible_id_info_(ids, root_domain_, divisible_splits_) {
   if (ids.size() > 0) {
     // This constructor doesn't provide the following information so it needs to
@@ -419,28 +423,36 @@ ContigIDs::ContigIDs(
     const std::vector<IterDomain*>& ids,
     const std::vector<IterDomain*>& root_domain,
     const std::vector<bool>& root_contiguity,
-    std::unordered_map<IterDomain*, IterDomain*> concrete_to_ref,
+    const std::unordered_set<IterDomain*>& final_ids,
+    const std::unordered_map<IterDomain*, Val*>& index_map,
     const std::unordered_set<Split*>& divisible_splits,
     std::shared_ptr<const ComputeAtMap> ca_map,
     std::shared_ptr<const HaloInfo> halo_info,
     std::shared_ptr<const ConcretizedBroadcastDomains> concrete_info,
     std::unordered_map<IterDomain*, IterDomain*> p2c_id_map,
-    bool ignore_indexability)
+    bool ignore_indexability,
+    bool ignore_consistent_ordering)
     : root_domain_(root_domain),
       root_contiguity_(root_contiguity),
-      concrete_to_ref_(std::move(concrete_to_ref)),
+      final_ids_(final_ids),
+      index_map_(index_map),
       divisible_splits_(divisible_splits),
       ca_map_(ca_map),
       halo_info_(halo_info),
       concrete_info_(concrete_info),
       p2c_id_map_(std::move(p2c_id_map)),
       ignore_indexability_(ignore_indexability),
+      ignore_consistent_ordering_(ignore_consistent_ordering),
       consistent_transform_info_(std::make_unique<const OrderedIdInformation>(
           ids,
           root_domain,
           concrete_info_)),
       non_divisible_id_info_(ids, root_domain, divisible_splits_) {
   build(ids);
+}
+
+ContigIDs ContigIDs::getNonContigIDs() {
+  return ContigIDs({}, {}, {}, {}, {}, {});
 }
 
 void ContigIDs::build(const std::vector<IterDomain*>& ids) {
@@ -488,14 +500,23 @@ void ContigIDs::handle(Merge* merge) {
   // If output is not consistently ordered or doesn't solely consume all root
   // domains in its dependencies, then it can't be a contiguously indexable
   // iterdomain.
-  if (!(consistent_transform_info_->isConsistentlyOrdered(merge->out()) &&
-        consistent_transform_info_->exclusivelyConsumesRoots(merge->out()))) {
+  if (!(ignore_consistent_ordering_ ||
+        consistent_transform_info_->isConsistentlyOrdered(merge->out()))) {
+    return;
+  }
+
+  if (!consistent_transform_info_->exclusivelyConsumesRoots(merge->out())) {
     return;
   }
 
   // If output is not "directly indexable" then it's definitely not contiguously
   // indexable.
   if (!ignore_indexability_ && !isIndexable(merge->out())) {
+    return;
+  }
+
+  // If inputs are marked as final, stop
+  if (final_ids_.count(merge->inner()) || final_ids_.count(merge->outer())) {
     return;
   }
 
@@ -512,17 +533,25 @@ void ContigIDs::handle(Merge* merge) {
 
   VectorOfUniqueEntries<IterDomain*> root_ids = root_ids_it->second;
 
+  bool is_indexing_pass = !ignore_consistent_ordering_;
+
   IterDomain* last_root = nullptr;
   for (auto root_id_i : c10::irange(root_domain_.size())) {
     auto root_id = root_domain_[root_id_i];
     if (root_ids.has(root_id)) {
       // ID found, remove it
       root_ids.erase(root_id);
-      // If the last id isn't contiguous that's fine, we can use the stride of
-      // the last iter domain to multiply the contig index.
-      if (!root_contiguity_[root_id_i] && !root_ids.empty()) {
-        // Otherwise this merge->out() isn't a contiguously indexable ID
-        return;
+      // If we're indexing:
+      // we could still potentially consider this ID linearly indexable, as we
+      // could multiple the index by the last root's stride.
+      //
+      // If we're computing predicates (ignore_consistent_ordering_==true),
+      // then we don't have this same constraint, we can just ignore
+      // contiguity of the roots all together.
+      if (!root_contiguity_[root_id_i] && is_indexing_pass) {
+        if (!root_ids.empty()) {
+          return;
+        }
       }
       last_root = root_id;
     }
@@ -581,7 +610,7 @@ bool ContigIDs::isIndexable(IterDomain* id) const {
   }
   auto c_id =
       ca_map_->getConcreteMappedID(getMappedId(id), IdMappingMode::EXACT);
-  return concrete_to_ref_.find(c_id) != concrete_to_ref_.end();
+  return index_map_.find(c_id) != index_map_.end();
 }
 
 } // namespace cuda
