@@ -1330,7 +1330,8 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
     """
     warnings.warn(
         "torch.distributed.broadcast_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later."
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
     )
 
     if _rank_not_in_group(group):
@@ -1432,7 +1433,8 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
     """
     warnings.warn(
         "torch.distributed.all_reduce_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later."
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
     )
 
     if _rank_not_in_group(group):
@@ -1621,7 +1623,8 @@ def reduce_multigpu(
     """
     warnings.warn(
         "torch.distributed.reduce_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later."
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
     )
 
     if _rank_not_in_group(group):
@@ -1739,7 +1742,8 @@ def all_gather_multigpu(
     """
     warnings.warn(
         "torch.distributed.all_gather_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later."
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
     )
 
     if _rank_not_in_group(group):
@@ -2640,7 +2644,8 @@ def reduce_scatter_multigpu(
     """
     warnings.warn(
         "torch.distributed.reduce_scatter_multigpu will be deprecated. If you must "
-        "use it, please revisit our documentation later."
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
     )
 
     if _rank_not_in_group(group):
