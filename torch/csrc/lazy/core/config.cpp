@@ -13,6 +13,11 @@ C10_DEFINE_bool(
     "Handle special scalars 0 and 1 diffrently");
 
 C10_DEFINE_bool(
+    torch_lazy_all_numbers_special_scalars,
+    false,
+    "Handle all numbers as special scalars");
+
+C10_DEFINE_bool(
     torch_lazy_reuse_ir,
     false,
     "Reuse IR nodes from previous tracing when possible");
