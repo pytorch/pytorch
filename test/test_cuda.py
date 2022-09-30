@@ -1643,8 +1643,6 @@ except RuntimeError as e:
             _test(1)
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
-    # skip for ROCM. Look into #62533.
-    @skipIfRocm
     def test_cuda_memory_leak_detection(self):
         l = []
 
@@ -3236,6 +3234,32 @@ torch.cuda.synchronize()
         with self.assertRaisesRegex(RuntimeError, "out of memory"):
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2 ** 40, device="cuda")
+
+    @unittest.skipIf((not TEST_CUDA) or
+                     TEST_WITH_ROCM or
+                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
+    @skipCUDAMemoryLeakCheckIf(True)  # This test may incur an expected allocation for a cuBLAS workspace
+    def test_repeat_graph_capture_cublas_workspace_memory(self):
+        (x, y, z) = 1024, 512, 64
+        a = torch.rand((x, y), device='cuda')
+        b = torch.rand((y, z), device='cuda')
+
+        # warmup
+        torch.mm(a, b)
+
+        free_bytes_before, total_bytes = torch.cuda.mem_get_info()
+        used_gb_before = (total_bytes - free_bytes_before) / 1e9
+
+        for i in range(100):
+            torch_graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(torch_graph):
+                torch.mm(a, b)
+            torch_graph.replay()
+
+        free_bytes_after, _ = torch.cuda.mem_get_info()
+        used_gb_after = (total_bytes - free_bytes_after) / 1e9
+
+        self.assertFalse(used_gb_before + 0.1 < used_gb_after)
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
