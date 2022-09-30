@@ -8026,6 +8026,7 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+    MPS: masked_select_out_mps
   tags: dynamic_output_shape
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
@@ -8033,6 +8034,7 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+    MPS: masked_select_mps
   tags: dynamic_output_shape
 
 - func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
@@ -13803,3 +13805,11 @@
   dispatch:
     CPU: foobar
   autogen: _foobar.out
+
+# Fused Optimizer CUDA kernels.
+- func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
+  variants: function
+  dispatch:
+    CUDA: _fused_adam_kernel_cuda_
+  autogen: _fused_adam, _fused_adam.out
