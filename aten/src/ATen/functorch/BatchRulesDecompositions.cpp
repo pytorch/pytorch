@@ -260,6 +260,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(t_);
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
+  OP_DECOMPOSE(unfold_copy);
 
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);

@@ -4,6 +4,7 @@ from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
 import contextlib
+from copy import deepcopy
 import ctypes
 import gc
 import io
@@ -2223,20 +2224,24 @@ torch.cuda.synchronize()
             self.assertEqual(s1.get_growth_interval(), 2)
             self.assertEqual(s1._init_growth_tracker, 0)
 
-    def _create_scaling_models_optimizers(self, device="cuda"):
+    def _create_scaling_models_optimizers(self, device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         # Create a module+optimizer that will use scaling, and a control module+optimizer
         # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
         mod_control = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
         mod_scaling = torch.nn.Sequential(torch.nn.Linear(8, 8), torch.nn.Linear(8, 8)).to(device=device)
-        for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-            s.data.copy_(c.data)
+        with torch.no_grad():
+            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+                s.copy_(c)
 
-        opt_control = torch.optim.SGD(mod_control.parameters(), lr=1.0)
-        opt_scaling = torch.optim.SGD(mod_scaling.parameters(), lr=1.0)
+        kwargs = {"lr": 1.0}
+        if optimizer_kwargs is not None:
+            kwargs.update(optimizer_kwargs)
+        opt_control = optimizer_ctor(mod_control.parameters(), **kwargs)
+        opt_scaling = optimizer_ctor(mod_scaling.parameters(), **kwargs)
 
         return mod_control, mod_scaling, opt_control, opt_scaling
 
-    def _create_scaling_case(self, device="cuda", dtype=torch.float):
+    def _create_scaling_case(self, device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
                 (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
                 (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
@@ -2246,13 +2251,17 @@ torch.cuda.synchronize()
 
         skip_iter = 2
 
-        return self._create_scaling_models_optimizers(device=device) + (data, loss_fn, skip_iter)
+        return self._create_scaling_models_optimizers(
+            device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+        ) + (data, loss_fn, skip_iter)
 
     # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
-    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7):
+    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         # Ensure scaling can be disabled without changing user control flow.
         for enabled in True, False:
-            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter = self._create_scaling_case()
+            (
+                mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
+            ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
 
             # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
             # so any potential errors with the growth factor handling will be magnified.
@@ -2274,10 +2283,16 @@ torch.cuda.synchronize()
                 self.assertTrue(scaler.get_scale() == 1.0)
 
             for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertEqual(c.grad, s.grad, atol=atol, rtol=1e-05)
+
+                c_state, s_state = opt_control.state[c], opt_scaling.state[s]
+                for k in c_state:
+                    self.assertEqual(c_state[k], s_state[k], atol=atol, rtol=1e-05, msg=k)
+
                 self.assertEqual(c, s, atol=atol, rtol=1e-05)
 
     # Compares no scaling + no autocasting against scaling + autocasting.
-    def test_grad_scaling_autocast(self):
+    def _grad_scaling_autocast_test(self, *, atol=1e-3, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
         try_pickle = False
 
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -2289,7 +2304,8 @@ torch.cuda.synchronize()
                 if try_scaling_api:
                     scaler.scale(loss).backward()
                     if i == skip_iter and scaler.is_enabled():
-                        model[1].weight.grad.data.fill_(float('inf'))
+                        with torch.no_grad():
+                            model[1].weight.grad.fill_(float('inf'))
                     scaler.step(optimizer)
                     scaler.update()
                     if try_pickle:
@@ -2300,11 +2316,81 @@ torch.cuda.synchronize()
                         optimizer.step()
             return scaler
 
-        # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
-        # this will be picked up by try_pickle within run():
-        try_pickle = True
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-3)
+        # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
+        #   Giving some flexibility to this test might help.
+        context = contextlib.nullcontext
+        if optimizer_ctor in (torch.optim.Adam,):
+            from functools import partial
+            context = partial(self.assertRaises, AssertionError)
+        with context():
+            # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
+            self._run_scaling_case(
+                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+            )
+            # this will be picked up by try_pickle within run():
+            try_pickle = True
+            self._run_scaling_case(
+                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
+            )
+
+    def test_grad_scaling_autocast(self):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor)
+
+    def test_grad_scaling_autocast_foreach(self):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam):
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
+
+    def test_grad_scaling_autocast_fused(self):
+        self._grad_scaling_autocast_test(optimizer_ctor=torch.optim.Adam, optimizer_kwargs={"fused": True})
+
+    def test_grad_scaling_autocast_fused_optimizers(self):
+        for optimizer_ctor, optimizer_kwargs in (
+            (torch.optim.Adam, {"fused": True, "amsgrad": False}),
+            (torch.optim.Adam, {"fused": True, "amsgrad": True}),
+        ):
+            self._grad_scaling_autocast_fused_optimizers(
+                optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
+
+    def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs):
+        (
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
+        ) = self._create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
+        kwargs = deepcopy(optimizer_kwargs)
+        kwargs["fused"] = False
+        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
+
+        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
+
+        for input, target in data:
+            opt_control.zero_grad()
+            with torch.autocast('cuda'):
+                output_control = mod_control(input)
+                loss_control = loss_fn(output_control, target)
+            scaler.scale(loss_control).backward()
+            scaler.step(opt_control)
+            scaler.update()
+
+            opt_scaling.zero_grad()
+            with torch.autocast('cuda'):
+                output_scaling = mod_scaling(input)
+                loss_scaling = loss_fn(output_scaling, target)
+            scaler.scale(loss_scaling).backward()
+            scaler.step(opt_scaling)
+            scaler.update()
+
+            self.assertEqual(loss_control, loss_scaling)
+            for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertEqual(param_control.grad, param_scaling.grad)
+                self.assertEqual(param_control, param_scaling)
+
+                state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
+
+                for k in state_control:
+                    actual = state_scaling[k]
+                    if k == "step":
+                        actual = actual.squeeze()
+                    self.assertEqual(state_control[k], actual, msg=k)
 
     def test_grad_scaling_clipping(self):
         def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
@@ -3868,15 +3954,79 @@ torch.cuda.synchronize()
         model_control.eval()
         self.assertEqual(model_graphed(real_inputs[0]), model_control(real_inputs[0]))
 
+    def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
+        for actually_do_graphs in (True, False):
+            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+            params_control = [p.clone().requires_grad_() for p in params]
+            params_graphed = [p.clone().requires_grad_() for p in params]
+
+            grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
+
+            # Control (capturable=False)
+
+            opt = optimizer_ctor(params_control, capturable=False, **kwargs)
+
+            for i in range(steps_warmup + steps_train):
+                for j, p in enumerate(params_control):
+                    p.grad = grads[i][j]
+                opt.step()
+
+            # capturable=True
+
+            opt = optimizer_ctor(params_graphed, capturable=True, **kwargs)
+
+            for i in range(steps_warmup):
+                for j, p in enumerate(params_graphed):
+                    p.grad = grads[i][j]
+                opt.step()
+
+            if actually_do_graphs:
+                g = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(g):
+                    opt.step()
+
+            for i in range(steps_train):
+                if actually_do_graphs:
+                    for j, p in enumerate(params_graphed):
+                        p.grad.copy_(grads[i + steps_warmup][j])
+                    g.replay()
+                else:
+                    # Passing capturable=True to the constructor and running without graphs should still be
+                    # numerically correct, even if it's not ideal for performance.
+                    for j, p in enumerate(params_graphed):
+                        p.grad = grads[i + steps_warmup][j]
+                    opt.step()
+
+            for p_control, p_graphed in zip(params_control, params_graphed):
+                self.assertEqual(p_control, p_graphed)
+
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_adam_adamw(self):
-        OptClasses = (torch.optim.Adam, torch.optim.AdamW)
-        cases = []
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
-        for Class, foreach, amsgrad in product(OptClasses, (False, True), (False, True)):
-            cases.append((Class, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad}))
+        cases = [
+            (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
+            for optimizer_ctor, foreach, amsgrad in product(
+                (torch.optim.Adam, torch.optim.AdamW), (False, True), (False, True),)
+        ] + [
+            (torch.optim.Adam, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
+            for amsgrad in (False, True)
+        ]
+
+        for optimizer_ctor, kwargs in cases:
+            with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
+                self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
+
+    @unittest.skipIf(
+        (not TEST_CUDA) or TEST_WITH_ROCM or int(torch.version.cuda.split(".")[0]) < 11,
+        "CUDA >= 11.0 required for graphs",
+    )
+    def test_graph_scaling_fusedadam(self):
+        cases = [
+            (torch.optim.Adam, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
+            for amsgrad in (False, True)
+        ]
 
         steps_warmup = 3
         steps_train = 2
@@ -3887,7 +4037,21 @@ torch.cuda.synchronize()
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
 
+                # `GradScaler` in-place updates gradients thus it's necessary to duplicate gradients.
                 grads = [[torch.randn_like(p) for p in params] for _ in range(steps_warmup + steps_train)]
+                with torch.no_grad():
+                    grads_control = [[g.clone() for g in gs] for gs in grads]
+                    grads_graphed = [[g.clone() for g in gs] for gs in grads]
+
+                # Gradient Scaler
+                scaler_for_control = torch.cuda.amp.GradScaler(init_scale=128.0)
+                with torch.no_grad():
+                    scaler_for_control._lazy_init_scale_growth_tracker(torch.device("cuda"))
+
+                scaler_for_graphed = torch.cuda.amp.GradScaler()
+                scaler_for_graphed.load_state_dict(scaler_for_control.state_dict())
+                with torch.no_grad():
+                    scaler_for_graphed._lazy_init_scale_growth_tracker(torch.device("cuda"))
 
                 # Control (capturable=False)
 
@@ -3895,8 +4059,9 @@ torch.cuda.synchronize()
 
                 for i in range(steps_warmup + steps_train):
                     for j, p in enumerate(params_control):
-                        p.grad = grads[i][j]
-                    opt.step()
+                        p.grad = grads_control[i][j]
+                    scaler_for_control.step(opt)
+                    scaler_for_control.update()
 
                 # capturable=True
 
@@ -3904,25 +4069,28 @@ torch.cuda.synchronize()
 
                 for i in range(steps_warmup):
                     for j, p in enumerate(params_graphed):
-                        p.grad = grads[i][j]
-                    opt.step()
+                        p.grad = grads_graphed[i][j]
+                    scaler_for_graphed.step(opt)
+                    scaler_for_graphed.update()
 
                 if actually_do_graphs:
                     g = torch.cuda.CUDAGraph()
                     with torch.cuda.graph(g):
-                        opt.step()
+                        scaler_for_graphed.step(opt)
+                        scaler_for_graphed.update()
 
                 for i in range(steps_train):
                     if actually_do_graphs:
                         for j, p in enumerate(params_graphed):
-                            p.grad.copy_(grads[i + steps_warmup][j])
+                            p.grad.copy_(grads_graphed[i + steps_warmup][j])
                         g.replay()
                     else:
                         # Passing capturable=True to the constructor and running without graphs should still be
                         # numerically correct, even if it's not ideal for performance.
                         for j, p in enumerate(params_graphed):
-                            p.grad = grads[i + steps_warmup][j]
-                        opt.step()
+                            p.grad = grads_graphed[i + steps_warmup][j]
+                        scaler_for_graphed.step(opt)
+                        scaler_for_graphed.update()
 
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
