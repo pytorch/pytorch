@@ -77,12 +77,12 @@ qnnpack_weight_only_quint4x2_dtype_config = DTypeConfig(
 # TODO: add additional restriction on qscheme to ensure it
 # is either per_tensor_symmetric or per_channel_symmetric
 
-qnnpack_act_qint8_with_symmetric_constraints = DTypeWithConstraints(
+qnnpack_act_qint8_scale_min_2_neg_12 = DTypeWithConstraints(
     dtype=torch.qint8,
     scale_min_lower_bound=2 ** -12,
 )
 
-qnnpack_weight_qint8_with_symmetric_constraints = DTypeWithConstraints(
+qnnpack_weight_qint8_neg_127_to_127_scale_min_2_neg_12 = DTypeWithConstraints(
     dtype=torch.qint8,
     quant_min_lower_bound=-127,
     quant_max_upper_bound=127,
@@ -90,15 +90,15 @@ qnnpack_weight_qint8_with_symmetric_constraints = DTypeWithConstraints(
 )
 
 qnnpack_weighted_op_qint8_symmetric_dtype_config = DTypeConfig(
-    input_dtype=qnnpack_act_qint8_with_symmetric_constraints,
-    output_dtype=qnnpack_act_qint8_with_symmetric_constraints,
-    weight_dtype=qnnpack_weight_qint8_with_symmetric_constraints,
+    input_dtype=qnnpack_act_qint8_scale_min_2_neg_12,
+    output_dtype=qnnpack_act_qint8_scale_min_2_neg_12,
+    weight_dtype=qnnpack_weight_qint8_neg_127_to_127_scale_min_2_neg_12,
     bias_dtype=torch.float,
 )
 
 qnnpack_default_op_qint8_symmetric_dtype_config = DTypeConfig(
-    input_dtype=qnnpack_act_qint8_with_symmetric_constraints,
-    output_dtype=qnnpack_act_qint8_with_symmetric_constraints,
+    input_dtype=qnnpack_act_qint8_scale_min_2_neg_12,
+    output_dtype=qnnpack_act_qint8_scale_min_2_neg_12,
 )
 
 
