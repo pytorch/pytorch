@@ -36,7 +36,6 @@ from pytorch_test_common import (
     skipTraceTest,
 )
 from torch import Tensor
-from torch import hub
 from torch.nn.utils import rnn as rnn_utils
 from torch.onnx import _constants, verification
 from torch.testing._internal import common_utils
@@ -12578,25 +12577,18 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(16)
-    @unittest.skipIf(not hub._check_module_exists("torch_geometric"), "torch_geometric not installed.")
+    @unittest.skipIf(
+        not torch.hub._check_module_exists("torch_geometric"),
+        "torch_geometric not installed.",
+    )
     def test_sage_conv(self):
-        from torch.nn import (
-            Linear as Lin,
-            Sequential as Seq,
-            ReLU,
-            Sigmoid,
-        )
-        from torch_geometric.nn import (
-            BatchNorm,
-            knn_graph,
-            SAGEConv,
-        )
+        from torch_geometric import nn as torch_geometric_nn
 
         # Input
         coords0 = torch.randn(1, 6)
         coords1 = torch.randn(1, 6)
         coords = torch.transpose(torch.cat((coords0, coords1), dim=0), 0, 1)
-        adj = knn_graph(coords, k=2, batch=None, loop=True)
+        adj = torch_geometric_nn.knn_graph(coords, k=2, batch=None, loop=True)
         edge_from = adj[0:1, :]
         edge_to = adj[1:, :]
         inputs = (coords0, coords1, edge_from, edge_to)
@@ -12604,11 +12596,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class MySAGEConv(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.SAGEConvBlock1 = SAGEConv(2, 512, normalize=True)
-                self.bano1 = BatchNorm(512)
-                self.relu = ReLU()
-                self.dense1 = Seq(Lin(512, 1))
-                self.sigmoid = Sigmoid()
+                self.SAGEConvBlock1 = torch_geometric_nn.SAGEConv(
+                    2, 512, normalize=True
+                )
+                self.bano1 = torch_geometric_nn.BatchNorm(512)
+                self.relu = torch.nn.ReLU()
+                self.dense1 = torch.nn.Seq(Lin(512, 1))
+                self.sigmoid = torch.nn.Sigmoid()
 
             def forward(self, coords0, coords1, edge_from, edge_to):
                 adj = torch.cat((edge_from, edge_to), dim=0)
@@ -12626,7 +12620,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             "edge_to": {0: "batch_size", 1: "features"},
             "outputs": {0: "batch_size"},
         }
-        self.run_test(MySAGEConv(), inputs, input_names=input_names, output_names=output_names, dynamic_axes=dynamic_axes)
+        self.run_test(
+            MySAGEConv(),
+            inputs,
+            input_names=input_names,
+            output_names=output_names,
+            dynamic_axes=dynamic_axes,
+        )
 
     # Cannot export with older opsets because of "ConstantFill" op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime
