@@ -1455,7 +1455,7 @@
     CompositeExplicitAutograd: convolution
   autogen: convolution.out
 
-- func: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, SymInt[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CompositeExplicitAutograd, CUDA: convolution_backward
   autogen: convolution_backward.out

@@ -435,7 +435,7 @@ convolution_backward_weight_batch_rule(
 
 std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
-    const c10::OptionalArrayRef<int64_t> bias_sizes_opt,
+    const c10::OptionalArrayRef<SymInt> bias_sizes_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed,
     IntArrayRef output_padding, int64_t groups, std::array<bool, 3> output_mask) {
   const auto maybe_layer = maybeCurrentDynamicLayer();
@@ -444,7 +444,7 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
 
   if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::convolution_backward(
+    return at::convolution_backward_symint(
         grad_output_, input_, weight_, bias_sizes_opt, stride, padding,
         dilation, transposed, output_padding, groups, output_mask);
   }

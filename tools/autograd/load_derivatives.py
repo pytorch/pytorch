@@ -782,6 +782,17 @@ def saved_variables(
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
             },
         ),
+        # replace self->sym_sizes() with self_sym_sizes_opt
+        (
+            r"{}->sym_sizes\(\)",
+            {
+                "suffix": "_sym_sizes_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+            },
+        ),
         # replace self.options() with self_options
         (
             r"{}.options\(\)",

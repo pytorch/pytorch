@@ -845,6 +845,19 @@ void addInputs(
   }
 }
 
+void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalSymIntArrayRef& opt_value) {
+  if (opt_value.has_value()) {
+    jit::tracer::addInputs(n, name, *opt_value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
 void addInputs(Node* n, const char* name, ArrayRef<double> value) {
   std::vector<Value*> info;
   auto& g = getTracingState()->graph;
