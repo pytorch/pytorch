@@ -187,7 +187,7 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @dtypes(torch.float16, torch.uint8)
-    def test_nvprim_convert_element_dtype(self, device, dtype):
+    def test_nvprim_convert_element_type(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
