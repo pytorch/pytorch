@@ -4,6 +4,15 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph
 from typing import Union, Dict, Any, Set
 
+__all__ = [
+    "FusedGraphModule",
+    "ObservedGraphModule",
+    "is_observed_module",
+    "ObservedStandaloneGraphModule",
+    "is_observed_standalone_module",
+    "QuantizedGraphModule",
+]
+
 class FusedGraphModule(GraphModule):
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, preserved_attr_names: Set[str]):
         self.preserved_attr_names = preserved_attr_names
