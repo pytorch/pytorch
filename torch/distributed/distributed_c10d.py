@@ -53,7 +53,7 @@ __all__ = [
     'ProcessGroup', 'ReduceOp', 'ReduceOptions', 'ReduceScatterOptions',
     'ScatterOptions', 'Store', 'DebugLevel', 'get_debug_level', 'Work',
     'default_pg_timeout', 'get_group_rank', 'get_global_rank', 'get_process_group_ranks',
-    'reduce_op',
+    'reduce_op', 'all_gather_into_tensor',
 ]
 
 _MPI_AVAILABLE = True
@@ -2219,14 +2219,22 @@ def all_gather(tensor_list, tensor, group=None, async_op=False):
         work.wait()
 
 
-def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
+def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=False):
     """
-    Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
+    Gather tensors from all ranks and put them in a single output tensor.
 
     Args:
-        output_tensor (Tensor): Output tensor. It should contain
-            correctly-sized tensors to be used for output of the collective.
-        input_tensor (Tensor): Tensor to be broadcast from current process.
+        output_tensor (Tensor): Output tensor to accommodate tensor elements
+            from all ranks. It must be correctly sized to have one of the
+            following forms:
+            (i) a concatenation of all the input tensors along the primary
+            dimension; for definition of "concatenation", see ``torch.cat()``;
+            (ii) a stack of all the input tensors along the primary dimension;
+            for definition of "stack", see ``torch.stack()``.
+            Examples below may better explain the supported output forms.
+        input_tensor (Tensor): Tensor to be gathered from current rank.
+            Different from the ``all_gather`` API, the input tensors in this
+            API must have the same size across all ranks.
         group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
@@ -2237,30 +2245,36 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
 
     Examples:
         >>> # xdoctest: +SKIP("need process group init")
-        >>> # All tensors below are of torch.int64 dtype.
-        >>> # We have 2 process groups, 2 ranks.
-        >>> output_tensor = torch.zeros(2, dtype=torch.int64)
-        >>> output_tensor
-        [tensor([0, 0])] # Rank 0 and 1
-        >>> tensor = torch.arange(1, dtype=torch.int64) + 1 + rank
-        >>> tensor
-        tensor([1]) # Rank 0
-        tensor([2]) # Rank 1
-        >>> dist.all_gather_base(output_tensor, tensor)
-        >>> output_tensor
-        tensor([1,2]) # Rank 0
-        tensor([1,2]) # Rank 1
+        >>> # All tensors below are of torch.int64 dtype and on CUDA devices.
+        >>> # We have two ranks.
+        >>> device = torch.device(f'cuda:{rank}')
+        >>> tensor_in = torch.arange(2, dtype=torch.int64, device=device) + 1 + 2 * rank
+        >>> tensor_in
+        tensor([1, 2], device='cuda:0') # Rank 0
+        tensor([3, 4], device='cuda:1') # Rank 1
+        >>> # Output in concatenation form
+        >>> tensor_out = torch.zeros(world_size * 2, dtype=torch.int64, device=device)
+        >>> dist.all_gather_into_tensor(tensor_out, tensor_in)
+        >>> tensor_out
+        tensor([1, 2, 3, 4], device='cuda:0') # Rank 0
+        tensor([1, 2, 3, 4], device='cuda:1') # Rank 1
+        >>> # Output in stack form
+        >>> tensor_out2 = torch.zeros(world_size, 2, dtype=torch.int64, device=device)
+        >>> dist.all_gather_into_tensor(tensor_out2, tensor_in)
+        >>> tensor_out2
+        tensor([[1, 2],
+                [3, 4]], device='cuda:0') # Rank 0
+        tensor([[1, 2],
+                [3, 4]], device='cuda:1') # Rank 1
 
     .. warning::
-        `_all_gather_base` is experimental and subject to change.
-        It is the caller's responsibility to ensure the output_tensor
-        is correctly sized.
+        The Gloo backend does not support this API.
 
     """
     _check_single_tensor(input_tensor, "input_tensor")
     _check_single_tensor(output_tensor, "output_tensor")
     if _rank_not_in_group(group):
-        _warn_not_in_group("_all_gather_base")
+        _warn_not_in_group("all_gather_into_tensor")
         return
 
     output_tensor = (
@@ -2284,6 +2298,35 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
         return work
     else:
         work.wait()
+
+
+def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
+    """
+    Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
+
+    Args:
+        output_tensor (Tensor): Output tensor. It should contain
+            correctly-sized tensors to be used for output of the collective.
+        input_tensor (Tensor): Tensor to be broadcast from current process.
+        group (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+        async_op (bool, optional): Whether this op should be an async op
+
+    Returns:
+        Async work handle, if async_op is set to True.
+        None, if not async_op or if not part of the group
+
+    .. warning::
+        `_all_gather_base` is a private function. Users should use
+        `all_gather_into_tensor` instead.
+
+    """
+    warnings.warn(
+        "torch.distributed._all_gather_base is a private function and will be "
+        "deprecated. Please use torch.distributed.all_gather_into_tensor "
+        "instead."
+    )
+    return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
 
 def all_gather_coalesced(
