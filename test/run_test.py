@@ -7,6 +7,7 @@ from distutils.util import strtobool
 from distutils.version import LooseVersion
 import os
 import pathlib
+from select import select
 import shutil
 import signal
 import subprocess
@@ -1062,7 +1063,7 @@ def main():
     selected_tests = get_selected_tests(options, test_times)
 
     if options.verbose:
-        print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests.map(lambda x: x[0]))))
+        print_to_stderr("Selected tests:\n {}".format("\n ".join(map(lambda x: x[0], selected_tests))))
 
     if options.dry_run:
         return
