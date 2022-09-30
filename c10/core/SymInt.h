@@ -80,6 +80,17 @@ class C10_API SymInt {
     return *this;
   }
 
+  SymInt clone() const {
+#ifndef C10_MOBILE
+    if (is_symbolic()) {
+      return toSymIntNodeImplUnowned()->clone()->toSymInt();
+    }
+#else
+    TORCH_INTERNAL_ASSERT(!is_symbolic());
+#endif
+    return *this;
+  }
+
 #ifndef C10_MOBILE
   SymIntNodeImpl* toSymIntNodeImplUnowned() const {
     uint64_t unextended_bits = static_cast<uint64_t>(data_) & ~MASK;
