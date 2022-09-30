@@ -161,7 +161,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
-Tensor linear_eltwise_run(
+Tensor linear_pointwise_run(
     const Tensor& input,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
@@ -233,8 +233,8 @@ Tensor linear_eltwise_run(
 
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_eltwise"),
-      TORCH_FN(linear_eltwise_run));
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_FN(linear_pointwise_run));
 }
 
 } // namespace native
