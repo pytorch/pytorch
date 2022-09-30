@@ -972,6 +972,10 @@ class AbstractCommTest(object):
     def world_size(self):
         return 2
 
+    @property
+    def device(self):
+        self.fail("test subclass didn't override device")
+
     def _verify_sequence_number_across_pg(self, pg, verify_pg):
 
         seq_num = pg._get_sequence_number_for_group()
@@ -1144,7 +1148,81 @@ class AbstractCommTest(object):
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
 
+    def _test_tensor_dtype_mismatch(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
 
+        tensor = torch.ones(2, 2, device=self.device) * 7
+        tensor_h = tensor.half()
+        tensor_list = [torch.zeros(2, 2, device=self.device) for _ in range(self.world_size)]
+        tensor_list_h = list(tensor_list)
+        tensor_list_h[1] = tensor_list_h[1].half()
+
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_gather(tensor_list_h, tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_gather(tensor_list, tensor_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_gather_coalesced([tensor_list_h], tensor_list)
+            dist.all_gather_coalesced([tensor_list], tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_reduce_coalesced(tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.reduce_scatter(tensor, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.reduce_scatter(tensor_h, tensor_list)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_to_all_single(tensor_h, tensor)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_to_all(tensor_list_h, tensor_list)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.all_to_all(tensor_list, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.scatter(tensor, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.gather(tensor_h, tensor_list)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.gather(tensor, tensor_list_h)
+
+        with self.assertRaisesRegex(RuntimeError, "tensors with different dtypes"):
+            dist.scatter(tensor_h, tensor_list)
+
+    def _test_tensor_dtype_complex(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+        tensor = torch.rand(2, device=self.device)
+        tensor_c = torch.view_as_complex(tensor)
+        tensor_list = [torch.rand(2, device=self.device) for _ in range(self.world_size)]
+        tensor_list_c = list(tensor_list)
+        tensor_list_c[1] = torch.view_as_complex(tensor_list_c[1])
+
+        dist.all_gather(tensor_list, tensor)
+        dist.all_gather(tensor_list, tensor_c)
+        dist.all_gather(tensor_list_c, tensor)
+        dist.all_gather(tensor_list_c, tensor_c)
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
@@ -1288,13 +1366,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
-            dist.Backend._plugins["DUMMY"],
+            dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
 
+    class Options:
+        def __init__(self):
+            pass
+
+        def create(self):
+            pass
+
     @staticmethod
-    def create_dummy(store, rank, size, timeout):
-        return DummyProcessGroup(rank, size)
+    def create_dummy(store, group_rank, group_size, timeout):
+        return DummyProcessGroup(group_rank, group_size)
 
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
@@ -1354,6 +1439,48 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
+class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super(ProcessGroupWithDispatchedCollectivesTests, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(ProcessGroupWithDispatchedCollectivesTests, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _call_collective_with_varying_tensors(self, backend, collective, *args):
+        # call collective with varying tensors to ensure that the tensors are
+        # correctly dispatched
+
+        # TODO: this will be updated in the future to not be backend specific
+        device = "cuda" if backend == "nccl" else "cpu"
+        # ensure supported devices (cpu, cuda) succeeds during dispatch call
+        tensor = torch.zeros(2, 2, device=torch.device(device))
+        collective(tensor, *args)
+
+    # TODO: backend will be replaced with a non specified backend
+    def _test_collectives(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        collectives_and_args = [
+            (dist.broadcast, self.rank),
+            (dist.all_reduce,)
+        ]
+        for collective, *args in collectives_and_args:
+            with self.subTest(collective=collective, args=args):
+                self._call_collective_with_varying_tensors(backend, collective, *args)
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):

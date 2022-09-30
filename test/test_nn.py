@@ -5370,7 +5370,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mask[i, end:] = False
 
         nt = torch._nested_tensor_from_mask(input, mask)
-        input_convert = torch.nested.to_padded_tensor(nt, 0.)
+        input_convert = nt.to_padded_tensor(0.)
         input.masked_fill_(mask.reshape(N, L, 1).logical_not(), 0.)
 
         self.assertEqual(input, input_convert)
@@ -5867,7 +5867,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_multihead_attn_nested_tensor_outside_fast_path(self):
         mha = torch.nn.MultiheadAttention(4, 4, batch_first=True).eval()
-        nt = torch.nested_tensor([torch.randn(4, 4)])
+        nt = torch.nested.nested_tensor([torch.randn(4, 4)])
         # One tested platform (linux-bionic-py3.7-clang) has a torch_function for one
         # or more of these. Take advantage of that to test the torch_function bailout.
         has_torch_func = torch.overrides.has_torch_function(
@@ -5888,7 +5888,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mha(nt, nt, nt)
         with torch.inference_mode():
             mha(nt, nt, nt)
-        nt = torch.nested_tensor([torch.randn(4, 4, requires_grad=False)])
+        nt = torch.nested.nested_tensor([torch.randn(4, 4, requires_grad=False)])
         nt.requires_grad = False
         with self.assertRaisesRegex(AssertionError, msg):
             mha(nt, nt, nt)
@@ -6100,6 +6100,19 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         bn.load_state_dict(state_dict)
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
+
+    def test_load_state_dict_child(self):
+        base_module = nn.Linear(1, 1)
+        model = base_module
+        for _ in range(3):
+            model = nn.Sequential(*[deepcopy(model) for _ in range(10)])
+
+        def hook_fn(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+            module_state_dict = module.state_dict()
+            self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
+
+        model[0][0]._register_load_state_dict_pre_hook(hook_fn, with_module=True)
+        model.load_state_dict(model.state_dict(), strict=True)
 
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_load_state_dict_ref_cycle(self):
@@ -10770,20 +10783,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # input wrong dimension
 
         unfold = nn.Unfold(kernel_size=(2, 3))
-        with self.assertRaisesRegex(NotImplementedError, r"Only 4D input Tensors are supported"):
-            unfold(torch.randn(1, 5, 2))
 
         # calculated output shape is too small
-
-        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
             unfold = nn.Unfold(kernel_size=(2, 3))
             unfold(torch.randn(1, 2, 2, 2))
 
-        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
             unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
             unfold(torch.randn(1, 2, 2, 3))
 
-        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+        with self.assertRaisesRegex(RuntimeError, r"its components must be at least one"):
             unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
             unfold(torch.randn(1, 2, 2, 2))
 
@@ -13920,10 +13930,10 @@ class TestNNDeviceType(NNTestCase):
                             # result.
                             with self.assertRaisesRegex(
                                     AssertionError, 'MultiheadAttention does not support NestedTensor outside'):
-                                nt = torch.nested_tensor([], device=device)
+                                nt = torch.nested.nested_tensor([], device=device)
                                 _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
 
-                            nt = torch.nested_tensor([torch.rand(0, 512, device=device)], device=device)
+                            nt = torch.nested.nested_tensor([torch.rand(0, 512, device=device)], device=device)
                             _test_module_empty_input(self, encoder_layer, nt, check_size=False, inference=True)
                 else:
                     _test_module_empty_input(self, encoder_layer, input, check_size=False)
@@ -15436,26 +15446,26 @@ class TestNNDeviceType(NNTestCase):
         for shape in shapes:
             dims = [0, len(shape) - 1] if len(shape) > 0 else [0]
             for dim in dims:
-                input = torch.randn(shape, requires_grad=True)
-                mask = torch.randint(0, 2, shape).bool()
-                mask_type = 1   # BxL => src_key_padding_mask
-                if (self.device_type == "cuda"):
-                    input = input.cuda().detach().requires_grad_()
-                    mask = mask.cuda()
-                self._test_masked_softmax_helper(input, dim, mask, mask_type)
+                for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
+                    input = torch.randn(shape, requires_grad=True)
+                    mask = torch.randint(0, 2, shape).bool()
+                    if (self.device_type == "cuda"):
+                        input = input.cuda().detach().requires_grad_()
+                        mask = mask.cuda()
+                    self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
     def test_masked_softmax_forward_with_nans(self, device):
         dim = 0
         shapes = [(4, 5), (50, 100), (1500, 1200)]
         for (x, y) in shapes:
-            input = torch.randn((x, y), requires_grad=True)
-            mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
-            mask_type = 1   # BxL => src_key_padding_mask
-            if (self.device_type == "cuda"):
-                input = input.cuda().detach().requires_grad_()
-                mask = mask.cuda()
-            self._test_masked_softmax_helper(input, dim, mask, mask_type)
+            for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
+                input = torch.randn((x, y), requires_grad=True)
+                mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
+                if (self.device_type == "cuda"):
+                    input = input.cuda().detach().requires_grad_()
+                    mask = mask.cuda()
+                self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     @onlyCUDA
     def test_masked_softmax_transformer_layout(self, device):
@@ -15537,8 +15547,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
-    @largeTensorTest("90GB", "cpu")
-    @precisionOverride({torch.half: 0.001})
+    @largeTensorTest("64GB", "cpu")
     def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
@@ -15548,8 +15557,12 @@ class TestNNDeviceType(NNTestCase):
                 xx = x.cpu().requires_grad_()
             yy = F.log_softmax(xx.float(), dim=-1).to(dtype)
             yy.backward(yy)
-            self.assertEqual(y, yy)
-            self.assertEqual(x.grad, xx.grad)
+            # workaround to reduce memory usage vs. self.assertEqual, see #84944
+            rtol, atol = torch.testing._comparison.get_tolerances(dtype, rtol=None, atol=None)
+            self.assertTrue(torch.allclose(y.cpu(), yy, rtol=rtol, atol=atol))
+            # x is half
+            rtol, _ = torch.testing._comparison.get_tolerances(torch.half, rtol=None, atol=None)
+            self.assertTrue(torch.allclose(x.grad.cpu(), xx.grad, rtol=rtol, atol=1e-3))
 
         run_test(1100000000, 2)  # Illegal memory access https://github.com/pytorch/pytorch/issues/52715
         run_test(2200000000, 1)  # invalid configuration argument https://github.com/pytorch/pytorch/issues/52716
@@ -15557,7 +15570,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest("20GB")
-    @largeTensorTest("90GB", "cpu")
+    @largeTensorTest("2GB", "cpu")
     @precisionOverride({torch.half: 0.001})
     def test_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
@@ -15905,7 +15918,6 @@ class TestNNDeviceType(NNTestCase):
     @skipIfMps
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
-    @skipIfTorchDynamo("requires https://github.com/pytorch/torchdynamo/pull/1098")
     def test_gumbel_softmax(self, device, dtype):
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=0, count_expected=1)
         self._test_gumbel_softmax_st_shapes(device, dtype, shape=[5], dim=-1, count_expected=1)
@@ -17869,6 +17881,39 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
+    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    @onlyCUDA
+    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("45GB", "cuda")
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_nll_loss_large_tensor(self, device, reduction):
+        shape = [int(2 ** 16), int(2 ** 16) + 1]
+
+        input = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
+        labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
+
+        out = F.nll_loss(input, labels, reduction=reduction)
+
+        with torch.no_grad():
+            input_cpu = input.cpu().float().requires_grad_()
+            labels_cpu = labels.cpu()
+        out_cpu = F.nll_loss(input_cpu, labels_cpu, reduction=reduction)
+        # workaround to reduce memory usage vs. self.assertEqual, see #84944
+        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        if reduction == "sum":
+            orig_rtol, orig_atol = rtol, atol
+            rtol, atol = 7 * rtol, 3 * atol
+        with torch.no_grad():
+            self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
+        if reduction == "sum":
+            rtol, atol = orig_rtol, orig_atol
+
+        if reduction != "none":
+            out.backward()
+            out_cpu.backward()
+            with torch.no_grad():
+                self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
+
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
@@ -18175,6 +18220,30 @@ class TestNNDeviceType(NNTestCase):
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
+    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    @onlyCUDA
+    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("45GB", "cuda")
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_cross_entropy_large_tensor(self, device, reduction):
+        logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
+        labels = torch.zeros(logits.size(0), dtype=torch.long, device='cuda')
+        loss = F.cross_entropy(logits, labels, reduction=reduction)
+        if reduction != "none":
+            loss.backward()
+
+        with torch.no_grad():
+            logits_cpu = logits.cpu().detach().requires_grad_()
+            labels_cpu = labels.cpu().detach()
+        loss_cpu = F.cross_entropy(logits_cpu, labels_cpu, reduction=reduction)
+        if reduction != "none":
+            loss_cpu.backward()
+
+        # workaround to reduce memory usage vs. self.assertEqual, see #84944
+        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
+        if reduction != "none":
+            self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
@@ -18728,7 +18797,7 @@ class TestNNDeviceType(NNTestCase):
                 mask = torch.zeros(encoder_input.shape[:-1], device=device, dtype=torch.bool)
                 mask[0][-1] = True
 
-                nt = torch.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
+                nt = torch.nested.nested_tensor([encoder_input[0][:-1], encoder_input[1]], device=device)
                 result = model(nt)
                 ref_output = torch.tensor(
                     [
@@ -18749,7 +18818,7 @@ class TestNNDeviceType(NNTestCase):
                     ],
                     device=device, dtype=dtype
                 )
-                result = torch.nested.to_padded_tensor(result, 0)
+                result = result.to_padded_tensor(0)
                 ref_output[0][-1] = torch.zeros_like(
                     ref_output[0][-1], device=device, dtype=dtype
                 )

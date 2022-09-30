@@ -268,15 +268,15 @@ to configure quantization settings for individual ops.
     default_activation_only_qconfig
     default_qat_qconfig_v2
 
-torch.nn.intrinsic
-~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.intrinsic
-.. automodule:: torch.nn.intrinsic.modules
+torch.ao.nn.intrinsic
+~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.intrinsic
+.. automodule:: torch.ao.nn.intrinsic.modules
 
 This module implements the combined (fused) modules conv + relu which can
 then be quantized.
 
-.. currentmodule:: torch.nn.intrinsic
+.. currentmodule:: torch.ao.nn.intrinsic
 
 .. autosummary::
     :toctree: generated
@@ -543,7 +543,7 @@ as follows:
 
 where :math:`\text{clamp}(.)` is the same as :func:`~torch.clamp` while the
 scale :math:`s` and zero point :math:`z` are then computed
-as decribed in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifically:
+as described in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifically:
 
     .. math::
 
@@ -586,7 +586,14 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 
 
 .. These modules are missing docs. Adding them here only for tracking
+.. automodule:: torch.nn.intrinsic
+.. automodule:: torch.nn.intrinsic.modules
 .. automodule:: torch.nn.quantizable
 .. automodule:: torch.nn.quantizable.modules
 .. automodule:: torch.nn.quantized
+   :noindex:
+
+.. automodule:: torch.ao.nn.quantized.reference
+   :noindex:
+.. automodule:: torch.ao.nn.quantized.reference.modules
    :noindex:

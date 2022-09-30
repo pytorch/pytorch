@@ -14,9 +14,8 @@ import torch.autograd.forward_ad as fwAD
 
 from .vmap import vmap
 from torch._decomp import decomposition_table
-import torch._decomp.decompositions_for_jvp
 
-from functorch._C import (
+from torch._C._functorch import (
     _wrap_for_grad,
     _unwrap_for_grad,
     _grad_increment_nesting,
@@ -637,15 +636,6 @@ def _slice_argnums(args, argnums, as_tuple=True):
     return tuple(args[i] for i in argnums)
 
 
-def _argnums_partial(f, args, argnums):
-    def f_wrapper(*wrapper_args):
-        replaced_args = _replace_args(args, wrapper_args, argnums)
-        return f(*replaced_args)
-    wrapper_args = _slice_argnums(args, argnums)
-    wrapper_args = wrapper_args if isinstance(wrapper_args, tuple) else (wrapper_args, )
-    return (f_wrapper, wrapper_args)
-
-
 JVP_NESTING = 0
 
 
@@ -795,11 +785,32 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
          >>> assert torch.allclose(output, x + y)
 
     """
+
+    return _jvp_with_argnums(func, primals, tangents, argnums=None, strict=strict, has_aux=has_aux)
+
+
+def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Optional[argnums_t], *,
+                      strict: bool = False, has_aux: bool):
+    # This is the same function as jvp but also accepts an argnums argument
+    # Most args are the same as jvp except for the added argument
+    # argnums (Optional[int or tuple[int]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    #         If None, computes the gradients with respect to all inputs (used for jvp). Default: None
+    # Because of this, tangents must be of length argnums and matches up to the corresponding primal whose index is
+    # given by argnums
+    #
+    # WARN: Users should NOT call this function directly and should just be calling jvp.
+    # It is only separated so that inputs passed to jacfwd but not differentiated get the correct wrappers.
+    #
+    # NOTE: All error messages are produced as if jvp was being called, even if this was called by jacfwd
+    #
+    # Returns the same two elements as :func:`jvp` but the returned tuple, ``jvp_out``, only has JVPs with respect to
+    # the primals given by argnums
     if not isinstance(primals, tuple):
         raise RuntimeError(
             f'{jvp_str}: Expected primals to be a tuple. '
             f'E.g. it should be valid to call f(*primals).')
-    flat_primals, primals_spec = tree_flatten(primals)
+    diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
+    flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
     if primals_spec != tangents_spec:
         raise RuntimeError(
@@ -820,6 +831,9 @@ def jvp(func: Callable, primals: Any, tangents: Any, *, strict: bool = False, ha
                 flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))
                 duals = tree_unflatten(flat_duals, primals_spec)
+                if argnums is not None:
+                    primals = _wrap_all_tensors(primals, level)
+                    duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
                 if has_aux:
                     if not (isinstance(result_duals, tuple) and len(result_duals) == 2):
@@ -966,14 +980,14 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
     """
     @wraps(func)
     def wrapper_fn(*args):
-        f_wrapper, primals = _argnums_partial(func, args, argnums)
+        primals = args if argnums is None else _slice_argnums(args, argnums)
         flat_primals, primals_spec = tree_flatten(primals)
         flat_primals_numels = tuple(p.numel() for p in flat_primals)
         flat_basis = _construct_standard_basis_for(flat_primals, flat_primals_numels)
         basis = tree_unflatten(flat_basis, primals_spec)
 
         def push_jvp(basis):
-            output = jvp(f_wrapper, primals, basis, has_aux=has_aux)
+            output = _jvp_with_argnums(func, args, basis, argnums=argnums, has_aux=has_aux)
             if has_aux:
                 _, jvp_out, aux = output
                 return jvp_out, aux

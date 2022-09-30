@@ -124,9 +124,11 @@ from torch.ao.quantization import (
     QConfigMapping,
 )
 from torch.ao.quantization.backend_config.utils import get_fusion_pattern_to_root_node_getter
+from torch.ao.quantization.backend_config import BackendConfig
 from torch.ao.quantization.fx.backend_config_utils import get_pattern_to_quantize_handlers
 from torch.ao.quantization.fx.match_utils import find_matches
 from torch.ao.quantization.fx.qconfig_mapping_utils import generate_qconfig_map
+from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
     _get_dedup_subgraphs,
@@ -746,25 +748,34 @@ def prepare_n_shadows_model(
     model: torch.nn.Module,
     example_inputs: Any,
     qconfig_mappings: List[QConfigMapping],
-    backend_config_dict: Any,
+    backend_config: BackendConfig,
 ) -> torch.nn.Module:
     """
-    Given a model with a graph such as
+    Given a model with a graph with M ops such as
 
-      x0 -> op0 -> x1 -> op1 -> x2
+      ... (args_m, kwargs_m) -> op_m -> (output_m) -> ...
 
-    and two qconfigs for op0 and two qconfigs for op1, creates a model with a
-    graph such as
+    And a set of N qconfigs for each op, creates a new model, with
+    each of the subgraph of `op_m` transformed into
 
-      x0 -> op0 -----> log_0_0 -> x1 -> op1 -----> log_1_0 -> x2
-       |                           |
-       | -> op0_q_0 -> log_0_1     | -> op1_q_0 -> log_1_1
-       |                           |
-       | -> op0_q_1 -> log_0_1     | -> op1_q_1 -> log_1_2
+      ... (args_m, kwargs_m) -> op_m -> (output_m) -> ...
+                  |                        |
+                 ...                      ...
+                  |                        |
+                  |---------------------------> mod_with_op_m_transformed_with_qconfig_i
+                 ...                      ...
+                  |                        |
+                  |---------------------------> mod_with_op_m_transformed_with_qconfig_n
 
-    where op0 is the original op0, op0_q_0 is op0 quantized with qconfig_0_0,
-    op0_q_1 is op0 quantized_with qconfig_0_1, and log_0_0 is a logger recording
-    the values flowing through the output of op0..
+
+    Where `mod_with_op_m_transformed_with_qconfig_i` is a submodule, and its
+    inner graph looks like
+
+      args_m -------- op_m_prepared_with_qconfig_n -> output_m_n -> comparison_logger
+                  /                                                    /
+      kwargs_m ---                                                    /
+                                                                     /
+      output_m ------------------------------------------------------
 
     This is useful for testing different quantization of multiple layers in
     a single pass through the model.
@@ -772,9 +783,8 @@ def prepare_n_shadows_model(
     High level TODOs for future PRs:
     1. add deduplication for qconfigs per subgraph
     2. figure out a better way to name the output structure
-    3. for now, results are manually printed in an easy to read way. A logical
-       next step would be to automaticaly output the best qconfig, and then
-       automatically output a single model quantized with that best qconfig.
+    3. return a results data structure instead of printing it out
+    4. make specifying sets of QConfigMapping more user friendly
     """
 
     tracer = quantize_fx.QuantizationTracer([], [])
@@ -790,20 +800,21 @@ def prepare_n_shadows_model(
     # Find the set of subgraphs in the original graph which we need to
     # consider.
     modules = dict(mt.named_modules(remove_duplicate=False))
-    patterns = get_pattern_to_quantize_handlers(backend_config_dict)
+    patterns = get_pattern_to_quantize_handlers(backend_config)
     root_node_getter_mapping = \
-        get_fusion_pattern_to_root_node_getter(backend_config_dict)
+        get_fusion_pattern_to_root_node_getter(backend_config)
     standalone_module_names: List[str] = []
     standalone_module_classes: List[Type] = []
     custom_module_classes: List[Type] = []
     matches = find_matches(
         mt.graph, modules, patterns, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
-    subgraphs_dedup = _get_dedup_subgraphs(matches)
+    subgraphs_dedup: Dict[str, List[Node]] = \
+        _get_dedup_subgraphs(matches)
 
     # generate node to qconfig for each subgraph
     # TODO(future PR): deduplicate repeating entries
-    list_of_node_name_to_qconfig = []
+    list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]] = []
     for qconfig_mapping in qconfig_mappings:
         node_name_to_qconfig = generate_qconfig_map(
             mt, modules, mt.graph, qconfig_mapping, tracer.node_name_to_scope)

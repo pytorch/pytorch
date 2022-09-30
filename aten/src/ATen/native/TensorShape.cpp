@@ -57,7 +57,7 @@ inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITen
   return format.value();
 }
 
-TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
+TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -65,10 +65,10 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorListRef tensors, int64_t dim) {
   auto materialized = tensors.materialize();
 
   cat_check_no_zero_dim(materialized);
-  dim = at::legacy_cat_wrap_dim(dim, tensors);
+  dim = at::legacy_cat_wrap_dim(dim, materialized);
 
   // Checking names before the actual dimensions.
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
 
   TORCH_CHECK(
       materialized.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
@@ -203,9 +203,48 @@ Tensor& set_storage_cpu_(Tensor& result, Storage storage, int64_t storage_offset
   return result;
 }
 
-Tensor& set_(Tensor& result, const Tensor& storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
+  checkSetStorage(result, storage, storage_offset, size, stride);
+
+  c10::SymDimVector contiguous_strides;
+  if (stride.data() == nullptr) {
+    // TODO: dedupe this with empty() symbolic logic
+    int64_t dim = size.size();
+    contiguous_strides.resize(dim);
+    if (dim > 0) {
+      const auto last_idx = dim - 1;
+      contiguous_strides.at(last_idx) = 1;
+      for (auto i = last_idx - 1; i >= 0; --i) {
+        // TODO: max with 1
+        contiguous_strides.at(i) = contiguous_strides.at(i+1) * size.at(i+1);
+      }
+    }
+    stride = contiguous_strides;
+  }
+
+  // Run this before storage setting so we can access numel
+  result.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride, storage_offset);
+
+  // Matches maybe_resize_storage_cpu no-numel behavior
+  if (result.sym_numel() != 0) {
+    // maybe_resize_storage_cpu can handle no storage exists at all but
+    // that should never be the case here
+    TORCH_INTERNAL_ASSERT(storage);
+    TORCH_CHECK(storage.resizable(), "Trying to resize storage that is not resizable");
+    // All meta data pointers are the same, so we don't have to "re" allocate
+    // it.  TODO: Actually this might not quite be correct if we use special
+    // pointers to track whether or not fake cuda tensors are pinned or not
+    const auto itemsize = result.dtype().itemsize();
+    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
+        size, stride, itemsize, storage_offset);
+    storage.set_nbytes(size_bytes);
+  }
+  return result;
+}
+
+Tensor& set__symint(Tensor& result, const Tensor& storage, c10::SymInt storage_offset, c10::SymIntArrayRef size, c10::SymIntArrayRef stride) {
   TORCH_CHECK(storage.is_contiguous(), "passed in tensor to be used as storage must be contiguous");
-  return result.set_(storage.storage(), storage_offset + storage.storage_offset(), size, stride);
+  return result.set__symint(storage.storage(), storage_offset + storage.sym_storage_offset(), size, stride);
 }
 
 Tensor& set_tensor_(Tensor& result, const Tensor& source) {
@@ -328,7 +367,7 @@ std::vector<Tensor> broadcast_tensors(TensorList tensors) {
 }
 
 TORCH_IMPL_FUNC(cat_out_cpu)
-(ITensorListRef tensors,
+(const ITensorListRef& tensors,
  int64_t dim,
  int64_t valid,
  bool all_contiguous,
@@ -476,16 +515,16 @@ static void check_cat_sparse_dims(Tensor const &t,
             ", but tensor at position ", pos, " has ", t.sparse_dim(), ", ", t.dense_dim(), ".");
 }
 
-static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
+static Tensor cat_sparse_impl(const MaterializedITensorListRef& tensors, int64_t dim) {
   std::vector<Tensor> indices;
   std::vector<Tensor> values;
-  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
-  int64_t sparse_dim = tensors[0].sparse_dim();
-  int64_t dense_dim = tensors[0].dense_dim();
-  IntArrayRef sizes = tensors[0].sizes();
+  int64_t wrapped = maybe_wrap_dim(dim, tensors[0].get().dim());
+  int64_t sparse_dim = tensors[0].get().sparse_dim();
+  int64_t dense_dim = tensors[0].get().dense_dim();
+  IntArrayRef sizes = tensors[0].get().sizes();
   if (wrapped < sparse_dim) {
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       indices.push_back(t._indices());
       values.push_back(t._values());
@@ -504,7 +543,7 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
     int64_t col = 0;
     int64_t cumulative_offset = 0;
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       int64_t this_piece_size = t._nnz();
       // cumulative_offset is zero for the first piece, so
       // don't waste time doing this operation unless i > 0.
@@ -520,10 +559,10 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
         idxs,
         vals,
         sizes_copy,
-        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
-        tensors[0].options().layout_opt(),
-        tensors[0].options().device_opt(),
-        tensors[0].options().pinned_memory_opt());
+        optTypeMetaToScalarType(tensors[0].get().options().dtype_opt()),
+        tensors[0].get().options().layout_opt(),
+        tensors[0].get().options().device_opt(),
+        tensors[0].get().options().pinned_memory_opt());
   }
   else {
     // Catting along a dense dimension requires us to create new values.
@@ -545,15 +584,19 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
     // The dimension in each tensor's values object that corresponds to the overall dimension along which we're catting.
     int64_t values_dim = wrapped - sparse_dim + 1;
     // The final size along the catted dimension.
-    const int64_t total_size = std::accumulate(tensors.begin(), tensors.end(), static_cast<int64_t>(0), [values_dim](int64_t l, Tensor const &r) {
-      return l + r._values().size(values_dim);
-    });
-    auto zeros_sizes = tensors[0]._values().sizes().vec();
+    const int64_t total_size = std::accumulate(
+        tensors.begin(),
+        tensors.end(),
+        static_cast<int64_t>(0),
+        [values_dim](int64_t l, const Tensor& r) {
+          return l + r._values().size(values_dim);
+        });
+    auto zeros_sizes = tensors[0].get()._values().sizes().vec();
     int64_t cumulative_size = 0;
     std::vector<Tensor> vals_pieces;
     std::vector<Tensor> idxs_pieces;
     for (const auto i : c10::irange(tensors.size())) {
-      auto const &t = tensors[i];
+      const Tensor& t = tensors[i];
       check_cat_sparse_dims(t, i, sizes, wrapped, sparse_dim, dense_dim);
       // dimension 0 of values corresponds to the number of values,
       // rather than to any logical dimension of the sparse tensor.
@@ -583,16 +626,17 @@ static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
         at::cat(idxs_pieces, 1),
         at::cat(vals_pieces),
         sizes_copy,
-        optTypeMetaToScalarType(tensors[0].options().dtype_opt()),
-        tensors[0].options().layout_opt(),
-        tensors[0].options().device_opt(),
-        tensors[0].options().pinned_memory_opt());
+        optTypeMetaToScalarType(tensors[0].get().options().dtype_opt()),
+        tensors[0].get().options().layout_opt(),
+        tensors[0].get().options().device_opt(),
+        tensors[0].get().options().pinned_memory_opt());
   }
 }
 
-Tensor cat_sparse(TensorList tensors, int64_t dim) {
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
-  auto result = cat_sparse_impl(tensors, at::legacy_cat_wrap_dim(dim, tensors));
+Tensor cat_sparse(const ITensorListRef& tensors, int64_t dim) {
+  auto materialized = tensors.materialize();
+  auto maybe_outnames = namedinference::compute_cat_outnames(materialized);
+  auto result = cat_sparse_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
@@ -910,6 +954,14 @@ Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArray
   auto result = at::detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
   setStrided(result, size, stride, storage_offset);
+  return result;
+}
+
+Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, optional<c10::SymInt> sym_storage_offset_) {
+  auto sym_storage_offset = sym_storage_offset_.value_or(self.sym_storage_offset());
+  auto result = at::detail::make_tensor<TensorImpl>(
+      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+  setStrided(result, sym_size, sym_stride, sym_storage_offset);
   return result;
 }
 
@@ -3521,12 +3573,12 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     slice.copy_(src);
     return output;
 }
-at::Tensor as_strided_scatter(const at::Tensor& self, const at::Tensor& src, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset) {
+at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
     // See Note [as_strided_scatter backward support]
     TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
     auto output = self.clone();
-    auto slice = output.as_strided(size, stride, storage_offset);
-    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    auto slice = output.as_strided_symint(size, stride, storage_offset);
+    TORCH_CHECK(slice.sym_sizes() == src.sym_sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sym_sizes(), ", slice size = ", slice.sym_sizes());
     slice.copy_(src);
     return output;
 }
@@ -3585,8 +3637,8 @@ at::Tensor& _neg_view_copy_out(const at::Tensor & self, at::Tensor & out) {
 }
 
 
-at::Tensor& as_strided_copy_out(const at::Tensor & self, at::IntArrayRef size, at::IntArrayRef stride, c10::optional<int64_t> storage_offset, at::Tensor & out) {
-  auto tmp = self.as_strided(size, stride, storage_offset);
+at::Tensor& as_strided_copy_out_symint(const at::Tensor & self, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset, at::Tensor & out) {
+  auto tmp = self.as_strided_symint(size, stride, storage_offset);
   out.copy_(tmp);
   return out;
 }

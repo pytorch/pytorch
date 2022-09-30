@@ -39,6 +39,8 @@ NSSubgraph = NamedTuple(
 #   'comparisons': [torch.tensor(...), ...]
 #   # name of function used for precomputed comparisons
 #   'comparison_fn_name': 'sqnr',
+#   # string representation of qconfig responsible for creating this logger
+#   'qconfig_str': 'QConfig(...)',
 # }
 NSSingleResultType = Dict[str, Any]
 

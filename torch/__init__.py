@@ -416,6 +416,9 @@ def use_deterministic_algorithms(mode, *, warn_only=False):
         * :class:`torch.nn.AdaptiveMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool2d` when attempting to differentiate a CUDA tensor
         * :class:`torch.nn.FractionalMaxPool3d` when attempting to differentiate a CUDA tensor
+        * :class:`torch.nn.MaxUnpool1d`
+        * :class:`torch.nn.MaxUnpool2d`
+        * :class:`torch.nn.MaxUnpool3d`
         * :func:`torch.nn.functional.interpolate` when attempting to differentiate a CUDA tensor
           and one of the following modes is used:
 
@@ -893,6 +896,29 @@ def compiled_with_cxx11_abi():
 from torch._ops import ops
 from torch._classes import classes
 
+# Import from torch._decomp import decompositions_for_jvp to register
+# decompositions for jvp to the jit registry
+# (decompositions_for_jvp depends on torch.ops, so we place it after)
+#
+# FIXME: We specify that __debug__ must be True because
+# if python is run with -OO or -O flags (i.e., __debug__ is False), we encounter the
+# following error:
+#
+# Return value was annotated as having type Tuple[NoneType, NoneType] but is actually of
+# type Tuple[Tensor, Tensor]:
+#   File ".../torch/_decomp/__init__.py", line 1585
+#     else:
+#         buffer = z
+#     return min - torch.log1p(z), buffer
+#     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+# Currently broken for 3.11, see https://github.com/pytorch/pytorch/issues/85506
+if (os.environ.get("PYTORCH_JIT", "1" if sys.version_info < (3, 11) else "0") == "1" and
+        __debug__ and
+        not torch._C._is_deploy_enabled() and
+        os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0"):
+    from torch._decomp import decompositions_for_jvp
+    del decompositions_for_jvp
+
 # quantization depends on torch.fx
 # Import quantization
 from torch import quantization as quantization
@@ -927,10 +953,15 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 # Import experimental masked operations support. See
 # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
 # information.
-from . import _masked
+from . import masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import eig, solve
+from ._linalg_utils import (  # type: ignore[misc]
+    matrix_rank,
+    eig,
+    solve,
+    lstsq,
+)
 
 
 def _register_device_module(device_type, module):
@@ -952,7 +983,7 @@ def _register_device_module(device_type, module):
 
 # expose return_types
 from . import return_types
-if sys.executable != 'torch_deploy':
+if sys.executable != 'torch_deploy' and os.environ.get('PYTORCH_DISABLE_LIBRARY', "0") == "0":
     from . import library
     if not TYPE_CHECKING:
         from . import _meta_registrations
@@ -962,5 +993,3 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
     import torch.cuda._sanitizer as csan
 
     csan.enable_cuda_sanitizer()
-
-from ._dispatch import python

@@ -51,7 +51,7 @@ class OutputProp:
     """
     Output propagation (modeled from shape propagation).
 
-    Given a GraphModule and an example input, saves the input flowing
+    Given a GraphModule and an example input, saves the output flowing
     through each node on `node.traced_result`.
 
     Code based on the example from
@@ -74,7 +74,7 @@ class OutputProp:
             attr_itr = self.mod
             for i, atom in enumerate(target_atoms):
                 if not hasattr(attr_itr, atom):
-                    raise RuntimeError(f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}")
+                    raise RuntimeError(f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}")
                 attr_itr = getattr(attr_itr, atom)
             return attr_itr
 
@@ -113,6 +113,10 @@ def _get_dedup_subgraphs(
     for name, cur_match in matches.items():
         matches_items_reversed.insert(0, (name, cur_match))
 
+    # Note: the order is important.  `matches` currently provides the matches
+    # in reverse order.  We would like to process the matches in non-reverse
+    # order, so that we can create an intuitive naming scheme, such as
+    # naming the first op's submodules `shadow_0_0` through `shadow_0_(n-1)`
     for name, cur_match in matches_items_reversed:  # type: ignore[call-overload]
         was_seen = False
         for node_or_tuple in cur_match[1]:
@@ -139,9 +143,8 @@ def _get_dedup_subgraphs(
 
             else:
                 assert isinstance(node_or_tuple, tuple)
-                assert isinstance(node_or_tuple[0], Node) and \
-                    isinstance(node_or_tuple[1], Node)
                 for node in node_or_tuple:
+                    assert isinstance(node, Node)
                     if node in seen_nodes:
                         was_seen = True
                     seen_nodes.add(node)
@@ -159,6 +162,8 @@ def _get_dedup_subgraphs(
             # either (a, b), or ((a, b), c) or (c, (a, b))
             # cannot make any assumptions on order, not clear what the
             # find_matches function is doing to populate this
+            # TODO(future PR): make this code less confusing,  see discussion
+            # in https://github.com/pytorch/pytorch/pull/80521/files#r975918836
 
             def _order_nodes(node_a, node_b, node_c) -> List[Node]:
                 nodes = [node_a, node_b, node_c]
@@ -231,6 +236,9 @@ def _get_logger_for_subgraph(
         fqn,  # fqn
         qconfig_str,
     )
+    # Usually we expect the user to add loggers, then calibrate, then convert,
+    # and then populate loggers.  This is why the loggers start disabled.
+    # TODO(future PR): reconsider the design to make this more intuitive.
     logger_mod_orig.enabled = False
     return logger_mod_orig
 
@@ -290,7 +298,6 @@ def _add_logger_to_subgraph_wrapper(
 
     with model.graph.inserting_after(last_node):
         new_node = model.graph.call_module(
-            # attr_name, args=(last_node,), kwargs={})
             attr_name, args=(last_node, new_ph), kwargs={})
     model.recompile()
 
@@ -497,10 +504,10 @@ def handle_subgraph_candidate(
     Given a subgraph in `mt` and a subgraph candidate idx, inserts the
     subgraph candidate copy and instruments it with loggers.
 
-    If subgraph_idx is 0, this is the baseline fp32 subgraph and we just
+    If subgraph_candidate_idx is 0, this is the baseline fp32 subgraph and we just
     add a logger to the end.
 
-    If subgraph_idx is not 0, we create a copy of the subgraph and
+    If subgraph_candidate_idx is not 0, we create a copy of the subgraph and
     prepare it with `prepare_fx`.
     """
 
@@ -638,7 +645,8 @@ def handle_subgraph(
         # every node, so we have to guard for this case since we cannot
         # quantize without an example input
         # TODO(future PR): add a test case for this once we have an easy
-        # repro
+        # repro, see https://github.com/pytorch/pytorch/pull/80521/files#r975940489
+        # for additional context
         if hasattr(prev_node, 'traced_result'):
             example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined, assignment]
         else:
@@ -652,7 +660,17 @@ def handle_subgraph(
     # quantized.
     # TODO(future): consider making this configurable
     found_at_least_one_qconfig = False
-    for subgraph_candidate_idx in range(len(qconfig_mappings)):
+    for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
+
+        if subgraph_candidate_idx == 0:
+            # fp32 baseline does not need a qconfig
+            continue
+
+        # a. we have N shadows, so len(qconfig_mappings) is N
+        # b. we will have the fp32 layer + N shadows, so overall number of
+        #    (original_op) + (*shadows) will be N+1
+        # c. since `subgraph_candidate_idx` represents (b), we need
+        #    to subtract 1 to query from (a)
         node_name_to_qconfig = \
             list_of_node_name_to_qconfig[subgraph_candidate_idx - 1]
         qconfig = node_name_to_qconfig[first_node.name]
