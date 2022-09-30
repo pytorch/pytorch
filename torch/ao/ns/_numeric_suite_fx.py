@@ -223,10 +223,14 @@ class OutputLogger(nn.Module):
     def forward(self, x):
         """
         """  # blank docblock to make autodoc happy
+        # TODO(future PR): consider designing this better, as the difference
+        # between these two flags is subtle and not obvious.
         if not self.enabled:
             return x
         if not self.save_activations:
             return x
+        # TODO(future PR): consider refactoring this to better reuse the parent
+        # class
         if isinstance(x, torch.Tensor):
             self.stats.append(x.detach())
         elif isinstance(x, tuple) and len(x) == 2 and len(x[1]) == 2:
@@ -785,6 +789,7 @@ def prepare_n_shadows_model(
     2. figure out a better way to name the output structure
     3. return a results data structure instead of printing it out
     4. make specifying sets of QConfigMapping more user friendly
+    5. add examples to docblocks
     """
 
     tracer = quantize_fx.QuantizationTracer([], [])

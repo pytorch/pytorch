@@ -109,6 +109,7 @@ def _get_dedup_subgraphs(
 
     # Dict items are not reversible until Python 3.8, so we hack it
     # to be compatible with previous Python versions
+    # TODO(future PR): try reversed(list(matches.items()))
     matches_items_reversed: List[Tuple[str, MatchResult]] = []
     for name, cur_match in matches.items():
         matches_items_reversed.insert(0, (name, cur_match))
@@ -599,6 +600,7 @@ def handle_subgraph_candidate(
                     new_kwargs[name] = old_kwarg
                 elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
                     for inner_old_kwarg in old_kwarg:
+                        # TODO(future PR): clarify why we are adding kwargs to args
                         new_args.append(inner_old_kwarg)
 
             new_args = tuple(new_args)  # type: ignore[assignment]
@@ -690,6 +692,7 @@ def handle_subgraph(
             last_node, fqn, list_of_node_name_to_qconfig,
             example_inputs)
 
+# TODO(future PR): redesign this to make it easier to consume outputs
 def group_results_by_subgraph(results: NSResultsType) -> Any:
     """
     Creates a comparison of results
@@ -772,6 +775,7 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
 
     return dict(subgraph_name_to_subgraph_results)
 
+# TODO(future PR): redesign this to make it easier to consume outputs
 def create_results_comparison(
     results_grouped,
 ) -> Any:
@@ -851,6 +855,7 @@ def create_results_comparison(
 
     return results_comparison
 
+# TODO(future PR): redesign this to make it easier to consume outputs
 def print_n_shadows_summary(
     results_comparison,
 ) -> None:
