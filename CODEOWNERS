@@ -23,22 +23,20 @@
 
 # Architecture Optimization (quantization, sparsity, etc.)
 /aten/src/ATen/native/ao_sparse @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized @vkuzo @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cpu @vkuzo @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
-/aten/src/ATen/native/quantized/cuda @vkuzo @jerryzh168 @dzdang
-/aten/src/ATen/native/quantized/cudnn @vkuzo @jerryzh168 @dzdang
+/aten/src/ATen/native/quantized @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cpu @jerryzh168 @z-a-f @salilsdesai @kimishpatel @digantdesai @jianyuh
+/aten/src/ATen/native/quantized/cuda @jerryzh168 @dzdang
+/aten/src/ATen/native/quantized/cudnn @jerryzh168 @dzdang
 /test/test_quantization.py @jerryzh168
 /test/ao/ @jerryzh168 @z-a-f @hdcharles
 /test/quantization/ @jerryzh168 @z-a-f
-/torch/quantization/ @jerryzh168 @vkuzo
-ao/ @vkuzo
-ao/ns/ @vkuzo
+/torch/quantization/ @jerryzh168
 ao/sparisty/ @z-a-f @hdcharles
 ao/quantization/ @jerryzh168
-nn/intrinsic/ @jerryzh168 @vkuzo
-nn/quantized/ @jerryzh168 @vkuzo
+nn/intrinsic/ @jerryzh168
+nn/quantized/ @jerryzh168
 nn/quantizable/ @jerryzh168 @z-a-f
-nn/qat/ @jerryzh168 @vkuzo
+nn/qat/ @jerryzh168
 
 # Tensorpipe RPC Agent.
 /torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
