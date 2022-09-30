@@ -51,9 +51,9 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
-.. autofunction:: torch.backends.cuda.fused_sdp_enabled
+.. autofunction:: torch.backends.cuda.flash_sdp_enabled
 
-.. autofunction:: torch.backends.cuda.enable_fused_sdp
+.. autofunction:: torch.backends.cuda.enable_flash_sdp
 
 .. autofunction:: torch.backends.cuda.math_sdp_enabled
 

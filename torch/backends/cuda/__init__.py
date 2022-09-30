@@ -5,8 +5,8 @@ import contextlib
 from typing import Union
 
 __all__ = ["is_built", "cuFFTPlanCacheAttrContextProp", "cuFFTPlanCache", "cuFFTPlanCacheManager",
-           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "enable_fused_sdp",
-           "fused_sdp_enabled", "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
+           "cuBLASModule", "preferred_linalg_library", "cufft_plan_cache", "matmul", "enable_flash_sdp",
+           "flash_sdp_enabled", "math_sdp_enabled", "enable_math_sdp", "sdp_kernel"]
 
 def is_built():
     r"""Returns whether PyTorch is built with CUDA support.  Note that this
@@ -163,22 +163,22 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
     return torch._C._get_linalg_preferred_backend()
 
 
-def fused_sdp_enabled():
+def flash_sdp_enabled():
     r"""
     .. warning:: This flag is experimental and subject to change.
 
-    Returns whether fused sdp is enabled or not.
+    Returns whether flash sdp is enabled or not.
     """
-    return torch._C._get_fused_sdp_enabled()
+    return torch._C._get_flash_sdp_enabled()
 
 
-def enable_fused_sdp(enabled: bool):
+def enable_flash_sdp(enabled: bool):
     r"""
     .. warning:: This flag is experimental and subject to change.
 
-    Enables or disables fused sdp.
+    Enables or disables flash sdp.
     """
-    torch._C._set_enabled_fused_sdp(enabled)
+    torch._C._set_sdp_use_flash(enabled)
 
 
 def math_sdp_enabled():
@@ -196,27 +196,27 @@ def enable_math_sdp(enabled: bool):
 
     Enables or disables math sdp.
     """
-    torch._C._set_enabled_math_sdp(enabled)
+    torch._C._set_sdp_use_math(enabled)
 
 
 @contextlib.contextmanager
-def sdp_kernel(enable_fused: bool = True, enable_math: bool = True):
+def sdp_kernel(enable_flash: bool = True, enable_math: bool = True):
     r"""
     .. warning:: This flag is experimental and subject to change.
 
-    This context manager can be used to temporarily enable or disable fused sdp and math sdp.
+    This context manager can be used to temporarily enable or disable flash sdp and math sdp.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
-    previous_fused: bool = fused_sdp_enabled()
+    previous_flash: bool = flash_sdp_enabled()
     previous_math: bool = math_sdp_enabled()
     try:
-        enable_fused_sdp(enable_fused)
+        enable_flash_sdp(enable_flash)
         enable_math_sdp(enable_math)
         yield{}
     except RuntimeError as err:
         raise err
     finally:
-        enable_fused_sdp(previous_fused)
+        enable_flash_sdp(previous_flash)
         enable_math_sdp(previous_math)
 
 cufft_plan_cache = cuFFTPlanCacheManager()

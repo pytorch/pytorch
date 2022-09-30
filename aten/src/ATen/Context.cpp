@@ -104,19 +104,19 @@ void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
 }
 
-bool Context::userEnabledFusedSDP() const {
-  return enabled_fusedSDP;
+bool Context::userEnabledFlashSDP() const {
+  return enabled_flashSDP;
 }
 
-void Context::setUserEnabledFusedSDP(bool e) {
-  enabled_fusedSDP = e;
+void Context::setSDPUseFlash(bool e) {
+  enabled_flashSDP = e;
 }
 
 bool Context::userEnabledMathSDP() const {
   return enabled_mathSDP;
 }
 
-void Context::setUserEnabledMathSDP(bool e) {
+void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 

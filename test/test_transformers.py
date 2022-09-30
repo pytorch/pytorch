@@ -723,43 +723,6 @@ class TestTransformers(NNTestCase):
         self.assertEqual(result.shape, ref_output.shape)
         torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
 
-    @parametrize("type", ["dense", "nested"])
-    def test_scaled_dot_product_attention_fused_kernels(self, type: str):
-        def rand_nt(shape):
-            batch, seq_len, num_heads, head_dim = shape
-            return torch.nested.nested_tensor([torch.randn(seq_len, num_heads, head_dim,
-                                                           device="cuda", dtype=torch.float16) for _ in range(batch)])
-
-        def rand_tensor(shape):
-            batch, seq_len, num_heads, head_dim = shape
-            return torch.randn(batch, seq_len, num_heads, head_dim, device="cuda", dtype=torch.float16)
-
-        shape = (32, 64, 16, 128)
-        if type == "dense":
-            query = rand_tensor(shape)
-            key = rand_tensor(shape)
-            value = rand_tensor(shape)
-        elif type == "nested":
-            query = rand_nt(shape)
-            key = rand_nt(shape)
-            value = rand_nt(shape)
-
-        query = query.transpose(1, 2)
-        key = key.transpose(1, 2)
-        value = value.transpose(1, 2)
-
-        with sdp_kernel(enable_math=False):
-            # Lets switch seq_len and num_heads
-            # B x S X H X D -> B x H x S x D
-            actual = torch.nn.functional._scaled_dot_product_attention(
-                query, key, value, attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
-        with sdp_kernel(enable_fused=False):
-            math_ref = torch.nn.functional._scaled_dot_product_attention(
-                query.contiguous(), key.contiguous(), value.contiguous(),
-                attn_mask=None, dropout_p=0.0, need_attn_weights=False, is_causal=False)
-
-        self.assertEqual(actual[0].contiguous(), math_ref[0].contiguous(), atol=1e-3, rtol=1e-2)
-
     @parametrize("input_dim,attn_mask_dim,is_causal",
                  [(3, None, False), (3, 2, False), (3, 2, True), (3, 3, False), (3, 3, True),
                   (4, None, False), (4, 2, False), (4, 2, True), (4, 4, False), (4, 4, True)],
@@ -769,7 +732,7 @@ class TestTransformers(NNTestCase):
                          if attn_dim is not None else "no_attn_mask")))
     @parametrize("dropout_p", [0.0, 0.2, 0.5])
     @parametrize("device", device_list)
-    @sdp_kernel(enable_fused=False)
+    @sdp_kernel(enable_flash=False)
     def test_scaled_dot_product_attention(self, device, input_dim, attn_mask_dim, is_causal, dropout_p):
         def sdp_ref(
                 q,
@@ -906,6 +869,52 @@ class TestTransformers(NNTestCase):
         # Mask check disabled results in sparisty fastpath, independently of the mask
         _test_fastpath(model, aligned_mask, nested_tensor_return_value, nested_tensors=True)
         _test_fastpath(model, not_aligned_mask, nested_tensor_return_value, nested_tensors=True)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_sdp_runtime_dispatch(self):
+        # We will test all the constraints that we know will cause a failure
+        # The problem is that any code path that goes down flash_attention
+        # will fail on CI/CD becuase it is not compiled with the right flags
+        device = 'cuda'
+        dtype = torch.float16
+
+        def make_tensor(*size, device=device, dtype=dtype):
+            return torch.randn(size, device=device, dtype=dtype)
+
+        with sdp_kernel(enable_flash=False, enable_math=False):
+            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            self.assertRaisesRegex(RuntimeError, "No viable backend for scaled_dot_product_attention was found.",
+                                   lambda: torch.nn.functional._scaled_dot_product_attention(q, k, v))
+
+        with sdp_kernel(enable_flash=True, enable_math=False):
+            # Failures for invalid input
+
+            # Dim is not 4
+            q, k, v = make_tensor(2, 3, 4), make_tensor(2, 3, 4), make_tensor(2, 3, 4)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+            # Invalid last_dim size
+            q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+            # Invalid dtype
+            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float), make_tensor(
+                2, 2, 3, 16, dtype=torch.float), make_tensor(2, 2, 3, 16, dtype=torch.float)
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, False, False))
+
+            # Failures for unsupported SDP args
+            q, k, v = make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16), make_tensor(2, 2, 3, 16)
+
+            # Needs attention weights
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, None, 0.0, True, False))
+
+            # Non-None attention mask
+            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+                q, k, v, torch.ones_like(q), 0.0, False, False))
 
 # TODO: Replace this with instantiate_device_type_tests() to take advantage of test framework support for
 # cross device / dtype testing.

@@ -458,13 +458,12 @@ std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
   int64_t Nnz_q{batch_size * max_seqlen_batch_q};
   int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
 
-  Tensor query_reshaped = q_t.view({Nnz_q, num_heads, head_dim});
-  Tensor key_reshaped = k_t.view({Nnz_kv, num_heads, head_dim});
-  Tensor value_reshaped = v_t.view({Nnz_kv, num_heads, head_dim});
+  // For the standard MHA these will actually be views
+  Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
+  Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
+  Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  // TORCH_CHECK(query_reshaped.is_contiguous());
-
-  std::tuple<Tensor, Tensor> attention_and_weights =
+  Tensor attention =
       at::_flash_scaled_dot_product_attention(
           query_reshaped,
           key_reshaped,
@@ -474,14 +473,12 @@ std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
           max_seqlen_batch_q,
           max_seqlen_batch_k,
           dropout_p,
-          need_atten_weights,
           is_causal);
   // Reshape output to convert nnz to batch_size and seq_len
-  Tensor attention = std::get<0>(attention_and_weights);
   attention =
       attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
 
-  return std::tie(attention, std::get<1>(attention_and_weights));
+  return std::tuple<Tensor, Tensor>(attention, Tensor());
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
@@ -497,7 +494,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
       case sdp::SDPBackend::math:
         return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
       default:
-        TORCH_CHECK(false, "Unsupported backend for scaled_dot_product_attention");
+        TORCH_CHECK(false, "No viable backend for scaled_dot_product_attention was found.");
         return std::make_tuple(Tensor(), Tensor());
     }
 }

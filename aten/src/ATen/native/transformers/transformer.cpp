@@ -117,7 +117,7 @@ Tensor transformer_encoder_layer_forward(
      TORCH_WARN_ONCE("transformer_encoder_layer_forward is using flash attention.");
      x = at::linear(x, qkv_weight, qkv_bias);
      x = x.view({x.size(0), -1, 3, num_heads, embed_dim / num_heads});
-     x = std::get<0>(flash_attention_helper_packed(x, x, x, 0.0, false, false));
+     x = flash_attention_helper(x, x, x, 0.0, false);
      x = x.view({-1, -1, embed_dim});
      x = at::linear(x, proj_weight, proj_bias);
   } else {

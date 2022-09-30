@@ -28,62 +28,26 @@ struct sdp_params {
 
 enum class SDPBackend {flash_attention, math, error};
 
-//  Define gate functions that determine if a fused kernel can be ran
-inline bool check_gradients(sdp_params params, bool debug) {
-  if (params.query.requires_grad() || params.key.requires_grad() ||
-      params.value.requires_grad()) {
-    TORCH_CHECK(
-        debug,
-        "Query, Key, or Value require's gradient. Query: ",
-        params.query.requires_grad(),
-        " Key: ",
-        params.key.requires_grad(),
-        " Value: ",
-        params.value.requires_grad());
-    return false;
+#define CHECK_DTYPE(tensor, types)                                    \
+  if (std::find(types.begin(), types.end(), params.tensor.dtype()) == \
+      types.end()) {                                                  \
+    TORCH_CHECK(                                                      \
+        debug,                                                        \
+        #tensor,                                                      \
+        " is not in the allowed dtypes. ",                            \
+        #tensor,                                                      \
+        " dtype: ",                                                   \
+        params.tensor.dtype());                                       \
+    return false;                                                     \
   }
-  return true;
-}
-
-inline bool compiled_with_fused_kernels(sdp_params params, bool debug) {
-#ifndef USE_FLASH_ATTENTION
-  TORCH_CHECK(debug, "Torch was not compiled with flash attention");
-  return false;
-#endif
-  return true;
-}
-
+template <typename dtype_vector>
 inline bool check_tensor_dtype(
     sdp_params params,
-    std::vector<caffe2::ScalarType> allowed_dtypes,
+    dtype_vector allowed_dtypes,
     bool debug) {
-  if (std::find(
-          allowed_dtypes.begin(), allowed_dtypes.end(), params.query.dtype()) ==
-      allowed_dtypes.end()) {
-    TORCH_CHECK(
-        debug,
-        "Query is not in the allowed dtypes. Query dtype: ",
-        params.query.dtype());
-    return false;
-  }
-  if (std::find(
-          allowed_dtypes.begin(), allowed_dtypes.end(), params.key.dtype()) ==
-      allowed_dtypes.end()) {
-    TORCH_CHECK(
-        debug,
-        "Key is not in the allowed dtypes. Key dtype: ",
-        params.key.dtype());
-    return false;
-  }
-  if (std::find(
-          allowed_dtypes.begin(), allowed_dtypes.end(), params.value.dtype()) ==
-      allowed_dtypes.end()) {
-    TORCH_CHECK(
-        debug,
-        "Value is not in the allowed dtypes. Value dtype: ",
-        params.value.dtype());
-    return false;
-  }
+  CHECK_DTYPE(query, allowed_dtypes)
+  CHECK_DTYPE(key, allowed_dtypes)
+  CHECK_DTYPE(value, allowed_dtypes)
   return true;
 }
 
@@ -105,63 +69,51 @@ inline bool check_for_attn_mask(sdp_params params, bool debug) {
   return true;
 }
 
+#define CHECK_DIM(tensor, n_dims)      \
+  if (params.tensor.dim() != n_dims) { \
+    TORCH_CHECK(                       \
+        debug,                         \
+        #tensor,                       \
+        " is not a ",                  \
+        #n_dims,                       \
+        " dimensional tensor. ",       \
+        #tensor,                       \
+        " dim: ",                      \
+        params.tensor.dim());          \
+    return false;                      \
+  }
+
 inline bool check_tensor_shapes(sdp_params params, bool debug) {
-  if (params.query.dim() != 4) {
-    TORCH_CHECK(
-        debug,
-        "Query is not a 4 dimensional tensor. Query dim: ",
-        params.query.dim());
-    return false;
-  }
-  if (params.key.dim() != 4) {
-    TORCH_CHECK(
-        debug,
-        "Key is not a 4 dimensional tensor. Key dim: ",
-        params.key.dim());
-    return false;
-  }
-  if (params.value.dim() != 4) {
-    TORCH_CHECK(
-        debug,
-        "Value is not a 4 dimensional tensor. Value dim: ",
-        params.value.dim());
-    return false;
-  }
+  CHECK_DIM(query, 4)
+  CHECK_DIM(key, 4)
+  CHECK_DIM(value, 4)
   return true;
 }
 
+#define CHECK_HEAD_SIZE(tensor)                                              \
+  if ((params.tensor.size(-1) % 8 != 0) && (params.tensor.size(-1) > 128)) { \
+    TORCH_CHECK(                                                             \
+        debug,                                                               \
+        #tensor,                                                             \
+        "'s last dimensions is not a multiple of 8 and last then 128. ",     \
+        #tensor,                                                             \
+        ".size(-1) = ",                                                      \
+        params.tensor.size(-1));                                             \
+    return false;                                                            \
+  }
+
 inline bool check_head_dim_size(
     sdp_params params,
-    const std::unordered_set<int64_t> allowed_sizes,
     bool debug) {
-  if (allowed_sizes.find(params.query.size(-1)) == allowed_sizes.end()) {
-    TORCH_CHECK(
-        debug,
-        "Query's last dimension is not in the set of supported sizes. Query.size(-1): ",
-        params.query.size(-1));
-    return false;
-  }
-  if (allowed_sizes.find(params.key.size(-1)) == allowed_sizes.end()) {
-    TORCH_CHECK(
-        debug,
-        "Key's last dimension is not in the set of supported sizes. Key.size(-1): ",
-        params.key.size(-1));
-    return false;
-  }
-  if (allowed_sizes.find(params.value.size(-1)) == allowed_sizes.end()) {
-    TORCH_CHECK(
-        debug,
-        "Value's last dimension is not in the set of supported sizes. Value.size(-1): ",
-        params.value.size(-1));
-    return false;
-  }
+  CHECK_HEAD_SIZE(query)
+  CHECK_HEAD_SIZE(key)
+  CHECK_HEAD_SIZE(value)
   return true;
 }
 
 inline bool check_runtime_disabled(sdp_params params, bool debug) {
-  // We check the global context to see if user has explicitly turned of fused sdp kernels
-  auto& ctx = at::globalContext();
-  if (!ctx.userEnabledFusedSDP()) {
+  // We check the global context to see if user has explicitly turned of flash sdp kernels
+  if (!at::globalContext().userEnabledFlashSDP()) {
     TORCH_CHECK(debug, "Flash attention has been runtime disabled.");
     return false;
   }
@@ -187,28 +139,25 @@ inline bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
 }
 
 inline bool use_flash_attention(sdp_params params, bool debug) {
+  #ifndef USE_FLASH_ATTENTION
+    TORCH_CHECK(debug, "Torch was not compiled with flash attention.");
+    return false;
+  #endif
   // Constraints specific to flash attention
-  static const std::unordered_set<int64_t> flash_embed_dim_sizes{
-      16, 32, 64, 128};
-  static const std::vector<caffe2::ScalarType> flash_dtypes{
-      at::kHalf, at::kBFloat16};
+  static const std::vector<caffe2::ScalarType> flash_dtypes{at::kHalf, at::kBFloat16};
 
-  //
+  //  Define gate functions that determine if a flash kernel can be ran
   std::vector<std::function<bool(sdp_params, bool)>> constraints{
       check_runtime_disabled,
       check_tensor_shapes,
       check_for_attn_weights,
       check_for_attn_mask,
-      compiled_with_fused_kernels,
+      check_head_dim_size,
       check_gpu_sm75_or_greater};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
-  }
-  // Check flash specific functions
-  if (!check_head_dim_size(params, flash_embed_dim_sizes, debug)) {
-    return false;
   }
   if (!check_tensor_dtype(params, flash_dtypes, debug)) {
     return false;
@@ -217,13 +166,19 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
 }
 
 inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
+  // This function defines the priority order of the different sdp backends
+  // 1. Flash Attention
+  // 2. Math fallback
+  auto& ctx = at::globalContext();
+  if (!ctx.userEnabledMathSDP() && !ctx.userEnabledFlashSDP()){
+       return SDPBackend::error;
+  }
   // Because TORCHCHECK checks if condition is true we negate debug so that
   // The statements will be printed when debug is true
   bool print_debug = false;
   if (use_flash_attention(kernel_params, !print_debug)) {
     return SDPBackend::flash_attention;
   }
-  auto& ctx = at::globalContext();
   if (ctx.userEnabledMathSDP()){
        return SDPBackend::math;
   }
