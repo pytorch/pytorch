@@ -435,8 +435,8 @@ def in_kernel_invocation_manager(fake_mode):
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
     assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
 
-    fake_mode.in_kernel_invocation = in_kernel
-    torch._C._set_meta_in_tls_dispatch_include(in_kernel)
+    fake_mode.in_kernel_invocation = True
+    torch._C._set_meta_in_tls_dispatch_include(True)
     try:
         yield
     finally:
