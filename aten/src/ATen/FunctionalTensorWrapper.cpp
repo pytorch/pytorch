@@ -206,12 +206,7 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   value_ = other;
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  if (sizes() != value_.sizes() || strides() != value_.strides()) {
-    set_sizes_and_strides(value_.sizes(), value_.strides());
-  }
-  if (storage_offset() != value_.storage_offset()) {
-    set_storage_offset(value_.storage_offset());
-  }
+  set_sizes_and_strides(value_.sym_sizes(), value_.sym_strides(), value_.sym_storage_offset());
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     // .to() should not re-entrantly go through functionalization.
     at::AutoDispatchSkipFunctionalize guard;
@@ -566,8 +561,7 @@ void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) 
 // calls each {view} reference implementations with meta tensors.
 // The output meta tensor's stride info serves as a reference for what the correct strides should be.
 void set_sizes_strides_offset(const Tensor& out, const Tensor& reference_out) {
-  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sizes(), reference_out.strides());
-  out.unsafeGetTensorImpl()->set_storage_offset(reference_out.storage_offset());
+  out.unsafeGetTensorImpl()->set_sizes_and_strides(reference_out.sym_sizes(), reference_out.sym_strides(), reference_out.sym_storage_offset());
 }
 
 void set_sizes_strides_offset(const std::vector<Tensor>& outs, const std::vector<Tensor>& reference_outs) {
