@@ -11817,6 +11817,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_quantized_conv1d_relu(self):
+        model = torch.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
+        # Manually initialize model weight and bias to random numbers.
+        # By default all zeros.
+        q_weight = torch.quantize_per_tensor(
+            torch.randn(33, 16, 3), 0.5, 0, torch.qint8
+        )
+        bias = torch.arange(33).to(torch.float) - 16
+        model.set_weight_bias(q_weight, bias)
+        input = torch.randn(3, 16, 32)
+        q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
+        self.run_test(model, q_input)
+
     @common_utils.parametrize(
         "function_or_module",
         [
