@@ -3056,7 +3056,7 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
     shape.push_back(self.sizes()[i]);
   }
 
-  return at::reshape(self, shape);
+  return native::reshape(self, shape);
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
