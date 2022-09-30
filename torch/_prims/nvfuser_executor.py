@@ -221,7 +221,7 @@ class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSuppor
             return (
                 _torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None
                 and _torch_dtype_to_nvfuser_dtype_map.get(
-                    node.args[0].meta["tensor_meta"].dtype  # type: ignore[arg-type]
+                    node.args[0].meta["tensor_meta"].dtype  # type: ignore[union-attr]
                 )
                 is not None
             )
