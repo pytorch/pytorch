@@ -214,7 +214,7 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
 class NvfuserPrimOperatorSupport(torch.fx.passes.operator_support.OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
         # special case to stop lowering to nvprim when converting to an unsupported type
-        if node.op == "call_function" and node.name == "convert_element_type":
+        if node.op == "call_function" and node.target == torch.ops.prims.convert_element_type.default:
             return _torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None
         return (
             node.op == "call_function"

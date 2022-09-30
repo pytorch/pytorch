@@ -187,7 +187,7 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @dtypes(torch.float16, torch.uint8)
-    def test_nvprim_conditional_lowering(self, device, dtype):
+    def test_nvprim_convert_element_dtype(self, device, dtype):
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.executor import execute
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
@@ -198,7 +198,7 @@ class TestPrims(TestCase):
         a = torch.randn(3, 3, device=device, dtype=torch.float32)
 
         def func(x, dtype):
-            return x.to(dtype)
+            return x.to(dtype).to(x.dtype)
 
         with TorchRefsNvfuserCapabilityMode():
             gm = make_fx(func)(a, dtype)
