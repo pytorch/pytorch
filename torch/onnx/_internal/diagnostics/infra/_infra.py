@@ -221,7 +221,7 @@ class RuleCollection:
             new_collection_class_name,
             [
                 (
-                    formatter._kebab_case_to_snake_case(rule.name),
+                    formatter.kebab_case_to_snake_case(rule.name),
                     type(rule),
                     dataclasses.field(default=rule),
                 )
@@ -288,7 +288,8 @@ class DiagnosticTool:
 
 class Invocation:
     # TODO: Implement this.
-    pass
+    def __init__(self) -> None:
+        raise NotImplementedError()
 
 
 @dataclasses.dataclass

@@ -3,6 +3,7 @@
 import contextlib
 import dataclasses
 import io
+import unittest
 from typing import AbstractSet, Tuple
 
 import torch
@@ -40,8 +41,7 @@ def assert_all_diagnostics(
     engine: infra.DiagnosticEngine,
     rule_level_pairs: AbstractSet[Tuple[infra.Rule, infra.Level]],
 ):
-    """
-    Context manager to assert that all diagnostics are emitted.
+    """Context manager to assert that all diagnostics are emitted.
 
     Usage:
         with assert_all_diagnostics(
@@ -72,13 +72,12 @@ def assert_all_diagnostics(
 
 
 def assert_diagnostic(
-    test_suite: common_utils.TestCase,
+    test_suite: unittest.TestCase,
     engine: infra.DiagnosticEngine,
     rule: infra.Rule,
     level: infra.Level,
 ):
-    """
-    Context manager to assert that a diagnostic is emitted.
+    """Context manager to assert that a diagnostic is emitted.
 
     Usage:
         with assert_diagnostic(
@@ -105,7 +104,7 @@ def assert_diagnostic(
     return assert_all_diagnostics(test_suite, engine, {(rule, level)})
 
 
-class TestONNXDiagnostics(common_utils.TestCase):
+class TestOnnxDiagnostics(common_utils.TestCase):
     """Test cases for diagnostics emitted by the ONNX export code."""
 
     def setUp(self):
@@ -275,7 +274,7 @@ class TestDiagnosticsInfra(common_utils.TestCase):
     ):
         with self.assertRaisesRegex(
             TypeError,
-            "Expected diagnostic_type to be a subclass of Diagnostic, " "but got",
+            "Expected diagnostic_type to be a subclass of Diagnostic, but got",
         ):
             _ = infra.DiagnosticTool(
                 "custom_tool",

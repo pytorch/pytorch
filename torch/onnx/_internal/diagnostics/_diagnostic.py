@@ -30,11 +30,13 @@ class ExportDiagnostic(infra.Diagnostic):
     def with_cpp_stack(self: _ExportDiagnostic) -> _ExportDiagnostic:
         # TODO: Implement this.
         # self.stacks.append(...)
+        raise NotImplementedError()
         return self
 
     def with_python_stack(self: _ExportDiagnostic) -> _ExportDiagnostic:
         # TODO: Implement this.
         # self.stacks.append(...)
+        raise NotImplementedError()
         return self
 
     def with_model_source_location(
@@ -42,6 +44,7 @@ class ExportDiagnostic(infra.Diagnostic):
     ) -> _ExportDiagnostic:
         # TODO: Implement this.
         # self.locations.append(...)
+        raise NotImplementedError()
         return self
 
     def with_export_source_location(
@@ -49,6 +52,7 @@ class ExportDiagnostic(infra.Diagnostic):
     ) -> _ExportDiagnostic:
         # TODO: Implement this.
         # self.locations.append(...)
+        raise NotImplementedError()
         return self
 
 

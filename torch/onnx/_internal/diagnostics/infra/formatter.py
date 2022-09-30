@@ -19,13 +19,25 @@ def _camel_case_to_snake_case(s: str) -> str:
     return re.sub(r"([A-Z])", r"_\1", s).lower()
 
 
-def _kebab_case_to_snake_case(s: str) -> str:
+def kebab_case_to_snake_case(s: str) -> str:
     return s.replace("-", "_")
 
 
 def _convert_key(
     object: Union[Dict[str, Any], Any], convert: Callable[[str], str]
 ) -> Union[Dict[str, Any], Any]:
+    """Convert and update keys in a dictionary with "convert".
+
+    Any value that is a dictionary will be recursively updated.
+    Any value that is a list will be recursively searched.
+
+    Args:
+        object: The object to update.
+        convert: The function to convert the keys, e.g. `kebab_case_to_snake_case`.
+
+    Returns:
+        The updated object.
+    """
     if not isinstance(object, Dict):
         return object
     new_dict = {}
