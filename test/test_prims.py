@@ -14,7 +14,15 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     skipCUDAIfRocm,
     dtypes,
+    OpDTypes,
 )
+from torch.testing._internal.common_methods_invocations import (
+    op_db,
+)
+from torch.testing._internal.common_device_type import (
+    ops,
+)
+
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
@@ -25,6 +33,7 @@ if TEST_SCIPY:
     import scipy.special
 
 NVPRIM_ATEN_FALLBACK_WARNING = "fallback to aten executor"
+GET_ISOLATED_GRAPHMODULE_ERROR = "get_isolated_graphmodule failed on decomposition"
 
 class TestPrims(TestCase):
     @onlyCUDA
@@ -742,7 +751,7 @@ class TestDecomp(TestCase):
         op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
 
         def fn0(*arg):
-            return _is_func_unsupported_nvfuser(mode, op, arg, {})
+            return _is_func_unsupported_nvfuser(TorchRefsNvfuserCapabilityMode(), op, arg, {})
 
         def fn1(x):
             x = x * 2
@@ -750,8 +759,8 @@ class TestDecomp(TestCase):
             x = x * 2
             return x
 
-        with TorchRefsNvfuserCapabilityMode() as mode:
-            self.assertFalse(fn0(x, y, 0.3, False))
+        self.assertFalse(fn0(x, y, 0.3, False))
+        with TorchRefsNvfuserCapabilityMode():
 
             # Autocast context has C++ level ATen calls that are hidden from
             # TorchRefsNvfuserCapabilityMode that works only on Python level.
@@ -769,6 +778,73 @@ class TestDecomp(TestCase):
                 for node in call_function_nodes
             )
             self.assertFalse(includes_aten_to_copy)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float16, torch.float32)
+    def test_masked_fill_decomposition_under_nvprim_context(self, device, dtype):
+        # masked_fill decomposition extracts cpu scalar tensor value when
+        # filling out a cuda tensor. This triggers data-dependent control flow
+        # on TorchRefsNvfuser speculative lowering.
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+        x = torch.empty(2, 3, device=device).to(dtype=dtype)
+        mask = torch.ones_like(x).bool()
+        y = torch.tensor(0.3)  # cpu scalar tensor
+
+        def func(x, mask, y):
+            return torch.masked_fill(x, mask, y)
+
+        # mimics real use-case for TorchRefsNvfuserCapabilityMode context
+        gm = make_fx(func, decomposition_table={})(x, mask, y)
+
+        with warnings.catch_warnings(record=True) as caught:
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(gm)(x, mask, y)
+        # masked_fill decomposition fails inside `get_isolated_graphmodule`
+        self.assertTrue(any(GET_ISOLATED_GRAPHMODULE_ERROR in str(w.message) for w in caught))
+
+    @ops([op for op in op_db if op.supports_varargs], dtypes=OpDTypes.any_one)
+    def test_decomposition_method_vararg(self, device, dtype, op):
+        # some ops have vararg variants for the methods. this tests it.
+        # we don't have tests for varargs in OpInfo, so we need to
+        # improvise this a bit.
+        # The rule for general functions (the special cases being e.g. tensor
+        # creation functions taking shapes) is that things can be vararg
+        # if the method has only one argument of sequence type.
+        # e.g. permute can be called on a 3d tensor t as t.permute(0, 2, 1)
+        #      as well as t.permute([0, 2, 1])
+        #      when the signature in native_functions.yaml
+        #      shows arguments Tensor self, IntList dims
+        # we might need to adjust things for the factory functions or
+        # have them do their own test
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+
+        # filter out empty tuple as that cannot be the varargs
+        sample_inputs = (si for si in op.sample_inputs(device, dtype, requires_grad=False)
+                         if (si.args[-1] if si.args else si.input))
+
+        # just run one test, we assume there is a suitable one in the tests
+        sample_input = next(sample_inputs)
+        all_args = (sample_input.input,) + sample_input.args
+
+        # in general, the methods take varargs and not (always?) the function
+        # variants, the exception to this rule are the factory functions
+        if op.is_factory_function:
+            fn = op.op
+        else:
+            fn = op.method_variant
+        with TorchRefsMode():
+            gm = make_fx(fn)(*all_args[:-1], *all_args[-1])
+
+        # in case we add random factory functions
+        torch.manual_seed(1)
+        res = gm(*all_args[:-1], *all_args[-1])
+        torch.manual_seed(1)
+        expected = fn(*all_args[:-1], *all_args[-1])
+        self.assertEqual(res, expected)
 
 
 instantiate_device_type_tests(TestDecomp, globals())

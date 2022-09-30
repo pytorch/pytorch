@@ -2744,8 +2744,9 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: _index_put_impl_
+    CPU, CUDA, MPS: _index_put_impl_
     QuantizedCPU: _index_put_impl_quantized_cpu_
+    QuantizedCUDA: _index_put_impl_quantized_cuda_
   autogen: _index_put_impl, _index_put_impl.out
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -4318,6 +4319,7 @@
     MPS: relu_mps
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
+    QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
@@ -5872,7 +5874,7 @@
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
-    SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
+    SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_compressed_
   autogen: resize_as_sparse, resize_as_sparse.out
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
@@ -8024,6 +8026,7 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+    MPS: masked_select_out_mps
   tags: dynamic_output_shape
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
@@ -8031,6 +8034,7 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+    MPS: masked_select_mps
   tags: dynamic_output_shape
 
 - func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
@@ -12715,11 +12719,11 @@
   variants: function
   python_module: nn
 
-- func: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _nested_tensor_from_tensor_list(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: nested_tensor
-  autogen: nested_tensor.out
+    CompositeExplicitAutograd: _nested_tensor_from_tensor_list
+  autogen: _nested_tensor_from_tensor_list.out
 
 - func: _fw_primal_copy(Tensor self, int level) -> Tensor
   variants: function
