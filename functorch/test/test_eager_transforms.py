@@ -13,6 +13,9 @@ from torch.testing._internal.common_utils import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+import subprocess
+import sys
 import unittest
 import warnings
 import math
@@ -2273,6 +2276,15 @@ class TestComposability(TestCase):
         fx_f = make_fx(vjp_fn)(cotangent, True, True)
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
+
+    # it is redundant to run this test twice on a machine that has GPUs
+    @onlyCPU
+    def test_no_warning_on_import_functorch(self, device):
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import functorch"],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
 
     def test_requires_grad_inside_transform(self, device):
         def f(x):
