@@ -46,7 +46,8 @@ struct TORCH_API AccumulateGrad : public Node {
     TORCH_INTERNAL_ASSERT(pre_hooks_.size() == 0);
     // TODO: make this smarter
     hook_.clear();
-    hook_.push_back(std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
+    hook_.push_back(
+        std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
     return hook_;
   }
 

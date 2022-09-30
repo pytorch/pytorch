@@ -872,7 +872,8 @@ void Engine::evaluate_function(
     variable_list new_inputs = inputs.buffer;
     if (!fn_info.needed_ && fn_info.captures_) {
       // call the prehooks of the next node
-      new_inputs = call_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
+      new_inputs =
+          call_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
       const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);

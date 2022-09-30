@@ -26,7 +26,8 @@ CppFunctionTensorPreHook::CppFunctionTensorPreHook(
     int value_idx)
     : hooks_(hooks), value_idx_(value_idx) {}
 
-variable_list CppFunctionTensorPreHook::operator()(const variable_list& values){
+variable_list CppFunctionTensorPreHook::operator()(
+    const variable_list& values) {
   auto value = values[value_idx_];
   for (const auto i : c10::irange(hooks_->size())) {
     auto& hook = (*hooks_)[i];
@@ -52,7 +53,8 @@ variable_list CppFunctionTensorPreHook::operator()(const variable_list& values){
 //     kept alive until there's another node referencing it
 // NOLINTNEXTLINE(modernize-pass-by-value)
 CombinedFunctionPreHook::CombinedFunctionPreHook(
-    std::vector<std::shared_ptr<FunctionPreHook>> hooks): hooks_(hooks) {}
+    std::vector<std::shared_ptr<FunctionPreHook>> hooks)
+    : hooks_(hooks) {}
 
 variable_list CombinedFunctionPreHook::operator()(const variable_list& values) {
   variable_list res = values;
