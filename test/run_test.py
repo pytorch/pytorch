@@ -7,7 +7,6 @@ from distutils.util import strtobool
 from distutils.version import LooseVersion
 import os
 import pathlib
-from select import select
 import shutil
 import signal
 import subprocess

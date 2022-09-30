@@ -2,7 +2,7 @@ import random
 import unittest
 from typing import Dict, List, Tuple
 
-from tools.testing.test_selections import calculate_shards
+from tools.testing.test_selections import calculate_shards, TestJob
 
 
 class TestCalculateShards(unittest.TestCase):
@@ -34,14 +34,17 @@ class TestCalculateShards(unittest.TestCase):
         "short_test5": 0.01,
     }
 
+    def _test_jobs_to_name(self, jobs: List[TestJob]) -> List[str]:
+        return list(map(lambda x: x[0], jobs))
+
     def assert_shards_equal(
         self,
         expected_shards: List[Tuple[float, List[str]]],
-        actual_shards: List[Tuple[float, List[str]]],
+        actual_shards: List[Tuple[float, List[TestJob]]],
     ) -> None:
         for expected, actual in zip(expected_shards, actual_shards):
             self.assertAlmostEqual(expected[0], actual[0])
-            self.assertListEqual(expected[1], actual[1])
+            self.assertListEqual(expected[1], self._test_jobs_to_name(actual[1]))
 
     def test_calculate_2_shards_with_complete_test_times(self) -> None:
         expected_shards = [
@@ -194,7 +197,9 @@ class TestCalculateShards(unittest.TestCase):
                     calculated_shards[0][1] + calculated_shards[1][1]
                 )
                 # All the tests should be represented by some shard
-                self.assertEqual(sorted_tests, sorted_shard_tests)
+                self.assertEqual(
+                    sorted_tests, self._test_jobs_to_name(sorted_shard_tests)
+                )
 
 
 if __name__ == "__main__":
