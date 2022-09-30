@@ -218,6 +218,7 @@ build_host_protoc
 build_android
 build_ios
 /build_*
+!/build_variables.bzl
 .build_debug/*
 .build_release/*
 .build_profile/*
