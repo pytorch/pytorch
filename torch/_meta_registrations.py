@@ -35,6 +35,8 @@ def register_meta(op, register_dispatcher=True):
                 )
                 _meta_lib_dont_use_me_use_register_meta.impl(name, f)
 
+            op.py_impl(torch._C.DispatchKey.Meta)(f)
+
         tree_map(add_func, op)
         return f
 
