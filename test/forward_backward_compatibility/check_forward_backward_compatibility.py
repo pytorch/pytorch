@@ -93,10 +93,6 @@ ALLOW_LIST = [
     ("aten::_linalg_inv_out_helper.out", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper_", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper", datetime.date(2022, 10, 1)),
-    ("aten::amax", datetime.date(2022, 10, 25)),
-    ("aten::amax.out", datetime.date(2022, 10, 25)),
-    ("aten::amin", datetime.date(2022, 10, 25)),
-    ("aten::amin.out", datetime.date(2022, 10, 25)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
@@ -288,6 +284,8 @@ ALLOW_LIST = [
     ("c10d::allgather_", datetime.date(2022, 10, 1)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
+    ("aten::nested_tensor", datetime.date(2022, 10, 15)),
+
 ]
 
 ALLOW_LIST_COMPILED = [
