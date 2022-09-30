@@ -2441,7 +2441,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // we are virtualizing, then numel calls are virtualized as well, and this
   // should never get called
   int64_t compute_numel() const {
-    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
 #if C10_HAS_BUILTIN_OVERFLOW() && !defined(C10_MOBILE)
     // Use overflow checks if supported by the compiler
     return safe_compute_numel();
@@ -2456,7 +2456,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * using a sparse layout has multiple dimensions with large sizes.
    */
   int64_t safe_compute_numel() const {
-    TORCH_INTERNAL_ASSERT(!has_symbolic_sizes_strides_);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!has_symbolic_sizes_strides_);
     uint64_t n = 1;
     bool overflows =
         c10::safe_multiplies_u64(sizes_and_strides_.sizes_arrayref(), &n);
@@ -2470,7 +2470,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   SymInt compute_sym_numel() const {
-    TORCH_INTERNAL_ASSERT(has_symbolic_sizes_strides_);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(has_symbolic_sizes_strides_);
     SymInt numel = 1;
     for (const auto& s : extra_meta_->sizes_) {
       numel *= s;
