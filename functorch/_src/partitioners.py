@@ -316,7 +316,7 @@ def min_cut_rematerialization_partition(
                 return True
             if node.target == operator.getitem:
                 return False
-            if compiler == "inductor" and node.dist_from_bw > 0:
+            if compiler == "inductor" and node.dist_from_bw > 4:
                 return True
             # If the output of an op is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
