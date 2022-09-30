@@ -528,9 +528,10 @@ def nll_loss(
         lambda: f"Expected input tensor to have 1 or more dimensions (got {input.ndim})",
     )
 
+    # TODO: raise exception instead of converting value
+    # msg = "size_average and reduce args are deprecated, please use reduction argument."
+    # Convert these options for consistency with the eager mode
     if size_average is not None or reduce is not None:
-        # TODO: raise exception instead of converting value
-        # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
     # The expected behavior when the target and input have zero elements:
