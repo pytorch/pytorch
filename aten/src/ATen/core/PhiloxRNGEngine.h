@@ -213,7 +213,6 @@ private:
   inline detail::FLOAT2 normalize_pair_uniform(detail::FLOAT2 in) {
     // TODO(voz) We use std:: below, and thus need a separate impl for CUDA.
     float u1 = in[0];
-    float u2 = in[1];
 
     constexpr float two_pi = 2.0 * M_PI;
 
