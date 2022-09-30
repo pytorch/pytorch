@@ -1191,8 +1191,6 @@ def _model_to_graph(
     return graph, params_dict, torch_out
 
 
-# FIXME(justinchuby): Deprecation for testing perposes, remove before landing
-@_deprecation.deprecated("1.13", "1.14", "remove usage")
 @_beartype.beartype
 def export_to_pretty_string(
     model,
