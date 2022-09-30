@@ -46,7 +46,7 @@ from torch.onnx import (  # noqa: F401
     symbolic_helper,
 )
 from torch.onnx._globals import GLOBALS
-from torch.onnx._internal import _beartype, jit_utils, registration
+from torch.onnx._internal import _beartype, diagnostics, jit_utils, registration
 
 __all__ = [
     "is_in_onnx_export",
@@ -182,8 +182,8 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         model
     ) as apex_ctx, setup_onnx_logging(
         verbose
-    ) as log_ctx:
-        yield (mode_ctx, apex_ctx, log_ctx)
+    ) as log_ctx, diagnostics.create_export_diagnostic_context() as diagnostic_ctx:
+        yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
 @_beartype.beartype
@@ -842,7 +842,11 @@ def _trace(func, args, operator_export_type, return_outs=False):
         args = (args,)
 
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
-        func, args, strict=False, _force_outplace=False, _return_inputs_states=True
+        func,
+        args,
+        strict=False,
+        _force_outplace=False,
+        _return_inputs_states=True,
     )
     warn_on_static_input_change(inputs_states)
 
@@ -865,7 +869,11 @@ def _trace_and_get_graph_from_model(model, args):
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
     trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
-        model, args, strict=False, _force_outplace=False, _return_inputs_states=True
+        model,
+        args,
+        strict=False,
+        _force_outplace=False,
+        _return_inputs_states=True,
     )
     torch.set_autocast_cache_enabled(prev_autocast_cache_enabled)
 
@@ -1477,7 +1485,9 @@ def _export(
 
         with exporter_context(model, training, verbose):
             val_keep_init_as_ip = _decide_keep_init_as_input(
-                keep_initializers_as_inputs, operator_export_type, opset_version
+                keep_initializers_as_inputs,
+                operator_export_type,
+                opset_version,
             )
             val_add_node_names = _decide_add_node_names(
                 add_node_names, operator_export_type
@@ -1709,7 +1719,9 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 
 @_beartype.beartype
 def _should_aten_fallback(
-    name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
+    name: str,
+    opset_version: int,
+    operator_export_type: _C_onnx.OperatorExportTypes,
 ):
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
