@@ -993,12 +993,12 @@ void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tra
 // This is a type dispatching helper function for 'apply_lu_solve'
 void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
   // Lapack will write into unrelated memory if pivots are not in the right range so we do
-  // some simple sanity checks here.
+  // some simple sanity checks here for the CPU version
   TORCH_CHECK(pivots.gt(0).all().item<bool>(),
-              "Pivots given to lu_solve must all be greater than 1. "
+              "Pivots given to lu_solve must all be greater or equal to 1. "
               "Did you properly pass the result of lu_factor?");
-  TORCH_CHECK(pivots.le(LU.size(-1)).all().item<bool>(),
-              "Pivots given to lu_solve must all be smaller or equal to LU.size(-1). "
+  TORCH_CHECK(pivots.le(LU.size(-2)).all().item<bool>(),
+              "Pivots given to lu_solve must all be smaller or equal to LU.size(-2). "
               "Did you properly pass the result of lu_factor?");
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "linalg.lu_solve_cpu", [&]{
@@ -1104,7 +1104,7 @@ void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size, cons
       for (const auto i : c10::irange(dim_size)) {
         auto new_idx = pivots_data[i] - 1;
         TORCH_CHECK(new_idx >= 0 && new_idx < max_pivot,
-                    "pivots passed to lu_unpack must be between 1 and LU.size(-1)."
+                    "pivots passed to lu_unpack must be between 1 and LU.size(-2) inclusive."
                     "Did you properly pass the result of lu_factor?");
         std::swap(
           perm_data[i],

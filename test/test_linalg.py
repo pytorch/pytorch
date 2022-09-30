@@ -4963,15 +4963,15 @@ class TestLinalg(TestCase):
         torch.lu_unpack(LU, pivots)
 
         pivots[0] = 0
-        with self.assertRaisesRegex(RuntimeError, r"greater than 1"):
+        with self.assertRaisesRegex(RuntimeError, r"greater or equal to 1"):
             torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-1\)."):
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
 
         pivots[0] = 3
-        with self.assertRaisesRegex(RuntimeError, r"smaller or equal to LU.size\(-1\)"):
+        with self.assertRaisesRegex(RuntimeError, r"smaller or equal to LU.size\(-2\)"):
             torch.linalg.lu_solve(LU, pivots, B, adjoint=True)
-        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-1\)."):
+        with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
 
 
