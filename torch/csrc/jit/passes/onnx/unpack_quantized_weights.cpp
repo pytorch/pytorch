@@ -416,7 +416,8 @@ void unpackQuantizedWeightsHelper(
         groups = groups_int;
         transpose = transpose_int;
       } else if (
-          (params_type == QuantizedParamsType::CONV || params_type == QuantizedParamsType::CONV1D) &&
+          (params_type == QuantizedParamsType::CONV ||
+           params_type == QuantizedParamsType::CONV1D) &&
           ser_tup->elements()[0].isString()) {
         const auto& elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
@@ -452,7 +453,8 @@ void unpackQuantizedWeightsHelper(
         }
         for (const auto i : c10::irange(kSpatialDim)) {
           if (params_type != QuantizedParamsType::CONV1D || i != 0) {
-            output_padding_int.emplace_back(conv_params_packed[idx].item<int64_t>());
+            output_padding_int.emplace_back(
+                conv_params_packed[idx].item<int64_t>());
           }
           idx++;
         }
@@ -650,7 +652,7 @@ void UnpackQuantizedWeights(
   graph(%input, %packed_weight, %w_scale, %w_zero_point):
         %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
         return (%r) )";
-    std::string qconv1d_relu = R"(
+  std::string qconv1d_relu = R"(
   graph(%input, %packed_params, %scale, %zero_point):
         %r = quantized::conv1d_relu(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
