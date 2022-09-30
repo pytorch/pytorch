@@ -491,7 +491,7 @@ def export(
             will have prefix "inferred::". This is to differentiate from predefined attributes retrieved from
             python module annotations. Inferred attributes are used inside the subgraph of ONNX local function.
 
-            * ``False``(default): export ``nn.Module`` forward calls as fine grained nodes.
+            * ``False`` (default): export ``nn.Module`` forward calls as fine grained nodes.
             * ``True``: export all ``nn.Module`` forward calls as local function nodes.
             * Set of type of nn.Module: export ``nn.Module`` forward calls as local function nodes,
                 only if the type of the ``nn.Module`` is found in the set.
