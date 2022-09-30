@@ -148,13 +148,14 @@ def make_tensor(
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
     if stride_permutation is not None:
         strides = [None for _ in range(len(shape))]
-        assert len(shape) == len(stride_permutation)
-        prod = 1
         ndim = len(shape)
+        if ndim != len(stride_permutation):
+            raise ValueError(f"Length of shape must equal length of stride permutation, {ndim} != {len(stride_permutation)}")
+        prod = 1
         for i in range(ndim):
-            strides[stride_permutation[ndim - 1 - i]] = prod
+            strides[stride_permutation[ndim - 1 - i]] = prod  # type: ignore[call-overload]
             prod *= shape[stride_permutation[ndim - 1 - i]]
-        result = torch.as_strided(result, shape, strides)
+        result = torch.as_strided(result, shape, strides)  # type: ignore[arg-type]
 
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
