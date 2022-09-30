@@ -183,19 +183,7 @@ double getMPSScalarValue(const Tensor& t) {
 }
 
 MPSShape* getMPSShape(const Tensor& t) {
-  const int sz = t.dim();
-  const int sz_ = (sz > 0) ? sz : 1;
-
-  NSNumber* numbers[sz_];
-
-  for (int i = 0; i < sz_; i++)
-  {
-    NSInteger sz_i = (i < sz) ? t.size(i) : 1;
-
-    NSNumber* number = [NSNumber numberWithInteger:sz_i];
-    numbers[i] = number;
-  }
-  return [NSArray arrayWithObjects:numbers count:sz_];
+  return getMPSShape(t.sizes());
 }
 
 MPSShape* getMPSShape(c10::MaybeOwned<Tensor> t) {
@@ -207,16 +195,14 @@ MPSShape* getMPSShape(IntArrayRef sizes) {
   const int sz = sizes.size();
   const int sz_ = (sz > 0) ? sz : 1;
 
-  NSNumber* numbers[sz_];
+  std::vector<NSNumber*> numbers(sz_);
 
-  for (int i = 0; i < sz_; i++)
-  {
+  for (int i = 0; i < sz_; i++) {
     NSInteger sz_i = (i < sz) ? sizes[i] : 1;
-
     NSNumber* number = [NSNumber numberWithInteger:sz_i];
     numbers[i] = number;
   }
-  return [NSArray arrayWithObjects:numbers count:sz_];
+  return [NSArray arrayWithObjects:numbers.data() count:numbers.size()];
 }
 
 void printTensorNDArray(const Tensor& t) {

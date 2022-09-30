@@ -1574,7 +1574,7 @@
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
-- func: count_nonzero.dim_IntList(Tensor self, int[]? dim) -> Tensor
+- func: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   variants: function, method
   dispatch:
     CPU: count_nonzero_cpu
@@ -3311,11 +3311,11 @@
   device_check: NoCheck
   device_guard: False
 
-- func: amax(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor
+- func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
   structured_delegate: amax.out
 
-- func: amax.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU, CUDA: amax_out
@@ -3485,11 +3485,11 @@
 - func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
   device_check: NoCheck   # TensorIterator
 
-- func: amin(Tensor self, int[1]? dim=None, bool keepdim=False) -> Tensor
+- func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   variants: function, method
   structured_delegate: amin.out
 
-- func: amin.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU, CUDA: amin_out
@@ -4319,6 +4319,7 @@
     MPS: relu_mps
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
+    QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
@@ -5671,7 +5672,7 @@
     SparseCPU, SparseCUDA: norm_sparse
   autogen: native_norm.out
 
-- func: native_norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1]? dim, bool keepdim, ScalarType? dtype) -> Tensor
+- func: native_norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, ScalarType? dtype) -> Tensor
   dispatch:
     SparseCPU, SparseCUDA: norm_sparse
   autogen: native_norm.ScalarOpt_dim_dtype_out
@@ -5768,27 +5769,27 @@
     CompositeExplicitAutograd: norm
   autogen: norm.Scalar_out
 
-- func: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1]? dim, bool keepdim, *, ScalarType dtype) -> Tensor
+- func: norm.ScalarOpt_dim_dtype(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype) -> Tensor
   structured_delegate: norm.dtype_out
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: sparse_dtype_norm
 
-- func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1]? dim, bool keepdim=False) -> Tensor
+- func: norm.ScalarOpt_dim(Tensor self, Scalar? p, int[1] dim, bool keepdim=False) -> Tensor
   structured_delegate: norm.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: sparse_norm
 
-- func: norm.dtype_out(Tensor self, Scalar? p, int[1]? dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
+- func: norm.dtype_out(Tensor self, Scalar? p, int[1] dim, bool keepdim, *, ScalarType dtype, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: norm_dtype_out
 
-- func: norm.out(Tensor self, Scalar? p, int[1]? dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: norm.out(Tensor self, Scalar? p, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:
@@ -5824,11 +5825,11 @@
   variants: function
 
 # Deprecated (v.1.12)
-- func: frobenius_norm.dim(Tensor self, int[1]? dim, bool keepdim=False) -> Tensor
+- func: frobenius_norm.dim(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   variants: function
 
 # Deprecated (v.1.12)
-- func: frobenius_norm.out(Tensor self, int[1]? dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: frobenius_norm.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
 
 # Deprecated (v.1.12)
@@ -8025,6 +8026,7 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+    MPS: masked_select_out_mps
   tags: dynamic_output_shape
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
@@ -8032,6 +8034,7 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+    MPS: masked_select_mps
   tags: dynamic_output_shape
 
 - func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
@@ -12716,11 +12719,11 @@
   variants: function
   python_module: nn
 
-- func: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _nested_tensor_from_tensor_list(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: nested_tensor
-  autogen: nested_tensor.out
+    CompositeExplicitAutograd: _nested_tensor_from_tensor_list
+  autogen: _nested_tensor_from_tensor_list.out
 
 - func: _fw_primal_copy(Tensor self, int level) -> Tensor
   variants: function
@@ -13802,3 +13805,11 @@
   dispatch:
     CPU: foobar
   autogen: _foobar.out
+
+# Fused Optimizer CUDA kernels.
+- func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
+  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
+  variants: function
+  dispatch:
+    CUDA: _fused_adam_kernel_cuda_
+  autogen: _fused_adam, _fused_adam.out
