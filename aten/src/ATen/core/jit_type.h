@@ -1985,6 +1985,14 @@ struct getTypePtr_<at::OptionalIntArrayRef> final {
   }
 };
 
+template<>
+struct getTypePtr_<at::OptionalSymIntArrayRef> final {
+  static const auto& call() {
+    static auto type = OptionalType::create(getMaybeFakeTypePtr_<SymIntArrayRef, false>::call());
+    return type;
+  }
+};
+
 template <class... Contained, bool fake>
 struct getMaybeFakeTypePtr_<std::tuple<Contained...>, fake> final {
   static const auto& call() {
