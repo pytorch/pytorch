@@ -101,7 +101,6 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -133,7 +132,6 @@ enum class ConvBackend {
   SlowDilated3d,
   SlowTranspose2d,
   SlowTranspose3d,
-  Winograd3x3Depthwise,
   Xnnpack2d,
   Mps,
   MpsTranspose,
