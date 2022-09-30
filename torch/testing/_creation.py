@@ -146,7 +146,7 @@ def make_tensor(
     else:
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
-    if stride_permutation:
+    if stride_permutation is not None:
         strides = [None for _ in range(len(shape))]
         assert len(shape) == len(stride_permutation)
         prod = 1
