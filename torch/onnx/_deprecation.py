@@ -8,7 +8,8 @@ import warnings
 def deprecated(since: str, removed_in: str, instructions: str):
     """Marks functions as deprecated.
 
-    It will result in a warning when the function is called.
+    It will result in a warning when the function is called and a note in the
+    docstring.
 
     Args:
         since: The version when the function was first deprecated.
@@ -27,14 +28,35 @@ def deprecated(since: str, removed_in: str, instructions: str):
             )
             return function(*args, **kwargs)
 
+        # Add a deprecation note to the docstring.
+        docstring = function.__doc__ or ""
 
-        wrapper.__doc__ = textwrap.dedent(
+        # Add a note to the docstring.
+        deprecation_note = textwrap.dedent(
             f"""\
             .. deprecated:: {since}
-                Will be removed in version {removed_in}. Please {instructions}.
-
+                Deprecated and will be removed in version {removed_in}.
+                Please {instructions}.
             """
-        ) + (function.__doc__ or "")
+        )
+
+        # Split docstring at first occurrence of newline
+        summary_and_body = docstring.split("\n", 1)
+
+        if len(summary_and_body) > 1:
+            summary, body = summary_and_body
+
+            # Dedent the body. We cannot do this with the presence of the summary because
+            # the body contains leading whitespaces when the summary does not.
+            body = textwrap.dedent(body)
+
+            new_docstring_parts = [deprecation_note, "\n\n", summary, body]
+        else:
+            summary = summary_and_body[0]
+
+            new_docstring_parts = [deprecation_note, "\n\n", summary]
+
+        wrapper.__doc__ = "".join(new_docstring_parts)
 
         return wrapper
 
