@@ -239,6 +239,7 @@ def get_default_qconfig(backend='fbgemm', version=0):
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=True),
                               weight=default_per_channel_weight_observer)
         elif backend == 'qnnpack':
+            # TODO: make this compatible with xnnpack constraints
             qconfig = QConfig(activation=HistogramObserver.with_args(reduce_range=False),
                               weight=default_weight_observer)
         elif backend == 'onednn':
@@ -345,6 +346,7 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
                                                                                  reduce_range=True),
                               weight=default_fused_per_channel_wt_fake_quant)
         elif backend == 'qnnpack':
+            # TODO: make this compatible with xnnpack constraints
             qconfig = QConfig(activation=FusedMovingAvgObsFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
                                                                                  quant_min=0,
                                                                                  quant_max=255,
