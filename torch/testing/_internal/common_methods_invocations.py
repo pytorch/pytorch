@@ -17736,8 +17736,6 @@ python_ref_db = [
         torch_opinfo_name="unfold_copy",
         supports_nvfuser=False,
         supports_out=True,
-        # torch.unfold_copy returns a view (??!!)
-        validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.unsqueeze",
