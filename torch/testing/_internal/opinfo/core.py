@@ -2517,7 +2517,7 @@ def sample_inputs_foreach(
         return [
             make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for _ in range(N)
-        ] + make_tensor((N, N), dtype=dtype, device=device, stride_permutation = [1, 0])
+        ]
     else:
         return [
             make_tensor(
