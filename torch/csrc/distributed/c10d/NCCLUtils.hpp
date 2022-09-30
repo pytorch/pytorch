@@ -23,6 +23,14 @@
 #define NCCL_REMOTE_ERROR
 #endif
 
+// ncclInProgress only exists in NCCL versions 2.13+
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
+    (NCCL_MINOR >= 14)
+#define NCCL_RESULT_IN_PROGRESS
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define NCCL_RESULT_IN_PROGRESS
+#endif
+
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
 // and ncclCommGetAsyncError() are not supported in earlier versions.
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
@@ -47,8 +55,9 @@
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
+#if not defined(NCCL_RESULT_IN_PROGRESS)
 // Macro to throw on a non-successful NCCL return value.
-#define C10D_NCCL_CHECK(cmd, failureReason)                                                  \
+#define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
     if (result != ncclSuccess) {                                              \
@@ -58,6 +67,18 @@
       TORCH_CHECK(false, err);                                                \
     }                                                                         \
   } while (0)
+#else
+#define C10D_NCCL_CHECK(cmd, failureReason)                                   \
+  do {                                                                        \
+    ncclResult_t result = cmd;                                                \
+    if (result != ncclSuccess && result != ncclInProgress) {                  \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
+          "\n" + getNcclErrorDetailStr(result, failureReason);                \
+      TORCH_CHECK(false, err);                                                \
+    }                                                                         \
+  } while (0)
+#endif
 
 // Macro to print and abort on a non-successful NCCL return value.
 #define C10D_NCCL_ASSERT(cmd)                            \

@@ -39,6 +39,7 @@ typedef struct {
   char internal[NCCL_UNIQUE_ID_BYTES];
 } ncclUniqueId;
 
+// NOTE(crcrpar): Currently RemoteError is equivalent to NumResults if USE_ROCM
 /* Error type */
 enum class ncclResult {
   Success = 0,
@@ -47,7 +48,13 @@ enum class ncclResult {
   InternalError = 3,
   InvalidArgument = 4,
   InvalidUsage = 5,
-  NumResults = 6
+  // NCCL>=2.13.4, not implemented in RCCL as of
+  // bd7d589446e82d1066170597310f55071d38ab93
+  RemoteError = 6,
+  // NCCL>=2.14.3, not implemented in RCCL as of
+  // bd7d589446e82d1066170597310f55071d38ab93
+  InProgress = 7,
+  NumResults = 8
 };
 
 /* Reduction operation selector */

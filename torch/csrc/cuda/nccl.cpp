@@ -27,6 +27,26 @@ ncclUniqueId* to_nccl_unique_id(torch::cuda::nccl::ncclUniqueId* var) {
   return reinterpret_cast<ncclUniqueId*>(var);
 }
 
+// TODO(crcrpar): Reduce the following macros according to
+// ROCmSoftwarePlatform/rccl development.
+#if not defined(USE_ROCM)
+#if defined(NCCL_MAJOR)
+#if NCCL_MAJOR >= 3
+#define NCCL_REMOTE_ERROR
+#define NCCL_IN_PROGRESS
+#elif NCCL_MAJOR >= 2
+#if NCCL_MINOR >= 13
+#define NCCL_REMOTE_ERROR
+#endif
+#if NCCL_MINOR >= 14
+#define NCCL_IN_PROGRESS
+#endif // minor >= 14
+#endif // major >= 2
+#endif // major def
+#endif // not ROCM
+
+// If RemoteError and/or InProgress are unavailable, let them fall through to
+// NumResults.
 ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
   switch (var) {
     case torch::cuda::nccl::ncclResult::Success:
@@ -41,6 +61,14 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
       return ncclResult_t::ncclInvalidArgument;
     case torch::cuda::nccl::ncclResult::InvalidUsage:
       return ncclResult_t::ncclInvalidUsage;
+    case torch::cuda::nccl::ncclResult::RemoteError:
+#if defined(NCCL_REMOTE_ERROR)
+      return ncclResult_t::ncclRemoteError;
+#endif
+    case torch::cuda::nccl::ncclResult::InProgress:
+#if defined(NCCL_IN_PROGRESS)
+      return ncclResult_t::ncclSystemError;
+#endif
     case torch::cuda::nccl::ncclResult::NumResults:
       return ncclResult_t::ncclNumResults;
     default:
@@ -62,6 +90,14 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
       return torch::cuda::nccl::ncclResult::InvalidArgument;
     case ncclInvalidUsage:
       return torch::cuda::nccl::ncclResult::InvalidUsage;
+#if defined(NCCL_REMOTE_ERROR)
+    case ncclRemoteError:
+      return torch::cuda::nccl::ncclResult::RemoteError;
+#endif
+#if defined(NCCL_IN_PROGRESS)
+    case ncclInProgress:
+      return torch::cuda::nccl::ncclResult::InProgress;
+#endif
     case ncclNumResults:
       return torch::cuda::nccl::ncclResult::NumResults;
     default:
