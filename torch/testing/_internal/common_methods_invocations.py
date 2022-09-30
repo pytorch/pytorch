@@ -5121,7 +5121,7 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     inputs.append(SampleInput([c(C), c(x)], args=('...ik, ...j -> ij',)))
 
     # Test path kwarg
-    z = make_tensor((3, 2), device, dtype, requires_grad=requires_grad)
+    z = make_tensor((3, 2), device=device, dtype=dtype, requires_grad=requires_grad)
     inputs.append(SampleInput([c(A), z], args=('ij,jk',), kwargs={'path': [(0, 1)]}))
     inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                   args=('jk,ikl,ijk,lm->mk',),
