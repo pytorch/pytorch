@@ -12,6 +12,8 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <stdexcept>
 #include <utility>
@@ -105,6 +107,28 @@ struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
 
  private:
   std::vector<int64_t> v_value;
+};
+
+template <>
+struct TORCH_PYTHON_API type_caster<at::MemoryFormat> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::MemoryFormat, _("at::MemoryFormat"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPMemoryFormat_Check(obj)) {
+      value = reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
+      return true;
+    }
+    return false;
+  }
+  static handle cast(
+      at::MemoryFormat src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return handle(torch::utils::getTHPMemoryFormat(src));
+  }
 };
 
 template <>
