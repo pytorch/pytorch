@@ -7,7 +7,7 @@ import copy
 import os
 from collections import defaultdict, OrderedDict
 from torch.fx.passes import graph_drawer
-from typing import Tuple, List
+from typing import Tuple, List, Callable
 from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
 
@@ -180,7 +180,13 @@ def default_partition(
 # AOTAutograd is responsible for splitting off the mutated inputs
 # after calling the compiled forward graph,
 # and running the epilogue.
-def move_input_mutations_into_epilogue(fx_g: fx.GraphModule) -> List[bool]:
+
+# Returns:
+# - A callable, representing the opaque epilog
+# - A bitmask of len(inputs), specifying which inputs are mutated by the original function
+# - A bitmask of len(mutated_inputs) + len(fw_outputs), specifying which tensor outputs
+#   of the updated graph module require gradients.
+def move_input_mutations_into_epilogue(fx_g: fx.GraphModule, num_fw_outs: int) -> Tuple[Callable, List[bool], List[bool]]:
     mutable_nodes: List[Node] = []  # the copy_() and as_strided_() nodes, that we'll delete move to a submodule.
     mutated_inputs: List[Node] = []
     node_map: Dict[Node, Node] = {}
@@ -249,6 +255,24 @@ def move_input_mutations_into_epilogue(fx_g: fx.GraphModule) -> List[bool]:
     new_args = [mutated_inputs + output_node[0].args[0]]
     output_node[0].args = tuple(new_args)
 
+    input_mutation_bitset = list(model_input_to_mutation.values())
+
+    # Remember which outputs in the graph required gradients,
+    # So we can specify that information in the autograd.function returned from aot_autograd.
+    num_mutated_inputs = len([x for x in input_mutation_bitset if x])
+    total_num_fw_outs = num_mutated_inputs + num_fw_outs
+    tensor_outputs_requiring_gradients = [
+        # NOTE: x.meta["val"] only works when fake tensors are enabled.
+        # but x.meta["tensor_meta"] will have inaccurate requires_grad info.
+        # Fix when we turn on fake tensors by default!
+        x is not None and hasattr(x, "meta") and (
+            x.meta["val"].requires_grad if "val" in x.meta else x.meta["tensor_meta"].requires_grad
+        )
+        # the joint graph returns [mutated_inputs, fw_outs, bw_outs]
+        # But we only want to collect requires_grad info about [mutated_inputs, fw_outs]
+        for x in new_args[0][:total_num_fw_outs]
+    ]
+
 
     # Remove the mutable nodes from the original graph
     for n in reversed(mutable_nodes):
@@ -256,7 +280,7 @@ def move_input_mutations_into_epilogue(fx_g: fx.GraphModule) -> List[bool]:
     fx_g.graph.lint()
     fx_g.recompile()
 
-    return mutation_epilogue, list(model_input_to_mutation.values())
+    return mutation_epilogue, input_mutation_bitset, tensor_outputs_requiring_gradients
 
 
 def _prod(x):
