@@ -790,8 +790,8 @@ class FakeTensorMode(TorchDispatchMode):
                 and aten_to_aten_decomp(func)
                 and func not in _disabled_meta_decomps
             ):
-                return decomposition_table[func](*args, **kwargs
-    
+                return decomposition_table[func](*args, **kwargs)
+
         # prims already wrap FakeTensor inputs to FakeTensor outputs
         # and do device logic, we dont need do anything but run them
         # and ensure that Meta kernels are dispatched to (see)
