@@ -13404,7 +13404,7 @@ class TestNNDeviceType(NNTestCase):
         subtest(((0, 0, 7, 8, 9), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel3d'),
         # Note: Tests for mobile backends are not currently supported. This comprises
-        # NnpackSpatial, Winograd3x3Depthwise, and Xnnpack2d backends. Testing these
+        # NnpackSpatial, and Xnnpack2d backends. Testing these
         # requires the ability to gate tests by whether PyTorch is built with USE_MOBILE=1.
     ])
     # Test with both bias and no bias.
