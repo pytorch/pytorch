@@ -1,6 +1,6 @@
 import functools
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Sequence, Union
+from typing import Any, Callable, Dict, Sequence
 from warnings import warn
 
 import torch
@@ -66,25 +66,6 @@ def torch_to_refs_map():
         if s in torch._refs.__all__:
             r[getattr(torch.Tensor, s)] = torch._refs.__dict__.get(s)
     return r
-
-
-@functools.lru_cache(None)
-def nvfuser_decomp_table():
-    """
-    decomposition table needed for nvfuser
-    """
-    aten = torch.ops.aten
-    nvfuser_decompositions: Sequence[
-        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-    ] = {  # type: ignore[assignment]
-        # AMP calls `to` in C++, which is not handled by torch mapping
-        aten._to_copy,
-    }
-
-    from torch._decomp import get_decompositions
-
-    decomp_table = get_decompositions(nvfuser_decompositions)
-    return decomp_table
 
 
 @functools.lru_cache(None)
@@ -203,7 +184,17 @@ def _is_node_supported_nvfuser(node):
 
 def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
     with torch_function_mode:
-        gm = get_isolated_graphmodule(func, args, kwargs)
+        try:
+            gm = get_isolated_graphmodule(func, args, kwargs)
+        except Exception as e:
+            warn(
+                "get_isolated_graphmodule failed on decomposition: "
+                + func.__name__
+                + " with error message: "
+                + str(e)
+            )
+            # returns unsupported when tracing fails.
+            return True
 
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
