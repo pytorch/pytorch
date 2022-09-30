@@ -1090,6 +1090,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/detail/CUDAHooksInterface.cpp",
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
+    "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/metal/Context.cpp",
     "aten/src/ATen/native/AutogradComposite.cpp",
     "aten/src/ATen/native/ComparisonUtils.cpp",
