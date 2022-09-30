@@ -1,6 +1,6 @@
-#include <c10d/NCCLUtils.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
-#include <c10d/UCCForNCCL.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/UCCForNCCL.hpp>
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -21,9 +21,9 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <c10d/ParamCommsUtils.hpp>
-#include <c10d/TraceUtils.h>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/TraceUtils.h>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <torch/csrc/cuda/nccl.h>
 
@@ -623,8 +623,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
-  asyncErrorHandling_ =
-      static_cast<ErrorHandlingMode>(parseEnvVarInt(NCCL_ASYNC_ERROR_HANDLING));
+  asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
+      parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 0));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
 
