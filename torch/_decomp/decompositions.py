@@ -1670,7 +1670,6 @@ def norm(
 
 @register_decomposition(torch.ops.aten.upsample_bilinear2d.vec)
 @pw_cast_for_opmath
-# @aten.upsample_bilinear2d.vec.py_impl(torch._C.DispatchKey.Autograd)
 def upsample_bilinear2d_vec(
     input: Tensor,
     output_size: Optional[List[int]],

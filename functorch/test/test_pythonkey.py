@@ -21,7 +21,6 @@ from functorch import (
     make_fx
 )
 from functorch._src.aot_autograd import aot_module_simplified
-import functorch._src.config as config
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module,

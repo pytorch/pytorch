@@ -13,7 +13,6 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
-import functorch._src.config as config
 from contextlib import contextmanager, nullcontext
 import inspect
 from dataclasses import dataclass
