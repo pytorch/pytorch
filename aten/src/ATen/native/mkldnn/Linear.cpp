@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/mkldnn/LinearPrepack.h>
+#include <torch/library.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -158,6 +160,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_linear_backward(
     std::tie(grad_weight, grad_bias) = at::mkldnn_linear_backward_weights(grad_output, input, weight, output_mask[2]);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear_eltwise"),
+      TORCH_FN(at::native::mkldnn::internal::linear::linear_eltwise_run));
 }
 
 } // namespace native
