@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <c10d/HashStore.hpp>
 
 #include <errno.h>
 #include <stdint.h>

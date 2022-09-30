@@ -1,5 +1,5 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <c10d/TCPStore.hpp>
 
 #include <fcntl.h>
 #include <algorithm>
@@ -18,12 +18,12 @@
 #endif
 
 #ifdef _WIN32
-#include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
+#include <c10d/WinSockUtils.hpp>
 #else
-#include <torch/csrc/distributed/c10d/UnixSockUtils.hpp>
+#include <c10d/UnixSockUtils.hpp>
 #endif
 
-#include <torch/csrc/distributed/c10d/socket.h>
+#include <c10d/socket.h>
 
 namespace c10d {
 namespace detail {

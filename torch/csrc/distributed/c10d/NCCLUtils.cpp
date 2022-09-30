@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <c10d/NCCLUtils.hpp>
 
 #include <c10/util/CallOnce.h>
 

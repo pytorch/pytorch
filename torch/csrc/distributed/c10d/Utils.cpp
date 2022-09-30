@@ -1,4 +1,4 @@
-#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <c10d/Utils.hpp>
 
 #include <algorithm>
 #include <cstring>
