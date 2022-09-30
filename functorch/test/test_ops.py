@@ -9,7 +9,7 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize
 import torch
 from torch import Tensor
 import functools
@@ -289,6 +289,48 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+}
+
+aliasing_ops = {
+    'T',
+    'broadcast_to',
+    'conj',
+    'contiguous',
+    'diagonal',  # linalg.diagonal is an alias
+    'expand',
+    'flatten',
+    'imag',
+    'mH',  # adjoint is an alias
+    'mT',
+    'movedim',  # moveaxis is an alias
+    'narrow',
+    'permute',
+    'positive',
+    # 'ravel', is composite implict autograd and may call clone
+    'real',
+    'reshape',
+    'resolve_conj',
+    'resolve_neg',
+    'select',
+    'squeeze',
+    'transpose',  # swapdims and swapaxes are aliases
+    'unflatten',
+    'unfold',
+    'unsqueeze',
+    'view',
+    'view_as',
+    'view_as_complex',
+    'view_as_real',
+}
+
+aliasing_ops_list_return = {
+    'chunks',
+    'dsplit',
+    'hsplit',
+    'split',
+    'unbind',
+    'vsplit',
+    # 'tensor_split' not composite compliant, see vjp_fail
 }
 
 
@@ -1610,6 +1652,64 @@ class TestOperators(TestCase):
         loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
         self.assertEqual(loop_out, batched_out)
 
+    @ops(filter(lambda op: op.name in aliasing_ops, op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace(self, device, dtype, op, grad_op):
+        for sample_input in op.sample_inputs(device, dtype):
+            def f(x):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs).copy_(x)
+                return x
+
+            without_grad = op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+            if grad_op == "jvp":
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+            else:
+                assert grad_op == "vjp"
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    vjp(f, torch.randn_like(without_grad))
+
+    @ops(filter(lambda op: op.name in aliasing_ops_list_return, op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace_list_return(self, device, dtype, op, grad_op):
+        for sample_input in op.sample_inputs(device, dtype):
+            def f(x):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs)[0].copy_(x)
+                return x
+
+            without_grad = op(sample_input.input, *sample_input.args, **sample_input.kwargs)[0]
+            with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                if grad_op == "jvp":
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+                else:
+                    assert grad_op == "vjp"
+                    vjp(f, torch.randn_like(without_grad))
+
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace_special(self, grad_op):
+        # some things in __getitem__ use at::index, which doesn't alias, so this tests a subset of them that do alias
+        ops = [
+            lambda x: x[0],
+            lambda x: x[0, 0, 0],
+            lambda x: x[:1],
+            lambda x: x[:, :1],
+            lambda x: x[:, :1, :],
+        ]
+
+        for op in ops:
+            def f(x):
+                op(captured).copy_(x)
+                return x
+
+            captured = torch.randn(4, 3, 3)
+            without_grad = op(captured)
+            if grad_op == "jvp":
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+            else:
+                assert grad_op == "vjp"
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    vjp(f, torch.randn_like(without_grad))
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)

@@ -47,7 +47,8 @@ void FunctionalizeInterpreterPtr::processImpl(
 
 void FunctionalizeInterpreterPtr::sendToNextInterpreterImpl(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack,
+    bool grad_special_case) {
   // For now, we don't support nested functionalization calls.
   // This check just enforces that - after the functionalize kernel runs
   // and we hit the BackModeFallback, we'll have unwrapped our FunctionalTensors

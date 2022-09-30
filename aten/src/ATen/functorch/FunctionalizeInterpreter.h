@@ -11,7 +11,7 @@ struct FunctionalizeInterpreterPtr {
   TransformType key() const { return base_->key(); }
   int64_t level() const { return base_->level(); }
   void processImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
-  void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack);
+  void sendToNextInterpreterImpl(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool grad_special_case);
   bool functionalizeAddBackViews() const {
     return c10::get<FunctionalizeInterpreterMeta>(base_->meta()).functionalizeAddBackViews_;
   }
