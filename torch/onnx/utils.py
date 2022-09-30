@@ -1191,6 +1191,8 @@ def _model_to_graph(
     return graph, params_dict, torch_out
 
 
+# FIXME(justinchuby): Deprecation for testing perposes, remove before landing
+@_deprecation.deprecated("1.13", "1.14", "remove usage")
 @_beartype.beartype
 def export_to_pretty_string(
     model,
@@ -1224,7 +1226,7 @@ def export_to_pretty_string(
             protobuf's `Message::DebugString()`, which is more verbose.
 
     Returns:
-      A UTF-8 str containing a human-readable representation of the ONNX model.
+        A UTF-8 str containing a human-readable representation of the ONNX model.
     """
     if opset_version is None:
         opset_version = _constants.ONNX_DEFAULT_OPSET
