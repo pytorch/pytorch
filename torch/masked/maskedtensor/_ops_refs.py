@@ -333,7 +333,8 @@ def _softmax(func, *args, **kwargs):
     _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0)
     data = _get_data(args[0])
     mask = _maybe_get_mask(args[0])
-    result_data = torch.ops.aten._masked_softmax(data, ~mask, args[1], 2)
+    input_data = data.masked_fill(~mask, float("-inf"))
+    result_data = func(input_data, args[1], args[2])
     return MaskedTensor(result_data, mask)
 
 
@@ -351,12 +352,9 @@ def _softmax_backward_data(func, *args, **kwargs):
     if is_masked_tensor(grad) and is_masked_tensor(output):
         if not _masks_match(grad, output):
             raise ValueError("__torch_dispatch__, {func}: expected the masks of grad and output to match")
-        new_grad_data = torch.ops.aten._masked_softmax_backward(
-            _get_data(grad),
-            _get_data(output),
-            ~_maybe_get_mask(grad),
-            dim
-        )
+        grad_data = _get_data(grad).masked_fill(~_maybe_get_mask(grad), 1)
+        output_data = _get_data(output).masked_fill(~_maybe_get_mask(output), 0)
+        new_grad_data = func(grad_data, output_data, dim, input_dtype)
         res = MaskedTensor(new_grad_data, _maybe_get_mask(grad))
         return res
     else:
