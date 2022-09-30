@@ -212,7 +212,7 @@ c10::intrusive_ptr<Work> broadcast(
   static auto op =
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("c10d::broadcast_", "")
-        .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+          .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
               at::TensorList,
               const c10::intrusive_ptr<::c10d::ProcessGroup>&,
               int64_t,
