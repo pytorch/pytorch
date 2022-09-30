@@ -4714,40 +4714,41 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
+    c10::SymInt N,
+    c10::SymInt C,
+    c10::SymInt HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask) {
   const int64_t G = group;
-  const int64_t D = C / G;
-  const double s = 1.0 / static_cast<double>(D * HxW);
+  const auto D = C / G;
+  // TODO: don't guard
+  const double s = 1.0 / static_cast<double>((D * HxW).guard_int(__FILE__, __LINE__));
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
-  const Tensor X_tensor = X.reshape({N, G, D, HxW});
-  const Tensor mean_tensor = mean.reshape({N, G, 1, 1});
-  const Tensor rstd_tensor = rstd.reshape({N, G, 1, 1});
+  const Tensor X_tensor = X.reshape_symint({N, G, D, HxW});
+  const Tensor mean_tensor = mean.reshape_symint({N, G, 1, 1});
+  const Tensor rstd_tensor = rstd.reshape_symint({N, G, 1, 1});
   Tensor dY_tensor;
   Tensor ds;
   Tensor db;
   if (dY.defined()) {
-    dY_tensor = dY.reshape({N, G, D, HxW});
+    dY_tensor = dY.reshape_symint({N, G, D, HxW});
     ds = (dY_tensor * X_tensor).sum(3).unsqueeze_(-1);
     db = dY_tensor.sum(3).unsqueeze_(-1);
   }
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
     if (isDefined(gamma)) {
-      gamma_tensor = gamma->reshape({1, G, D, 1});
+      gamma_tensor = gamma->reshape_symint({1, G, D, 1});
     }
     const Tensor var =
         ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
     const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
     Tensor dvar;
     if (drstd.defined()) {
-      dvar = -0.5 * rstd_cube * drstd.view({N, G, 1, 1});
+      dvar = -0.5 * rstd_cube * drstd.view_symint({N, G, 1, 1});
     }
     if (dY.defined()) {
       const Tensor a =
@@ -4762,7 +4763,7 @@ infinitely_differentiable_native_group_norm_backward(
       if (dmean.defined() && drstd.defined()) {
         dX += var_mean_backward(
             dvar,
-            dmean.view({N, G, 1, 1}),
+            dmean.view_symint({N, G, 1, 1}),
             X_tensor,
             IntArrayRef{2, 3},
             0,
@@ -4772,7 +4773,7 @@ infinitely_differentiable_native_group_norm_backward(
     } else if (dmean.defined() && drstd.defined()) {
       dX = var_mean_backward(
                dvar,
-               dmean.view({N, G, 1, 1}),
+               dmean.view_symint({N, G, 1, 1}),
                X_tensor,
                IntArrayRef{2, 3},
                0,

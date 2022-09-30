@@ -698,9 +698,9 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
+    c10::SymInt N,
+    c10::SymInt C,
+    c10::SymInt HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask);
