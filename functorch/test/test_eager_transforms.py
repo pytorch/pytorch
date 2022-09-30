@@ -2361,6 +2361,64 @@ class TestComposability(TestCase):
         with self.assertRaises(RuntimeError):
             grad(f)(x)
 
+    @parametrize('transform', [
+        'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+
+        if transform == 'functionalize':
+            transform = functorch.experimental.functionalize
+        else:
+            transform = getattr(functorch, transform)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                transform(f)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            transform(g)(x)
+
+    def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                vjp(f, x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            vjp(g, x)
+
+    def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        t = torch.randn(3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                jvp(f, (x,), (t,))
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            jvp(g, (x,), (t,))
+
 
 class TestMakeFunctional(TestCase):
     @parametrize('disable_autograd_tracking', [True, False])
