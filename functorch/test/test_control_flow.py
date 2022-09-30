@@ -1,8 +1,9 @@
 import torch
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 from functorch.experimental.cond import cond
 from torch.fx.experimental.proxy_tensor import make_fx
+import unittest
 
 
 class TestControlFlow(TestCase):
@@ -37,6 +38,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_true, torch.sin(x))
         self.assertEqual(result_false, torch.cos(x))
 
+    @unittest.expectedFailure
     def test_cond_nested_traced(self):
         def true_nested(y):
             return y * y
@@ -72,6 +74,7 @@ class TestControlFlowTraced(TestCase):
 
         self.assertEqual(result_false_true, torch.cos(x))
 
+    @unittest.expectedFailure
     def test_cond_nested_traced_other_inputs(self):
         def true_nested(y):
             return y * y
@@ -100,6 +103,7 @@ class TestControlFlowTraced(TestCase):
         result_true_true = graph.forward(b, torch.tensor(True), torch.tensor(True))
         self.assertEqual(result_true_true, (b * b) + torch.tensor([0.25, 0.25]))
 
+    @unittest.expectedFailure
     def test_cond_nested_traced_multi(self):
         def true_a(y):
             return y * y
@@ -167,7 +171,7 @@ class TestControlFlowTraced(TestCase):
         with self.assertRaises(AssertionError):
             make_fx(f)(x, torch.tensor(False))
 
-
+    @unittest.expectedFailure
     def test_assert_on_mismatch_tensor_size(self):
         def true_fn(x):
             return x.sin()
@@ -181,3 +185,6 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaises(AssertionError):
             make_fx(f)(x, torch.tensor(False))
+
+if __name__ == '__main__':
+    run_tests()
