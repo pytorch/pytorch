@@ -431,6 +431,8 @@ Collective functions
 
 .. autofunction:: reduce_scatter
 
+.. autofunction:: reduce_scatter_tensor
+
 .. autofunction:: all_to_all
 
 .. autofunction:: barrier
