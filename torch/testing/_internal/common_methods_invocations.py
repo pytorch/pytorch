@@ -13455,7 +13455,7 @@ op_db: List[OpInfo] = [
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
            # TODO(@heitorschueroff) update SampleInput to handle such cases
-           op=lambda tensors, equation, path=None: torch.einsum(equation, tensors, path=path),
+           op=lambda tensors, equation, path='use_opt_einsum_if_available': torch.einsum(equation, tensors, path=path),
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),

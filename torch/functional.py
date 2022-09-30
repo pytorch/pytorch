@@ -198,7 +198,7 @@ def split(
 
 
 def einsum(*args: Any,
-           path: Optional[Union[bool, Union[Sequence[int], Sequence[Tuple[int, int]]]]] = None) -> Tensor:
+           path: Union[str, Union[Sequence[int], Sequence[Tuple[int, int]]]] = 'use_opt_einsum_if_available') -> Tensor:
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -270,9 +270,10 @@ def einsum(*args: Any,
         operands (List[Tensor]): The tensors to compute the Einstein summation of.
 
     Keyword Args:
-        path (Sequence[int] or Sequence[Tuple[int, int]] or bool): A Sequence representing the contraction path
-            to use when performing the contractions or a boolean to control whether einsum should calculate an optimal
-            contraction path before proceeding with computation.
+        path (Sequence[int] or Sequence[Tuple[int, int]] or str): A Sequence representing the contraction path
+            to use when performing the contractions or a string to control whether einsum should calculate an optimal
+            contraction path before proceeding with computation. The string must be one of: 'use_opt_einsum',
+            'skip_path_calculation', or 'use_opt_einsum_if_available' (the default).
 
             If a list: Each tuple in the list specifies the index of the two tensors to be contracted next, with the
             result of the contraction being appended to the list of operands. e.g. given 3 input operands and
@@ -281,13 +282,13 @@ def einsum(*args: Any,
             every pair of consecutive indices form a contraction, e.g. `optimize=[1, 2, 0, 1]` is the same path as
             in the previous example. If there is only one input operand, then the contraction path should be `[(0,)]`.
 
-            If `None`: einsum will default to first calculating an optimized contraction path with the help of
-            opt_einsum if the package is installed in the same environment. If opt_einsum is not available, path
-            calculation will be skipped and tensors will be contracted from left to right. Defaults to `None`.
+            If `use_opt_einsum_if_available`: einsum will default to first calculating an optimized contraction path
+            with the help of opt_einsum if the package is installed in the same environment. If opt_einsum is not
+            available, path calculation will be skipped and tensors will be contracted from left to right. The default.
 
-            If `False`: einsum will skip path calculation and contract the tensors from left to right.
+            If `skip_path_calculation`: einsum will skip path calculation and contract the tensors from left to right.
 
-            If `True`: einsum will attempt path calculation and error if opt_einsum cannot be found.
+            If `use_opt_einsum`: einsum will attempt path calculation and error if opt_einsum cannot be found.
 
     Examples::
 
@@ -421,18 +422,22 @@ def einsum(*args: Any,
                 path = flattened_path
         return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
-    if len(operands) <= 2 or path is False:
+    if len(operands) <= 2 or path == 'skip_path_calculation':
         # the path for contracting 0 or 1 time(s) is already optimized
-        # specifically use `is False` vs. `not` because we handle None differently--False means that the user
-        # intentionally opts out of path calculation.
+        # or the user intentionally opts out of path calculation
         return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
-    # path is True
-    if _opt_einsum is None and path:
-        raise RuntimeError("einsum(): path is set to True, but opt_einsum is not available to calculate "
+    if _opt_einsum is None and path == 'use_opt_einsum':
+        raise RuntimeError("einsum(): path is set to use_opt_einsum, but opt_einsum is not available to calculate "
                            "the optimal path")
 
-    # go the default path; path is None
+    # go the default path; path should only be 'use_opt_einsum_if_available' now
+    if path == 'use_opt_einsum_if_available':
+        path = None
+    else:
+        raise RuntimeError("einsum(): unrecognized value for path kwarg, path should be a Sequence or one of three "
+                           "strings: 'use_opt_einsum_if_available', 'use_opt_einsum', 'skip_path_calculation'")
+
     if _opt_einsum is not None:
         tupled_path = _opt_einsum.contract_path(equation, *operands)[0]
         # flatten path for dispatching to C++

@@ -3673,11 +3673,11 @@ class TestLinalg(TestCase):
 
         # use path optimization; requires opt_einsum to be installed
         if TEST_OPT_EINSUM:
-            res = torch.einsum(*args, path=True)
+            res = torch.einsum(*args, path='use_opt_einsum')
             self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
         # skip path optimization
-        res = torch.einsum(*args, path=False)
+        res = torch.einsum(*args, path='skip_path_calculation')
         self.assertEqual(torch.from_numpy(np.array(ref)), res)
 
     @dtypes(torch.double, torch.cdouble)
@@ -3771,7 +3771,7 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_contraction_path(self, device, dtype):
-        def check(equation, *operands, path=None):
+        def check(equation, *operands, path='use_opt_einsum_if_available'):
             np_ops = [op.cpu().numpy() for op in operands]
             res = torch.einsum(equation, *operands, path=path)
             ref = np.einsum(equation, *np_ops, optimize=('einsum_path', *path))
@@ -3934,7 +3934,7 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
-        def check(*args, regex, exception=RuntimeError, path=None):
+        def check(*args, regex, exception=RuntimeError, path='use_opt_einsum_if_available'):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
                 torch.einsum(*args, path=path)
 
@@ -3966,6 +3966,7 @@ class TestLinalg(TestCase):
 
         check(x, [-1], regex=r'not within the valid range \[0, 52\)', exception=ValueError)
         check('a', [x], regex=r'path should not be an empty list', path=[])
+        check('a', [x], regex=r'unrecognized value for path kwarg', path='unacceptable_kwarg')
         check('a', [x], regex=r'size 1 but got 2', path=[(0, 1)])
         check('a,ab', [x, y], regex=r'cannot contract an operand with itself', path=[(0, 0)])
         check('a,ab', [x, y], regex=r'out of bounds', path=[(1, 2)])
