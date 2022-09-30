@@ -1324,8 +1324,8 @@
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
 
-- name: repeat(Tensor self, int[] repeats) -> Tensor
-  self: repeat_backward(grad, repeats, self.sizes())
+- name: repeat(Tensor self, SymInt[] repeats) -> Tensor
+  self: repeat_backward(grad, repeats, self.sym_sizes())
   result: auto_linear
 
 - name: special_entr(Tensor self) -> Tensor
@@ -1352,7 +1352,7 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
+- name: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
   self: grad.reshape(self.sizes())
   result: auto_linear
 
@@ -1697,7 +1697,7 @@
   output_differentiability: [True, False, False]
   self: not_implemented("_unique2")
 
-- name: _unsafe_view(Tensor self, int[] size) -> Tensor
+- name: _unsafe_view(Tensor self, SymInt[] size) -> Tensor
   self: grad.reshape(self.sizes())
   result: auto_linear
 
