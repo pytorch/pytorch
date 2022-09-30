@@ -417,6 +417,8 @@ Collective functions
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_into_tensor
+
 .. autofunction:: all_gather_object
 
 .. autofunction:: gather
@@ -428,6 +430,8 @@ Collective functions
 .. autofunction:: scatter_object_list
 
 .. autofunction:: reduce_scatter
+
+.. autofunction:: reduce_scatter_tensor
 
 .. autofunction:: all_to_all
 
