@@ -1,6 +1,7 @@
 from typing import List, Optional, Union
 
 import torch
+from torch._C import memory_format
 import torch._prims_common as utils
 from torch import Tensor
 from torch._prims_common import (
@@ -378,7 +379,6 @@ def meta_conv(
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
-
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
@@ -395,6 +395,25 @@ def meta_adaptive_avg_pool3d(self, output_size):
         lambda: f"Expected 4D or 5D tensor, but got {self.shape}",
     )
     return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+@register_meta(aten._adaptive_avg_pool2d_backward.default)
+def meta__adaptive_avg_pool2d_backward(grad_out, self):
+    ndim = grad_out.ndim
+    for i in range(1, ndim):
+        check(
+            grad_out.size(i) > 0,
+            lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
+                      size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
+        )
+    check(
+        ndim == 3 or ndim == 4,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
+    )
+    check (
+        self.dtype == grad_out.dtype,
+        lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}"
+    )
+    return self.new_empty(self.shape)
 
 
 @register_meta(aten.repeat_interleave.Tensor)
@@ -565,7 +584,8 @@ def meta_convolution_backward(grad_output_, input_, weight_, bias_sizes_opt, str
     if output_mask[1]:
         backend_grad_weight = aten.empty_like.default(weight_)
     if output_mask[2]:
-        backend_grad_bias = aten.empty_like.default(bias_sizes_opt, **weight_.options())
+        backend_grad_bias = aten.empty.memory_format(bias_sizes_opt, dtype=weight_.dtype,
+                                                     layout=weight_.layout)
 
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
@@ -988,6 +1008,25 @@ def pool2d_shape_check(
         "Output size is too small",
     )
 
+@register_meta(aten.max_pool2d_with_indices_backward.default, register_dispatcher=False)
+def meta_max_pool2d_with_indices_backward(
+    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    # Reference: aten/src/ATen/native/cpu/MaxPoolKernel.cpp
+    memory_format = utils.suggest_memory_format(self)
+    if memory_format == torch.contiguous_format:
+        pass
+    elif memory_format == torch.channels_last:
+        check(
+            self.ndim == 4,
+            lambda: "max pooling backward with channels last format supports tensors with 4 dims.",
+        )
+    else:
+        check(
+            False,
+            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
+        )
+    return self.new_empty(self.shape)
 
 @register_meta(aten.max_pool2d_with_indices.default, register_dispatcher=False)
 def meta_max_pool2d_with_indices(
