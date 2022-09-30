@@ -109,6 +109,9 @@ class PySymInt(object):
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
+    def clone(self):
+        return PySymInt(self.expr, self.shape_env, constant=self.constant)
+
     def __str__(self):
         return f"{self.expr}"
 
