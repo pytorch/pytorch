@@ -1,6 +1,7 @@
 from typing import List, Optional, Union
 
 import torch
+from torch._C import memory_format
 import torch._prims_common as utils
 from torch import Tensor
 from torch._prims_common import (
@@ -378,6 +379,23 @@ def meta_conv(
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
+# @register_meta(aten.avg_pool2d.default)
+# def meta_avg_pool2d(self, output_size):
+#     # Reference: aten/src/ATen/native/cpu/AvgPoolKernel.cpp
+#     memory_format = utils.suggest_memory_format(self)
+#     if memory_format == torch.contiguous_format:
+#         pass
+#     elif memory_format == torch.channels_last:
+#         check(
+#             self.ndim == 4,
+#             lambda: "max pooling backward with channels last format supports tensors with 4 dims.",
+#         )
+#     else:
+#         check(
+#             False,
+#             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
+#         )
+#     return self.new_empty(self.shape)
 
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
@@ -565,7 +583,8 @@ def meta_convolution_backward(grad_output_, input_, weight_, bias_sizes_opt, str
     if output_mask[1]:
         backend_grad_weight = aten.empty_like.default(weight_)
     if output_mask[2]:
-        backend_grad_bias = aten.empty_like.default(bias_sizes_opt, **weight_.options())
+        backend_grad_bias = aten.empty.memory_format(bias_sizes_opt, dtype=weight_.dtype,
+                                                     layout=weight_.layout)
 
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
@@ -988,6 +1007,25 @@ def pool2d_shape_check(
         "Output size is too small",
     )
 
+@register_meta(aten.max_pool2d_with_indices_backward.default, register_dispatcher=False)
+def meta_max_pool2d_with_indices_backward(
+    grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
+):
+    # Reference: aten/src/ATen/native/cpu/MaxPoolKernel.cpp
+    memory_format = utils.suggest_memory_format(self)
+    if memory_format == torch.contiguous_format:
+        pass
+    elif memory_format == torch.channels_last:
+        check(
+            self.ndim == 4,
+            lambda: "max pooling backward with channels last format supports tensors with 4 dims.",
+        )
+    else:
+        check(
+            False,
+            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
+        )
+    return self.new_empty(self.shape)
 
 @register_meta(aten.max_pool2d_with_indices.default, register_dispatcher=False)
 def meta_max_pool2d_with_indices(
