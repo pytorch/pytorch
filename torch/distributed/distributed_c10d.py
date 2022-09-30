@@ -1553,7 +1553,8 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     warnings.warn(
         "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later."
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#collective-functions"
     )
     _check_tensor_list(tensors, "tensor")
     _ensure_all_tensors_same_dtype(tensors)
@@ -2404,7 +2405,8 @@ def all_gather_coalesced(
     """
     warnings.warn(
         "torch.distributed.all_gather_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later."
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#collective-functions"
     )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
