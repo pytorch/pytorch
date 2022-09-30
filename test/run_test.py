@@ -1085,7 +1085,7 @@ def main():
         for test, shard_id, shard_num, _ in selected_tests:
             options_clone = copy.deepcopy(options)
             if shard_id != 0 or shard_num != 1:
-                options_clone.additional_unittest_args.extend([f"--shard-id={shard_id}", f"--shard-num={shard_num}"])
+                options_clone.additional_unittest_args.extend([f"--shard-id={shard_id}", f"--num-shards={shard_num}"])
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
                 continue
