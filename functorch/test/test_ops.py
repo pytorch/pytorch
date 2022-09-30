@@ -1591,7 +1591,7 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
-        tol1('linalg.einsum',
+        tol1('einsum',
              {torch.float32: tol(atol=5e-04, rtol=1e-05)}, device_type='cuda'),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
