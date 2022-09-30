@@ -1062,7 +1062,7 @@ def main():
     selected_tests = get_selected_tests(options, test_times)
 
     if options.verbose:
-        print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests)))
+        print_to_stderr("Selected tests:\n {}".format("\n ".join(selected_tests.map(lambda x: x[0]))))
 
     if options.dry_run:
         return
