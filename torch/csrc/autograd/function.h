@@ -485,7 +485,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return pre_hooks_;
   }
 
-  std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() noexcept {
+  virtual std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() noexcept {
     return pre_hooks_;
   }
 

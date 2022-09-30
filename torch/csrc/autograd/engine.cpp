@@ -803,30 +803,6 @@ void validate_outputs(
   }
 }
 
-static void maybe_capture_grads(
-    std::shared_ptr<GraphTask>& graph_task,
-    Node* func,
-    const variable_list& inputs) {
-  auto& exec_info_ = graph_task->exec_info_;
-  auto& fn_info = exec_info_.at(func);
-  if (auto* capture_vec = fn_info.captures_.get()) {
-    const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
-    // Lock mutex for writing to graph_task->captured_vars_.
-    std::lock_guard<std::mutex> lock(graph_task->mutex_);
-    for (const auto& capture : *capture_vec) {
-      auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
-      captured_grad = inputs.at(capture.input_idx_);
-      for (auto& hook : capture.hooks_) {
-        captured_grad = (*hook)(captured_grad);
-      }
-      if (opt_parent_stream) {
-        // No need to take graph_task->mutex_ here, we already hold it
-        graph_task->leaf_streams.emplace(*opt_parent_stream);
-      }
-    }
-  }
-}
-
 static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
@@ -844,47 +820,33 @@ static variable_list call_function(
   const auto has_post_hooks = !fn.post_hooks().empty();
   variable_list outputs;
 
-  if (only_call_hooks) {
-    // skip execution of the node and also:
-    // - capture grads now that we've finished pre-hooks
-    // - run tensor hooks because those are special
-    // TODO: Assert that this is accumulate grad (if possible)
-    const at::Tensor& variable = ((AccumulateGrad*)func)->variable;
-    auto hooks = impl::hooks(variable);
-    at::Tensor new_grad = inputs.at(0);
-    TORCH_INTERNAL_ASSERT(inputs.size() == 1);
-    for (auto& hook : impl::hooks(variable)) {
-      new_grad = (*hook)({new_grad})[0];
-    }
-    maybe_capture_grads(graph_task, func, {new_grad});
+  if (has_post_hooks) {
+    // In functions/accumulate_grad.cpp, there is some logic to check the
+    // conditions under which the incoming gradient can be stolen directly
+    // (which elides a deep copy) instead of cloned. One of these conditions
+    // is that the incoming gradient's refcount must be 1 (nothing else is
+    // referencing the same data).  Stashing inputs_copy here bumps the
+    // refcount, so if post hooks are employed, it's actually still ok for
+    // accumulate_grad.cpp to steal the gradient if the refcount is 2.
+    //
+    // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
+    // accumulate_grad.cpp accounts for this, but also creates a silent
+    // dependency between engine.cpp (ie, this particular engine
+    // implementation) and accumulate_grad.cpp.
+    //
+    // If you change the logic here, make sure it's compatible with
+    // accumulate_grad.cpp.
+    auto inputs_copy = inputs;
+    outputs = fn(std::move(inputs_copy));
   } else {
-    if (has_post_hooks) {
-      // In functions/accumulate_grad.cpp, there is some logic to check the
-      // conditions under which the incoming gradient can be stolen directly
-      // (which elides a deep copy) instead of cloned. One of these conditions
-      // is that the incoming gradient's refcount must be 1 (nothing else is
-      // referencing the same data).  Stashing inputs_copy here bumps the
-      // refcount, so if post hooks are employed, it's actually still ok for
-      // accumulate_grad.cpp to steal the gradient if the refcount is 2.
-      //
-      // "new_grad.use_count() <= 1 + !post_hooks().empty()" in
-      // accumulate_grad.cpp accounts for this, but also creates a silent
-      // dependency between engine.cpp (ie, this particular engine
-      // implementation) and accumulate_grad.cpp.
-      //
-      // If you change the logic here, make sure it's compatible with
-      // accumulate_grad.cpp.
-      auto inputs_copy = inputs;
-      outputs = fn(std::move(inputs_copy));
-    } else {
-      outputs = fn(std::move(inputs));
-    }
-    validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
-      std::ostringstream ss;
-      ss << "Function " << fn.name() << " returned an " << msg;
-      return ss.str();
-    });
+    outputs = fn(std::move(inputs));
   }
+
+  validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
+    std::ostringstream ss;
+    ss << "Function " << fn.name() << " returned an " << msg;
+    return ss.str();
+  });
 
   if (has_post_hooks) {
     // NOLINTNEXTLINE(bugprone-use-after-move)
@@ -910,16 +872,29 @@ void Engine::evaluate_function(
   bool only_call_hooks = false;
   if (!exec_info_.empty()) {
     auto& fn_info = exec_info_.at(func);
-    if (!fn_info.needed_) {
-      // Either return immediately OR slightly delayed return in case we still
-      // want to execute the next node's hooks (always accumulate grad)
-      if (fn_info.captures_) {
-        only_call_hooks = true;
-      } else {
-        return;
+    variable_list new_inputs = inputs.buffer;
+    if (!fn_info.needed_ && fn_info.captures_) {
+      // call the prehooks of the next node
+      new_inputs = call_pre_hooks(*func, InputBuffer::variables(std::move(inputs)));
+    }
+    if (auto* capture_vec = fn_info.captures_.get()) {
+      const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
+      // Lock mutex for writing to graph_task->captured_vars_.
+      std::lock_guard<std::mutex> lock(graph_task->mutex_);
+      for (const auto& capture : *capture_vec) {
+        auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
+        captured_grad = new_inputs[capture.input_idx_];
+        for (auto& hook : capture.hooks_) {
+          captured_grad = (*hook)(captured_grad);
+        }
+        if (opt_parent_stream) {
+          // No need to take graph_task->mutex_ here, we already hold it
+          graph_task->leaf_streams.emplace(*opt_parent_stream);
+        }
       }
-    } else {
-      maybe_capture_grads(graph_task, func, inputs.buffer);
+    }
+    if (!fn_info.needed_) {
+      return;
     }
   }
 

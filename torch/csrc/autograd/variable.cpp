@@ -186,7 +186,7 @@ void update_cpp_hooks_on_new_gradfn(
   // Since this is a new list, 0 is the index of the retains_grad hook
   meta->retains_grad_ = 0;
   std::unique_ptr<FunctionPreHook> hook_ptr(
-      new CppFunctionPreHook(meta->cpp_hooks_list_, self.output_nr()));
+      new CppFunctionTensorPreHook(meta->cpp_hooks_list_, self.output_nr()));
   new_fn->add_pre_hook(std::move(hook_ptr));
 }
 
@@ -226,9 +226,9 @@ void create_cpp_hook(const at::TensorBase& self) {
   // NOLINTNEXTLINE(modernize-make-shared)
   list.reset(new hooks_list());
   std::unique_ptr<FunctionPreHook> hook_ptr(
-      new CppFunctionPreHook(list, self.output_nr()));
+      new CppFunctionTensorPreHook(list, self.output_nr()));
   clear_hooks(self);
-  add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
+  add_hook(self, std::make_shared<CppFunctionTensorPreHook>(list, 0));
   const auto& fn = self.grad_fn();
   if (fn) {
     fn->add_pre_hook(std::move(hook_ptr));

@@ -4,6 +4,10 @@ import contextlib
 from torch.utils._python_dispatch import TorchDispatchMode
 from typing import Dict, Tuple, Optional
 import weakref
+
+__all__ = ["saved_tensors_hooks", "save_on_cpu", "allow_mutation_on_saved_tensors"]
+
+
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
 
@@ -210,9 +214,12 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        # Bug? Maybe something to do with wrapped number + dispatcher, not sure why yet
+        # We don't really need this unless we try to print though, but keeping for now
         if type(args[0]) is int:
-            # wrapped number
             args = [torch.tensor(args[0]), *args[1:]]
+
         # (only for in-place ops now, we may want to handle out= later)
         if func.__name__.split('.')[0][-1] == "_":
             # The first argument is assumed to be modified in-place
@@ -220,13 +227,20 @@ class _CloneArgBeforeMutateMode(TorchDispatchMode):
             sid = _get_sid(args[0])
             if sid in _sid_to_tid:
                 for tid in _sid_to_tid[sid]:
-                    if tid in _tid_to_weakhandle:
-                        handle = _tid_to_weakhandle[tid]()
-                        if handle is not None and handle not in _cloned:
-                            _cloned[handle] = _original[handle].clone()
-                            del _original[handle]
+                    if tid not in _tid_to_weakhandle:
+                        # It's never been saved
+                        continue
+                    handle = _tid_to_weakhandle[tid]()
+                    if handle is None or handle in _cloned:
+                        # It's been saved, but backward was run OR
+                        # The same exactly tensor has been cloned already
+                        continue
+                    _cloned[handle] = _original[handle].clone()
+                    del _original[handle]
             else:
+                # this can happen with math views, I'm not sure why yet
                 assert not args[0]._is_view()
+
         rs = func(*args, **kwargs)
         return rs
 
