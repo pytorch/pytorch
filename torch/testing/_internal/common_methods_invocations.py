@@ -17072,6 +17072,7 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
             ),
         ),
+    ),
     PythonRefInfo(
         "_refs.nn.functional.huber_loss",
         torch_opinfo_name="nn.functional.huber_loss",
