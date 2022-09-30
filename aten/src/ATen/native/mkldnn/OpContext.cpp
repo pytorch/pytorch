@@ -50,7 +50,7 @@ AttrFunction attr_func_gelu = [](std::vector<c10::optional<at::Scalar>> scalars,
   } else if (algorithm.value() == "tanh") {
     gelu_type = dnnl::algorithm::eltwise_gelu_tanh;
   } else {
-    TORCH_CHECK(
+    TORCH_INTERNAL_ASSERT(
         false, "Unsupported gelu algorithm: ", algorithm.value());
   }
 
