@@ -7113,8 +7113,6 @@ TEST_F(LazyOpsTest, TestViewSqueezeAddInPlace) {
   });
 }
 
-// TODO: reenable after LTC rewrite
-#if 0
 TEST_F(LazyOpsTest, TestUnsafeView) {
   torch::Tensor input = torch::rand(
       {32, 20, 4, 4},
@@ -7126,7 +7124,6 @@ TEST_F(LazyOpsTest, TestUnsafeView) {
     AllClose(output, lazy_output);
   });
 }
-#endif
 
 TEST_F(LazyOpsTest, TestNarrow) {
   torch::Tensor a = torch::rand(
