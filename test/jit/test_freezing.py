@@ -1528,6 +1528,77 @@ class TestFreezing(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleContainerIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
 
+    def test_freeze_with_interface_mutable(self):
+        @torch.jit.interface
+        class ModuleInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class ImplementsInterface(torch.nn.Module):
+            def __init__(self):
+                super(ImplementsInterface, self).__init__()
+                self.sum = torch.zeros((2, 2))
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                self.sum += inp.relu()
+                return self.sum
+
+        class ModWithDict(torch.nn.Module):
+            impl: ModuleInterface
+
+            def __init__(self):
+                super().__init__()
+                self.impl = ImplementsInterface()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.impl.forward(x)
+
+        m = torch.jit.script(ModWithDict())
+        m.eval()
+        m_frozen = torch.jit.freeze(m)
+
+        x = torch.rand((2, 2))
+
+        m_frozen(x)
+        self.assertEqual(m_frozen.impl.sum, x.relu())
+
+    def test_freeze_with_swapping_interfaces(self):
+        @torch.jit.interface
+        class ModuleInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class Implementation1(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return inp.relu()
+
+        class Implementation2(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return inp.sin()
+
+        class ModWithDict(torch.nn.Module):
+            impl: ModuleInterface
+
+            def __init__(self):
+                super().__init__()
+                self.option1 = Implementation1()
+                self.option2 = Implementation2()
+                self.impl = self.option1
+                self.idx = 0
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.idx += 1
+                if self.idx%2 == 1:
+                    self.impl = self.option1
+                else:
+                    self.impl = self.option2
+                return self.impl(x)
+
+        m = torch.jit.script(ModWithDict())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute"):
+            m_frozen = torch.jit.freeze(m)
+
     def test_freeze_non_module_class_getattr(self):
         class BoxCoder(object):
             def __init__(self, bbox_xform_clip):
