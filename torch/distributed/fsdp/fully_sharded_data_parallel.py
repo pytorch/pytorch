@@ -2218,6 +2218,9 @@ class FullyShardedDataParallel(nn.Module):
                     f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
                 )
                 fqn = f"{prefix}{clean_key}"
+                if fqn not in state_dict:
+                    # A buffer can be registered as non-persistent.
+                    continue
                 if state_dict[fqn].device != cpu_device:
                     state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
