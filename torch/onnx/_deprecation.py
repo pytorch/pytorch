@@ -30,9 +30,8 @@ def deprecated(since: str, removed_in: str, instructions: str):
 
         wrapper.__doc__ = textwrap.dedent(
             f"""\
-            .. warning::
-                Deprecated: `{function.__name__}` is deprecated in version {since} and will be
-                removed in version {removed_in}. Please {instructions}.
+            .. deprecated:: {since}
+                Will be removed in version {removed_in}. Please {instructions}.
 
             """
         ) + (function.__doc__ or "")
