@@ -182,7 +182,7 @@ class MixedPrecision:
         are checkpointed in their full precision (and then restored back to
         to their reduced precision) as expected. Note that this checkpoint
         support is currently limited to ``StateDictType.FULL_STATE_DICT``.
-        ``keep_casted_gradients``: Whether to upcast gradients back to the
+        ``keep_low_precision_grads``: Whether to upcast gradients back to the
         full parameter precision after backwards or not. This can be disabled
         to keep the gradients in the lower precision, which can potentially
         save memory if custom Optimizers are able to perform parameter updates
@@ -214,12 +214,7 @@ class MixedPrecision:
     # TODO: buffer + param are usually of the same type, if user specifies
     # param but not buffer, should we automatically make buffer be the same?
     buffer_dtype: Optional[torch.dtype] = None
-    # Whether to upcast gradients back to the full parameter precision after
-    # backwards or not. This can be disabled to keep the gradients in the
-    # lower precision, which can potentially save memory if custom Optimizers
-    # are able to perform parameter updates effectively with lower precision
-    # grads.
-    keep_casted_gradients: Optional[bool] = False
+    keep_low_precision_grads: Optional[bool] = False
 
 
 @dataclass
@@ -395,7 +390,8 @@ class _ExecOrderData:
     """
 
     def __init__(self, debug_level: dist.DebugLevel) -> None:
-        # Tracks the pre-forward order for post-backward prefetching
+        # Tracks the (static) pre-forward order for execution order validation
+        # and forward prefetching
         self.handles_pre_forward_order: List[int] = []
         # Maps each handles key to its index in `handles_pre_forward_order`
         self.handles_to_pre_forward_order_index: Dict[_HandlesKey, int] = {}
@@ -464,6 +460,24 @@ class _ExecOrderData:
         if target_index < 0:
             return None
         target_handles_key = self.handles_post_forward_order[target_index]
+        return target_handles_key
+
+    def get_handles_to_forward_prefetch(
+        self,
+        current_handles_key: _HandlesKey,
+    ) -> Optional[_HandlesKey]:
+        """
+        Returns the handles key of the handles to forward prefetch given the
+        current handles key or ``None`` if there is no valid handles key to
+        prefetch.
+        """
+        current_index = self.handles_to_pre_forward_order_index.get(current_handles_key, None)
+        if current_index is None:
+            return None
+        target_index = current_index + 1
+        if target_index >= len(self.handles_pre_forward_order):
+            return None
+        target_handles_key = self.handles_pre_forward_order[target_index]
         return target_handles_key
 
     def record_post_forward(self, handles: List[FlatParamHandle]) -> None:
@@ -931,6 +945,12 @@ class FullyShardedDataParallel(nn.Module):
             This can also help load checkpoints taken by ``state_dict`` and to be loaded by
             ``load_state_dict`` in a memory efficient way. See documentation for
             :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
+        forward_prefetch (bool): If ``True``, then FSDP *explicitly* prefetches
+            the next upcoming all-gather while executing in the forward pass.
+            This may improve communication and computation overlap for CPU
+            bound workloads. This should only be used for static graph models
+            since the forward order is fixed based on the first iteration's
+            execution. (Default: ``False``)
         limit_all_gathers (bool): If ``False``, then FSDP allows the CPU
             thread to schedule all-gathers without any extra synchronization.
             If ``True``, then FSDP explicitly synchronizes the CPU thread to
@@ -1040,7 +1060,7 @@ class FullyShardedDataParallel(nn.Module):
             self.cpu_offload.offload_params,
             self.mixed_precision.param_dtype,
             self.mixed_precision.reduce_dtype,
-            self.mixed_precision.keep_casted_gradients,
+            self.mixed_precision.keep_low_precision_grads,
         )
         self._fsdp_wrapped_module = FlattenParamsWrapper(
             module,
@@ -1079,6 +1099,8 @@ class FullyShardedDataParallel(nn.Module):
         self._handles_prefetched: Dict[_HandlesKey, bool] = {}
         # Used for guarding against mistargeted backward prefetches
         self._needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
+        # Used for guarding against mistargeted forward prefetches
+        self._needs_pre_forward_unshard: Dict[_HandlesKey, bool] = {}
         # The data structures use tuples of handles to generalize over the case
         # where a module's forward involves multiple handles.
 
@@ -1507,6 +1529,8 @@ class FullyShardedDataParallel(nn.Module):
         Postcondition: Each handle's ``FlatParameter`` 's data is the padded
         unsharded flattened parameter on the compute device.
         """
+        if not handles:
+            return
         if self.limit_all_gathers:
             events = self._free_event_queue.flush_if_needed()
             if events:
@@ -1659,7 +1683,7 @@ class FullyShardedDataParallel(nn.Module):
     def _mixed_precision_keep_low_precision_grads(self) -> bool:
         return (
             self.mixed_precision is not None
-            and self.mixed_precision.keep_casted_gradients
+            and self.mixed_precision.keep_low_precision_grads
         )
 
     def _low_precision_hook_enabled(self) -> bool:
@@ -1992,6 +2016,7 @@ class FullyShardedDataParallel(nn.Module):
         valid_training_states = (
             HandleTrainingState.BACKWARD_PRE,
             HandleTrainingState.BACKWARD_POST,
+            HandleTrainingState.FORWARD,
         )
         p_assert(
             training_state in valid_training_states,
@@ -1999,31 +2024,27 @@ class FullyShardedDataParallel(nn.Module):
             f"currently in {training_state}"
         )
         eod = self._exec_order_data
+        target_handles_key: Optional[_HandlesKey] = None
         if (
             training_state == HandleTrainingState.BACKWARD_PRE
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
         ):
             target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
-            if target_handles_key is not None:
-                target_training_state = self._get_training_state(target_handles_key)
-                if (
-                    target_training_state != HandleTrainingState.BACKWARD_POST
-                    and self._needs_pre_backward_unshard.get(target_handles_key, False)
-                ):
-                    return target_handles_key
+            if not self._needs_pre_backward_unshard.get(target_handles_key, False):
+                target_handles_key = None
         elif (
             training_state == HandleTrainingState.BACKWARD_POST
             and self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
         ):
             target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
-            if target_handles_key is not None:
-                target_training_state = self._get_training_state(target_handles_key)
-                if (
-                    target_training_state != HandleTrainingState.BACKWARD_POST
-                    and self._needs_pre_backward_unshard.get(target_handles_key, False)
-                ):
-                    return target_handles_key
-        return None
+            if not self._needs_pre_backward_unshard.get(target_handles_key, False):
+                target_handles_key = None
+        elif (
+            training_state == HandleTrainingState.FORWARD
+            and self.forward_prefetch
+        ):
+            target_handles_key = eod.get_handles_to_forward_prefetch(current_handles_key)
+        return target_handles_key
 
     def _get_training_state(
         self,
@@ -2708,8 +2729,12 @@ class FullyShardedDataParallel(nn.Module):
         handles: List[FlatParamHandle],
     ) -> None:
         """Unshards parameters in the pre-forward."""
-        self._unshard(handles)
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+        if handles:
+            self._unshard(handles)
+            handles_key = tuple(handles)
+            self._needs_pre_forward_unshard[handles_key] = False
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+            self._prefetch_handles(handles_key)
 
     def _post_forward(
         self,
@@ -2779,6 +2804,7 @@ class FullyShardedDataParallel(nn.Module):
         if not self._is_root:
             return args, kwargs
         self._wait_for_previous_optim_step()
+        self._needs_pre_forward_unshard.clear()
         args, kwargs = self._cast_forward_inputs(*args, **kwargs)
         return args, kwargs
 
@@ -3041,7 +3067,7 @@ class FullyShardedDataParallel(nn.Module):
             _handles_key = tuple(_handles)  # avoid shadowing `handles_key`
             # Only run the pre-backward hook once per group of handles involved
             # in the same module forward computation
-            if _handles_key and self._ran_pre_backward_hook[_handles_key]:
+            if _handles_key and self._ran_pre_backward_hook.get(_handles_key, False):
                 return
 
             with torch.autograd.profiler.record_function(
@@ -3400,9 +3426,8 @@ class FullyShardedDataParallel(nn.Module):
                 p = handle.flat_param
                 if p.requires_grad:
                     if hasattr(p, "_post_backward_hook_state"):
-                        assert len(p._post_backward_hook_state) == 2 and len(  # type: ignore[attr-defined]
-                            p._post_backward_hook_state  # type: ignore[attr-defined]
-                        ), (  # type: ignore[attr-defined]
+                        p_assert(
+                            len(p._post_backward_hook_state) == 2,  # type: ignore[attr-defined]
                             "p._post_backward_hook_state fields are not valid."
                         )
                         p._post_backward_hook_state[1].remove()  # type: ignore[attr-defined]

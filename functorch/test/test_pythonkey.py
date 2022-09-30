@@ -359,15 +359,21 @@ class TestAOTAutograd(AOTTestCase):
         def fn(x):
             return torch.nn.functional.interpolate(x, scale_factor=2., mode='bilinear') + 1
 
-        config.use_pre_autograd_decomposition = True
-
         def assert_compiler(gm, args):
+            gm.print_readable()
+
             for node in gm.graph.nodes:
                 assert node.target is not torch.ops.aten.upsample_bilinear2d.vec
                 assert node.target is not torch.ops.aten.upsample_bilinear2d_backward.vec
             return gm
 
-        compiled_f = aot_function(fn, assert_compiler)
+        target_op = torch.ops.aten.upsample_bilinear2d.vec
+        decomposition_table = torch._decomp.get_decompositions({target_op})
+        # Insert pre-autograd decomposition for upsample_bilinear2d
+        key = (target_op, torch._C.DispatchKey.Autograd)
+        decomposition_table[key] = decomposition_table[target_op]
+
+        compiled_f = aot_function(fn, assert_compiler, decompositions=decomposition_table)
         inp = [torch.randn(4, 3, 10, 10, requires_grad=True)]
 
         ref_out, ref_grad = _outs_and_grads(fn, inp)
@@ -375,19 +381,33 @@ class TestAOTAutograd(AOTTestCase):
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
 
-        config.use_pre_autograd_decomposition = False
+        # Rerun without pre-autograd decomposition
+        del decomposition_table[key]
 
-        def assert_compiler(gm, args):
-            found = False
+        def assert_forward_compiler(gm, args):
+            gm.print_readable()
+            found_forward = False
             for node in gm.graph.nodes:
-                if node.target in {torch.ops.aten.upsample_bilinear2d.vec,
-                                   torch.ops.aten.upsample_bilinear2d_backward.vec}:
-                    found = True
+                if node.target == torch.ops.aten.upsample_bilinear2d.vec:
+                    found_forward = True
                     break
-            assert found
+            assert not found_forward
             return gm
 
-        compiled_f = aot_function(fn, assert_compiler)
+        def assert_backward_compiler(gm, args):
+            gm.print_readable()
+            found_backward = False
+            for node in gm.graph.nodes:
+                if node.target == torch.ops.aten.upsample_bilinear2d_backward.vec:
+                    found_backward = True
+                    break
+            assert found_backward
+            return gm
+
+        compiled_f = aot_function(fn,
+                                  fw_compiler=assert_forward_compiler,
+                                  bw_compiler=assert_backward_compiler,
+                                  decompositions=decomposition_table)
         test_out, test_grad = _outs_and_grads(compiled_f, inp)
 
 
@@ -406,6 +426,32 @@ class TestAOTAutograd(AOTTestCase):
         f(torch.randn(5))
         out.sum().backward()
         self.assertEqual(count, [(['forward'], 4), (['inference'], 4), (['backward'], 8)])
+
+    def test_dupe_arg(self):
+        def f(x, y):
+            return x + y
+
+        x = torch.randn(3, 3, requires_grad=True)
+        self.verify_aot_autograd(f, [x, x])
+
+    def test_resize_input(self):
+        def f(x, y):
+            y.resize_(4)
+            y.zero_()
+            self.assertEqual(x.shape, (4,))
+            return y
+
+        # NB: don't use verify_aot_autograd as the inputs get
+        # mutated and I don't trust verify to do it right
+
+        compiled_f = aot_function(f, nop)
+        ref_x = torch.randn(0)
+        ref_out = f(ref_x, ref_x)
+
+        test_x = torch.randn(0)
+        test_out = compiled_f(test_x, test_x)
+
+        self.assertEqual(ref_out, test_out)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_batch_norm_amp(self):

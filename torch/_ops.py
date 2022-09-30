@@ -4,7 +4,9 @@ import inspect
 import sys
 import types
 from abc import ABC
-from typing import Any, Dict
+from typing import Any, Dict, Tuple, Callable
+from contextlib import contextmanager
+
 
 import torch._C
 
@@ -12,8 +14,20 @@ import torch.jit
 from torch import _utils_internal
 
 # Query `hasattr` only once.
+
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
+CURRENT_PYTHON_DISPATCH_TABLE: Dict[Tuple["OpOverload", torch._C.DispatchKey], Callable] = {}
+
+@contextmanager
+def python_dispatch(python_dispatch_table):
+    global CURRENT_PYTHON_DISPATCH_TABLE
+    old_python_dispatch_table = CURRENT_PYTHON_DISPATCH_TABLE
+    CURRENT_PYTHON_DISPATCH_TABLE = python_dispatch_table
+    try:
+        yield CURRENT_PYTHON_DISPATCH_TABLE
+    finally:
+        CURRENT_PYTHON_DISPATCH_TABLE = old_python_dispatch_table
 
 @contextlib.contextmanager
 def dl_open_guard():
@@ -144,9 +158,11 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
+        from torch.utils._python_dispatch import _get_current_dispatch_mode
+
         if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-            curr_mode = type(torch._C._get_torch_dispatch_mode())
+            curr_mode = type(_get_current_dispatch_mode())
             assert (
                 curr_mode is not None
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
@@ -260,6 +276,10 @@ class OpOverload(PyOperatorABC):
     def __str__(self):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
+    @property
+    def namespace(self):
+        return self._schema.name.split("::")[0]
+
     def decompose(self, *args, **kwargs):
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
@@ -310,9 +330,11 @@ class OpOverload(PyOperatorABC):
                 return key
 
             def handler(*args, **kwargs):
+                from torch.utils._python_dispatch import _get_current_dispatch_mode
+
                 # TODO: We also need to handle tensor subclasses here
                 # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-                curr_mode = type(torch._C._get_torch_dispatch_mode())
+                curr_mode = type(_get_current_dispatch_mode())
                 assert (
                     curr_mode is not None
                 ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
@@ -327,6 +349,11 @@ class OpOverload(PyOperatorABC):
             return handler
 
         key = resolve_key(self, key)
+
+        if key is torch._C.DispatchKey.Autograd:
+            # We skip caching the result in attr, as we want to support dynamic registration
+            return CURRENT_PYTHON_DISPATCH_TABLE.get((self, key), key)
+
         r = self.py_kernels.get(key, key)
         setattr(self, attr, r)
         return r

@@ -1259,6 +1259,73 @@ def find_node_with_name(nodes, name):
             return result
 
 class TestTorchTidyProfiler(TestCase):
+
+    def test_pointers_and_ids(self):
+        a = torch.randn(4, 3)
+        a_initial_storage_data = a.storage().data_ptr()
+
+        # Views of tensors can share the same storage, but have different TensorImpls
+        b = a.view((1, 12))
+        c = torch.randn(4, 1)
+        c_initial_storage_data = c.storage().data_ptr()
+        d = torch.randn(4, 3)
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = a + c
+            _ = b * c
+
+            # Resize should create a new data_ptr but keep the TensorImpl the same.
+            f = a.resize_(128, 129)
+            _ = torch.relu(f)
+
+            # `.set_` points a Tensor at an existing storage.
+            _ = d.sin()
+            c.set_(d.storage())
+            _ = c.cos()
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+
+        def get_fields(op_name, index):
+            node = find_node_with_name(nodes, op_name)
+            self.assertIsNotNone(node)
+            self.assertIsInstance(
+                node.extra_fields,
+                torch._C._profiler._ExtraFields_TorchOp)
+            tensor_info = node.extra_fields.inputs.tensor_metadata[index]
+            self.assertIsNotNone(tensor_info.impl_ptr)
+            self.assertIsNotNone(tensor_info.storage_data_ptr)
+            self.assertIsNotNone(tensor_info.id)
+            return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
+
+        a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
+        b_impl, b_storage_data, b_id = get_fields("aten::mul", 0)
+
+        # Profiler matches ground truth from Python API.
+        self.assertEqual(a_storage_data, a_initial_storage_data)
+
+        # Views are handled correctly.
+        self.assertEqual(a_storage_data, b_storage_data)
+        self.assertNotEqual(a_impl, b_impl)
+
+        # The same Tensor used in multiple calls gives identical results.
+        c_impl, c_storage_data, c_id = get_fields("aten::add", 1)
+        self.assertEqual((c_impl, c_storage_data, c_id), get_fields("aten::mul", 1))
+        self.assertEqual(c_storage_data, c_initial_storage_data)
+
+        # Mutations to the underlying storage are reflected. (But ID is shared.)
+        f_impl, f_storage_data, f_id = get_fields("aten::relu", 0)
+        self.assertEqual(a_impl, f_impl)
+        self.assertNotEqual(a_storage_data, f_storage_data)
+        self.assertEqual(a_id, f_id)
+
+        # Calling `set_` with an existing Tensor makes them share an ID.
+        d_impl, d_storage_data, d_id = get_fields("aten::sin", 0)
+        c_impl_new, c_storage_data_new, c_id_new = get_fields("aten::cos", 0)
+        self.assertNotEqual(d_impl, c_impl_new)
+        self.assertEqual(d_storage_data, c_storage_data_new)
+        self.assertEqual(c_id, c_id_new)
+        self.assertEqual(d_id, c_id_new)
+
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))

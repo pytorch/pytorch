@@ -181,11 +181,21 @@
   dispatch:
     CUDA: _use_cudnn_ctc_loss
 
+- func: _use_cudnn_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also _cudnn_ctc_loss
+  dispatch:
+    CUDA: _use_cudnn_ctc_loss_tensor
+
 - func: _cudnn_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
   device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
   dispatch:
     CUDA: _cudnn_ctc_loss
   autogen: _cudnn_ctc_loss.out
+
+- func: _cudnn_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
+  dispatch:
+    CUDA: _cudnn_ctc_loss_tensor
 
 - func: _use_cudnn_rnn_flatten_weight() -> bool
 
@@ -784,16 +794,17 @@
 
 - func: arctanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
+- func: as_strided(Tensor(a) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    ZeroTensor, CPU, CUDA, Meta: as_strided_tensorimpl
+    ZeroTensor, CPU, CUDA: as_strided_tensorimpl
+    Meta: as_strided_tensorimpl_meta_symint
     MPS: as_strided_tensorimpl_mps
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
 
-- func: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+- func: as_strided_(Tensor(a!) self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: function, method
   device_check: NoCheck
@@ -1769,11 +1780,19 @@
     CUDA: ctc_loss_gpu
   autogen: _ctc_loss.out
 
+- func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
+  dispatch:
+    CPU, CUDA: ctc_loss_tensor
+
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
   autogen: _ctc_loss_backward.out
+
+- func: _ctc_loss_backward.Tensor(Tensor grad, Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
+  dispatch:
+    CPU, CUDA: ctc_loss_backward_tensor
 
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   variants: function, method
@@ -1976,7 +1995,7 @@
   dispatch:
     CompositeExplicitAutograd: vdot_out
 
-- func: einsum(str equation, Tensor[] tensors) -> Tensor
+- func: einsum(str equation, Tensor[] tensors, *, int[]? path=None) -> Tensor
 
 - func: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   dispatch:
@@ -2727,6 +2746,7 @@
   dispatch:
     CPU, CUDA: _index_put_impl_
     QuantizedCPU: _index_put_impl_quantized_cpu_
+    QuantizedCUDA: _index_put_impl_quantized_cuda_
   autogen: _index_put_impl, _index_put_impl.out
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -3217,10 +3237,6 @@
   dispatch:
     CompositeImplicitAutograd: matmul_out
     NestedTensorCPU, NestedTensorCUDA: matmul_out_nested
-
-- func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
-
-- func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
 
 # Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
@@ -4707,12 +4723,12 @@
     CompositeExplicitAutograd: diagonal_scatter
   autogen: diagonal_scatter.out
 
-- func: as_strided_scatter(Tensor self, Tensor src, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+- func: as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: as_strided_scatter
+    CompositeExplicitAutograd: as_strided_scatter_symint
   autogen: as_strided_scatter.out
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
@@ -5857,7 +5873,7 @@
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
-    SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
+    SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_compressed_
   autogen: resize_as_sparse, resize_as_sparse.out
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
@@ -6804,21 +6820,24 @@
     CPU, CUDA, Meta, MPS: set_
   autogen: set.source_Storage, set.source_Storage_out
 
-- func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+- func: set_.source_Storage_storage_offset(Tensor(a!) self, Storage source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, Meta: set_storage_cpu_
+    CPU: set_storage_cpu_
+    Meta: set_storage_meta__symint
     CUDA: set_storage_cuda_
     MPS: set_storage_mps_
     QuantizedCPU, QuantizedCUDA: set_storage_quantized_
   autogen: set.source_Storage_storage_offset, set.source_Storage_storage_offset_out
 
-- func: set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
+- func: set_.source_Tensor_storage_offset(Tensor(a!) self, Tensor source, SymInt storage_offset, SymInt[] size, SymInt[] stride=[]) -> Tensor(a!)
   variants: method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: set__symint
 
 - func: set_.source_Tensor(Tensor(a!) self, Tensor source) -> Tensor(a!)
   variants: method
@@ -6877,6 +6896,7 @@
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
     QuantizedCPU: masked_fill__quantized_cpu
+    QuantizedCUDA: masked_fill__quantized_cuda
     MPS: masked_fill__mps
   autogen: masked_fill.Scalar_out
 
@@ -6893,6 +6913,7 @@
     CPU: masked_fill__cpu
     CUDA: masked_fill__cuda
     QuantizedCPU: masked_fill__quantized_cpu
+    QuantizedCUDA: masked_fill__quantized_cuda
     MPS: masked_fill__mps
   autogen: masked_fill.Tensor_out
 
@@ -8098,17 +8119,6 @@
 
 - func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, float label_smoothing=0.0) -> Tensor
   python_module: nn
-
-- func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
-  dispatch:
-    CPU: legacy_lstsq_out
-    CUDA: legacy_lstsq_out_cuda
-
-- func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  variants: method, function
-  dispatch:
-    CPU: legacy_lstsq
-    CUDA: legacy_lstsq_cuda
 
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
@@ -12610,10 +12620,6 @@
 - func: nested_to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   python_module: nested
   variants: function
-  dispatch:
-    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
-    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
-  autogen: nested_to_padded_tensor.out
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
@@ -12752,7 +12758,7 @@
     CompositeExplicitAutogradNonFunctional: _neg_view_copy
   tags: view_copy
 
-- func: as_strided_copy(Tensor self, int[] size, int[] stride, int? storage_offset=None) -> Tensor
+- func: as_strided_copy(Tensor self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: as_strided_copy
@@ -12964,10 +12970,10 @@
     CompositeExplicitAutograd: _neg_view_copy_out
 
 
-- func: as_strided_copy.out(Tensor self, int[] size, int[] stride, int? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: as_strided_copy.out(Tensor self, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    CompositeExplicitAutograd: as_strided_copy_out
+    CompositeExplicitAutograd: as_strided_copy_out_symint
 
 
 - func: _sparse_broadcast_to_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
@@ -13125,6 +13131,13 @@
   dispatch:
     CompositeExplicitAutograd: alias_copy_out
 
+- func: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+  variants: method
+  dispatch:
+    NestedTensorCPU: NestedTensor_to_padded_tensor_generic
+    NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
+  autogen: to_padded_tensor.out
+
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
     NestedTensorCPU: NestedTensor_softmax_dropout
@@ -13150,7 +13163,9 @@
   autogen: _native_multi_head_attention.out
 
 - func: _scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool need_attn_weights=True, bool is_causal=False) -> (Tensor, Tensor)
+  python_module: nn
   variants: function
+  autogen: _scaled_dot_product_attention.out
 
 - func: _triton_scaled_dot_attention(Tensor q, Tensor k, Tensor v, float dropout_p=0.0) -> Tensor
   variants: function

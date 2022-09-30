@@ -1,5 +1,4 @@
 """ONNX exporter."""
-import warnings
 
 from torch import _C
 from torch._C import _onnx as _C_onnx
@@ -26,6 +25,7 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset14,
     symbolic_opset15,
     symbolic_opset16,
+    symbolic_opset17,
     utils,
 )
 from ._exporter_states import ExportTypes, SymbolicContext
@@ -60,6 +60,7 @@ __all__ = [
     "symbolic_opset14",
     "symbolic_opset15",
     "symbolic_opset16",
+    "symbolic_opset17",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",
@@ -133,6 +134,3 @@ def log(*args) -> None:
             character appended to the end, and flushed to output stream.
     """
     _C._jit_onnx_log(*args)
-
-
-_registration.discover_and_register_all_symbolic_opsets()

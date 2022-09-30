@@ -103,7 +103,7 @@ Linear Algebra (torch.linalg)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
--  Mario Lezcano (`Lezcano <https://github.com/Lezcano>`__)
+-  Mario Lezcano (`lezcano <https://github.com/lezcano>`__)
 -  Ivan Yashchuk (`IvanYashchuk <https://github.com/IvanYashchuk>`__)
 -  (emeritus) Vishwak Srinivasan (`vishwakftw <https://github.com/vishwakftw>`__)
 
@@ -228,10 +228,11 @@ Mobile / Edge
 
 Model Compression & Optimization
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
--  Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
+-  Vasiliy Kuznetsov (`vkuzo <https://github.com/vkuzo>`__)
 -  Jerry Zhang (`jerryzh168 <https://github.com/jerryzh168>`__)
 -  Zafar Takhirov (`z-a-f <https://github.com/z-a-f>`__)
 -  Supriya Rao (`supriyar <https://github.com/supriyar>`__)
+-  (emeritus) Raghuraman Krishnamoorthi (`raghuramank100 <https://github.com/raghuramank100>`__)
 
 
 Windows
