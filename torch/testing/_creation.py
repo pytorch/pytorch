@@ -65,7 +65,7 @@ def make_tensor(
             :attr:`dtype`'s :func:`~torch.finfo` object), and for complex types it is replaced with a complex number
             whose real and imaginary parts are both the smallest positive normal number representable by the complex
             type. Default ``False``.
-        stride_permutation (Optional[bool]): Sets a stride permutation on the returned tensor. For example, a
+        stride_permutation (Optional[List[int]]): Sets a stride permutation on the returned tensor. For example, a
             channels-last permutation would be passed in as [0, 2, 3, 1]
 
     Raises:
