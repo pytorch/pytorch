@@ -3,7 +3,6 @@
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
@@ -806,8 +805,7 @@ void validate_outputs(
 static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
-    InputBuffer& inputBuffer,
-    bool only_call_hooks) {
+    InputBuffer& inputBuffer) {
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
@@ -869,7 +867,6 @@ void Engine::evaluate_function(
 
   // If exec_info_ is not empty, we have to instrument the execution
   auto& exec_info_ = graph_task->exec_info_;
-  bool only_call_hooks = false;
   if (!exec_info_.empty()) {
     auto& fn_info = exec_info_.at(func);
     variable_list new_inputs = inputs.buffer;
@@ -894,15 +891,12 @@ void Engine::evaluate_function(
       }
     }
     if (!fn_info.needed_) {
+      // Skip execution if we don't need to execute the function
       return;
     }
   }
 
-  auto outputs = call_function(graph_task, func, inputs, only_call_hooks);
-
-  if (only_call_hooks) {
-    return;
-  }
+  auto outputs = call_function(graph_task, func, inputs);
 
   auto& fn = *func;
   if (!graph_task->keep_graph_) {
