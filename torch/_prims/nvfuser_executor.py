@@ -6,7 +6,12 @@ from warnings import warn
 
 import torch
 import torch.overrides
-from torch._prims_common import getnvFuserDtype, Number, number_type
+from torch._prims_common import (
+    _torch_dtype_to_nvfuser_dtype_map,
+    getnvFuserDtype,
+    Number,
+    number_type,
+)
 
 from torch.fx import GraphModule
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
