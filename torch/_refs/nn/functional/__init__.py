@@ -5,6 +5,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
 from torch._decomp import register_decomposition
+from torch._decomp.decompositions import Reduction
 from torch._prims_common import (
     check,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -32,6 +33,7 @@ __all__ = [
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
+    "huber_loss",
     "l1_loss",
     "margin_ranking_loss",
     "mish",
@@ -303,6 +305,17 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
 
 
 # Losses
+def _reduction_int_to_str(reduction: int) -> str:
+    if reduction == Reduction.NONE.value:
+        return "none"
+    elif reduction == Reduction.MEAN.value:
+        return "mean"
+    elif reduction == Reduction.SUM.value:
+        return "sum"
+    else:
+        raise ValueError(f"{reduction} is not a valid value for reduction")
+
+
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
     if reduction == "sum":
         return refs.sum(loss)
@@ -314,7 +327,7 @@ def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeTyp
 
 def _check_reduction_value(reduction: str):
     if reduction not in ("mean", "sum", "none"):
-        raise ValueError("{} is not a valid value for reduction".format(reduction))
+        raise ValueError(f"{reduction} is not a valid value for reduction")
 
 
 # This helper function maps depreciated arguments, "size_average" and "reduce"
@@ -507,6 +520,9 @@ def nll_loss(
     reduce: Optional[bool] = None,
     reduction: str = "mean",
 ) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.nll_loss
+    """
     utils.check(
         input.ndim > 0,
         lambda: f"Expected input tensor to have 1 or more dimensions (got {input.ndim})",
@@ -561,6 +577,36 @@ def nll_loss(
         result = _nll_loss_nd(input, target, weight, reduction, ignore_index)
         # reshape flattened inner-dim to original k-dimensions
         return torch.reshape(result, out_size)
+
+# TODO: This ref supports int reduction and out kwarg to be compatible with ATen:
+# https://github.com/pytorch/pytorch/issues/83931
+# TODO: Could be rewritten to support complex:
+# https://github.com/pytorch/pytorch/pull/85041
+@register_decomposition(torch.ops.aten.huber_loss)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("input", "target"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def huber_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    reduction: Union[str, int] = "mean",
+    delta: float = 1.0,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.huber_loss
+    """
+    if type(reduction) is int:
+        reduction = _reduction_int_to_str(reduction)
+    _check_reduction_value(reduction)  # type: ignore[arg-type]
+    check(
+        delta > 0,
+        lambda: "huber_loss does not support non-positive values for delta.",
+    )
+    z = (input - target).abs()
+    loss = torch.where(z < delta, 0.5 * z * z, delta * (z - 0.5 * delta))
+    return _apply_loss_reduction(loss, reduction)  # type: ignore[arg-type]
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out
