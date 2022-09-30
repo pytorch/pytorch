@@ -6,7 +6,7 @@ from torch.fx.graph import (
 from .utils import (
     all_node_args_have_no_tensors,
 )
-from torch.ao.quantization.quantization_types import (
+from torch.ao.quantization.utils import (
     Pattern,
     NodePattern,
 )
