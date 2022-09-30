@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .backend_config import BackendConfig, DTypeConfig
-from ..quantization_types import Pattern
+from ..utils import Pattern
 
 __all__ = [
     "get_pattern_to_dtype_configs",
