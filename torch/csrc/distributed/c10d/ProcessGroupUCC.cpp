@@ -1,8 +1,8 @@
 #ifdef USE_C10D_UCC
 
-#include <c10d/ProcessGroupUCC.hpp>
-#include <c10d/UCCTracing.hpp>
-#include <c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 #include <list>
 #include <memory>
 #include <unordered_map>
