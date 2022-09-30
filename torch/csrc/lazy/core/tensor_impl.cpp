@@ -186,7 +186,8 @@ int64_t LTCTensorImpl::storage_offset_custom() const {
   return 0;
 }
 
-bool LTCTensorImpl::is_strides_like_custom(c10::MemoryFormat memory_format) const {
+bool LTCTensorImpl::is_strides_like_custom(
+    c10::MemoryFormat memory_format) const {
   TORCH_INTERNAL_ASSERT(memory_format != at::MemoryFormat::Contiguous);
   return false;
 }
