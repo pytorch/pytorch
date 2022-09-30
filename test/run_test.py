@@ -289,6 +289,7 @@ CI_SERIAL_LIST = [
     'test_autograd',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_prims',  # slow gradcheck runs a test that checks the cuda memory allocator
     'test_modules',  # failed test due to mismatched elements
+    'functorch/test_vmap',  # OOM
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
