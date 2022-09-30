@@ -331,6 +331,7 @@ def register_rand_like():
     ):
         strides = make_contiguous_strides_for(self.shape)
         return torch._prims.TensorMeta(
+            self,
             shape=self.shape,
             strides=strides,
             dtype=dtype,

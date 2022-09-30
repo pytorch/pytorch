@@ -10,7 +10,7 @@ from torch.ao.quantization.backend_config import (
     BackendConfig,
     DTypeWithConstraints,
 )
-from torch.ao.quantization.fake_quantize import FakeQuantize
+from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.stubs import DeQuantStub
 from torch.ao.quantization.utils import (
@@ -955,7 +955,7 @@ def _reroute_tuple_getitem_pattern(graph: Graph):
             user.replace_input_with(last_getitem, new_input)
 
 def _get_observer_from_activation_post_process(
-    activation_post_process: Union[ObserverBase, FakeQuantize],
+    activation_post_process: Union[ObserverBase, FakeQuantizeBase],
 ) -> ObserverBase:
     """
     If `activation_post_process` is an observer, return the observer.
@@ -964,6 +964,7 @@ def _get_observer_from_activation_post_process(
     if isinstance(activation_post_process, ObserverBase):
         return activation_post_process
     else:
+        assert isinstance(activation_post_process, FakeQuantizeBase)
         return activation_post_process.activation_post_process  # type: ignore[return-value]
 
 def _qconfig_satisfies_dtype_config_constraints(
@@ -981,7 +982,7 @@ def _qconfig_satisfies_dtype_config_constraints(
     If `qconfig` or `dtype_with_constraints.dtype` is None, or the dtypes do not match, return True.
     """
     def _activation_post_process_satisfies_dtype_config_constraints(
-            activation_post_process: Union[ObserverBase, FakeQuantize],
+            activation_post_process: Union[ObserverBase, FakeQuantizeBase],
             dtype_with_constraints: DTypeWithConstraints,
             debug_string: str) -> bool:
         observer = _get_observer_from_activation_post_process(activation_post_process)
