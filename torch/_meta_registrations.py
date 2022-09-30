@@ -379,24 +379,6 @@ def meta_conv(
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
-# @register_meta(aten.avg_pool2d.default)
-# def meta_avg_pool2d(self, output_size):
-#     # Reference: aten/src/ATen/native/cpu/AvgPoolKernel.cpp
-#     memory_format = utils.suggest_memory_format(self)
-#     if memory_format == torch.contiguous_format:
-#         pass
-#     elif memory_format == torch.channels_last:
-#         check(
-#             self.ndim == 4,
-#             lambda: "max pooling backward with channels last format supports tensors with 4 dims.",
-#         )
-#     else:
-#         check(
-#             False,
-#             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
-#         )
-#     return self.new_empty(self.shape)
-
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
@@ -413,6 +395,25 @@ def meta_adaptive_avg_pool3d(self, output_size):
         lambda: f"Expected 4D or 5D tensor, but got {self.shape}",
     )
     return self.new_empty(self.shape[:-3] + tuple(output_size))
+
+@register_meta(aten._adaptive_avg_pool2d_backward.default)
+def meta__adaptive_avg_pool2d_backward(grad_out, self):
+    ndim = grad_out.ndim
+    for i in range(1, ndim):
+        check(
+            grad_out.size(i) > 0,
+            lambda: f"adaptive_avg_pool2d_backward(): Expected grad_output to have non-zero \
+                      size for non-batch dimensions, {grad_out.shape} with dimension {i} being empty",
+        )
+    check(
+        ndim == 3 or ndim == 4,
+        lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
+    )
+    check (
+        self.dtype == grad_out.dtype,
+        lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}"
+    )
+    return self.new_empty(self.shape)
 
 
 @register_meta(aten.repeat_interleave.Tensor)
