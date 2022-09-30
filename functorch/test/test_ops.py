@@ -863,7 +863,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.embedding', ''),
-        skip('nn.functional.gaussian_nll_loss'),  # takes too long
+        skip('nn.functional.gaussian_nll_loss'),  # passes, but takes too long
         xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "amin"),  # aten::scatter_reduce.two hit the vmap fallback

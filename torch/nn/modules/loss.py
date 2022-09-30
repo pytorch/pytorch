@@ -320,8 +320,7 @@ class GaussianNLLLoss(_Loss):
     Args:
         full (bool, optional): include the constant term in the loss
             calculation. Default: ``False``.
-        eps (float, optional): value used to clamp ``var`` (see note below), for
-            stability. Default: 1e-6.
+        eps (float, optional): value used to clamp ``var``, for stability. Default: 1e-6.
         reduction (str, optional): specifies the reduction to apply to the
             output:``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
             will be applied, ``'mean'``: the output is the average of all batch
@@ -355,10 +354,6 @@ class GaussianNLLLoss(_Loss):
         >>> var = torch.ones(5, 1, requires_grad=True) #homoscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
-
-    Note:
-        The clamping of ``var`` is ignored with respect to autograd, and so the
-        gradients are unaffected by it.
 
     Reference:
         Nix, D. A. and Weigend, A. S., "Estimating the mean and variance of the
