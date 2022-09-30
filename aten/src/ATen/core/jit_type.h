@@ -1980,7 +1980,10 @@ struct getMaybeFakeTypePtr_<at::optional<T>, fake> final {
 template<>
 struct getTypePtr_<at::OptionalIntArrayRef> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getMaybeFakeTypePtr_<IntArrayRef, false>::call());
+    static auto inner_type = getMaybeFakeTypePtr_<IntArrayRef, false>::call();
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = OptionalType::get(inner_type);
     return type;
   }
 };
@@ -1988,7 +1991,10 @@ struct getTypePtr_<at::OptionalIntArrayRef> final {
 template<>
 struct getTypePtr_<at::OptionalSymIntArrayRef> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getMaybeFakeTypePtr_<SymIntArrayRef, false>::call());
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto inner_type = getMaybeFakeTypePtr_<SymIntArrayRef, false>::call();
+    static auto type = OptionalType::get(inner_type);
     return type;
   }
 };

@@ -352,12 +352,14 @@ Check this module for more information.
             return f"{argname}.has_value() ? c10::make_optional({argname}->expect_int()) : c10::nullopt"
         elif goal.type == BaseCType(optionalIntArrayRefT):
             try:
-                argname = direct_solve(NamedCType(goal.name,  BaseCType(optionalSymIntArrayRefT)))
+                argname = direct_solve(NamedCType(goal.name, BaseCType(optionalSymIntArrayRefT)))
                 return f"{argname}.has_value() ? c10::make_optional(c10::asIntArrayRefSlow(*{argname})) : c10::nullopt"
             except UnsatError:
-                return solve(NamedCType(goal.name, optionalLongVec_ctype), direct=False)
+                return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
         elif goal.type == BaseCType(optionalSymIntArrayRefT):
-            argname = solve(NamedCType(goal.name, BaseCType(optionalIntArrayRefT)), direct=False)
+            # TODO: You might also want to solve this from longSymVec_ctype or
+            # an optional version of it
+            argname = direct_solve(NamedCType(goal.name, BaseCType(optionalIntArrayRefT)))
             return f"{argname}.has_value() ? c10::make_optional(c10::fromIntArrayRef(*{argname})) : c10::nullopt"
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))

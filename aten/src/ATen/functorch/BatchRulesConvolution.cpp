@@ -442,8 +442,6 @@ std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   int64_t cur_level = maybe_layer->layerId();
 
-
-
   if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::convolution_backward_symint(

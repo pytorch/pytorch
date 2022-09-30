@@ -171,7 +171,10 @@ def argumenttype_type(
         elif isinstance(t.elem, ListType) and str(t.elem.elem) == "int":
             return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elif isinstance(t.elem, ListType) and str(t.elem.elem) == "SymInt":
-            return NamedCType(binds, BaseCType(optionalSymIntArrayRefT)) if symint else NamedCType(binds, BaseCType(optionalIntArrayRefT))
+            if symint:
+                return NamedCType(binds, BaseCType(optionalSymIntArrayRefT))
+            else:
+                return NamedCType(binds, BaseCType(optionalIntArrayRefT))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds, symint=symint)
         return NamedCType(binds, OptionalCType(elem.type))
     elif isinstance(t, ListType):

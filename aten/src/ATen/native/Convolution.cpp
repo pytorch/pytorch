@@ -18,7 +18,6 @@
 
 #include <limits>
 
-
 #if AT_NNPACK_ENABLED()
 #include <nnpack.h>
 #endif
@@ -1794,18 +1793,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
 //       transposed is true
 //   groups: number of groups for grouped convolution
 //   output_mask: 3-dim boolean array specifying which gradients to compute in input, weight, bias order
-std::tuple<Tensor, Tensor, Tensor> convolution_backward_symint(
+std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
-    const at::OptionalSymIntArrayRef sym_bias_sizes_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
     int64_t groups, std::array<bool, 3> output_mask) {
   auto grad_output = grad_output_;
   auto input = input_;
   auto weight = weight_;
-
-  c10::optional<at::IntArrayRef> int_bias_sizes_opt = sym_bias_sizes_opt ? c10::make_optional(c10::asIntArrayRefSlow(*sym_bias_sizes_opt)) : c10::nullopt;
-  at::OptionalIntArrayRef bias_sizes_opt(int_bias_sizes_opt);
-
 
   auto k = weight.ndimension();
   int64_t dim = k - 2;
