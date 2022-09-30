@@ -4319,7 +4319,6 @@
     MPS: relu_mps
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
-    QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
@@ -8026,7 +8025,6 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
-    MPS: masked_select_out_mps
   tags: dynamic_output_shape
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
@@ -8034,7 +8032,6 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
-    MPS: masked_select_mps
   tags: dynamic_output_shape
 
 - func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
@@ -8729,7 +8726,8 @@
 - func: max.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: max_unary_out
+    CPU, CUDA: max_unary_out
+    QuantizedCPU: max_quantized_unary_out
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
   structured_delegate: minimum.out
@@ -12717,11 +12715,11 @@
   variants: function
   python_module: nn
 
-- func: _nested_tensor_from_tensor_list(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: _nested_tensor_from_tensor_list
-  autogen: _nested_tensor_from_tensor_list.out
+    CompositeExplicitAutograd: nested_tensor
+  autogen: nested_tensor.out
 
 - func: _fw_primal_copy(Tensor self, int level) -> Tensor
   variants: function
@@ -13803,11 +13801,3 @@
   dispatch:
     CPU: foobar
   autogen: _foobar.out
-
-# Fused Optimizer CUDA kernels.
-- func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, Tensor? grad_scale=None, Tensor? found_inf=None) -> ()
-  # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
-  variants: function
-  dispatch:
-    CUDA: _fused_adam_kernel_cuda_
-  autogen: _fused_adam, _fused_adam.out

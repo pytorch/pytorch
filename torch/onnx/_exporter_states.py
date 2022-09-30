@@ -3,8 +3,7 @@ from __future__ import annotations
 import enum
 from typing import Dict
 
-from torch import _C
-from torch.onnx import _deprecation
+from torch import _C as _C
 
 
 class ExportTypes:
@@ -17,7 +16,7 @@ class ExportTypes:
 
 
 class SymbolicContext:
-    """Extra context for symbolic functions.
+    r"""Provides extra context for symbolic functions.
 
     Args:
         params_dict (Dict[str, _C.IValue]): Mapping from graph initializer name to IValue.
@@ -26,19 +25,7 @@ class SymbolicContext:
         onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
     """
 
-    @_deprecation.deprecated(
-        "1.13",
-        "1.14",
-        # TODO(justinchuby): Fix the instruction when GraphContext is public.
-        "remove the 'ctx' argument and annotate 'g: GraphContext' instead",
-    )
-    def __init__(
-        self,
-        params_dict: Dict[str, _C.IValue],
-        env: dict,
-        cur_node: _C.Node,
-        onnx_block: _C.Block,
-    ):
+    def __init__(self, params_dict, env, cur_node, onnx_block):
         self.params_dict: Dict[str, _C.IValue] = params_dict
         self.env: Dict[_C.Value, _C.Value] = env
         # Current node that is being converted.

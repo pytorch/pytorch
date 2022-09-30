@@ -37,7 +37,7 @@ struct ShaderDuration final {
 
 class QueryPool final {
  public:
-  explicit QueryPool(const QueryPoolConfig&, const Adapter* adapter_p);
+  explicit QueryPool(const VkDevice, const QueryPoolConfig&);
 
   QueryPool(const QueryPool&) = delete;
   QueryPool& operator=(const QueryPool&) = delete;
@@ -59,7 +59,7 @@ class QueryPool final {
   size_t in_use_;
 
  private:
-  size_t write_timestamp(const CommandBuffer&);
+  uint32_t write_timestamp(const CommandBuffer&);
 
   std::string generate_string_report();
 
@@ -80,7 +80,6 @@ class QueryPool final {
   void extract_results();
   void print_results();
   uint64_t get_total_op_ns(std::string op_name);
-  uint64_t ns_per_tick_;
   void shader_log_for_each(std::function<void(const ShaderDuration&)> fn);
 };
 

@@ -1366,20 +1366,13 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
-            dist.Backend._plugins["DUMMY"].creator_fn,
+            dist.Backend._plugins["DUMMY"],
             PythonProcessGroupExtensionTest.create_dummy
         )
 
-    class Options:
-        def __init__(self):
-            pass
-
-        def create(self):
-            pass
-
     @staticmethod
-    def create_dummy(store, group_rank, group_size, timeout):
-        return DummyProcessGroup(group_rank, group_size)
+    def create_dummy(store, rank, size, timeout):
+        return DummyProcessGroup(rank, size)
 
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)

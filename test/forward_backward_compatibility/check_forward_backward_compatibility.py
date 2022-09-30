@@ -284,8 +284,6 @@ ALLOW_LIST = [
     ("c10d::allgather_", datetime.date(2022, 10, 1)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
     ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
-    ("aten::nested_tensor", datetime.date(2022, 10, 15)),
-
 ]
 
 ALLOW_LIST_COMPILED = [

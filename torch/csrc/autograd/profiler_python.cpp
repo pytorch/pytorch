@@ -269,31 +269,6 @@ class Callsite {
   Config<CallType::PyCall>::key_t caller_;
 };
 
-void check_and_store(
-    const pybind11::handle& name,
-    const pybind11::handle& param,
-    std::vector<std::pair<std::basic_string<char>, void*>>& storeroom) {
-  auto t = param.ptr();
-  if (py::isinstance<py::str>(name) && THPVariable_CheckExact(t)) {
-    auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
-    if (storage) {
-      storeroom.emplace_back(name.cast<std::string>(), storage->data());
-    }
-  }
-}
-
-void check_and_store(
-    const pybind11::handle& param,
-    std::vector<void*>& storeroom) {
-  auto t = param.ptr();
-  if (THPVariable_CheckExact(t)) {
-    auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
-    if (storage) {
-      storeroom.emplace_back(storage->data());
-    }
-  }
-}
-
 // ============================================================================
 // == Type specific store and load implementations. ===========================
 // ============================================================================
@@ -383,7 +358,13 @@ void ValueCache::store<CallType::PyModuleCall>(
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
     std::vector<std::pair<std::string, void*>> params_;
     for (auto& it : params) {
-      check_and_store(it.first, it.second, params_);
+      auto t = it.second.ptr();
+      if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(t)) {
+        auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
+        if (storage) {
+          params_.emplace_back(it.first.cast<std::string>(), storage->data());
+        }
+      }
     }
     cache.modules_and_params_[key] = make_pair(cls, params_);
   }
@@ -415,22 +396,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     py::list param_groups_handle =
         py::handle((PyObject*)key).attr("param_groups");
     std::vector<void*> params_;
-    // param_groups is a list of dict
-    for (auto& param_group : param_groups_handle) {
-      for (auto& param :
-           py::cast<py::dict>(param_group).attr("get")("params")) {
-        check_and_store(param, params_);
-      }
-    }
     std::vector<std::pair<std::string, void*>> states_;
-    py::dict state_handle = py::handle((PyObject*)key).attr("state");
-    for (auto& it : state_handle) {
-      TORCH_INTERNAL_ASSERT(
-          py::isinstance<py::dict>(it.second), "Expects a dict type element");
-      for (auto& state_elem : py::cast<py::dict>(it.second)) {
-        check_and_store(state_elem.first, state_elem.second, states_);
-      }
-    }
 
     cache.optimizer_data_[key] = {cls, params_, states_};
   }
@@ -717,9 +683,9 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     // to all the prior frames onto our event stack. (We stop at depth=128)
     std::vector<PyFrameObject*> current_stack;
     auto frame = PyEval_GetFrame();
+    Py_INCREF(frame);
     size_t depth = 0; // Make sure we can't infinite loop.
     while (frame != nullptr && depth <= 128) {
-      Py_INCREF(frame);
       current_stack.push_back(frame);
       frame = PyFrame_GetBack(frame);
       depth++;

@@ -434,20 +434,6 @@ class FakeTensorConstHandling(TestCase):
             self.assertEqual(x.size(0), 2)
             self.assertNotConst(x)
 
-    def test_fake_tensor_in_intlist_repro(self):
-
-        def fn(tensors):
-            max_size = torch.tensor([800, 1216], dtype=torch.int64)
-            batch_shape = [len(tensors)] + list(tensors[0].shape[:-2]) + list(max_size)
-            return tensors[0].new_full(batch_shape, 0.0)
-
-        with self.assertRaises(torch._subclasses.fake_tensor.DataDependentOutputException):
-            with torch._subclasses.fake_tensor.FakeTensorMode(throw_on_data_dependent_ops=True):
-                a = torch.randn(3, 800, 1199)
-                b = torch.randn(3, 800, 800)
-                inputs = [a, b]
-                ref = fn(inputs)
-
     def test_shared_storage_invalidation(self):
         with FakeTensorMode():
             x = torch.tensor([1.])

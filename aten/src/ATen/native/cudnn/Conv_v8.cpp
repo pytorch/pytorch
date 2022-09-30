@@ -654,7 +654,7 @@ void raw_cudnn_convolution_add_relu_out(
     bool allow_tf32) {
   if (output.numel() == 0) { return; }
   if (at::native::cudnnv8_enabled_check_debug()) {
-    auto bias_ = input.ndimension() == 4 ? bias.view({1, bias.numel(), 1, 1}) : bias.view({1, bias.numel(), 1, 1, 1});
+    auto bias_ = bias.view({1, bias.numel(), 1, 1});
     run_fused_conv(input, output, weight, z, bias_,
       alpha, stride, padding, dilation,
       groups, benchmark, deterministic, allow_tf32);

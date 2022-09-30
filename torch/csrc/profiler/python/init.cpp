@@ -175,27 +175,8 @@ void initPythonBindings(PyObject* module) {
           "cls_name", [](const NNModuleInfo& s) { return s.cls_name_.str(); });
 
   py::class_<OptimizerInfo>(m, "_OptInfo")
-      .def_property_readonly(
-          "self",
-          [](const OptimizerInfo& a) {
-            return reinterpret_cast<intptr_t>(a.self_.value_of());
-          })
-      .def_property_readonly(
-          "param_addrs",
-          [](const OptimizerInfo& s) {
-            py::list params_addrs;
-            for (auto& addr : s.params_addr_) {
-              params_addrs.append(reinterpret_cast<intptr_t>(addr));
-            }
-            return params_addrs;
-          })
-      .def_property_readonly("opt_state", [](const OptimizerInfo& s) {
-        py::list states;
-        for (auto& a : s.opt_state_) {
-          states.append(
-              std::make_pair(a.first, reinterpret_cast<intptr_t>(a.second)));
-        }
-        return states;
+      .def_property_readonly("self", [](const OptimizerInfo& a) {
+        return reinterpret_cast<intptr_t>(a.self_.value_of());
       });
 
   py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall")
