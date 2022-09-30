@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional
 import torch
 
 from torch._prims_common import (
-    _torch_dtype_to_nvfuser_dtype_map,
     DimsSequenceType,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     getnvFuserDtype,
@@ -99,7 +98,6 @@ nvprim_names = [
 ]
 
 _nvfuser_impls: Dict[str, Any] = {}
-_nvfuser_skip: Dict[str, Any] = {}
 
 _nvfuser_unary_ops = {
     "abs",
@@ -314,11 +312,6 @@ _nvfuser_impls["amax"] = _amax_nvfuser
 _nvfuser_impls["amin"] = _amin_nvfuser
 
 
-def _check_dtype(node):
-    return _torch_dtype_to_nvfuser_dtype_map.get(node.args[1]) is not None
-
-_nvfuser_skip["convert_element_type"] = _check_dtype
-
 def register_rand_like():
     name = "rand_like"
 
@@ -496,4 +489,3 @@ def register_nvprims():
             p.__doc__ = main_prim.__doc__
             p.impl_nvfuser = _nvfuser_impls[name]
             p.return_type = main_prim.return_type  # type: ignore[attr-defined]
-            p.skip_nvfuser = _nvfuser_skip.get(name)
