@@ -717,7 +717,7 @@ def run_tests(argv=UNITTEST_ARGS):
             exitcode = shell(cmd)
             if exitcode != 0:
                 # This is sort of hacky, but add on relevant env variables for distributed tests.
-                if 'TestDistBackendWithSpawn' in test_case_full_name:
+                if 'TestDistBackendWithSpawn' in case.id().split('.', 1)[1]:
                     backend = os.environ.get("BACKEND", "")
                     world_size = os.environ.get("WORLD_SIZE", "")
                     env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
