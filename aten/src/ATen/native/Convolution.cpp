@@ -8,9 +8,6 @@
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/NativeFunctions.h>
 #include <c10/util/accumulate.h>
-#include <ATen/core/ATen_fwd.h>
-#include <c10/core/SymIntArrayRef.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
 #include <ATen/Config.h>
