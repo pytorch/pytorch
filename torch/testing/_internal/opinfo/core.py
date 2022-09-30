@@ -2038,7 +2038,7 @@ def sample_inputs_elementwise_unary(
             low=low,
             high=high,
             requires_grad=requires_grad,
-            stride_ordering=[0, 2, 3, 1]
+            stride_permutation=[0, 2, 3, 1]
         ),
         kwargs=op_kwargs,
     )
@@ -2134,7 +2134,7 @@ def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kw
         a = make_arg(shape)
         yield SampleInput(a, kwargs=op.sample_kwargs(device, dtype, a)[0])
 
-    make_arg_channels_last = partial(make_arg, stride_ordering=[0, 2, 3, 1])
+    make_arg_channels_last = partial(make_arg, stride_permutation=[0, 2, 3, 1])
     yield SampleInput(make_arg((2, 3, 4, 5)), kwargs=op.sample_kwargs(device, dtype, a)[0])
 
 def generate_elementwise_unary_small_value_tensors(
@@ -2517,7 +2517,7 @@ def sample_inputs_foreach(
         return [
             make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for _ in range(N)
-        ] + make_tensor((N, N), dtype=dtype, device=device, stride_ordering = [1, 0])
+        ] + make_tensor((N, N), dtype=dtype, device=device, stride_permutation = [1, 0])
     else:
         return [
             make_tensor(
