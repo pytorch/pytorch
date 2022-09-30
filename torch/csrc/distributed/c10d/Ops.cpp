@@ -40,6 +40,23 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
       std::move(tensor_vec), work);
 }
 
+c10::intrusive_ptr<Work> reduce_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->reduce(
+      tensor_vec,
+      ReduceOptions{
+          *reduce_op.get(),
+          root_rank,
+          root_tensor,
+          std::chrono::milliseconds(timeout)});
+}
+
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
 allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
@@ -122,6 +139,26 @@ c10::intrusive_ptr<Work> barrier(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<Work> send(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t dstRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->send(
+      tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<Work> recv_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recv(
+      tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup, Work, and ReduceOp definitions are more like
   // declarations. They don't expose the details of the two classes into
@@ -146,7 +183,8 @@ TORCH_LIBRARY(c10d, m) {
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
   m.def(
-      "reduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op, int root_rank, int root_tensor, int timeout) -> __torch__.torch.classes.c10d.Work");
+      "reduce_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
   m.def(
       "gather_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));
@@ -159,10 +197,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
-  m.def(
-      "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int dstRank, int tag) -> __torch__.torch.classes.c10d.Work");
-  m.def(
-      "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int srcRank, int tag) -> __torch__.torch.classes.c10d.Work");
+  m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
+  m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
 }
 } // namespace
 
