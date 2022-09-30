@@ -4954,7 +4954,7 @@ class TestLinalg(TestCase):
     @onlyCPU
     @dtypes(*floating_and_complex_types())
     def test_linalg_lu_cpu_errors(self, device, dtype):
-        ### Square tests
+        # Square tests
         sample = torch.randn(3, 2, 2, device=device, dtype=dtype)
         B = torch.randn(3, 2, 2, device=device, dtype=dtype)
         LU, pivots = torch.linalg.lu_factor(sample)
@@ -4975,7 +4975,7 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
 
-        ### Rectangular tests
+        # Rectangular tests
         sample = torch.randn(3, 4, 2, device=device, dtype=dtype)
         B = torch.randn(3, 4, 2, device=device, dtype=dtype)
         LU, pivots = torch.linalg.lu_factor(sample)
@@ -4992,7 +4992,7 @@ class TestLinalg(TestCase):
             torch.lu_unpack(LU, pivots)
 
 
-        ### Rectangular tests
+        # Rectangular tests
         sample = torch.randn(2, 3, 5, device=device, dtype=dtype)
         B = torch.randn(2, 3, 5, device=device, dtype=dtype)
         LU, pivots = torch.linalg.lu_factor(sample)
