@@ -305,7 +305,6 @@ class DiagnosticContext:
     options: Optional[DiagnosticOptions] = None
     _diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
     _invocation: Invocation = dataclasses.field(init=False)
-    _is_active: bool = dataclasses.field(init=False, default=True)
 
     def __enter__(self):
         return self
@@ -339,12 +338,8 @@ class DiagnosticContext:
             The created diagnostic.
 
         Raises:
-            RuntimeError: If the context is not active.
             ValueError: If the rule is not supported by the tool.
         """
-        if not self._is_active:
-            raise RuntimeError("The diagnostics context is not active.")
-
         diagnostic = self.tool.create_diagnostic(rule, level, message_args, **kwargs)
         self._diagnostics.append(diagnostic)
         return diagnostic
