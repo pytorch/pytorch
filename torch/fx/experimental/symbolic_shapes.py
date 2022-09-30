@@ -266,6 +266,9 @@ class ShapeEnv(object):
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set["sympy.Expr"] = set()
+        # Duck-shaping says that if two input tensors have the same size,
+        # they get assigned the same symbolic variable
+        self.val_to_symint: Dict[int, torch.SymIntNode] = {}
 
     def _get_key(self):
         """
@@ -274,17 +277,27 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
+    # NB: This is only called for input symbolic sizes; intermediate symbolic
+    # sizes are allocated via a different mechanism
     def create_symint(self, name, val):
+        assert val >= 0
         if not HAS_SYMPY:
             raise RuntimeError("Need sympy installed to create symbolic shapes")
 
-        # Currently we don't put 0/1 specialization in guards but perhaps we should
+        # TODO: Put 0/1 specialization in guards
         if val == 0 or val == 1:
             return val
+        # This implements duck-shaping: input sizes that match are assigned
+        # the same symint
+        # TODO: Create a guard whenever this happens
+        # TODO: But how do I represent the guard in this case?
+        if val in self.val_to_symint:
+            return self.val_to_symint[val]
         sympy_expr = sympy.Symbol(name, positive=True, integer=True)
         py_sym_int = PySymInt(sympy_expr, self)
         cpp_sym_int = torch.SymIntNode.new_symint(py_sym_int)  # type: ignore[attr-defined]
         self.var_to_val[sympy_expr] = sympy.Integer(val)
+        self.val_to_symint[val] = cpp_sym_int
         return cpp_sym_int
 
     def evaluate_guards_for_args(self, *args):
