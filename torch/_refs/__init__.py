@@ -3569,7 +3569,7 @@ def unfold(
 @register_decomposition(torch.ops.aten.unfold_copy)
 @out_wrapper()
 def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
-    return self.unfold(dimension, size, step).to(
+    return self.unfold(dimension, size, step).to(  # type: ignore[call-overload]
         memory_format=torch.contiguous_format, copy=True
     )
 
