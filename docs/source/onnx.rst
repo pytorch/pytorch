@@ -635,6 +635,8 @@ Functions
 .. autofunction:: export
 .. autofunction:: export_to_pretty_string
 .. autofunction:: register_custom_op_symbolic
+.. autofunction:: unregister_custom_op_symbolic
+.. autofunction:: select_model_mode_for_export
 .. autofunction:: is_in_onnx_export
 
 Classes
