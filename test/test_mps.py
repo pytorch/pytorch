@@ -7018,7 +7018,6 @@ class TestConsistency(TestCase):
     # by doing `EXPECTTEST_ACCEPT=1 python test_mps.py TestConsistencyCPU`
     # You most likely do NOT want to modify this manually
     ALLOWLIST_OP = {
-<<<<<<< HEAD
         '__getitem__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         '__radd__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         '__rand__': ['b8', 'i16', 'i32', 'i64', 'u8'],
