@@ -22,7 +22,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
     get_exhaustive_batched_inputs,
-    get_exhaustive_batched_inputs_batch_norm_is_training,
     decorate,
     xfail,
     skip,
@@ -1082,10 +1081,10 @@ class TestOperators(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            if is_batch_norm and is_batch_norm_training(op.name, kwargs):
-                generator = get_exhaustive_batched_inputs_batch_norm_is_training(args, kwargs)
-            else:
-                generator = get_exhaustive_batched_inputs(args, kwargs)
+
+            is_batch_norm_and_training = is_batch_norm and is_batch_norm_training(op.name, kwargs)
+            generator = get_exhaustive_batched_inputs(args, kwargs,
+                                                      is_batch_norm_and_training=is_batch_norm_and_training)
 
             for batched_args, in_dims, kwargs in generator:
                 vmapped_op = vmap(op, in_dims)
