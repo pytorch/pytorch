@@ -1016,8 +1016,7 @@ def get_selected_tests(options, test_times: Dict[str, float]) -> List[TestJob]:
     assert num_shards <= len(selected_tests), f"Number of shards must be less than {len(selected_tests)}"
 
     shards = calculate_shards(num_shards, selected_tests, test_times)
-    print_to_stderr(f"expected time: {round(time / 60, 2)} m")
-
+    print_to_stderr("expected times: ")
     for i, _ in shards:
         print_to_stderr(str(round(i / 60, 2)))
 
