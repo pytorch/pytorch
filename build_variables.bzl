@@ -1158,7 +1158,6 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/ComplexKernel.cpp",
     "aten/src/ATen/native/cpu/CopyKernel.cpp",
     "aten/src/ATen/native/cpu/CrossKernel.cpp",
-    "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
     "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
     "aten/src/ATen/native/cpu/DistributionKernels.cpp",
     "aten/src/ATen/native/cpu/FillKernel.cpp",
