@@ -392,7 +392,7 @@ def einsum(*args: Any,
         operands = args[1:]
 
     if has_torch_function(operands):
-        return handle_torch_function(einsum, operands, equation, *operands)
+        return handle_torch_function(einsum, operands, equation, *operands, path=path)
 
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
@@ -411,7 +411,7 @@ def einsum(*args: Any,
         if isinstance(path[0], Sequence):
             # For a single operand, optimize should be [(0,)]
             if len(path) == 1 and len(path[0]) == 1:
-                path = [path[0][0]]
+                path = [path[0][0]]  # type: ignore[index]
             else:
                 flattened_path: List[int] = []
                 for contraction in path:
