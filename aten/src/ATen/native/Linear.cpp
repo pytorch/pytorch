@@ -86,8 +86,8 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
   auto sum_dims = at::dim_list_to_bitset(sum_dims_, dim);
-  // dimensions that will be part of the output (i.e. not summed over) in three vectors
-  // dims in lro appear in left, right and output, similarly lo: left and output, ro: right and output
+  // dimensions that will be part of the output (i.e. not summed over) in three vectors:
+  // dims in lro appear in left, right and output, similarly, lo: left and output, ro: right and output
   // also the sizes are kept track of for reshaping
   std::vector<int64_t> lro, lo, ro;
   int64_t lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
@@ -105,7 +105,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
       } else if (sr) {
         right = right.sum(i, true);
       }
-    } else if (sl && sr) { // now deal with dimensions  dimensions that will be in the output
+    } else if (sl && sr) { // now deal with dimensions that will be in the output
       // dimensions nontrivially in both left and right must be of the same size
       TORCH_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
       lro.push_back(i);
@@ -120,16 +120,17 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   }
   // we now work with the following permutations / shapes.
   // the pipeline is permute inputs -> reshape inputs -> batch matrix mul -> reshape(view) output -> permute output
-  // output: "lro, lo, 1-for-summed-dims, ro" with orgiginal shape dimensions
+  // output: "lro, lo, 1-for-summed-dims, ro" with original shape dimensions
   // left:   "lro, lo, summed" permuted with lpermutation and the three flattened
   // right:  "lro, summed, ro" permuted with rpermutation and the three flattened
   // then the permuted output is a view of bmm(left, right)
   // finally, opermutation reverts the permutation to the original order of dimensions
+  auto out_num_dim = lro.size() + lo.size() + sum_dims_.size() + ro.size();
   std::vector<int64_t> out_size;
-  // NOLINTNEXTLINE(performance-inefficient-vector-operation)
+  out_size.reserve(out_num_dim);
   for (auto& d : lro) out_size.push_back(left.size(d));
   for (auto& d : lo) out_size.push_back(left.size(d));
-  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
+  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warning about not using d
   for (auto& d : ro) out_size.push_back(right.size(d));
 
   std::vector<int64_t> lpermutation(lro);
@@ -142,7 +143,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   rpermutation.insert(rpermutation.end(), ro.begin(), ro.end());
   rpermutation.insert(rpermutation.end(), lo.begin(), lo.end());
 
-  std::vector<int64_t> opermutation(lro.size()+lo.size()+sum_dims_.size()+ro.size(), -1);
+  std::vector<int64_t> opermutation(out_num_dim, -1);
   {
     int64_t i = 0;
 
@@ -169,8 +170,7 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   // finally squeeze summed dimensions if desired
   if (! keepdim) {
     auto sizes = result.sizes().vec();
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    for (int i = dim-1; i>=0; i--) {
+    for (auto i = dim-1; i>=0; i--) {
       if (sum_dims[i]) {
         sizes.erase(sizes.begin() + i);
       }
@@ -180,11 +180,14 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   return result;
 }
 
-// There are roughly three parts to compute einsum:
+// There are roughly three parts to computing einsum:
 // 1. Parse equation to extract the labels for each input operand and output
 // 2. Unsqueeze missing dimensions from input operands and permute to align them
 // 3. Compute result by multiplying input operands and summing contraction
-//    dimensions We do the last part by reducing to bmm.
+//    dimensions. We do the last part by reducing to bmm.
+// If a path is specified, we reduce in the order specified by the path, else we
+// default to going left => right. The path is a list of indices processed the same
+// way as opt-einsum: https://optimized-einsum.readthedocs.io/en/stable/path_finding.html#format-of-the-path
 Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArrayRef path) {
   TORCH_CHECK(!operands.empty(), "einsum(): must provide at least one operand");
   const auto num_ops = operands.size();
@@ -225,7 +228,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   std::vector<std::vector<uint8_t>> op_labels(num_ops);
   bool ell_in_input = false;
   std::size_t curr_op = 0;
-  for (auto i = decltype(lhs.length()){0}; i < lhs.length(); ++i) {
+  for (std::size_t i = 0; i < lhs.length(); ++i) {
     const unsigned char label = lhs[i];
     switch (label) {
       case ' ':
@@ -336,7 +339,7 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
   } else {
     // Parse explicit output
     const auto rhs = equation.substr(arrow_pos + 2);
-    for (auto i = decltype(rhs.length()){0}; i < rhs.length(); ++i) {
+    for (std::size_t i = 0; i < rhs.length(); ++i) {
       const unsigned char label = rhs[i];
       switch (label) {
         case ' ':
@@ -394,10 +397,10 @@ Tensor einsum(c10::string_view equation, TensorList operands, at::OptionalIntArr
     }
   }
 
-  // Next we check the sizes, take diagonals for repeated labels, unsqueeze
+  // Next: we check the sizes, take diagonals for repeated labels, unsqueeze
   // missing dimensions so all operands have the same dimensions and permute
-  // the operands to align the dimensions following the indices compute above.
-  // We also count how many operands have dimension with size > 1 for each
+  // the operands to align the dimensions following the indices computed above.
+  // We also count how many operands have dimension with size != 1 for each
   // label used to identify which dimensions can be contracted.
   std::vector<int64_t> label_size(TOTAL_LABELS, 1);
   std::vector<int64_t> ell_sizes(ell_num_dim, 1);
