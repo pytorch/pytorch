@@ -9,6 +9,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
+#include <ATen/detail/MPSHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/CallOnce.h>
@@ -83,6 +84,9 @@ class TORCH_API Context {
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
+  static bool hasMPS() {
+    return detail::getMPSHooks().hasMPS();
+  }
   static bool hasIPU() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::IPU);
   }
@@ -92,8 +96,6 @@ class TORCH_API Context {
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
   }
-  static bool hasMPS();
-
   static bool hasORT() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::ORT);
   }
