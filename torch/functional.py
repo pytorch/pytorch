@@ -403,7 +403,7 @@ def einsum(*args: Any,
         return einsum(equation, *_operands, path=path)
 
     # Process user input'd contraction path
-    if isinstance(path, Sequence):
+    if isinstance(path, Sequence) and not isinstance(path, str):
         if len(path) == 0:
             raise RuntimeError("einsum(): path should not be an empty list, "
                                "for a single operand, path should be [(0,)]")
@@ -433,7 +433,7 @@ def einsum(*args: Any,
 
     # go the default path; path should only be 'use_opt_einsum_if_available' now
     if path == 'use_opt_einsum_if_available':
-        path = None
+        path_to_pass = None
     else:
         raise RuntimeError("einsum(): unrecognized value for path kwarg, path should be a Sequence or one of three "
                            "strings: 'use_opt_einsum_if_available', 'use_opt_einsum', 'skip_path_calculation'")
@@ -441,8 +441,8 @@ def einsum(*args: Any,
     if _opt_einsum is not None:
         tupled_path = _opt_einsum.contract_path(equation, *operands)[0]
         # flatten path for dispatching to C++
-        path = [item for pair in tupled_path for item in pair]
-    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
+        path_to_pass = [item for pair in tupled_path for item in pair]
+    return _VF.einsum(equation, operands, path=path_to_pass)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.
