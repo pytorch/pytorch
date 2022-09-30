@@ -197,7 +197,8 @@ def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=Fa
     # batch it since running_mean/var will be seen as unbatched tensors
     if num_tensors == 1 and is_batch_norm_and_training:
         return
-    bdim_choices = get_bdim_choices(num_tensors)
+    bdim_choices = get_bdim_choices_batch_norm(
+        num_tensors, **arg_values) if is_batch_norm_and_training else get_bdim_choices(num_tensors)
 
     @memoize
     def get_batched_arg(arg, bdim):
