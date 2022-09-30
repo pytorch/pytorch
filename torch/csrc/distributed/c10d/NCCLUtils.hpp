@@ -26,9 +26,9 @@
 // ncclInProgress only exists in NCCL versions 2.13+
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 14)
-#define NCCL_RESULT_IN_PROGRESS
+#define NCCL_IN_PROGRESS
 #elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
-#define NCCL_RESULT_IN_PROGRESS
+#define NCCL_IN_PROGRESS
 #endif
 
 // Error checking is enabled only for NCCL versions 2.4+ since ncclCommAbort()
@@ -55,7 +55,7 @@
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
-#if not defined(NCCL_RESULT_IN_PROGRESS)
+#if not defined(NCCL_IN_PROGRESS)
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                   \
   do {                                                                        \
