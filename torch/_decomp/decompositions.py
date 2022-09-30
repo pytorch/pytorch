@@ -798,9 +798,9 @@ def unfold_backward(
     idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
     idx = idx.unfold(0, size, step).flatten()
     grad = grad.movedim(-1, dim + 1).flatten(dim, dim + 1)
-    # nb. At the moment this generates kernels in triton
+    # nb. At the moment this generates two kernels in triton
     # It could potentially be fused into one call to scatter_reduce,
-    # provided that op generates 1 kernel
+    # in the case step <= size provided scatter_reduce generates 1 kernel
     grad_input = grad.new_zeros(input_size)
     return torch.index_add(grad_input, dim, idx, grad)
 
