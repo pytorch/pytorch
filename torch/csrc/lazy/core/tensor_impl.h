@@ -39,13 +39,21 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
 
   at::IntArrayRef sizes_custom() const override;
   at::IntArrayRef strides_custom() const override;
-  int64_t dim_custom() const override;
   int64_t numel_custom() const override;
+  int64_t storage_offset_custom() const override;
+  int64_t dim_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  bool is_strides_like_custom(at::MemoryFormat memory_format) const override;
+  bool is_non_overlapping_and_dense_custom() const override;
 
+<<<<<<< HEAD
   virtual c10::SymIntArrayRef sym_sizes_custom() const override;
   virtual c10::SymIntArrayRef sym_sizes() const override;
   virtual c10::SymIntArrayRef sym_strides_custom() const override;
+=======
+  c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_strides_custom() const override;
+>>>>>>> 3b6588ab745 (Consistent compute numel/contiguous strategy with SymInts (#85858))
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
   const at::Storage& storage() const override {
