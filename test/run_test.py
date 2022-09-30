@@ -699,7 +699,7 @@ def run_test_ops(test_module, test_directory, options):
         return run_test(test_module, test_directory, copy.deepcopy(options),
                         extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
                         )
-    NUM_PROCS = 3
+    NUM_PROCS = 2
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
     pool = get_context("spawn").Pool(NUM_PROCS)
