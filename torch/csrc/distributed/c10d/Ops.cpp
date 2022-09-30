@@ -139,6 +139,26 @@ c10::intrusive_ptr<Work> barrier(
       BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<Work> send(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t dstRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->send(
+      tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
+}
+
+c10::intrusive_ptr<Work> recv_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t srcRank,
+    int64_t tag) {
+  auto tensor_vec = tensors.vec();
+  return process_group->recv(
+      tensor_vec, static_cast<int>(srcRank), static_cast<int>(tag));
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup, Work, and ReduceOp definitions are more like
   // declarations. They don't expose the details of the two classes into
@@ -178,10 +198,8 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
-  m.def(
-      "send(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int dstRank, int tag) -> __torch__.torch.classes.c10d.Work");
-  m.def(
-      "recv_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, int srcRank, int tag) -> __torch__.torch.classes.c10d.Work");
+  m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
+  m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
 }
 } // namespace
 
