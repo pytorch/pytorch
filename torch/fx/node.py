@@ -600,20 +600,27 @@ def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     assert callable(fn), "torch.fx.map_arg(a, fn): fn must be a callable"
     return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
 
+
 @compatibility(is_backward_compatible=True)
-def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
+def map_aggregate(a: Argument, fn: Callable[[Argument], Argument],
+                  should_traverse_fn: Optional[Callable[[Argument], bool]] = None) -> Argument:
     """
     Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys.
+    Traverses list, tuple, slice, or dict if ``should_traverse_fn`` is either None or returns True for supplied argument
     """
+    if should_traverse_fn and not should_traverse_fn(a):
+        return fn(a)
+
     if isinstance(a, tuple):
-        t = tuple(map_aggregate(elem, fn) for elem in a)
+        t = tuple(map_aggregate(elem, fn, should_traverse_fn) for elem in a)
         # Support NamedTuple (if it has `_fields`) by repacking into original type.
         return t if not hasattr(a, '_fields') else type(a)(*t)
     elif isinstance(a, list):
-        return immutable_list(map_aggregate(elem, fn) for elem in a)
+        return immutable_list(map_aggregate(elem, fn, should_traverse_fn) for elem in a)
     elif isinstance(a, dict):
-        return immutable_dict((k, map_aggregate(v, fn)) for k, v in a.items())
+        return immutable_dict((k, map_aggregate(v, fn, should_traverse_fn)) for k, v in a.items())
     elif isinstance(a, slice):
-        return slice(map_aggregate(a.start, fn), map_aggregate(a.stop, fn), map_aggregate(a.step, fn))
+        return slice(map_aggregate(a.start, fn, should_traverse_fn), map_aggregate(a.stop, fn, should_traverse_fn),
+                     map_aggregate(a.step, fn, should_traverse_fn))
     else:
         return fn(a)
