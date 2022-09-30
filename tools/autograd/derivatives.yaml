@@ -2276,7 +2276,7 @@
   result: auto_linear
 
 - name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
-  grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
+  grad_output: _adaptive_avg_pool2d_symint(grad, {grad_output.sym_size(-2), grad_output.sym_size(-1)})
   self: zeros_like(self)
   result: _adaptive_avg_pool2d_backward(grad_output_t, self_p)
 
