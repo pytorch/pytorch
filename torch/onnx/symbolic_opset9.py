@@ -2664,7 +2664,7 @@ def _layer_norm_returns_normalized_input_mean_rstd(
     eps: float,
     cudnn_enable: bool,
     return_mean_rstd: bool,
-) -> Tuple[_C.Value, Optional[_C.Value], Optional[_C.Value]]:
+) -> Union[Tuple[_C.Value, Optional[_C.Value], Optional[_C.Value]], _C.Value]:
     if symbolic_helper.is_caffe2_aten_fallback():
         return g.at(
             "layer_norm",
