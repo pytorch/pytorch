@@ -128,7 +128,6 @@ class TestCommon(TestCase):
     @deviceCountAtLeast(2)
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long))
     def test_multiple_devices(self, devices, dtype, op):
-        assert 1 + 2 == 1
         for cuda_device_str in devices:
             cuda_device = torch.device(cuda_device_str)
             # NOTE: only tests on first sample
