@@ -939,7 +939,8 @@ class FlatParamHandle:
                 "All sharded parameters that received a gradient in the "
                 "post-backward should use `_saved_grad_shard`",
             )
-        # TODO (awgu): I am not sure that deleting this is necessary.
+        # Delete `_saved_grad_shard` since its existence indicates a previous
+        # gradient to accumulate with in the post-backward hook
         if hasattr(flat_param, "_saved_grad_shard"):
             delattr(flat_param, "_saved_grad_shard")
 
@@ -1283,7 +1284,8 @@ class FlatParamHandle:
             but no longer has the expected flattened shape.
         Returns: ``True`` if some writeback happened, and ``False`` otherwise.
         """
-        if not self.is_sharded(self.flat_param):
+        if self.uses_sharded_strategy and not self.is_sharded(self.flat_param):
+            # For `NO_SHARD`, we may still need to writeback
             return False
         flat_param = self.flat_param
         start, end = flat_param._shard_indices  # type: ignore[attr-defined]
@@ -1392,8 +1394,6 @@ class FlatParamHandle:
                 f"expected device={dst_tensor.device} device={src_device}"
             )
         if src_tensor is not None and src_tensor.shape != expected_shape:
-            # TODO (awgu): Should we relax this to just having the same numel?
-            # Then, we just flatten and writeback.
             # NOTE: Gradient shape mismatch is not possible in practice since
             # the gradient shape is enforced to match that of the parameter and
             # we already check for parameter shape mismatch.
@@ -1450,10 +1450,10 @@ class FlatParamHandle:
 
     def is_sharded(self, tensor: Tensor) -> bool:
         """
-        Returns if ``tensor`` is *currently* sharded. For ``NO_SHARD``, this
-        always returns ``True`` once :meth:`shard` has been called.
+        Returns if ``tensor`` is *currently* sharded. For ``NO_SHARD``, we
+        choose to have this always return ``False`` for clarity.
         """
-        if not hasattr(self.flat_param, "_sharded_size"):
+        if not hasattr(self.flat_param, "_sharded_size") or not self.uses_sharded_strategy:
             # `_sharded_size` is defined iff `handle.shard()` has been called
             return False
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
