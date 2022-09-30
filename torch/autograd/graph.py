@@ -2,7 +2,7 @@ import torch
 from typing import Callable, Any
 import contextlib
 from torch.utils._python_dispatch import TorchDispatchMode
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Set
 import weakref
 
 __all__ = ["saved_tensors_hooks", "save_on_cpu", "allow_mutation_on_saved_tensors"]
@@ -156,7 +156,7 @@ class save_on_cpu(saved_tensors_hooks):
 _cloned: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _original: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _tid_to_weakhandle: Dict[Tuple[int, int], weakref.ReferenceType] = dict()
-_sid_to_tid: Dict[Tuple[int, int], Tuple[int, int]] = dict()
+_sid_to_tid: Dict[Tuple[int, int], Set[Tuple[int, int]]] = dict()
 _ctx_id = 0
 _inside_ctx = False
 
