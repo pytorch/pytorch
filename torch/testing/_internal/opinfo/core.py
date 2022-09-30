@@ -2038,10 +2038,11 @@ def sample_inputs_elementwise_unary(
             low=low,
             high=high,
             requires_grad=requires_grad,
-            stride_permutation=[0, 2, 3, 1]
+            stride_permutation=[0, 2, 3, 1],
         ),
         kwargs=op_kwargs,
     )
+
 
 # Replace values satisfying condition with a safe value. This is used to block
 # out values the could cause singularity like tan(pi/2)
@@ -2135,7 +2136,10 @@ def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kw
         yield SampleInput(a, kwargs=op.sample_kwargs(device, dtype, a)[0])
 
     make_arg_channels_last = partial(make_arg, stride_permutation=[0, 2, 3, 1])
-    yield SampleInput(make_arg((2, 3, 4, 5)), kwargs=op.sample_kwargs(device, dtype, a)[0])
+    yield SampleInput(
+        make_arg((2, 3, 4, 5)), kwargs=op.sample_kwargs(device, dtype, a)[0]
+    )
+
 
 def generate_elementwise_unary_small_value_tensors(
     op, *, device, dtype, requires_grad=False
