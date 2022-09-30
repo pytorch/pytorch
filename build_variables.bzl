@@ -1102,7 +1102,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/Gelu.cpp",
     "aten/src/ATen/native/mkldnn/IDeepRegistration.cpp",
     "aten/src/ATen/native/mkldnn/Linear.cpp",
-    "aten/src/ATen/native/mkldnn/LinearPrepack.cpp",
     "aten/src/ATen/native/mkldnn/MKLDNNCommon.cpp",
     "aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp",
     "aten/src/ATen/native/mkldnn/MkldnnTensorMath.cpp",
