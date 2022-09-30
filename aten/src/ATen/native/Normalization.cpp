@@ -155,7 +155,7 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
     double momentum, double eps) {
 
   using accscalar_t = at::acc_type<scalar_t, false>;
-  TORCH_CHECK(input.dim() >= 1,
+  TORCH_INTERNAL_ASSERT(input.dim() >= 1,
            "Expected input to have at least 2 dimensions.");
 
   int64_t n_input = input.size(1);
