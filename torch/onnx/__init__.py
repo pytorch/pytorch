@@ -74,6 +74,8 @@ __all__ = [
     "select_model_mode_for_export",
     "register_custom_op_symbolic",
     "unregister_custom_op_symbolic",
+    "disable_log",
+    "enable_log",
     # Errors
     "CheckerError",  # Backwards compatibility
 ]
@@ -98,11 +100,16 @@ def _export(*args, **kwargs):
 # Returns True iff ONNX logging is turned on.
 is_onnx_log_enabled = _C._jit_is_onnx_log_enabled
 
-# Enables ONNX logging.
-enable_log = _C._jit_set_onnx_log_enabled
 
-# Disables ONNX logging.
-disable_log = _C._jit_set_onnx_log_enabled
+def enable_log() -> None:
+    r"""Enables ONNX logging."""
+    _C._jit_set_onnx_log_enabled(True)
+
+
+def disable_log() -> None:
+    r"""Disables ONNX logging."""
+    _C._jit_set_onnx_log_enabled(False)
+
 
 """Sets output stream for ONNX logging.
 
