@@ -386,7 +386,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         # when functinalization is turned on, we want to move
         # these mutations into an opaque epilogue
         # so our graph infra can assume a functional graph.
-        input_mutation_epilogue, mutated_inputs_map = move_input_mutations_into_epilogue(fx_g)
+        input_mutation_epilogue, mutated_inputs_map, _outputs_requiring_grad_map = move_input_mutations_into_epilogue(fx_g, _num_outs)
         _num_mutated_inputs = len([x for x in mutated_inputs_map if x])
         original_inputs_needing_mutation = []
         for is_mutated, x in zip(mutated_inputs_map, flat_args):
@@ -432,6 +432,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         compiled_bw = None
         num_outs = _num_outs
         num_mutated_inputs = _num_mutated_inputs
+        outputs_requiring_grad_map = _outputs_requiring_grad_map
 
         @staticmethod
         @disable_torchdynamo
@@ -441,10 +442,20 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                 CompiledFunction.compiled_fw, deduped_flat_tensor_args
             )
 
-            num_outs = CompiledFunction.num_outs
-            num_mutated_inputs = CompiledFunction.num_mutated_inputs
-            ctx.save_for_backward(*fw_outs[num_mutated_inputs + num_outs:])
-            return tuple(fw_outs[0:num_mutated_inputs + num_outs])
+            # Some outputs from the forward might not require grad: mark them.
+            num_outs_to_return = CompiledFunction.num_outs + CompiledFunction.num_mutated_inputs
+            tensor_outs_to_return = fw_outs[0:num_outs_to_return]
+            tensor_outs_to_save = fw_outs[num_outs_to_return:]
+            non_differentiable_tensor_outs = [
+                out_tensor
+                for (i, (requires_grad, out_tensor)) in
+                enumerate(zip(CompiledFunction.outputs_requiring_grad_map, tensor_outs_to_return))
+                if not requires_grad
+            ]
+            ctx.mark_non_differentiable(*non_differentiable_tensor_outs)
+
+            ctx.save_for_backward(*tensor_outs_to_save)
+            return tuple(tensor_outs_to_return)
 
         @staticmethod
         @disable_torchdynamo
