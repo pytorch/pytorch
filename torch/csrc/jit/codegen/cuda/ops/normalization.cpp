@@ -589,7 +589,7 @@ ForwardNormResult batch_norm(
     // During inference, mean/invstd output are empty tensors
     // on CPU, but not on CUDA. We need to make sure we have the same
     // behavior as with eager mode on CUDA.
-    mean = set(running_mean);
+    mean = running_mean;
     invstd = unbiased_invstd;
     y = mul(x_sub_mean, invstd_bcast);
   }
@@ -844,7 +844,7 @@ ForwardNormResult instance_norm(
     // During inference, mean/invstd output are empty tensors
     // on CPU, but not on CUDA. We need to make sure we have the same
     // behavior as with eager mode on CUDA.
-    mean = set(running_mean);
+    mean = running_mean;
     invstd = unbiased_invstd;
     y = mul(x_sub_mean, invstd_bcast);
   }

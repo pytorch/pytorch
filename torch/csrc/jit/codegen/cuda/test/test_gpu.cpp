@@ -26026,6 +26026,34 @@ TEST_F(NVFuserTest, FusionInlineAt_CUDA) {
   testValidate(fusion, {out}, {t0}, {t0.sin().cos()}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionTrivialInputForwarding_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeConcreteTensor({-1, -1});
+  TensorView* tv1 = makeConcreteTensor({-1, -1});
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+  // Note: tv2 is not needed. Kept it here since previously there was an
+  // assertion from sorting in codegen.
+  auto tv2 = add(tv1, IrBuilder::create<Double>(3.141));
+  fusion->addOutput(tv0);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({10, 4}, options);
+  at::Tensor t1 = at::randn({10, 4}, options);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  auto cg_outputs = fec.runFusionWithInputs({t0, t1});
+
+  testValidate(fusion, cg_outputs, {t0, t1}, {t0}, __LINE__, __FILE__);
+
+  // Second run to ensure cache hit handles trivial forwarding properly
+  auto cg_outputs2 = fec.runFusionWithInputs({t0, t1});
+  testValidate(fusion, cg_outputs2, {t0, t1}, {t0}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

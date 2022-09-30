@@ -741,29 +741,24 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
 }
 
 std::vector<at::Tensor> FusionExecutor::allocOutputs(
+    const KernelArgumentHolder& args,
     kir::ExpressionEvaluator& expr_eval,
     const std::unordered_set<int>& alias_indices) {
   FUSER_PERF_SCOPE("FusionExecutor::AllocOutputs");
   const auto kernel = lowered_->kernel();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
+  TORCH_INTERNAL_ASSERT(
+      args.size() == kernel->inputs().size(),
+      "kernel arguments length does not match runtime arguments.");
   for (const auto out_i : c10::irange(kernel->outputs().size())) {
-    // TODO: FIX this short-cut where we trivially forward inputs to outputs
     if (kernel->outputs()[out_i]->isFusionInput()) {
-      TORCH_INTERNAL_ASSERT(false, "trivial input forwarding NOT IMPLEMENTED");
-      // for (auto inp_i : c10::irange(kernel->inputs().size())) {
-      //   if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
-      //     TORCH_INTERNAL_ASSERT(
-      //         inp_i < inputs.size(),
-      //         "Issue with an input showing up as output, couldn't find
-      //         input.");
-      //     TORCH_INTERNAL_ASSERT(
-      //         inputs[inp_i].isTensor(),
-      //         "Cannot register a scalar as an output in a fusion.");
-      //     outputs.push_back(inputs[inp_i].toTensor());
-      //     break;
-      //   }
-      // }
+      // pushing empty tensor for trivial forwarding. Since we handle this in
+      // integration, see step 1 - note [trivial forwarding]
+      c10::Device device(c10::DeviceType::CUDA, args.getDeviceIndex());
+      const auto tensor_options =
+          at::TensorOptions().dtype(at::kFloat).device(device);
+      outputs.emplace_back(at::empty({0}, tensor_options));
     } else {
       TORCH_INTERNAL_ASSERT(
           kernel->outputs()[out_i]->isA<TensorView>(),
@@ -803,7 +798,8 @@ KernelArgumentHolder FusionExecutor::evaluateOutputSizes(
   meta_options.device = c10::Device(DeviceType::Meta, 0);
 
   for (const auto out_i : c10::irange(kernel->outputs().size())) {
-    // If the output is just trivially the input, just "copy" it over.
+    // If the output is just trivially the input, just "copy" it over, see note
+    // [trivial forwarding]
     if (kernel->outputs()[out_i]->isFusionInput()) {
       for (auto inp_i : c10::irange(kernel->inputs().size())) {
         if (kernel->inputs()[inp_i] == kernel->outputs()[out_i]) {
@@ -1124,7 +1120,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
       auto& output_alias_indices = output_alias_indices_entry.get();
 
-      allocated_outputs = allocOutputs(expr_eval, output_alias_indices);
+      allocated_outputs = allocOutputs(args, expr_eval, output_alias_indices);
 
       for (const auto& entry : alias_indices) {
         auto aliased_output_index = entry.first;
