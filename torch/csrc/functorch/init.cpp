@@ -6,7 +6,7 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
-#include <torch/extension.h>
+#include <torch/python.h>
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
@@ -233,18 +233,18 @@ RandomnessType get_randomness_enum(const std::string& randomness) {
 }
 
 void set_fwd_grad_enabled(bool enabled) {
-  AutogradState::get_tls_state().set_fw_grad_mode(enabled);
+  c10::AutogradState::get_tls_state().set_fw_grad_mode(enabled);
 }
 
 bool get_fwd_grad_enabled() {
-  return AutogradState::get_tls_state().get_fw_grad_mode();
+  return c10::AutogradState::get_tls_state().get_fw_grad_mode();
 }
 
 int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Grad, nullopt, nullopt, prev_grad_mode);
+      TransformType::Grad, c10::nullopt, c10::nullopt, prev_grad_mode);
 }
 
 int64_t _grad_decrement_nesting() {
@@ -257,7 +257,11 @@ int64_t _jvp_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_fwd_grad_mode = get_fwd_grad_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Jvp, nullopt, nullopt, nullopt, prev_fwd_grad_mode);
+      TransformType::Jvp,
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt,
+      prev_fwd_grad_mode);
 }
 
 int64_t _jvp_decrement_nesting() {
@@ -365,7 +369,7 @@ static int64_t currentLevel() {
 
 static void tls_set_vmap_excluded(bool excluded) {
   c10::impl::tls_set_dispatch_key_excluded(
-      DispatchKey::FuncTorchBatched, excluded);
+      c10::DispatchKey::FuncTorchBatched, excluded);
 }
 
 static void _set_dynamic_layer_keys_included(bool value) {
