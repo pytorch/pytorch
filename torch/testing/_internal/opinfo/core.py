@@ -1994,7 +1994,6 @@ def sample_inputs_elementwise_unary(
         op_kwargs = {}
 
     _L = S if kwargs.get("small_inputs_only", False) else L
-
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
@@ -2030,7 +2029,19 @@ def sample_inputs_elementwise_unary(
                 ),
                 kwargs=op_kwargs,
             )
-
+    # Create Channels Last Tenosr
+    yield SampleInput(
+        make_tensor(
+            (2, 3, 4, 5),
+            device=device,
+            dtype=dtype,
+            low=low,
+            high=high,
+            requires_grad=requires_grad,
+            stride_ordering=[0, 2, 3, 1]
+        ),
+        kwargs=op_kwargs,
+    )
 
 # Replace values satisfying condition with a safe value. This is used to block
 # out values the could cause singularity like tan(pi/2)
@@ -2123,6 +2134,8 @@ def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kw
         a = make_arg(shape)
         yield SampleInput(a, kwargs=op.sample_kwargs(device, dtype, a)[0])
 
+    make_arg_channels_last = partial(make_arg, stride_ordering=[0, 2, 3, 1])
+    yield SampleInput(make_arg((2, 3, 4, 5)), kwargs=op.sample_kwargs(device, dtype, a)[0])
 
 def generate_elementwise_unary_small_value_tensors(
     op, *, device, dtype, requires_grad=False
@@ -2504,7 +2517,7 @@ def sample_inputs_foreach(
         return [
             make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
             for _ in range(N)
-        ]
+        ] + make_tensor((N, N), dtype=dtype, device=device, stride_ordering = [1, 0])
     else:
         return [
             make_tensor(

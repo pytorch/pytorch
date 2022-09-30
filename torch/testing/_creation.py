@@ -21,7 +21,8 @@ def make_tensor(
     high: Optional[float] = None,
     requires_grad: bool = False,
     noncontiguous: bool = False,
-    exclude_zero: bool = False
+    exclude_zero: bool = False,
+    stride_ordering: Optional[List[int]] = None,
 ) -> torch.Tensor:
     r"""Creates a tensor with the given :attr:`shape`, :attr:`device`, and :attr:`dtype`, and filled with
     values uniformly drawn from ``[low, high)``.
@@ -64,6 +65,8 @@ def make_tensor(
             :attr:`dtype`'s :func:`~torch.finfo` object), and for complex types it is replaced with a complex number
             whose real and imaginary parts are both the smallest positive normal number representable by the complex
             type. Default ``False``.
+        memory_permutation (Optional[bool]): If not None, the returned tensor will be dense with permutted strides.
+            Channels-last would be passed in as [0, 2, 3, 1] (NHWC)
 
     Raises:
         ValueError: if ``requires_grad=True`` is passed for integral `dtype`
@@ -143,6 +146,15 @@ def make_tensor(
     else:
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
+    if stride_ordering:
+        strides = [None for _ in range(len(shape))]
+        assert len(shape) == len(stride_ordering)
+        prod = 1
+        ndim = len(shape)
+        for i in range(ndim):
+            strides[stride_ordering[ndim - 1 - i]] = prod
+            prod *= shape[stride_ordering[ndim - 1 - i]]
+        result = torch.as_strided(result, shape, strides)
 
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
