@@ -1,3 +1,4 @@
+#include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
@@ -58,6 +59,13 @@ int64_t SymInt::guard_int(const char* file, int64_t line) const {
   }
   SymIntNode a = toSymIntNodeImpl();
   return a->guard_int(file, line);
+}
+
+SymInt::operator SymFloat() const {
+  if (!is_symbolic()) {
+    return SymFloat(double(data_));
+  }
+  return SymFloat::toSymFloat(toSymIntNodeImpl()->sym_float());
 }
 
 SymInt SymInt::operator+(SymInt sci) const {
