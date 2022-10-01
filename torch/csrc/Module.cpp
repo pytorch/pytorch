@@ -1175,6 +1175,8 @@ Call this whenever a new thread is created in order to propagate values from
       .value("SlowDilated3d", at::native::ConvBackend::SlowDilated3d)
       .value("SlowTranspose2d", at::native::ConvBackend::SlowTranspose2d)
       .value("SlowTranspose3d", at::native::ConvBackend::SlowTranspose3d)
+      .value(
+          "Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
       .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d);
 
   py_module.def(
