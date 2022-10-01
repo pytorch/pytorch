@@ -18,6 +18,11 @@
 #define NDEF_IGNORE_CODE_ALIGN_DIRECTIVES_P2ALIGN_3
 #endif
 
+# For Mac ARM64, ; begins a comment, and %% is used to separate instructions
+#ifdef USE_MAC_ARM64_INSTRUCTION_SEPARATOR
+#define ; %%
+#endif
+
 .macro TRANSPOSE_4X4_S32 vin0, vin1, vin2, vin3, temp0, temp1, temp2, temp3
     TRN1 \temp0\().4s, \vin0\().4s, \vin1\().4s
     TRN2 \temp1\().4s, \vin0\().4s, \vin1\().4s

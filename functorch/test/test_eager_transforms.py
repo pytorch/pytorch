@@ -282,7 +282,7 @@ class TestGradTransform(TestCase):
             return y
 
         grad(foo)(x)
-        self.assertEqual(functorch._C.dlevel(escaped[0]), -1)
+        self.assertEqual(torch._C._functorch.dlevel(escaped[0]), -1)
 
     def test_escaped_wrappers_are_ignored(self, device):
         x = torch.randn([], device=device)
@@ -296,7 +296,7 @@ class TestGradTransform(TestCase):
         grad(foo)(x)
 
         something = escaped[0].sum()
-        self.assertEqual(functorch._C.dlevel(something), 0)
+        self.assertEqual(torch._C._functorch.dlevel(something), 0)
         self.assertEqual(something, x.sin().sum())
 
     def test_vjp(self, device):
@@ -815,6 +815,18 @@ class TestGradTransform(TestCase):
                 buf = buf.replace("\n", "").replace("  ", "")
                 expected = expected.replace("\n", "").replace("  ", "")
                 self.assertEqual(expected, buf)
+
+    def test_print_captured_tensor_inside_transform(self, device):
+        x = torch.tensor([1., 2., 3.], device=device)
+        out = None
+
+        def f(y):
+            nonlocal out
+            out = repr(x)
+            return y
+
+        vjp(f, torch.randn(4, device=device))
+        self.assertEqual(out, repr(x))
 
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)
@@ -1881,17 +1893,17 @@ class TestJvp(TestCase):
 
     def test_fwd_grad_enabled(self, device):
         # Tests some private helper functions to enable/disable fwd grad mode
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
     def test_autograd_function_disables_fwd_grad(self, device):
@@ -1900,7 +1912,7 @@ class TestJvp(TestCase):
         class MySquare(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertFalse(enabled)
                 return x * x
 
@@ -1914,18 +1926,18 @@ class TestJvp(TestCase):
     def test_enable_fwd_grad(self, device):
         # Tests a private helper function
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
 
             with enable_fwd_grad():
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertTrue(enabled)
 
-            enabled = functorch._C.get_fwd_grad_enabled()
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
@@ -2348,6 +2360,64 @@ class TestComposability(TestCase):
         x = torch.randn([])
         with self.assertRaises(RuntimeError):
             grad(f)(x)
+
+    @parametrize('transform', [
+        'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+
+        if transform == 'functionalize':
+            transform = functorch.experimental.functionalize
+        else:
+            transform = getattr(functorch, transform)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                transform(f)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            transform(g)(x)
+
+    def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                vjp(f, x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            vjp(g, x)
+
+    def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        t = torch.randn(3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                jvp(f, (x,), (t,))
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            jvp(g, (x,), (t,))
 
 
 class TestMakeFunctional(TestCase):

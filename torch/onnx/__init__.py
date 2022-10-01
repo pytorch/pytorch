@@ -1,5 +1,4 @@
 """ONNX exporter."""
-import warnings
 
 from torch import _C
 from torch._C import _onnx as _C_onnx
@@ -26,8 +25,11 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset14,
     symbolic_opset15,
     symbolic_opset16,
+    symbolic_opset17,
     utils,
 )
+
+# TODO(After 1.13 release): Remove the deprecated SymbolicContext
 from ._exporter_states import ExportTypes, SymbolicContext
 from ._type_utils import JitScalarType
 from .errors import CheckerError  # Backwards compatibility
@@ -60,14 +62,13 @@ __all__ = [
     "symbolic_opset14",
     "symbolic_opset15",
     "symbolic_opset16",
+    "symbolic_opset17",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",
     "TrainingMode",
     "TensorProtoDataType",
     "JitScalarType",
-    # Classes
-    "SymbolicContext",
     # Public functions
     "export",
     "export_to_pretty_string",
@@ -86,7 +87,6 @@ __all__ = [
 
 # Set namespace for exposed private names
 ExportTypes.__module__ = "torch.onnx"
-SymbolicContext.__module__ = "torch.onnx"
 JitScalarType.__module__ = "torch.onnx"
 
 producer_name = "pytorch"
@@ -94,7 +94,7 @@ producer_version = _C_onnx.PRODUCER_VERSION
 
 
 @_deprecation.deprecated(
-    since="1.12.0", removed_in="TBD", instructions="use `torch.onnx.export` instead"
+    since="1.12.0", removed_in="1.14", instructions="use `torch.onnx.export` instead"
 )
 def _export(*args, **kwargs):
     return utils._export(*args, **kwargs)
@@ -133,6 +133,3 @@ def log(*args) -> None:
             character appended to the end, and flushed to output stream.
     """
     _C._jit_onnx_log(*args)
-
-
-_registration.discover_and_register_all_symbolic_opsets()
