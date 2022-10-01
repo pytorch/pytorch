@@ -1988,12 +1988,12 @@ struct getTypePtr_<at::OptionalIntArrayRef> final {
   }
 };
 
-template<>
-struct getTypePtr_<at::OptionalSymIntArrayRef> final {
+template <bool fake>
+struct getMaybeFakeTypePtr_<at::OptionalSymIntArrayRef, fake> final {
   static const auto& call() {
     // The "per optional<T>" static singleton needs to live in a .cpp file,
     // otherwise we'll end up with one singleton instance per shared library.
-    static auto inner_type = getMaybeFakeTypePtr_<SymIntArrayRef, false>::call();
+    static auto inner_type = getMaybeFakeTypePtr_<SymIntArrayRef, fake>::call();
     static auto type = OptionalType::get(inner_type);
     return type;
   }
