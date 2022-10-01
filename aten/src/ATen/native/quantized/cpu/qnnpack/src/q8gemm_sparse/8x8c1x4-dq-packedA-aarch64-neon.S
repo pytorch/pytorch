@@ -19,7 +19,7 @@
 #endif
 
 # For Mac ARM64, ; begins a comment, and %% is used to separate instructions
-#ifdef USE_MAC_ARM64_INSTRUCTION_SEPARATOR
+#ifdef __APPLE__
 #define ; %%
 #endif
 
@@ -548,3 +548,7 @@ MAKE_PYTORCH_Q8GEMM_DQ_SPARSE_1X4_UKERNEL_8X8_PACKEDA__AARCH64_NEON(8, #1, #0, L
 #undef NDEF_IGNORE_CODE_ALIGN_DIRECTIVES_P2ALIGN_4
 #undef NDEF_IGNORE_CODE_ALIGN_DIRECTIVES_P2ALIGN_3
 #undef MAKE_PYTORCH_Q8GEMM_DQ_SPARSE_1X4_UKERNEL_8X8_PACKEDA__AARCH64_NEON
+
+#ifdef __APPLE__
+#undef ;
+#endif
