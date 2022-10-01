@@ -397,11 +397,11 @@ Tensor where_mps(const Tensor& condition,
 
     auto max_idx = std::max({cond_idx, self_idx, other_idx});
 
-    TORCH_CHECK(cond_idx == max_idx || cond_idx == 1, i, "'th index ", cond_idx, " of condition tensor does not match the other tensors")
-    TORCH_CHECK(self_idx == max_idx || self_idx == 1, i, "'th index ", self_idx, " of x tensor does not match the other tensors")
-    TORCH_CHECK(other_idx == max_idx || other_idx == 1, i, "'th index ", other_idx, " of x tensor does not match the other tensors")
+    TORCH_CHECK(cond_idx == max_idx || cond_idx == 1 || (cond_idx == 0 && max_idx == 1), i, "'th index ", cond_idx, " of condition tensor does not match the other tensors")
+    TORCH_CHECK(self_idx == max_idx || self_idx == 1 || (self_idx == 0 && max_idx == 1), i, "'th index ", self_idx, " of x tensor does not match the other tensors")
+    TORCH_CHECK(other_idx == max_idx || other_idx == 1 || (other_idx == 0 && max_idx == 1), i, "'th index ", other_idx, " of x tensor does not match the other tensors")
 
-    out_arr[i] = max_idx;
+    out_arr[i] = (cond_idx == 0 || self_idx == 0 || other_idx == 0) ? 0 : max_idx;
   }
 
   Tensor ret = empty_mps(IntArrayRef(out_arr),
