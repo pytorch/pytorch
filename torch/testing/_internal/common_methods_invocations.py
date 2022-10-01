@@ -7395,9 +7395,6 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
 def error_inputs_triplet_margin_loss(op_info, device, with_distance=False, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
 
-    # TODO: triplet_margin_loss and triplet_margin_with_distance_loss have no
-    # margin > 0 checks in regular PyTorch
-
     samples = [
         # input, args, kwargs, error_type, error_regex
         # invalid reduction
