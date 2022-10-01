@@ -7395,7 +7395,7 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
 def error_inputs_triplet_margin_loss(op_info, device, with_distance=False, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
 
-    samples = [
+    samples = (
         # input, args, kwargs, error_type, error_regex
         # invalid reduction
         (make_input(3, 4), (make_input(3, 4), make_input(3, 4)),
@@ -7418,29 +7418,27 @@ def error_inputs_triplet_margin_loss(op_info, device, with_distance=False, **kwa
          RuntimeError,
          (r"The size of tensor a \(4\) must match the size of tensor b \(5\) "
           r"at non-singleton dimension 1")),
-    ]
 
-    samples.append(
+        # different dimensions
         (make_input(3,), (make_input(3, 4), make_input(3, 4)),
             dict(),
             RuntimeError,
             (r"The anchor, positive, and negative tensors are expected to have "
              r"the same number of dimensions, but got: anchor 1D, positive 2D, "
-             r"and negative 2D inputs")))
-    samples.append(
+             r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3,), make_input(3, 4)),
             dict(),
             RuntimeError,
             (r"The anchor, positive, and negative tensors are expected to have "
              r"the same number of dimensions, but got: anchor 2D, positive 1D, "
-             r"and negative 2D inputs")))
-    samples.append(
+             r"and negative 2D inputs")),
         (make_input(3, 4), (make_input(3, 4), make_input(3,)),
             dict(),
             RuntimeError,
             (r"The anchor, positive, and negative tensors are expected to have "
              r"the same number of dimensions, but got: anchor 2D, positive 2D, "
-             r"and negative 1D inputs")))
+             r"and negative 1D inputs")),
+    )
 
     for input, args, kwargs, error_type, error_regex in samples:
         yield ErrorInput(SampleInput(input, args=args, kwargs=kwargs),
