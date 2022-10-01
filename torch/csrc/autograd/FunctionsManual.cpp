@@ -4734,8 +4734,7 @@ infinitely_differentiable_native_group_norm_backward(
     std::array<bool, 3> grad_input_mask) {
   const int64_t G = group;
   const auto D = C / G;
-  // TODO: don't guard
-  const double s = 1.0 / static_cast<double>((D * HxW).guard_int(__FILE__, __LINE__));
+  c10::SymFloat s = c10::SymFloat(1.0) / c10::SymFloat(D * HxW);
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
