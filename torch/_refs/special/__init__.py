@@ -17,6 +17,8 @@ from torch._refs import (
 
 
 __all__ = [
+    "bessel_j0",
+    "bessel_j1",
     "i0e",
     "i1",
     "i1e",
@@ -24,6 +26,20 @@ __all__ = [
     "multigammaln",
     "zeta",
 ]
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_bessel_j0
+)
+def bessel_j0(a):
+    return prims.bessel_j0(a)
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_bessel_j1
+)
+def bessel_j1(a):
+    return prims.bessel_j1(a)
 
 
 @_make_elementwise_unary_reference(

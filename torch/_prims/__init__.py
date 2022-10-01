@@ -57,6 +57,8 @@ __all__ = [
     "atanh",
     "cos",
     "cosh",
+    "bessel_j0",
+    "bessel_j1",
     "bessel_i0",
     "bessel_i0e",
     "bessel_i1",
@@ -493,6 +495,20 @@ cos = _make_elementwise_unary_prim(
 cosh = _make_elementwise_unary_prim(
     "cosh",
     impl_aten=torch.cosh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bessel_j0 = _make_elementwise_unary_prim(
+    "bessel_j0",
+    impl_aten=torch.special.bessel_j0,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bessel_j1 = _make_elementwise_unary_prim(
+    "bessel_j1",
+    impl_aten=torch.special.bessel_j1,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
