@@ -19,6 +19,10 @@ FusionCache* FusionCache::get(size_t max_fusions) {
   if (singleton_ == nullptr) {
     singleton_ = new FusionCache(max_fusions);
   }
+  TORCH_CHECK(
+      max_fusions >= singleton_->fusions_.size(),
+      "The max fusions is set less than the number of fusions in the cache.");
+  singleton_->max_fusions_ = max_fusions;
   return singleton_;
 }
 
@@ -45,6 +49,15 @@ void FusionCache::print(std::ostream& os) {
     os << "Cache Lookups: " << fusion_cache_start_->visits;
     os << " Cache Hits: " << total_cache_hits;
     os << " Hit Rate: " << hit_rate << "%\n";
+  }
+}
+
+void FusionCache::reset() {
+  std::lock_guard<std::mutex> guard(fusion_cache_lock);
+  if (singleton_ != nullptr) {
+    auto max_fusions = singleton_->max_fusions_;
+    delete singleton_;
+    singleton_ = new FusionCache(max_fusions);
   }
 }
 

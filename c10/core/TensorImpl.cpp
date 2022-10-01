@@ -547,7 +547,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     bool allow_tensor_metadata_change) const {
   c10::intrusive_ptr<TensorImpl> r;
   const auto& maybe_torch_dispatch_mode_state =
-      c10::impl::TorchDispatchModeTLS::get_state();
+      c10::impl::TorchDispatchModeTLS::get_mode();
   // TODO: do we have to exclude after Python dispatch key set?
   if (maybe_torch_dispatch_mode_state &&
       !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
@@ -912,6 +912,10 @@ bool _compute_contiguous(const ExtraMeta& extra_meta) {
   return _compute_contiguous(extra_meta, order);
 }
 
+// NB: this doesn't check that the sizes/strides/offset are in bound for the
+// storage, and furthermore, it CANNOT do so as in some cases we temporarily
+// violate invariants by first setting sizes/strides, and then updating the
+// storage
 void TensorImpl::set_sizes_and_strides(
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
