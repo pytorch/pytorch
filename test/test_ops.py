@@ -1612,6 +1612,7 @@ class TestRefsOpsInfo(TestCase):
 
     not_in_decomp_table = {
         # duplicated in _decomp and _refs
+        '_refs.nn.functional.elu',
         '_refs.nn.functional.mse_loss',
         '_refs.var',
         '_refs.rsub',
@@ -1645,7 +1646,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.isclose',
         '_refs.isfinite',
         '_refs.isreal',
-        '_refs.matmul',
         '_refs.movedim',
         '_refs.narrow',
         '_refs.nn.functional.l1_loss',
