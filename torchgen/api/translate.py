@@ -1,6 +1,7 @@
 from typing import Dict, List, NoReturn, Sequence, Union
 
 from torchgen.api.types import (
+    ArrayRefCType,
     BaseCType,
     Binding,
     boolT,
@@ -249,6 +250,12 @@ Check this module for more information.
                 return solve(NamedCType(goal.name, goal.type.elem), direct=direct)
             except UnsatError:
                 pass
+
+        # TODO: These are referentially equal, shouldn't have to do this;
+        # ensuring we don't use type synonym IntArrayRef in codegen would
+        # help
+        if goal.type == ArrayRefCType(BaseCType(longT)):
+            return solve(NamedCType(goal.name, BaseCType(intArrayRefT)), direct=direct)
 
         if direct:
             unsat(goal)
