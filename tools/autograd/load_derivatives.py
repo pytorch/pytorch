@@ -781,7 +781,6 @@ def saved_variables(
                 ),
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
             },
-
         ),
         # replace self->sym_sizes() with self_sym_sizes_opt
         (
