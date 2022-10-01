@@ -13,6 +13,9 @@ from torch.testing._internal.common_utils import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+import subprocess
+import sys
 import unittest
 import warnings
 import math
@@ -2274,6 +2277,15 @@ class TestComposability(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    # it is redundant to run this test twice on a machine that has GPUs
+    @onlyCPU
+    def test_no_warning_on_import_functorch(self, device):
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import functorch"],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
+
     def test_requires_grad_inside_transform(self, device):
         def f(x):
             x.requires_grad_()
@@ -2360,6 +2372,64 @@ class TestComposability(TestCase):
         x = torch.randn([])
         with self.assertRaises(RuntimeError):
             grad(f)(x)
+
+    @parametrize('transform', [
+        'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+
+        if transform == 'functionalize':
+            transform = functorch.experimental.functionalize
+        else:
+            transform = getattr(functorch, transform)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                transform(f)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            transform(g)(x)
+
+    def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                vjp(f, x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            vjp(g, x)
+
+    def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        t = torch.randn(3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                jvp(f, (x,), (t,))
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            jvp(g, (x,), (t,))
 
 
 class TestMakeFunctional(TestCase):
