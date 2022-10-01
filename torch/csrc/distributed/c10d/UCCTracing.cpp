@@ -1,9 +1,9 @@
 #ifdef USE_C10D_UCC
 
-#include <c10d/UCCTracing.hpp>
-#include <c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 
-#include <c10d/ParamCommsUtils.hpp>
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
 
 #include <sys/stat.h>
 #include <cstdlib>
