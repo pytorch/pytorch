@@ -8285,11 +8285,13 @@
   tags: nondeterministic_seeded
   dispatch:
     CPU, CUDA: multinomial_out
+    MPS: multinomial_out_mps
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: multinomial
+    MPS: multinomial_mps
   tags: nondeterministic_seeded
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
