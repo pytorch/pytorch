@@ -275,6 +275,7 @@ class AOTConfig:
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
+    breakpoint()
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
