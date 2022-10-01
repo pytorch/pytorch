@@ -312,6 +312,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<c10::SymInt> symintlist(int i);
   inline c10::OptionalArray<int64_t> intlistOptional(int i);
+  inline c10::OptionalArray<c10::SymInt> symintlistOptional(int i);
   inline std::vector<int64_t> intlistWithDefault(
       int i,
       std::vector<int64_t> default_intlist);
@@ -708,6 +709,13 @@ inline c10::OptionalArray<int64_t> PythonArgs::intlistOptional(int i) {
     return {};
   }
   return intlist(i);
+}
+
+inline c10::OptionalArray<c10::SymInt> PythonArgs::symintlistOptional(int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return symintlist(i);
 }
 
 inline std::vector<double> PythonArgs::getDoublelist(int i) {
