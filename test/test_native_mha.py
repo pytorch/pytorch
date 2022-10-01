@@ -39,7 +39,7 @@ class TestMHADeviceType(TestCase):
                     xs = list(torch.unbind(x))
                     if use_padding:
                         xs[0] = xs[0][:-1]
-                    x = torch.nested_tensor(xs, device=device, dtype=dtype)
+                    x = torch.nested.nested_tensor(xs, device=device, dtype=dtype)
                 qkv = torch.nn.Linear(embed_dim, 3 * embed_dim, device=device, dtype=dtype)
 
                 # We have to use inference_mode here because q/k/v are
@@ -199,21 +199,21 @@ class TestMHADeviceType(TestCase):
                     qs = [x[:-1] for x in qs]
                 else:
                     qs[0] = qs[0][:-1]
-            q = torch.nested_tensor(qs, device=device, dtype=dtype)
+            q = torch.nested.nested_tensor(qs, device=device, dtype=dtype)
             if mode == "self":
                 k = v = q
             elif mode == "encdec":
-                k = torch.nested_tensor(torch.unbind(k), device=device, dtype=dtype)
+                k = torch.nested.nested_tensor(torch.unbind(k), device=device, dtype=dtype)
                 v = k
             else:
-                k = torch.nested_tensor(torch.unbind(k), device=device, dtype=dtype)
-                v = torch.nested_tensor(torch.unbind(v), device=device, dtype=dtype)
+                k = torch.nested.nested_tensor(torch.unbind(k), device=device, dtype=dtype)
+                v = torch.nested.nested_tensor(torch.unbind(v), device=device, dtype=dtype)
 
         ynpt, weight_npt = npt(
             q, k, v, key_padding_mask=mask if use_padding and not use_nt else None
         )
         if use_nt:
-            ynpt = torch.nested.to_padded_tensor(ynpt, 0)
+            ynpt = ynpt.to_padded_tensor(0)
             if pad_all:
                 ynpt_final = torch.zeros_like(ypt)
                 ynpt_final[:, :ynpt.shape[1], :] = ynpt

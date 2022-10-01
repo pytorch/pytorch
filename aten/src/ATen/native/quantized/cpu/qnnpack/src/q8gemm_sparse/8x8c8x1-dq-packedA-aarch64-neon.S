@@ -18,6 +18,11 @@
 #define NDEF_IGNORE_CODE_ALIGN_DIRECTIVES_P2ALIGN_3
 #endif
 
+# For Mac ARM64, ; begins a comment, and %% is used to separate instructions
+#ifdef USE_MAC_ARM64_INSTRUCTION_SEPARATOR
+#define ; %%
+#endif
+
 # params
 # c_stride
 
