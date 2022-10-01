@@ -197,7 +197,6 @@ __all__ = [
     # Linear algebra ops
     #
     "addr",
-    "matmul",
     #
     # View & Shape Ops
     #
@@ -2306,73 +2305,6 @@ def addr(
             return alpha * torch.outer(vec1, vec2)
         else:
             return beta * self + alpha * torch.outer(vec1, vec2)
-
-
-@torch.ops.aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
-@out_wrapper()
-def matmul(tensor1, tensor2):
-    dim_tensor1 = tensor1.dim()
-    dim_tensor2 = tensor2.dim()
-    assert dim_tensor1 != 0 and dim_tensor2 != 0
-    if dim_tensor1 == 1 and dim_tensor2 == 1:
-        return torch.dot(tensor1, tensor2)
-    elif dim_tensor1 == 2 and dim_tensor2 == 1:
-        return torch.mv(tensor1, tensor2)
-    elif dim_tensor1 == 1 and dim_tensor2 == 2:
-        return torch.squeeze(torch.mm(torch.unsqueeze(tensor1, 0), tensor2), 0)
-    elif dim_tensor1 == 2 and dim_tensor2 == 2:
-        return torch.mm(tensor1, tensor2)
-    # NB: didn't implement folding optimization
-    elif dim_tensor1 >= 1 and dim_tensor2 >= 1:
-        # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
-        # we track m1 vs m2 separately even though they must match for nicer error messages
-        n = tensor1.size(-2) if dim_tensor1 > 1 else 1
-        m1 = tensor1.size(-1)
-        batch_tensor1 = tensor1.shape[:-2]
-        m2 = tensor2.size(-2) if dim_tensor2 > 1 else tensor2.size(-1)
-        p = tensor2.size(-1) if dim_tensor2 > 1 else 1
-        batch_tensor2: List[int] = []
-        # TODO: handling of slice
-        for i in range(dim_tensor2 - 2):
-            batch_tensor2.append(tensor2.size(i))
-
-        # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
-        expand_batch_portion = list(
-            torch.broadcast_shapes(batch_tensor1, batch_tensor2)
-        )
-
-        tensor1_expand_size = expand_batch_portion + [n, m1]
-        tensor2_expand_size = expand_batch_portion + [m2, p]
-
-        from functools import reduce
-        from operator import mul
-
-        expand_batch_product = reduce(mul, expand_batch_portion, 1)
-
-        # TODO: I'm not sure why the original C++ didn't need this
-        if dim_tensor2 <= 1:
-            tensor2 = tensor2.unsqueeze(-1)
-
-        tensor1_expanded = (
-            tensor1.expand(tensor1_expand_size)
-            .reshape(expand_batch_product, n, m1)
-        )
-        tensor2_expanded = (
-            tensor2.expand(tensor2_expand_size)
-            .reshape(expand_batch_product, m2, p)
-        )
-
-        # todo: copy ?
-        output_shape = expand_batch_portion
-        if dim_tensor1 > 1:
-            output_shape.append(n)
-
-        if dim_tensor2 > 1:
-            output_shape.append(p)
-
-        return tensor1_expanded.bmm(tensor2_expanded).view(output_shape)
-    else:
-        check(False, lambda: "both arguments to matmul need to be at least 1D")
 
 
 # CompositeImplicitAutograd - don't register decomp
