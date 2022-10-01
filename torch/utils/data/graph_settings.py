@@ -5,7 +5,7 @@ from typing import Any, List, Optional, Set
 
 import torch
 
-from torch.utils.data.graph import DataPipe, DataPipeGraph, traverse
+from torch.utils.data.graph import DataPipe, DataPipeGraph, traverse_dps
 
 __all__ = [
     "apply_random_seed",
@@ -32,7 +32,7 @@ def _get_all_graph_pipes_helper(graph: DataPipeGraph, id_cache: Set[int]) -> Lis
 
 
 def apply_sharding(datapipe: DataPipe, num_of_instances: int, instance_id: int) -> DataPipe:
-    graph = traverse(datapipe, only_datapipe=True)
+    graph = traverse_dps(datapipe)
     all_pipes = get_all_graph_pipes(graph)
     already_applied_to = None
     for pipe in all_pipes:
@@ -67,7 +67,7 @@ def apply_shuffle_settings(datapipe: DataPipe, shuffle: Optional[bool] = None) -
     if shuffle is None:
         return datapipe
 
-    graph = traverse(datapipe, only_datapipe=True)
+    graph = traverse_dps(datapipe)
     all_pipes = get_all_graph_pipes(graph)
     shufflers = [pipe for pipe in all_pipes if _is_shuffle_datapipe(pipe)]
     if not shufflers and shuffle:
@@ -107,7 +107,7 @@ def apply_random_seed(datapipe: DataPipe, rng: torch.Generator) -> DataPipe:
         datapipe: DataPipe that needs to set randomness
         rng: Random number generator to generate random seeds
     """
-    graph = traverse(datapipe, only_datapipe=True)
+    graph = traverse_dps(datapipe)
     all_pipes = get_all_graph_pipes(graph)
     # Using a set to track id of DataPipe to prevent setting randomness per DataPipe more than once.
     # And, `id` is used in case of unhashable DataPipe
