@@ -9,7 +9,6 @@ from torchgen.api.types import (
     Expr,
     intArrayRefT,
     iOptTensorListRefT,
-    iTensorListRefT,
     layoutT,
     ListCType,
     longT,
@@ -20,6 +19,7 @@ from torchgen.api.types import (
     OptionalCType,
     optionalIntArrayRefT,
     optionalScalarRefT,
+    optionalSymIntArrayRefT,
     optionalTensorRefT,
     scalar_t,
     scalarT,
@@ -27,7 +27,6 @@ from torchgen.api.types import (
     SpecialArgName,
     symIntArrayRefT,
     SymIntT,
-    tensorListT,
     tensorOptionsT,
     tensorT,
     VectorCType,
@@ -183,12 +182,6 @@ def translate(
             ctx[
                 NamedCType(t.name, BaseCType(opmath_t))
             ] = f"static_cast<opmath_t>({b.expr})"
-
-        # [Note: ITensorListRef]
-        if t.type == BaseCType(tensorListT):
-            ctx[
-                NamedCType(t.name, BaseCType(iTensorListRefT))
-            ] = f"at::ITensorListRef({b.expr})"
 
         # [Note: IOptTensorListRef]
         if t.type == ConstRefCType(ListCType(OptionalCType(BaseCType(tensorT)))):
@@ -358,7 +351,20 @@ Check this module for more information.
             )
             return f"{argname}.has_value() ? c10::make_optional({argname}->expect_int()) : c10::nullopt"
         elif goal.type == BaseCType(optionalIntArrayRefT):
-            return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
+            try:
+                return direct_solve(NamedCType(goal.name, optionalLongVec_ctype))
+            except UnsatError:
+                argname = direct_solve(
+                    NamedCType(goal.name, BaseCType(optionalSymIntArrayRefT))
+                )
+                return f"{argname}.has_value() ? c10::make_optional(c10::asIntArrayRefSlow(*{argname})) : c10::nullopt"
+        elif goal.type == BaseCType(optionalSymIntArrayRefT):
+            # TODO: You might also want to solve this from longSymVec_ctype or
+            # an optional version of it
+            argname = direct_solve(
+                NamedCType(goal.name, BaseCType(optionalIntArrayRefT))
+            )
+            return f"{argname}.has_value() ? c10::make_optional(c10::fromIntArrayRef(*{argname})) : c10::nullopt"
         elif goal.type == BaseCType(optionalScalarRefT):
             return direct_solve(NamedCType(goal.name, optionalScalar_ctype))
         elif goal.type == BaseCType(optionalTensorRefT):

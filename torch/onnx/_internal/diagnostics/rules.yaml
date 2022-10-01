@@ -1,0 +1,83 @@
+# PyTorch ONNX Exporter (POE) Rules are based on sarif ReportingDescriptor format.
+
+# TODO: Define additional format requirements on top of sarif for our usage.
+#       For example: pre defined keys for message_strings for logging on different levels.
+# TODO: Based on above, create helper script to generate new rules.
+# TODO: Separate rules into individual files.
+# TODO: These rules are for demonstration purposes only. They are not complete.
+
+- id: POE0001
+  name: node-missing-onnx-shape-inference
+  short_description:
+    text: Node is missing ONNX shape inference.
+  full_description:
+    text: ""
+    markdown: |
+      Node is missing ONNX shape inference.
+      This usually happens when the node is not valid under standard ONNX operator spec.
+  message_strings:
+    default:
+      text: "The shape inference of {0} type is missing, so it may result in wrong shape inference for the exported graph.
+      Please consider adding it in symbolic function."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: POE0002
+  name: missing-custom-symbolic-function
+  short_description:
+    text: Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.
+  full_description:
+    text: ""
+    markdown: |
+      Missing symbolic function for custom PyTorch operator, cannot translate node to ONNX.
+  message_strings:
+    default:
+      text: "ONNX export failed on an operator with unrecognized namespace {0}.
+      If you are trying to export a custom operator, make sure you registered
+      it with the right domain and version."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+- id: POE0003
+  name: missing-standard-symbolic-function
+  short_description:
+    text: Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.
+  full_description:
+    text: ""
+    markdown: |
+      Missing symbolic function for standard PyTorch operator, cannot translate node to ONNX.
+  message_strings:
+    default:
+      text: "Exporting the operator '{0}' to ONNX opset version {1} is not supported.
+      Please feel free to request support or submit a pull request on PyTorch GitHub: {2}."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
+
+
+- id: POE0004
+  name: operator-supported-in-newer-opset-version
+  short_description:
+    text: Operator is supported in newer opset version.
+  full_description:
+    text: ""
+    markdown: |
+      Operator is supported in newer opset version.
+
+      Example:
+      ```python
+      torch.onnx.export(model, args, ..., opset_version=9)
+      ```
+  message_strings:
+    default:
+      text: "Exporting the operator '{0}' to ONNX opset version {1} is not supported.
+      Support for this operator was added in version {2}, try exporting with this version."
+  help_uri:
+  properties:
+    deprecated: false
+    tags: []
