@@ -186,7 +186,9 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
     // For View tensors, the storage offset can be bigger than what's being reported by nbytes
     src_total_size = at::detail::computeStorageNbytesContiguous(src.sizes(), src.element_size(), src.storage_offset());
   } else {
-    src = src_;
+    // Views are not the only source of non-contiguous tensors
+    // For example, tensor constructed from ndarray can be non-contagious
+    src = src_.contiguous();
     if (src.dtype() != dst_.dtype()) {
       // In case of dtype change, perform conversion on source device
       src = src.to(dst_.dtype());
