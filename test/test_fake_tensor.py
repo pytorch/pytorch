@@ -227,14 +227,6 @@ class FakeTensorTest(TestCase):
             out = x + y
         self.checkType(out, "cuda", [1])
 
-    def test_recursive_invocation(self):
-        mode = FakeTensorMode()
-        with mode:
-            x = torch.tensor(2)
-            mode.in_kernel_invocation = True
-            y = x + x
-            self.assertTrue(mode.in_kernel_invocation)
-
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cudnn_rnn(self):
