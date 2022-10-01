@@ -24,6 +24,7 @@ __all__ = [
     "i1e",
     "logit",
     "multigammaln",
+    "spherical_bessel_j0",
     "zeta",
 ]
 
@@ -90,6 +91,14 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     c = 0.25 * p * (p - 1) * math.log(math.pi)
     b = 0.5 * torch.arange(start=(1 - p), end=1, step=1, dtype=a.dtype, device=a.device)
     return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_spherical_bessel_j0,
+)
+def spherical_bessel_j0(a):
+    return prims.spherical_bessel_j0(a)
 
 
 zeta = _make_elementwise_binary_reference(

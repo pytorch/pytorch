@@ -675,6 +675,12 @@ python_ref_db: List[OpInfo] = [
         supports_nvfuser=False,
         op_db=op_db,
     ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.spherical_bessel_j0",
+        torch_opinfo_name="special.spherical_bessel_j0",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
     #
     # Elementwise Binary Special OpInfos
     #
