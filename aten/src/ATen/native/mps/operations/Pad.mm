@@ -107,23 +107,20 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
     grad_output = grad_output_.contiguous();
   }
 
-  const int64_t input_dim = input.dim();
-  MPSShape *leftPadding = nullptr, *rightPadding = nullptr;
-  if (padding_dim == 3) {
-    leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_front), @(pad_t), @(pad_l) } count:input_dim];
-    rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_back), @(pad_b), @(pad_r) } count:input_dim];
-  } else if (padding_dim == 2) {
-    leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_t), @(pad_l) } count:input_dim];
-    rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_b), @(pad_r) } count:input_dim];
-  } else if (padding_dim == 1) {
-    if (input_dim > 1) {
-      leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_l) } count:input_dim];
-      rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_r) } count:input_dim];
-    } else {
-      leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(pad_l) } count:input_dim];
-      rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(pad_r) } count:input_dim];
-    }
+  std::vector<NSNumber*> leftPadVec(ndims, @(0));
+  std::vector<NSNumber*> rightPadVec(ndims, @(0));
+  leftPadVec [ndims - 1] = @(pad_l);
+  rightPadVec[ndims - 1] = @(pad_r);
+  if (padding_dim >= 2) {
+    leftPadVec [ndims - 2] = @(pad_t);
+    rightPadVec[ndims - 2] = @(pad_b);
   }
+  if (padding_dim >= 3) {
+    leftPadVec [ndims - 3] = @(pad_front);
+    rightPadVec[ndims - 3] = @(pad_back);
+  }
+  MPSShape *leftPadding  = [NSArray arrayWithObjects:leftPadVec.data() count:ndims];
+  MPSShape *rightPadding = [NSArray arrayWithObjects:rightPadVec.data() count:ndims];
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) { }
