@@ -1588,7 +1588,7 @@ class TestFreezing(JitTestCase):
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 self.idx += 1
-                if self.idx%2 == 1:
+                if self.idx % 2 == 1:
                     self.impl = self.option1
                 else:
                     self.impl = self.option2

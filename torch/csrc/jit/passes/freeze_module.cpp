@@ -490,7 +490,6 @@ class AttributePropagator {
     return inlined;
   }
 
-
   //   [Note: Inlining interfaces strategy]
   // There's two structures that are relevant to freezing:
   // - the graph describing the computation in a method
