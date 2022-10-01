@@ -1547,6 +1547,11 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group.
 
     """
+    warnings.warn(
+        "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+    )
     _check_tensor_list(tensors, "tensor")
     _ensure_all_tensors_same_dtype(tensors)
     if _rank_not_in_group(group):
@@ -2394,6 +2399,11 @@ def all_gather_coalesced(
     performance improvements but users of this function should take extra care
     to ensure that each node passes in tensors whose shapes match across nodes.
     """
+    warnings.warn(
+        "torch.distributed.all_gather_coalesced will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+    )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
     if _rank_not_in_group(group):
