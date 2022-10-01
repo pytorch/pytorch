@@ -1392,6 +1392,12 @@ void initJITBindings(PyObject* module) {
                 return a->mod(snb);
               })
           .def(
+              "__rmod__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return snb->mod(a);
+              })
+          .def(
               "__eq__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 auto snb = toSymIntNode(a, b);
