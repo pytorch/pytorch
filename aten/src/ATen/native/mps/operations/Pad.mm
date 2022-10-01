@@ -293,6 +293,11 @@ Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& i
 // backward pass is exlicitly handled in autograd by negating the "pad" argument
 Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& value)
 {
+  if (pad.size() > 6) {
+    TORCH_WARN_ONCE("MPS: The constant padding of more than 3 dimensions is not currently supported natively. ",
+                    "It uses View Ops default implementation to run. This may have performance implications.");
+    return at::native::constant_pad_nd(self, pad, value);
+  }
   Tensor output = at::empty({0}, self.options());
   return mps::pad_out_template(output, self, pad, c10::nullopt, MPSGraphPaddingModeConstant, value.toDouble(), __func__);
 }
