@@ -133,7 +133,7 @@ jobs:
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.github-token }}
       - name: Clean workspace
@@ -173,7 +173,7 @@ jobs:
         run: |
           echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
       - name: Pull Docker image
-        uses: ./pytorch/.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
       - name: Build PyTorch binary
@@ -223,7 +223,7 @@ jobs:
 
       - name: Teardown Linux
         if: always()
-        uses: ./pytorch/.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
         if: always()

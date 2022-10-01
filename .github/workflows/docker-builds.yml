@@ -81,7 +81,7 @@ jobs:
           push-ghcr-image: ${{ github.event_name == 'push' }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
@@ -90,5 +90,6 @@ jobs:
         if: always()
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+
         if: always()
