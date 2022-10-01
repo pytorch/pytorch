@@ -711,7 +711,7 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
   } else if (ivalue.isString()) {
     ivalue_type = IValueUnion::String;
     offset = mobile::serialization::CreateString(
-                 fbb, fbb.CreateSharedString(ivalue.toString()->string()))
+                 fbb, fbb.CreateSharedString(ivalue.toStringRef()))
                  .Union();
   } else if (ivalue.isGenericDict()) {
     ivalue_type = IValueUnion::Dict;
