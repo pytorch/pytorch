@@ -1546,8 +1546,7 @@ Tensor var_backward(
     if (n == correction) {
       return INFINITY * grad;
     } else {
-      // TODO: sym_numel
-      return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
+      return (c10::SymFloat(2.0) / c10::SymFloat(self.sym_numel() - correction)) * grad * (self - self.mean());
     }
   }
   auto dim = dim_opt.value();
