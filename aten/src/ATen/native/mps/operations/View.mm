@@ -201,7 +201,9 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
     // IntArrayRef wouldn't own the data, so we use a static storage
     static const int64_t shape_1d = 1;
     // self.sizes().size() could be zero
-    base_shape = self.sizes().size() ? self.sizes() : IntArrayRef(&shape_1d, 1);
+    base_shape = self.sizes().size() ? self.sizes() :
+                      self.is_view() ? self._base().sizes() : IntArrayRef(&shape_1d, 1);
+
     // base_shape will be retained in MPSAllocator until buffer gets recycled
     if (self.storage().data())
       set_buffer_shape(self.storage().data(), base_shape);
@@ -232,7 +234,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
               newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]));
             }
             if (needsScatter) {
-              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()));
+              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, inputType);
             }
             newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast);
         }

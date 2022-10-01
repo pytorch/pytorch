@@ -1,42 +1,42 @@
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
-#include <c10d/FileStore.hpp>
-#include <c10d/TCPStore.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/TCPStore.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifndef _WIN32
-#include <c10d/HashStore.hpp>
-#include <c10d/ProcessGroupRoundRobin.hpp>
+#include <torch/csrc/distributed/c10d/HashStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 #endif
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/PyProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
 
 #ifdef USE_C10D_GLOO
-#include <c10d/ProcessGroupGloo.hpp>
-#include <c10d/ProcessGroupWrapper.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 #endif
 
 #ifdef USE_C10D_NCCL
-#include <c10d/NCCLUtils.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
-#include <c10d/ProcessGroupMPI.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
 #endif
 
 #ifdef USE_C10D_UCC
-#include <c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #endif
 
-#include <c10d/PrefixStore.hpp>
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
-#include <c10d/comm.hpp>
-#include <c10d/debug.h>
-#include <c10d/logger.hpp>
-#include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/debug.h>
+#include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/Ops.hpp>
@@ -640,6 +640,20 @@ They are used in specifying strategies for reduction collectives, e.g.,
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
+
+  py::class_<::c10d::DistributedBackendOptions>(
+      module, "_DistributedBackendOptions")
+      .def(py::init<>())
+      .def_readwrite("store", &::c10d::DistributedBackendOptions::store)
+      .def_readwrite(
+          "group_rank", &::c10d::DistributedBackendOptions::group_rank)
+      .def_readwrite(
+          "group_size", &::c10d::DistributedBackendOptions::group_size)
+      .def_readwrite("timeout", &::c10d::DistributedBackendOptions::timeout)
+      .def_readwrite("group_id", &::c10d::DistributedBackendOptions::group_id)
+      .def_readwrite(
+          "global_ranks_in_group",
+          &::c10d::DistributedBackendOptions::global_ranks_in_group);
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
