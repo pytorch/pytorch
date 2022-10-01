@@ -411,29 +411,15 @@ std::vector<Shape> compute_shape_std(
   return {Shape(self.scalar_type(), {})};
 }
 
-std::vector<Shape> compute_shape_embedding_dense_backward_symint(
+std::vector<Shape> compute_shape_embedding_dense_backward(
     const at::Tensor& grad_output,
     const at::Tensor& indices,
-    c10::SymInt num_weights,
+    int64_t num_weights,
     int64_t padding_idx,
     bool scale_grad_by_freq) {
   // Based on aten/src/ATen/native/Embedding.cpp::embedding_dense_backward_cpu.
-
-  if (num_weights.is_symbolic()) {
-    c10::SymIntNode symbolicIntNode = num_weights.toSymIntNodeImpl();
-    auto* lazySymIntNode =
-        dynamic_cast<torch::lazy::SymIntNodeImpl*>(symbolicIntNode.get());
-    TORCH_INTERNAL_ASSERT(lazySymIntNode);
-    auto size_node = lazySymIntNode->node_;
-    auto static_value =
-        std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)
-            ->getStaticValue();
-    return {
-        Shape(grad_output.scalar_type(), {static_value, grad_output.size(-1)})};
-  }
-  return {Shape(
-      grad_output.scalar_type(),
-      {num_weights.as_int_unchecked(), grad_output.size(-1)})};
+  return {
+      Shape(grad_output.scalar_type(), {num_weights, grad_output.size(-1)})};
 }
 
 std::vector<Shape> compute_shape_expand(
