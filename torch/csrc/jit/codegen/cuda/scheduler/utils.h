@@ -78,16 +78,12 @@ TORCH_CUDA_CU_API inline c10::optional<size_t> mergeDims(
 }
 
 // Merge all reduction to the right side and returns total number of
-// reduction axes. Don't merge is typically used for trivial reductions.
-size_t mergeReduction(
-    TensorView* tv,
-    const std::unordered_set<IterDomain*>& dont_merge = {});
+// reduction axes.
+size_t mergeReduction(TensorView* tv);
 
 // merge all non-reduction axes to the left side and returns total number of
-// iteration axes. Don't merge is typically used for trivial reductions.
-size_t mergeNonReduction(
-    TensorView* tv,
-    const std::unordered_set<IterDomain*>& dont_merge = {});
+// iteration axes.
+size_t mergeNonReduction(TensorView* tv);
 
 // Propagate the parallelization from the selected dimensions of the reference
 // tensor to their corresponding dimensions in all selected tensors in the DAG.
