@@ -118,6 +118,7 @@ def create_symbolic_tensor(name, arg, shape_env, storage_offset=0):
 CPP_SYMINT_CLASS = type(torch.SymIntNode.new_symint(1))
 
 
+@skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")
 class TestPySymInt(TestCase):
 
     @skipIfNoSympy
