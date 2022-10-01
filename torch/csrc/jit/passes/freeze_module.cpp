@@ -206,11 +206,6 @@ class AttributePropagator {
   }
 
   bool _loadModulePath(Value* input, std::shared_ptr<Graph>& graph) {
-    if (!input->type()->cast<InterfaceType>() &&
-        !input->type()->expectRef<ClassType>().is_module()) {
-      return false;
-    }
-
     Node* node = input->node();
     names_.clear();
     while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
@@ -572,12 +567,20 @@ class AttributePropagator {
           auto attrModule = module_;
           auto input = n->inputs()[0];
 
+          if (!input->type()->cast<InterfaceType>() &&
+              !input->type()->expectRef<ClassType>().is_module()) {
+            // we only care if we're setattr["thing"](%mod) if %mod
+            continue;
+          }
+
           // note: this will modify attrModule until it is the parent of the
           // "name" attr. In other words, attrModule is now the module that
           // matches "input".
-          TORCH_CHECK(
-              findConstantAttr(input, name, attrModule, graph),
-              "failed to freeze interface attribute '" + name + "'");
+          // We can't use findConstantAttr in case the base item is an object,
+          // instead of a module/interface.
+          auto path = getModulePath(input, graph);
+          TORCH_INTERNAL_ASSERT(path.has_value());
+          getModuleFromPath(attrModule, path->begin(), path->end());
 
           const auto& attrType = attrModule.type()->getAttribute(name);
           TORCH_INTERNAL_ASSERT(

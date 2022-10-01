@@ -1703,6 +1703,83 @@ class TestFreezing(JitTestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_freeze_non_interface_module_swap(self):
+        class InnerModule(torch.nn.Module):
+            def __init__(self, x):
+                super(InnerModule, self).__init__()
+                self.x = x
+
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return inp.relu() + self.x
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.option1 = InnerModule(torch.rand((2, 2)))
+                self.option2 = InnerModule(torch.rand((2, 2)))
+                self.impl = self.option1
+                self.idx = 0
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                self.idx += 1
+                if self.idx % 2 == 1:
+                    self.impl = self.option1
+                else:
+                    self.impl = self.option2
+                return self.impl(x)
+
+        unfrozen = WrapperModule()
+        m = torch.jit.script(unfrozen)
+        m.eval()
+        m_frozen = torch.jit.freeze(m)
+
+        x = torch.rand((2, 2))
+        expected = unfrozen(x)
+        actual = m_frozen(x)
+        self.assertEqual(expected, actual)
+
+    @unittest.expectedFailure
+    def test_freeze_interface_within_object(self):
+        # I don't think there's any way to create a plain python object that
+        # contains a torch.nn.Module inside it, but just in case... I'm not
+        # sure freezing would handle this case correctly, so marking as xfail
+        # so that if this ever _does_ start working someone will need to
+        # investigate to make sure this is handled correctly.
+        class MyIface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class MyImpl(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                return inp.sin()
+
+        class MyObject:
+            impl: MyIface
+
+            def run(self, x):
+                return self.impl(x)
+
+        class WrapperModule(torch.nn.Module):
+            impl: MyObject
+
+            def __init__(self):
+                super().__init__()
+                self.impl = MyObject()
+                self.impl.impl = MyImpl()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.impl(x)
+
+        unfrozen = WrapperModule()
+        m = torch.jit.script(unfrozen)
+        m.eval()
+        m_frozen = torch.jit.freeze(m)
+
+        x = torch.rand((2, 2))
+        expected = unfrozen(x)
+        actual = m_frozen(x)
+        self.expectEqual(expected, actual)
+
     def test_freeze_non_module_class_getattr(self):
         class BoxCoder(object):
             def __init__(self, bbox_xform_clip):
