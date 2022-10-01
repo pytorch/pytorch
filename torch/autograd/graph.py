@@ -161,15 +161,10 @@ _ctx_id = 0
 _inside_ctx = False
 
 def _get_tid(t) -> Tuple[int, int]:
-    return (id(t), t._version)
+    return (id(t), t.data_ptr(), t._version)
 
 def _get_sid(t) -> Tuple[int, int]:
-    if t._is_view():
-        base = t._base
-        sid = (base.data_ptr(), base._version)
-    else:
-        sid = (t.data_ptr(), t._version)
-    return sid
+    return (t.data_ptr(), t._version)
 
 class _Handle():
     pass
