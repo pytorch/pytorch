@@ -462,6 +462,9 @@ def define_qnnpack(third_party, labels = []):
         ],
         force_static = True,
         labels = labels,
+        macosx_compiler_flags = [
+            "-DUSE_MAC_ARM64_INSTRUCTION_SEPARATOR",
+        ],
         platform_compiler_flags = [
             (
                 # iOS assembler doesn't let us specify ISA in the assembly file,
