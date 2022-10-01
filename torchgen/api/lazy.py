@@ -66,7 +66,7 @@ tensorListValueT = BaseCppType("torch::lazy", "Value")
 
 
 def process_ir_type(
-    typ: Type, properties: "LazyIrProperties", *, symint: bool
+    typ: Type, properties: "LazyIrProperties"
 ) -> Union[BaseCType, VectorCType, OptionalCType, ListCType]:
     """
     This function takes a type from NativeFunctions and converts it for use with
@@ -97,10 +97,7 @@ def process_ir_type(
         elif typ.name == BaseTy.int:
             return BaseCType(longT)
         elif typ.name == BaseTy.SymInt:
-            if symint:
-                return BaseCType(getValueT())
-            else:
-                return BaseCType(longT)
+            return BaseCType(getValueT())
         elif typ.name == BaseTy.bool:
             return BaseCType(boolT)
         elif typ.name == BaseTy.float:
@@ -116,7 +113,7 @@ def process_ir_type(
         else:
             raise AssertionError(f"TODO add support for type {repr(typ)}")
     elif isinstance(typ, OptionalType):
-        return OptionalCType(process_ir_type(typ.elem, properties, symint=symint))
+        return OptionalCType(process_ir_type(typ.elem, properties))
     elif isinstance(typ, ListType):
         if str(typ.elem) == "Tensor?":
             # TODO(whc) is this actually correct? or should it use a Vector like above
@@ -135,7 +132,7 @@ def process_ir_type(
             return VectorCType(BaseCType(longT))
 
         else:
-            return VectorCType(process_ir_type(typ.elem, properties, symint=symint))
+            return VectorCType(process_ir_type(typ.elem, properties))
     else:
         raise AssertionError(f"unrecognized type {repr(typ)}")
 
@@ -227,7 +224,7 @@ class LazyArgument:
             # its null and safe to exclude from lazy IR
             self.lazy_type_ = None
         else:
-            self.lazy_type_ = process_ir_type(arg.type, properties, symint=symint)
+            self.lazy_type_ = process_ir_type(arg.type, properties)
         self.is_wrapped_scalar = isWrappedScalarType(arg.type)
         self.is_symint_or_list = symint and (
             isSymIntType(arg.type)
