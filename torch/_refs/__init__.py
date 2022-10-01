@@ -3589,7 +3589,7 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 @register_decomposition(torch.ops.aten.view, disable_meta=True)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
-    return _reshape_view_helper(a, *shape, allow_copy=True)
+    return _reshape_view_helper(a, *shape, allow_copy=False)
 
 
 # CompositeImplicitAutograd - don't register decomp
