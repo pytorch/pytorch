@@ -201,10 +201,8 @@ supported:
   - logsumexp.out
 symint:
   - empty.memory_format
-  - expand
   - expand_copy
   - narrow_copy
-  - view
   - view_copy
   - as_strided_copy
   - as_strided_scatter
