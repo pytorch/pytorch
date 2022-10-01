@@ -1264,8 +1264,6 @@ symbolic_tensor_failures = {
     xfail('slice_scatter', ''),  # aten.slice_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('sort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
-    xfail('special.bessel_j0', ''),  # aten.special_bessel_j0.default - couldn't find symbolic meta function/decomposition
-    xfail('special.bessel_j1', ''),  # aten.special_bessel_j1.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y1', ''),  # aten.special_bessel_y1.default - couldn't find symbolic meta function/decomposition
     xfail('special.chebyshev_polynomial_t', ''),  # aten.special_chebyshev_polynomial_t.default - couldn't find symbolic me...
