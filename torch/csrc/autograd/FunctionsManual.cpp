@@ -647,8 +647,7 @@ Tensor mean_backward(
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
-  // TODO: don't guard
-  return sum_backward(grad, shape, opt_dim, keepdim) / n.guard_int(__FILE__, __LINE__);
+  return sum_backward(grad, shape, opt_dim, keepdim) / n;
 }
 
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
