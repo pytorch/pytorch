@@ -1,7 +1,7 @@
 # IMPORTANT:
-# This file is ONLY used to subscribe for the notifications for a
-# PRs related to a specific files. People in this file are
-# notrequire the approval for your changes.
+# This file is ONLY used to subscribe for notifications for PRs
+# related to a specific file path. Approvals from people in this
+# file are not required for merges.
 
 # This is a comment.
 # Each line is a file pattern followed by one or more owners.
@@ -14,7 +14,7 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/nn/ @albanD @jbschlosser @saketh-are
+/torch/nn/ @albanD @jbschlosser
 /torch/optim/ @albanD
 /test/test_public_bindings.py @albanD
 /test/allowlist_for_publicAPI.json @albanD @anjali411
@@ -47,22 +47,22 @@ nn/qat/ @jerryzh168 @vkuzo
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
-/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
-/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu
+/torch/csrc/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu @kwen2501
+/torch/distributed/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu @kwen2501
+/torch/nn/parallel/ @mrshenli @zhaojuanmao @pritamdamania87 @rohan-varma @mingzhe09088 @H-Huang @awgu @kwen2501
 
 # Distributed tests
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
 # or remove yourself from it.
-/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
-/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu
+/test/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501
+/torch/testing/_internal/distributed @mrshenli @pritamdamania87 @zhaojuanmao @rohan-varma @H-Huang @awgu @kwen2501
 
 # ONNX Export
-/torch/csrc/jit/passes/onnx.h @bowenbao @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @bowenbao @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @bowenbao @shubhambhokare1
-/torch/onnx/ @bowenbao @shubhambhokare1
-/test/onnx/ @bowenbao @shubhambhokare1
+/torch/csrc/jit/passes/onnx.h @bowenbao @abock
+/torch/csrc/jit/passes/onnx.cpp @bowenbao @abock
+/torch/csrc/jit/passes/onnx/ @bowenbao @abock
+/torch/onnx/ @bowenbao @abock
+/test/onnx/ @bowenbao @abock
 
 # Docker
 /.circleci/docker/ @jeffdaily
