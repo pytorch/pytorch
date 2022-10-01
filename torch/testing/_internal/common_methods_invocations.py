@@ -28,6 +28,7 @@ from torch.testing._internal.common_cuda import (
     CUDA11OrLater, SM53OrLater, SM60OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version)
 from torch.testing._internal.common_utils import (
+    TEST_OPT_EINSUM,
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
@@ -5126,9 +5127,10 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                   args=('jk,ikl,ijk,lm->mk',),
                   kwargs={'path': [(0, 2), (0, 1), (0, 1)]}))
-    inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
-                  args=('jk,ikl,ijk,lm->mk',),
-                  kwargs={'path': 'use_opt_einsum'}))
+    if TEST_OPT_EINSUM:
+        inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
+                      args=('jk,ikl,ijk,lm->mk',),
+                      kwargs={'path': 'use_opt_einsum'}))
     inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                   args=('jk,ikl,ijk,lm->mk',),
                   kwargs={'path': 'skip_path_calculation'}))

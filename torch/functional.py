@@ -362,6 +362,11 @@ def einsum(*args: Any,
         raise ValueError('einsum(): must specify the equation string and at least one operand, '
                          'or at least one operand and its subscripts list')
 
+    # validate path kwarg if str
+    if isinstance(path, str) and path not in ['use_opt_einsum_if_available', 'use_opt_einsum', 'skip_path_calculation']:
+        raise RuntimeError("einsum(): unrecognized value for path kwarg, path should be a Sequence or one of three "
+                           "strings: 'use_opt_einsum_if_available', 'use_opt_einsum', 'skip_path_calculation'")
+
     equation = None
     operands = None
 
@@ -431,13 +436,8 @@ def einsum(*args: Any,
         raise RuntimeError("einsum(): path is set to use_opt_einsum, but opt_einsum is not available to calculate "
                            "the optimal path")
 
-    # go the default path; path should only be 'use_opt_einsum_if_available' now
-    if path == 'use_opt_einsum_if_available':
-        path_to_pass = None
-    else:
-        raise RuntimeError("einsum(): unrecognized value for path kwarg, path should be a Sequence or one of three "
-                           "strings: 'use_opt_einsum_if_available', 'use_opt_einsum', 'skip_path_calculation'")
-
+    # path will use opt_einsum, since path must be 'use_opt_einsum_if_available' or 'use_opt_einsum'
+    path_to_pass = None
     if _opt_einsum is not None:
         tupled_path = _opt_einsum.contract_path(equation, *operands)[0]
         # flatten path for dispatching to C++
