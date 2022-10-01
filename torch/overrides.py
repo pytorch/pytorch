@@ -495,7 +495,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.linalg.eigvals: lambda input, out=None: -1,
         torch.linalg.eigh: lambda input, UPLO="L", out=None: -1,
         torch.linalg.eigvalsh: lambda input, UPLO="L", out=None: -1,
-        torch.einsum: lambda equation, *operands, path='use_opt_einsum_if_available': -1,
+        torch.einsum: lambda equation, *operands, path=None: -1,
         torch.embedding: (lambda input, weight, padding_idx=None, max_norm=None, norm_type=2.0, scale_grad_by_freq=False,
                           sparse=False: -1),
         torch.embedding_bag: (lambda input, weight, offsets, max_norm=None, norm_type=2, scale_grad_by_freq=False,

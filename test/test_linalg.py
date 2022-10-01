@@ -3771,7 +3771,7 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum_contraction_path(self, device, dtype):
-        def check(equation, *operands, path='use_opt_einsum_if_available'):
+        def check(equation, *operands, path=None):
             np_ops = [op.cpu().numpy() for op in operands]
             res = torch.einsum(equation, *operands, path=path)
             ref = np.einsum(equation, *np_ops, optimize=('einsum_path', *path))
@@ -3934,7 +3934,7 @@ class TestLinalg(TestCase):
         check('a...b->ab', [[[1], [2]], [[3], [4]]], expected_output=[[3], [7]])
 
     def test_einsum_error_cases(self, device):
-        def check(*args, regex, exception=RuntimeError, path='use_opt_einsum_if_available'):
+        def check(*args, regex, exception=RuntimeError, path=None):
             with self.assertRaisesRegex(exception, r'einsum\(\):.*' + regex):
                 torch.einsum(*args, path=path)
 

@@ -198,7 +198,7 @@ def split(
 
 
 def einsum(*args: Any,
-           path: Union[str, Union[Sequence[int], Sequence[Tuple[int, int]]]] = 'use_opt_einsum_if_available') -> Tensor:
+           path: Optional[Union[str, Union[Sequence[int], Sequence[Tuple[int, int]]]]] = None) -> Tensor:
     r"""einsum(equation, *operands) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
@@ -282,8 +282,8 @@ def einsum(*args: Any,
             every pair of consecutive indices form a contraction, e.g. `optimize=[1, 2, 0, 1]` is the same path as
             in the previous example. If there is only one input operand, then the contraction path should be `[(0,)]`.
 
-            If `use_opt_einsum_if_available`: einsum will default to first calculating an optimized contraction path
-            with the help of opt_einsum if the package is installed in the same environment. If opt_einsum is not
+            If `use_opt_einsum_if_available` or None: einsum will default to first calculating an optimized contraction
+            path with the help of opt_einsum if the package is installed in the same environment. If opt_einsum is not
             available, path calculation will be skipped and tensors will be contracted from left to right. The default.
 
             If `skip_path_calculation`: einsum will skip path calculation and contract the tensors from left to right.
@@ -437,12 +437,12 @@ def einsum(*args: Any,
                            "the optimal path")
 
     # path will use opt_einsum, since path must be 'use_opt_einsum_if_available' or 'use_opt_einsum'
-    path_to_pass = None
+    path = None
     if _opt_einsum is not None:
         tupled_path = _opt_einsum.contract_path(equation, *operands)[0]
         # flatten path for dispatching to C++
-        path_to_pass = [item for pair in tupled_path for item in pair]
-    return _VF.einsum(equation, operands, path=path_to_pass)  # type: ignore[attr-defined]
+        path = [item for pair in tupled_path for item in pair]
+    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.
