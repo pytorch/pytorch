@@ -80,7 +80,7 @@ def _is_compiled() -> bool:
     return hasattr(torch._C, '_cuda_getDeviceCount')
 
 def _nvml_based_avail() -> bool:
-    return os.getenv('PYTORCH_NVML_BASED_CUDA_CHK') == '1'
+    return os.getenv('PYTORCH_NVML_BASED_CUDA_CHECK') == '1'
 
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""

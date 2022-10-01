@@ -477,7 +477,7 @@ have a flag that can be used to disable CUDA, in combination with
     CUDA Driver API (via `cuInit`_) if it is not already initialized, subsequent forks of a process that has run
     :meth:`~torch.cuda.is_available` will fail with a CUDA initialization error.
 
-    One can set ``PYTORCH_NVML_BASED_CUDA_CHK=1`` in your environment before importing PyTorch modules that execute
+    One can set ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` in your environment before importing PyTorch modules that execute
     :meth:`~torch.cuda.is_available` (or before executing it directly) in order to direct
     :meth:`~torch.cuda.is_available` to attempt an NVML-based assessement (`nvmlDeviceGetCount_v2`_). If the
     NVML-based assessment is successful (i.e. NVML discovery/initialization does not fail),
