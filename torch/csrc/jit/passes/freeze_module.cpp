@@ -490,6 +490,44 @@ class AttributePropagator {
     return inlined;
   }
 
+
+  //   [Note: Inlining interfaces strategy]
+  // There's two structures that are relevant to freezing:
+  // - the graph describing the computation in a method
+  // - the module describing the data structure of the module instance.
+  //
+  // First, in inlineInterfaceCalls, we inline interfaces. This is done in a
+  // separate step from normal inlining because CallMethod on an interface type
+  // requires extra steps compared to inlining a normal CallMethod.
+  //
+  // Next we need to simplify the structure of the module data structure, which
+  // is done for the most part by the usual steps in cleanupFrozenModule.
+  //
+  // However, there's a complication that comes from the fact that within a
+  // method, you can change the value of an interface to another module that
+  // implements that interface.
+  //
+  // For example:
+  //
+  // impl: MyInterface
+  // ...
+  // def forward(self, x):
+  //     if x > 0:
+  //         self.impl = my_interface_impl
+  //
+  // This is disallowed in freezing, because in this case we can't flatten out
+  // the module structure, since the type of self.impl will change.
+  //
+  // To handle this, we do the following:
+  //   1. inlineInterfaceCalls:
+  //     a. inline the graph, and in the process record all interfaces
+  //     b. simultaneously, check (throw error) for disallowed SetAttr calls.
+  //   2. call reassignInterfaceTypes, which reassigns interface types to their
+  //      concrete types. This is done in a separate step to avoid interfering
+  //      with inlineInterfaceCalls (note: this may not need to be done as a
+  //      separate step)
+  //   3. eventually cleanupFrozenModule will reorder the module data structure
+  //      and it will expect that all interface types have been removed.
   void inlineInterfaceCalls(
       std::shared_ptr<Graph>& graph,
       std::unordered_map<std::string, std::unordered_set<std::string>>&
@@ -522,11 +560,15 @@ class AttributePropagator {
 
           // Record this so that we can reassign the type later
           // in reassignInterfaceTypes()
+          // See [Note: Inlining interfaces strategy]
           auto path = getModulePath(input, graph);
           TORCH_INTERNAL_ASSERT(path.has_value());
           auto path_str = concatName(path->begin(), path->end());
           interfacesToRetype[path_str].insert(name);
         } else if (n->kind() == prim::SetAttr) {
+          // Check to make sure we're not assigning the value of any parameters
+          // that are interface types.
+          // See [Note: Inlining interfaces strategy]
           auto name = n->s(attr::name);
           auto attrModule = module_;
           auto input = n->inputs()[0];
@@ -560,6 +602,9 @@ class AttributePropagator {
     }
   }
 
+  // See [Note: Inlining interfaces strategy]
+  // This modifies the internal structure of module types to reassign the
+  // type from an interface type to its concrete type.
   void reassignInterfaceTypes(
       const std::unordered_map<std::string, std::unordered_set<std::string>>&
           interfacesToRetype) {
@@ -853,17 +898,10 @@ class AttributePropagator {
       if (isMutable) {
         attrsToKeep_[type].insert(i);
         if (attr.isModule()) {
-          // FIXME: This error is conservative. Detected an interface module
-          // that cannot be fully inlined away because of side effects.
-          // TODO: We could allow freezing in this case but we would need to
-          // 1) Change the module type to use the concrete type (attrTy).
-          // Probably first unsafe remove attribute and add it using concrete
-          // type.
-          // 2) Fail if there is any setattr to an interface attribute bc
-          // everything is inlined based on old value of this attribute.
+          // See [Note: Inlining interfaces strategy]
           TORCH_CHECK(
               !type->getAttribute(i)->cast<InterfaceType>(),
-              "failed to freeze interface attribute '" + name + "'");
+              "Unexpected interface attribute '" + name + "' during freezing");
 
           auto attrModule = attr.toModule();
           handleSharedClassType(attrModule, graph);
