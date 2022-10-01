@@ -336,7 +336,6 @@ def forward(self, x_1):
             self.assertTrue("square" not in str(n.target))
             self.assertTrue("norm" not in str(n.target))
 
-    @unittest.skip("way too slow")
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_resnet18_backward_trace(self):
         mod = torchvision.models.resnet18()
@@ -718,7 +717,6 @@ def xfail_inherited_tests(tests):
     "test_make_fx_model_fwd_bwd_wgtupdate",
     "test_make_fx_model_fwd_bwd",
     "test_proxy_tensor",
-    "test_resnet18_backward_trace",
     "test_trace_subclasses",
 ])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
@@ -826,10 +824,7 @@ class TestSymbolicTracing(TestCase):
         def f(a):
             return torch.empty(a.shape[0] * 2)
 
-        g = make_fx(f, tracing_mode="symbolic")(torch.empty(4))
-        g.graph.eliminate_dead_code()
-        g.recompile()
-        r = str(g.code).strip()
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0);  a_1 = None
@@ -842,20 +837,14 @@ def forward(self, a_1):
         def f(a):
             return a / a.shape[0]
 
-        g = make_fx(f, tracing_mode="symbolic")(torch.empty(4))
-        g.graph.eliminate_dead_code()
-        g.recompile()
-        r = str(g.code).strip()
+        r = str(make_fx(f, tracing_mode="symbolic")(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0)
     div = torch.ops.aten.div.Tensor(a_1, sym_size);  a_1 = sym_size = None
     return div""")
 
-        g = make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4))
-        g.graph.eliminate_dead_code()
-        g.recompile()
-        r = str(g.code).strip()
+        r = str(make_fx(f, tracing_mode="symbolic", decomposition_table=decomposition_table)(torch.empty(4)).code).strip()
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size = torch.ops.aten.sym_size(a_1, 0)
@@ -905,6 +894,7 @@ def forward(self, a_1):
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
         self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
 
+    @unittest.expectedFailure
     def test_backwards(self):
         def get_fw_bw(fn, *extra_args, **extra_kwargs):
             def tmp(*args):
@@ -920,7 +910,7 @@ def forward(self, a_1):
         shape_env = self._test_dynamic(get_fw_bw(torch.diag), [(2, 2)], [[(3, 3)], [(4, 4)]])
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
         self.assertFalse(shape_env.evaluate_guards_for_args(torch.randn(6, 5)))
-        assert len(shape_env.guards) == 3
+        self.assertEqual(len(shape_env.guards), 3)
 
         shape_env = self._test_dynamic(get_fw_bw(torch.diag, diagonal=1), [(3, 3)], [[(4, 4)], [(5, 5)]])
         self.assertTrue(shape_env.evaluate_guards_for_args(torch.randn(5, 5)))
