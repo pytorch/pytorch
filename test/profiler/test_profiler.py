@@ -127,6 +127,16 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
+        # Only testing that emit_itt runs when
+        # record_shapes option is enabled.
+        with torch.autograd.profiler.emit_itt(record_shapes=True) as prof:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            s = custom_layer(z)
+            q = s.sum()
+            q.backward()
+
 class TestRecordFunction(TestCase):
     def _record_function_with_param(self):
         u = torch.randn(3, 4, 5, requires_grad=True)
@@ -1238,7 +1248,7 @@ class TestProfiler(TestCase):
         a = torch.randn(4, 4)
         b = torch.randn(4, 4)
         c = torch.randn(4, 4)
-        inp = torch.nested_tensor([a, b])
+        inp = torch.nested.nested_tensor([a, b])
         with torch.profiler.profile(record_shapes=True) as prof:
             torch.nn.functional.linear(inp, c, None)
         for e in prof.events():
@@ -1249,7 +1259,6 @@ class TestProfiler(TestCase):
                 self.assertTrue(len(e.input_shapes[0]) > 0)
 
 
-
 def find_node_with_name(nodes, name):
     for node in nodes:
         if node.name() == name:
@@ -1258,7 +1267,85 @@ def find_node_with_name(nodes, name):
         if result is not None:
             return result
 
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(10, 5)
+        self.fc2 = nn.Linear(5, 2)
+
+    def forward(self, x):
+        return self.fc2(self.fc1(x))
+
+
 class TestTorchTidyProfiler(TestCase):
+
+    def test_pointers_and_ids(self):
+        a = torch.randn(4, 3)
+        a_initial_storage_data = a.storage().data_ptr()
+
+        # Views of tensors can share the same storage, but have different TensorImpls
+        b = a.view((1, 12))
+        c = torch.randn(4, 1)
+        c_initial_storage_data = c.storage().data_ptr()
+        d = torch.randn(4, 3)
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = a + c
+            _ = b * c
+
+            # Resize should create a new data_ptr but keep the TensorImpl the same.
+            f = a.resize_(128, 129)
+            _ = torch.relu(f)
+
+            # `.set_` points a Tensor at an existing storage.
+            _ = d.sin()
+            c.set_(d.storage())
+            _ = c.cos()
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+
+        def get_fields(op_name, index):
+            node = find_node_with_name(nodes, op_name)
+            self.assertIsNotNone(node)
+            self.assertIsInstance(
+                node.extra_fields,
+                torch._C._profiler._ExtraFields_TorchOp)
+            tensor_info = node.extra_fields.inputs.tensor_metadata[index]
+            self.assertIsNotNone(tensor_info.impl_ptr)
+            self.assertIsNotNone(tensor_info.storage_data_ptr)
+            self.assertIsNotNone(tensor_info.id)
+            return tensor_info.impl_ptr, tensor_info.storage_data_ptr, tensor_info.id
+
+        a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
+        b_impl, b_storage_data, b_id = get_fields("aten::mul", 0)
+
+        # Profiler matches ground truth from Python API.
+        self.assertEqual(a_storage_data, a_initial_storage_data)
+
+        # Views are handled correctly.
+        self.assertEqual(a_storage_data, b_storage_data)
+        self.assertNotEqual(a_impl, b_impl)
+
+        # The same Tensor used in multiple calls gives identical results.
+        c_impl, c_storage_data, c_id = get_fields("aten::add", 1)
+        self.assertEqual((c_impl, c_storage_data, c_id), get_fields("aten::mul", 1))
+        self.assertEqual(c_storage_data, c_initial_storage_data)
+
+        # Mutations to the underlying storage are reflected. (But ID is shared.)
+        f_impl, f_storage_data, f_id = get_fields("aten::relu", 0)
+        self.assertEqual(a_impl, f_impl)
+        self.assertNotEqual(a_storage_data, f_storage_data)
+        self.assertEqual(a_id, f_id)
+
+        # Calling `set_` with an existing Tensor makes them share an ID.
+        d_impl, d_storage_data, d_id = get_fields("aten::sin", 0)
+        c_impl_new, c_storage_data_new, c_id_new = get_fields("aten::cos", 0)
+        self.assertNotEqual(d_impl, c_impl_new)
+        self.assertEqual(d_storage_data, c_storage_data_new)
+        self.assertEqual(c_id, c_id_new)
+        self.assertEqual(d_id, c_id_new)
+
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
@@ -1400,18 +1487,10 @@ class TestTorchTidyProfiler(TestCase):
                 flat_out_extrafields(node.children, out)
             return out
 
-        class simpleNet(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(10, 5)
-                self.fc2 = nn.Linear(5, 2)
-
-            def forward(self, x):
-                return self.fc2(self.fc1(x))
 
         inputs = torch.rand(10)
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = simpleNet()
+            net = SimpleNet()
             out = net(inputs)
 
         modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
@@ -1421,6 +1500,62 @@ class TestTorchTidyProfiler(TestCase):
         expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
         expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
+
+    def _flat_out_extrafields(self, nodes, out=None):
+        if out is None:
+            out = []
+        for node in nodes:
+            if (isinstance(node.extra_fields, _ExtraFields_PyCall) and
+                    node.extra_fields.opt and node.extra_fields.opt.param_addrs):
+                # avoiding OptInfo duplicates from iterations
+                addr = node.extra_fields.opt.param_addrs[0]
+                if not [o for o in out if addr in o.param_addrs]:
+                    out.append(node.extra_fields.opt)
+            self._flat_out_extrafields(node.children, out)
+        return out
+
+    def _check_results(self, opt, opts, check_items=False):
+        self.assertEqual(len(opts), 1, "Expected 1 optimizer")
+        self.assertEqual(id(opt), opts[0].self, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self})")
+        if check_items:
+            self.assertEqual(len(opt.param_groups), len(opts))
+            for group, opt_ in zip(opt.param_groups, opts):
+                self.assertEqual(
+                    [(v.storage().data_ptr()) for v in group.get("params", [])],
+                    opt_.param_addrs
+                )
+
+    def test_optimizer(self):
+        inputs = torch.rand(10)
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
+            net = SimpleNet()
+            opt = torch.optim.SGD(net.parameters(), lr=0.01, momentum=0.9)
+
+            opt.zero_grad()
+            out = net(inputs)
+            loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+            loss.backward()
+            opt.step()
+        self._check_results(opt, self._flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree()), False)
+
+    def _test_optimizer_parameters(self, optimizer_factory):
+        inputs = torch.rand(10)
+        with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
+            net = SimpleNet()
+            opt = optimizer_factory(net.parameters())
+            for _ in range(2):
+                opt.zero_grad()
+                out = net(inputs)
+                loss = torch.nn.functional.cross_entropy(out, torch.rand(2))
+                loss.backward()
+                opt.step()
+        self._check_results(opt, self._flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree()), True)
+
+    def test_optimizer_parameters_sgd(self):
+        self._test_optimizer_parameters(lambda params: torch.optim.SGD(params, lr=0.01, momentum=0.9))
+
+    def test_optimizer_parameters_adam(self):
+        self._test_optimizer_parameters(lambda params: torch.optim.Adam(params, foreach=True))
 
     def test_allocations(self):
         gc.collect()
