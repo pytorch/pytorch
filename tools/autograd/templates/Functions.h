@@ -47,13 +47,13 @@ struct TypeAndSize {
   TypeAndSize() : options(at::TensorOptions()) {}
   /* implicit */
   TypeAndSize(const Tensor & t)
-    : sym_sizes(t.sym_sizes())
+    : sym_sizes(t.sym_sizes().vec())
     , options(t.options()) {}
 
   Tensor zeros() { return at::zeros_symint(sym_sizes, options); }
 
 private:
-  c10::SymIntArrayRef sym_sizes;
+  std::vector<c10::SymInt> sym_sizes;
   at::TensorOptions options;
 };
 
