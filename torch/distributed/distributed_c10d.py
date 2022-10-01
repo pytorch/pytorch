@@ -1328,6 +1328,12 @@ def broadcast_multigpu(tensor_list, src, group=None, async_op=False, src_tensor=
         None, if not async_op or if not part of the group
 
     """
+    warnings.warn(
+        "torch.distributed.broadcast_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("broadcast_multigpu")
         return
@@ -1425,6 +1431,12 @@ def all_reduce_multigpu(tensor_list, op=ReduceOp.SUM, group=None, async_op=False
         None, if not async_op or if not part of the group
 
     """
+    warnings.warn(
+        "torch.distributed.all_reduce_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         return
 
@@ -1614,6 +1626,12 @@ def reduce_multigpu(
         None, otherwise
 
     """
+    warnings.warn(
+        "torch.distributed.reduce_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("reduce_multigpu")
         return
@@ -1727,6 +1745,12 @@ def all_gather_multigpu(
         None, if not async_op or if not part of the group
 
     """
+    warnings.warn(
+        "torch.distributed.all_gather_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("all_gather_multigpu")
         return
@@ -2628,6 +2652,12 @@ def reduce_scatter_multigpu(
         None, if not async_op or if not part of the group.
 
     """
+    warnings.warn(
+        "torch.distributed.reduce_scatter_multigpu will be deprecated. If you must "
+        "use it, please revisit our documentation later at "
+        "https://pytorch.org/docs/master/distributed.html#multi-gpu-collective-functions"
+    )
+
     if _rank_not_in_group(group):
         _warn_not_in_group("reduce_scatter_multigpu")
         return
