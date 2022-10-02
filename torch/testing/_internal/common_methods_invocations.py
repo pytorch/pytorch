@@ -11130,7 +11130,6 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
-           aten_backward_name='im2col_backward',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,

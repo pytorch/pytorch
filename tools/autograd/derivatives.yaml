@@ -2259,20 +2259,11 @@
   self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
 - name: col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  self: col2im_backward(grad, kernel_size, dilation, padding, stride)
+  self: im2col(grad, kernel_size, dilation, padding, stride)
   result: auto_linear
 
 - name: im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  self: im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
-  result: auto_linear
-
-# NN double backwards support
-- name: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  grad_output: im2col(grad, kernel_size, dilation, padding, stride)
-  result: auto_linear
-
-- name: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  grad_output: col2im(grad, {grad_output.size(2), grad_output.size(3)}, kernel_size, dilation, padding, stride)
+  self: col2im(grad, {self.size(-2), self.size(-1)}, kernel_size, dilation, padding, stride)
   result: auto_linear
 
 - name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
