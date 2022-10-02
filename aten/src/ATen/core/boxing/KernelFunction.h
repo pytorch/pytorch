@@ -42,6 +42,16 @@ struct remove_symint<c10::optional<c10::SymInt>> {
   using type = c10::optional<int64_t>;
 };
 
+
+template <bool symint, typename T>
+struct maybe_keep_symint final {};
+
+template <typename T>
+struct maybe_keep_symint<true, T> { using type = T; };
+
+template <typename T>
+struct maybe_keep_symint<false, T> { using type = typename remove_symint<T>::type; };
+
 template <typename T>
 using fn_has_symint = typename guts::typelist::true_for_any_type<
   has_symint,
