@@ -177,8 +177,7 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
     return getPyObj().attr("__int__")().cast<int64_t>();
   }
 
-  // TODO: virtualize
-  SymFloat sym_float();
+  SymFloatNode sym_float() override;
 
   virtual std::string str() override {
     py::gil_scoped_acquire acquire;
@@ -299,11 +298,10 @@ SymFloatNode PythonSymIntNodeImpl::truediv(const SymIntNode& other) {
   return c10::make_intrusive<PythonSymFloatNodeImpl>(r);
 }
 
-SymFloat PythonSymIntNodeImpl::sym_float() {
+SymFloatNode PythonSymIntNodeImpl::sym_float() {
   py::gil_scoped_acquire acquire;
   return c10::make_intrusive<PythonSymFloatNodeImpl>(
-             getPyObj().attr("__sym_float__")())
-      ->toSymFloat();
+      getPyObj().attr("__sym_float__")());
 }
 
 namespace {
@@ -1392,6 +1390,12 @@ void initJITBindings(PyObject* module) {
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 auto snb = toSymIntNode(a, b);
                 return a->mod(snb);
+              })
+          .def(
+              "__rmod__",
+              [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
+                auto snb = toSymIntNode(a, b);
+                return snb->mod(a);
               })
           .def(
               "__eq__",
