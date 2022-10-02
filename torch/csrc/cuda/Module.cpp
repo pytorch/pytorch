@@ -1,4 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAConfig.h>
+#if AT_CUDNN_ENABLED()
+
+#include <ATen/native/cudnn/Macros.h>
+
+#endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -42,7 +48,7 @@ static bool in_bad_fork = false; // True for children forked after cuda init
 // Called in the forked child if cuda has already been initialized
 static void forked_child() {
   in_bad_fork = true;
-  torch::utils::set_run_yet_variable_to_false();
+  torch::utils::set_requires_cuda_init(true);
 }
 #endif
 
@@ -338,6 +344,16 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
+    PyObject* _unused,
+    PyObject* env) {
+  HANDLE_TH_ERRORS
+  c10::cuda::CUDACachingAllocator::setAllocatorSettings(
+      THPUtils_unpackString(env));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::cuda::device_synchronize();
@@ -513,32 +529,112 @@ PyObject* THCPModule_resetPeakMemoryStats(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
 }
 
+struct Frame {
+  PyCodeObject* code;
+  int lasti;
+};
+
+struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
+  std::vector<Frame> frames;
+  ~StackContext() {
+    for (auto& f : frames) {
+      Py_XDECREF((PyObject*)f.code);
+    }
+  }
+  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+    py::gil_scoped_acquire acquire;
+    auto r = std::make_unique<StackContext>();
+    PyFrameObject* f = PyEval_GetFrame();
+    Py_XINCREF(f);
+    while (f) {
+      r->frames.emplace_back(Frame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
+      auto f_back = PyFrame_GetBack(f);
+      Py_XDECREF(f);
+      f = f_back;
+    }
+    return r;
+  }
+};
+
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
+  using c10::cuda::CUDACachingAllocator::History;
   using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
-  const auto segmentInfoToDict = [](const SegmentInfo& segmentInfo) {
+  py::str device_s = "device";
+  py::str address_s = "address";
+  py::str total_size_s = "total_size";
+  py::str allocated_size_s = "allocated_size";
+  py::str active_size_s = "active_size";
+  py::str stream_s = "stream";
+  py::str segment_type_s = "segment_type";
+  py::str large_s = "large";
+  py::str small_s = "small";
+  py::str size_s = "size";
+  py::str state_s = "state";
+  py::str active_allocated_s = "active_allocated";
+  py::str active_pending_free_s = "active_pending_free";
+  py::str inactive_s = "inactive";
+  py::str addr_s = "addr";
+  py::str real_size_s = "real_size";
+  py::str filename_s = "filename";
+  py::str name_s = "name";
+  py::str line_s = "line";
+  py::str frames_s = "frames";
+  py::str history_s = "history";
+  py::str blocks_s = "blocks";
+
+  const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     py::dict segmentDict;
-    segmentDict["device"] = segmentInfo.device;
-    segmentDict["address"] = segmentInfo.address;
-    segmentDict["total_size"] = segmentInfo.total_size;
-    segmentDict["allocated_size"] = segmentInfo.allocated_size;
-    segmentDict["active_size"] = segmentInfo.active_size;
-    segmentDict["segment_type"] = (segmentInfo.is_large ? "large" : "small");
+    segmentDict[device_s] = segmentInfo.device;
+    segmentDict[address_s] = segmentInfo.address;
+    segmentDict[total_size_s] = segmentInfo.total_size;
+    segmentDict[allocated_size_s] = segmentInfo.allocated_size;
+    segmentDict[active_size_s] = segmentInfo.active_size;
+    // we want the python objects to pickle easily so use an int to
+    // represent the stream rather than a torch.cuda.stream object
+    segmentDict[stream_s] = int64_t(segmentInfo.stream);
+    segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
 
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
       py::dict blockDict;
-      blockDict["size"] = blockInfo.size;
-      blockDict["state"] =
+      blockDict[size_s] = blockInfo.size;
+      blockDict[state_s] =
           (blockInfo.allocated
-               ? "active_allocated"
-               : (blockInfo.active ? "active_pending_free" : "inactive"));
+               ? active_allocated_s
+               : (blockInfo.active ? active_pending_free_s : inactive_s));
+      if (blockInfo.history) {
+        py::list history;
+        History* h = blockInfo.history;
+        while (h) {
+          py::dict history_entry;
+          history_entry[addr_s] = (int64_t)h->addr;
+          history_entry[real_size_s] = h->real_size;
+          if (h->context) {
+            py::list frames;
+            auto sc = (StackContext*)h->context.get();
+            for (auto& f : sc->frames) {
+              py::dict frame;
+              frame[filename_s] =
+                  py::reinterpret_borrow<py::object>(f.code->co_filename);
+              frame[name_s] =
+                  py::reinterpret_borrow<py::object>(f.code->co_name);
+              frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
+              frames.append(std::move(frame));
+            }
+            history_entry[frames_s] = std::move(frames);
+          }
+          h = h->next.get();
+          history.append(std::move(history_entry));
+        }
+        blockDict[history_s] = std::move(history);
+      }
       blocks.append(blockDict);
     }
-    segmentDict["blocks"] = blocks;
+    segmentDict[blocks_s] = blocks;
 
     return segmentDict;
   };
@@ -552,6 +648,19 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   }
 
   return result.release().ptr();
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      PyBool_Check(enabled),
+      "recordMemoryHistory expects a bool, "
+      "but got %s",
+      THPUtils_typename(enabled));
+  c10::cuda::CUDACachingAllocator::setContextRecorder(
+      enabled == Py_True ? StackContext::gather : nullptr);
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -727,6 +836,32 @@ static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_setBenchmarkLimitCuDNN(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkLong(arg),
+      "set_benchmark_limit_cudnn expects an int, "
+      "but got %s",
+      THPUtils_typename(arg));
+  auto benchmark_limit = static_cast<int>(THPUtils_unpackLong(arg));
+#if defined(USE_ROCM)
+  TORCH_WARN_ONCE(
+      "cuDNN Benchmark limit is not supported in MIOpen and will have no effect.");
+#endif
+#if AT_CUDNN_ENABLED()
+#if HAS_CUDNN_V8()
+  at::globalContext().setBenchmarkLimitCuDNN(benchmark_limit);
+#else
+  TORCH_WARN_ONCE(
+      "cuDNN Benchmark limit is not supported with cuDNN v7 API and will have no effect.");
+#endif
+#endif
+  Py_RETURN_NONE;
+}
+
+PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
+  return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,
 // cppcoreguidelines-avoid-non-const-global-variables,
 // cppcoreguidelines-avoid-c-arrays)
@@ -785,6 +920,11 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
+    {"_cuda_recordMemoryHistory",
+     THCPModule_recordMemoryHistory,
+     METH_O,
+     nullptr},
+
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
@@ -795,6 +935,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_cudaCachingAllocator_raw_delete",
      THCPModule_cudaCachingAllocator_raw_delete,
+     METH_O,
+     nullptr},
+    {"_cuda_cudaCachingAllocator_set_allocator_settings",
+     THCPModule_cudaCachingAllocator_set_allocator_settings,
      METH_O,
      nullptr},
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},
@@ -813,6 +957,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_jiterator_compile_and_launch_kernel",
      THCPModule_cudaJiteratorCompileAndLaunchKernel,
      METH_VARARGS,
+     nullptr},
+    {"_cuda_get_cudnn_benchmark_limit",
+     THCPModule_benchmarkLimitCuDNN,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_set_cudnn_benchmark_limit",
+     THCPModule_setBenchmarkLimitCuDNN,
+     METH_O,
      nullptr},
 #ifdef USE_NCCL
     {"_nccl_version", THCPModule_nccl_version, METH_NOARGS, nullptr},

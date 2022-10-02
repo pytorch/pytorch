@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/ivalue.h>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/Export.h>
 
 namespace c10d {
@@ -114,7 +114,7 @@ namespace detail {
 template <typename T>
 class CppCommHookInterface : public CommHookInterface {
  public:
-  explicit CppCommHookInterface(T& state) : state_(state) {}
+  explicit CppCommHookInterface(const T& state) : state_(state) {}
 
   ~CppCommHookInterface() override = default;
 
