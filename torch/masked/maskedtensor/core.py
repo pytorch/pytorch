@@ -31,7 +31,7 @@ def is_masked_tensor(a):
     return isinstance(a, MaskedTensor)
 
 
-def _tensors_match(a, b, exact=True, rtol=1e-05, atol=1e-08):
+def _tensors_match(a, b, exact=True):
     if is_masked_tensor(a) or is_masked_tensor(b):
         raise ValueError("Neither `a` nor `b` can be a MaskedTensor.")
     if a.layout != b.layout:
@@ -51,7 +51,7 @@ def _tensors_match(a, b, exact=True, rtol=1e-05, atol=1e-08):
         )
     if exact:
         return (a.dim() == b.dim()) and torch.eq(a, b).all().item()
-    return (a.dim() == b.dim()) and torch.allclose(a, b, rtol=rtol, atol=atol)
+    return (a.dim() == b.dim()) and torch.allclose(a, b)
 
 
 def _masks_match(a, b):
@@ -280,9 +280,6 @@ class MaskedTensor(torch.Tensor):
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         func = func.overloadpacket
-
-        if func == torch.ops.aten.sym_stride:
-            return None
 
         from ._ops_refs import _MASKEDTENSOR_DISPATCH_TABLE
         if func in _MASKEDTENSOR_DISPATCH_TABLE:

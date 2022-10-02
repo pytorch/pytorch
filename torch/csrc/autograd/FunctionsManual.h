@@ -291,8 +291,8 @@ at::Tensor renorm_backward(
     const at::Scalar& maxnorm);
 at::Tensor repeat_backward(
     at::Tensor grad,
-    at::SymIntArrayRef repeats,
-    at::SymIntArrayRef input_shape);
+    at::IntArrayRef repeats,
+    at::IntArrayRef input_shape);
 at::Tensor _fused_dropout_backward(
     at::Tensor grad,
     at::Tensor mask,
