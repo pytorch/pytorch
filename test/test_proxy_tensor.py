@@ -1242,7 +1242,6 @@ symbolic_tensor_failures = {
     xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('reshape_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('reshape', ''),  # Tensors of type TensorImpl do not have numel
     xfail('resize_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('roll', ''),  # Tensors of type TensorImpl do not have numel

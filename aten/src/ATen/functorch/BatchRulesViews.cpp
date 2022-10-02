@@ -102,15 +102,15 @@ std::tuple<Tensor,optional<int64_t>> unsqueeze_batch_rule(
 std::tuple<Tensor,optional<int64_t>> repeat_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
-    IntArrayRef sizes) {
+    c10::SymIntArrayRef sizes) {
 
-  VmapDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
+  SymDimVector sizes_with_bdim = { sizes.begin(), sizes.end() };
   sizes_with_bdim.insert(sizes_with_bdim.begin(), 1);
   auto self_ = moveBatchDimToFront(self, self_bdim);
   while (self_.dim() < (int64_t)sizes_with_bdim.size()) {
     self_ = self_.unsqueeze(1);
   }
-  return std::make_tuple(self_.repeat(sizes_with_bdim), 0);
+  return std::make_tuple(self_.repeat_symint(sizes_with_bdim), 0);
 }
 
 
@@ -136,22 +136,22 @@ std::tuple<Tensor,optional<int64_t>> diag_batch_rule(
 std::tuple<Tensor,optional<int64_t>> _unsafe_view_batch_rule(
     const Tensor& self,
     optional<int64_t> self_bdim,
-    IntArrayRef size) {
+    c10::SymIntArrayRef size) {
   auto self_ = moveBatchDimToFront(self, self_bdim);
-  VmapDimVector view_size(size);
+  SymDimVector view_size(size);
   view_size.insert(view_size.begin(), self_.size(0));
 
   // See if the view is valid. If it's not, then we copy.
   // It's OK to copy, because _unsafe_view(x) guarantees that x isn't used
   // anymore.
-  const at::DimVector inferred_size = at::infer_size_dv(view_size, self_.numel());
-  const auto stride = at::detail::computeStride(self_.sizes(),
-                                                self_.strides(),
+  const at::SymDimVector inferred_size = at::infer_size_dv(view_size, self_.sym_numel());
+  const auto stride = at::detail::computeStride(self_.sym_sizes(),
+                                                self_.sym_strides(),
                                                 inferred_size);
   if (!stride.has_value()) {
     self_ = self_.contiguous();
   }
-  return std::make_tuple(at::_unsafe_view(self_, view_size), 0);
+  return std::make_tuple(at::_unsafe_view_symint(self_, view_size), 0);
 }
 
 std::tuple<Tensor,optional<int64_t>> flip_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef dims) {
@@ -286,15 +286,15 @@ std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, o
   return std::make_tuple(result, 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& self, optional<int64_t> bdim, const IntArrayRef shape, const IntArrayRef strides) {
+std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& self, optional<int64_t> bdim, const c10::SymIntArrayRef shape, const c10::SymIntArrayRef strides) {
   (void) strides;
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
   auto self_ = moveBatchDimToFront(self, bdim);
-  c10::SmallBuffer<int64_t, 5> new_shape(shape.size() + 1);
-  new_shape[0] = self_.size(0);
+  c10::SymDimVector new_shape(shape.size() + 1);
+  new_shape[0] = self_.sym_size(0);
   std::copy(shape.begin(), shape.end(), new_shape.begin() + 1);
-  return std::make_tuple(at::reshape(self_, new_shape), 0);
+  return std::make_tuple(at::reshape_symint(self_, new_shape), 0);
 }
 
 std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, optional<int64_t> bdim, IntArrayRef shifts, IntArrayRef dims) {

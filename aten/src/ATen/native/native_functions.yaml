@@ -4203,7 +4203,7 @@
 
 - func: negative.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: repeat(Tensor self, int[] repeats) -> Tensor
+- func: repeat(Tensor self, SymInt[] repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
     CompositeExplicitAutograd: repeat
@@ -4224,18 +4224,18 @@
 - func: repeat_interleave.self_int(Tensor self, int repeats, int? dim=None, *, int? output_size=None) -> Tensor
   variants: function, method
 
-- func: reshape(Tensor(a) self, int[] shape) -> Tensor(a)
+- func: reshape(Tensor(a) self, SymInt[] shape) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeImplicitAutograd: reshape
+    CompositeImplicitAutograd: reshape_symint
     CompositeImplicitAutogradNestedTensor: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
 # anywhere else.
-- func: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
+- func: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -5450,7 +5450,7 @@
   tags: dynamic_output_shape
   autogen: _unique2.out
 
-- func: _unsafe_view(Tensor self, int[] size) -> Tensor
+- func: _unsafe_view(Tensor self, SymInt[] size) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _unsafe_view
   autogen: _unsafe_view.out
@@ -12792,7 +12792,7 @@
     CompositeExplicitAutogradNonFunctional: permute_copy
   tags: view_copy
 
-- func: _reshape_alias_copy(Tensor self, int[] size, int[] stride) -> Tensor
+- func: _reshape_alias_copy(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: _reshape_alias_copy
@@ -13004,7 +13004,7 @@
     CompositeExplicitAutograd: permute_copy_out
 
 
-- func: _reshape_alias_copy.out(Tensor self, int[] size, int[] stride, *, Tensor(a!) out) -> Tensor(a!)
+- func: _reshape_alias_copy.out(Tensor self, SymInt[] size, SymInt[] stride, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: _reshape_alias_copy_out

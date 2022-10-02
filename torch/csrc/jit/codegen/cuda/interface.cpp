@@ -1,6 +1,8 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 
 #include <ATen/core/dispatch/OperatorOptions.h>
+#include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/TensorShape.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/transform_view.h>

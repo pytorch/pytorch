@@ -978,7 +978,7 @@ TEST_F(NVFuserTest, FusionExpandView1_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion));
   auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1});
 
-  auto ref = at::native::reshape(t0.expand({4, 3, 8}), {12, 8}) + t1;
+  auto ref = at::reshape(t0.expand({4, 3, 8}), {12, 8}) + t1;
 
   testValidate(
       executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
@@ -1009,7 +1009,7 @@ TEST_F(NVFuserTest, FusionExpandView2_CUDA) {
   FusionExecutorCache executor_cache(std::move(fusion));
   auto cg_outputs = executor_cache.runFusionWithInputs({t0, t1});
 
-  auto ref = at::native::reshape(t0.expand({12, 8}), {3, 4, 8}) + t1;
+  auto ref = at::reshape(t0.expand({12, 8}), {3, 4, 8}) + t1;
 
   testValidate(
       executor_cache.fusion(), cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);

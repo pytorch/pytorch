@@ -1064,7 +1064,7 @@ Tensor masked_softmax_backward_cuda(
   auto grad = grad_.contiguous();
   auto output = output_.contiguous();
   auto mask = mask_.contiguous();
-  int64_t dim = dim_.has_value() ? dim_.value() : output.dim() - 1;
+  int64_t dim = dim_.has_value() ? maybe_wrap_dim(dim_.value(), output.dim()) : output.dim() - 1;
 
   grad = grad.dim() == 0 ? grad.view(1) : grad;
   mask = mask.dim() == 0 ? mask.view(1) : mask;
