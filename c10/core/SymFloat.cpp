@@ -9,7 +9,9 @@ SymFloatNode SymFloat::toSymFloatNodeImpl() const {
   return SymFloatNode::reclaim_copy(toSymFloatNodeImplUnowned());
 }
 
-static std::array<SymFloatNode, 2> normalize_symfloats(SymFloat a_, SymFloat b_) {
+static std::array<SymFloatNode, 2> normalize_symfloats(
+    SymFloat a_,
+    SymFloat b_) {
   SymFloatNode a, b;
   if (a_.is_symbolic())
     a = a_.toSymFloatNodeImpl();

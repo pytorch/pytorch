@@ -301,7 +301,7 @@ SymFloatNode PythonSymIntNodeImpl::truediv(const SymIntNode& other) {
 SymFloatNode PythonSymIntNodeImpl::sym_float() {
   py::gil_scoped_acquire acquire;
   return c10::make_intrusive<PythonSymFloatNodeImpl>(
-             getPyObj().attr("__sym_float__")());
+      getPyObj().attr("__sym_float__")());
 }
 
 namespace {
