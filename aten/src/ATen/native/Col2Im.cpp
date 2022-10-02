@@ -179,18 +179,6 @@ static void col2im_out_cpu_template(
       });
 }
 
-void col2im_backward_out_cpu_template(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  // im2col_out_cpu checks size of kernel_size, dilation, padding and stride
-  at::native::im2col_out_cpu(
-      grad_output, kernel_size, dilation, padding, stride, grad_input);
-}
-
 } // namespace
 
 Tensor& col2im_out_cpu(const Tensor& input,
@@ -217,30 +205,6 @@ Tensor col2im_cpu(
   col2im_out_cpu_template(
       output, input, output_size, kernel_size, dilation, padding, stride);
   return output;
-}
-
-Tensor& col2im_backward_out_cpu(const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride,
-    Tensor& grad_input) {
-  col2im_backward_out_cpu_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
-}
-
-Tensor col2im_backward_cpu(
-    const Tensor& grad_output,
-    IntArrayRef kernel_size,
-    IntArrayRef dilation,
-    IntArrayRef padding,
-    IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-  col2im_backward_out_cpu_template(
-      grad_input, grad_output, kernel_size, dilation, padding, stride);
-  return grad_input;
 }
 
 } // namespace native

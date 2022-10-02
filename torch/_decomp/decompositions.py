@@ -893,32 +893,6 @@ def col2im(
     return output
 
 
-# TODO: the type annotations on arguments are not quite right
-
-
-@register_decomposition(aten.im2col_backward)
-def im2col_backward(
-    grad_output: Tensor,
-    input_size: List[int],
-    kernel_size: List[int],
-    dilation: List[int],
-    padding: List[int],
-    stride: List[int],
-) -> Tensor:
-    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
-
-
-@register_decomposition(aten.col2im_backward)
-def col2im_backward(
-    grad_output: Tensor,
-    kernel_size: List[int],
-    dilation: List[int],
-    padding: List[int],
-    stride: List[int],
-) -> Tensor:
-    return aten.im2col(grad_output, kernel_size, dilation, padding, stride)
-
-
 @register_decomposition(aten.native_dropout_backward)
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
