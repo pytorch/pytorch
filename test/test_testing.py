@@ -1860,6 +1860,23 @@ class TestOpInfos(TestCase):
         assert s.input is a
         assert s.broadcasts_input
 
+    def test_sample_input_metadata(self) -> None:
+        a, b = [object() for _ in range(2)]
+        s1 = SampleInput(a, b=b)
+        self.assertIs(s1.output_process_fn_grad(None), None)
+        self.assertFalse(s1.broadcasts_input)
+        self.assertEqual(s1.name, "")
+
+        s2 = s1.with_metadata(
+            output_process_fn_grad=lambda x: a,
+            broadcasts_input=True,
+            name="foo",
+        )
+        self.assertIs(s1, s2)
+        self.assertIs(s2.output_process_fn_grad(None), a)
+        self.assertTrue(s2.broadcasts_input)
+        self.assertEqual(s2.name, "foo")
+
 
 if __name__ == '__main__':
     run_tests()
