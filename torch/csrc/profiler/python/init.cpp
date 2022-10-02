@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/python/init.h>
 
 #include <ATen/record_function.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
@@ -136,7 +137,11 @@ void initPythonBindings(PyObject* module) {
                 torch::autograd::utils::wrap(metadata.layout_);
             return py::reinterpret_borrow<py::object>(layout_obj);
           })
-      .def_property_readonly("device", &TensorMetadata::device);
+      .def_property_readonly("device", &TensorMetadata::device)
+      .def_property_readonly("dtype", [](const TensorMetadata& metadata) {
+        return py::reinterpret_borrow<py::object>(
+            torch::autograd::utils::wrap(torch::getTHPDtype(metadata.dtype_)));
+      });
 
   using torch_op_t = ExtraFields<EventType::TorchOp>;
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
