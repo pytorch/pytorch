@@ -611,7 +611,7 @@ Tensor instance_norm(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
+ TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
   std::vector<SymInt> shape = input.sym_sizes().vec();
   SymInt b = input.sym_size(0);
