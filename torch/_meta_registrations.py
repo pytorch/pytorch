@@ -1015,6 +1015,7 @@ def meta_max_pool2d_with_indices(
         ),
     )
 
+
 @register_meta([aten.full.default])
 def full(size, fill_value, *args, **kwargs):
     return torch.empty(size, *args, **kwargs)
