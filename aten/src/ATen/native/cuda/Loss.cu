@@ -170,7 +170,7 @@ __global__ void nll_loss_forward_no_reduce_cuda_kernel(
     int64_t n_classes,
     int64_t ignore_index) {
   CUDA_KERNEL_LOOP(index, batch_size) {
-    int cur_target = target[index];
+    int64_t cur_target = target[index];
     if (cur_target == ignore_index) {
       output[index] = static_cast<scalar_t>(0);
       continue;
