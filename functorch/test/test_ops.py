@@ -9,7 +9,7 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize
 import torch
 from torch import Tensor
 import functools
@@ -21,8 +21,7 @@ from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
-    get_exhaustive_batched_inputs,
-    get_exhaustive_batched_inputs_batch_norm_is_training,
+    generate_vmap_inputs,
     decorate,
     xfail,
     skip,
@@ -291,6 +290,48 @@ vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
 }
 
+aliasing_ops = {
+    'T',
+    'broadcast_to',
+    'conj',
+    'contiguous',
+    'diagonal',  # linalg.diagonal is an alias
+    'expand',
+    'flatten',
+    'imag',
+    'mH',  # adjoint is an alias
+    'mT',
+    'movedim',  # moveaxis is an alias
+    'narrow',
+    'permute',
+    'positive',
+    # 'ravel', is composite implict autograd and may call clone
+    'real',
+    'reshape',
+    'resolve_conj',
+    'resolve_neg',
+    'select',
+    'squeeze',
+    'transpose',  # swapdims and swapaxes are aliases
+    'unflatten',
+    'unfold',
+    'unsqueeze',
+    'view',
+    'view_as',
+    'view_as_complex',
+    'view_as_real',
+}
+
+aliasing_ops_list_return = {
+    'chunks',
+    'dsplit',
+    'hsplit',
+    'split',
+    'unbind',
+    'vsplit',
+    # 'tensor_split' not composite compliant, see vjp_fail
+}
+
 
 class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -304,8 +345,6 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
-        tol1('masked.cumprod',
-             {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
     ))
     def test_grad(self, device, dtype, op):
         if op.name in vjp_fail:
@@ -364,8 +403,6 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=1e-04, rtol=1.3e-06)}, device_type='cuda'),
         tol1('nn.functional.binary_cross_entropy_with_logits',
              {torch.float32: tol(atol=4e-04, rtol=4e-04)}),
-        tol1('nn.functional.batch_norm',
-             {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
     ))
     def test_jvp(self, device, dtype, op):
         # TODO: get rid of vjp_decomp when we add decomposition support to
@@ -599,7 +636,6 @@ class TestOperators(TestCase):
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("masked.softmax", device_type='cuda'),  # Mismatch in values!
         xfail("masked.softmin", device_type='cuda'),  # Mismatch in values!
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
@@ -611,11 +647,11 @@ class TestOperators(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjpvjp', (
         tol1('linalg.svd',
-             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.lu_factor',
              {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
         tol1('svd',
-             {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
     ))
     def test_vmapvjpvjp(self, device, dtype, op):
         # Since, we test `vjpvjp` independently,
@@ -722,9 +758,9 @@ class TestOperators(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapvjp', (
         tol1('linalg.svd',
-             {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
+             {torch.float32: tol(atol=1.5e-04, rtol=1e-04)}, device_type="cuda"),
         tol1('svd',
-             {torch.float32: tol(atol=5e-04, rtol=1e-04)}, device_type="cuda"),
+             {torch.float32: tol(atol=1.5e-04, rtol=1e-04)}, device_type="cuda"),
     ))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
@@ -1084,10 +1120,10 @@ class TestOperators(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            if is_batch_norm and is_batch_norm_training(op.name, kwargs):
-                generator = get_exhaustive_batched_inputs_batch_norm_is_training(args, kwargs)
-            else:
-                generator = get_exhaustive_batched_inputs(args, kwargs)
+
+            is_batch_norm_and_training = is_batch_norm and is_batch_norm_training(op.name, kwargs)
+            generator = generate_vmap_inputs(args, kwargs,
+                                             is_batch_norm_and_training=is_batch_norm_and_training)
 
             for batched_args, in_dims, kwargs in generator:
                 vmapped_op = vmap(op, in_dims)
@@ -1158,15 +1194,11 @@ class TestOperators(TestCase):
         tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
         tol1('masked.cumprod',
-             {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
+             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
         tol1('linalg.vander',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
-        tol1('nn.functional.group_norm',
-             {torch.float32: tol(atol=1e-03, rtol=1e-03)}),
-        tol2('linalg.pinv', 'hermitian',
-             {torch.float32: tol(atol=5e-03, rtol=5e-03)}),
     ))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1309,8 +1341,6 @@ class TestOperators(TestCase):
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=5e-03, rtol=5e-03)}),
         tol1('linalg.multi_dot',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-        tol2('linalg.pinv', 'hermitian',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -1617,6 +1647,64 @@ class TestOperators(TestCase):
         loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
         self.assertEqual(loop_out, batched_out)
 
+    @ops(filter(lambda op: op.name in aliasing_ops, op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace(self, device, dtype, op, grad_op):
+        for sample_input in op.sample_inputs(device, dtype):
+            def f(x):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs).copy_(x)
+                return x
+
+            without_grad = op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+            if grad_op == "jvp":
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+            else:
+                assert grad_op == "vjp"
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    vjp(f, torch.randn_like(without_grad))
+
+    @ops(filter(lambda op: op.name in aliasing_ops_list_return, op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace_list_return(self, device, dtype, op, grad_op):
+        for sample_input in op.sample_inputs(device, dtype):
+            def f(x):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs)[0].copy_(x)
+                return x
+
+            without_grad = op(sample_input.input, *sample_input.args, **sample_input.kwargs)[0]
+            with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                if grad_op == "jvp":
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+                else:
+                    assert grad_op == "vjp"
+                    vjp(f, torch.randn_like(without_grad))
+
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace_special(self, grad_op):
+        # some things in __getitem__ use at::index, which doesn't alias, so this tests a subset of them that do alias
+        ops = [
+            lambda x: x[0],
+            lambda x: x[0, 0, 0],
+            lambda x: x[:1],
+            lambda x: x[:, :1],
+            lambda x: x[:, :1, :],
+        ]
+
+        for op in ops:
+            def f(x):
+                op(captured).copy_(x)
+                return x
+
+            captured = torch.randn(4, 3, 3)
+            without_grad = op(captured)
+            if grad_op == "jvp":
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+            else:
+                assert grad_op == "vjp"
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    vjp(f, torch.randn_like(without_grad))
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)

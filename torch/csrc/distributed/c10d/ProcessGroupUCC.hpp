@@ -2,7 +2,7 @@
 
 #ifdef USE_C10D_UCC
 
-#include <c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 
 #include <exception>
 #include <memory>
@@ -11,10 +11,10 @@
 #include <thread>
 #include <vector>
 
-#include <c10d/ProcessGroup.hpp>
-#include <c10d/Store.hpp>
-#include <c10d/Types.hpp>
-#include <c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Types.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
@@ -115,13 +115,12 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
     friend class Comm;
 
    public:
-    WorkUCC(OpType opType, const char* prof_title)
-        : Work(-1, opType, prof_title) {}
     WorkUCC(
         OpType opType,
         const char* prof_title,
+        const c10::optional<std::vector<at::Tensor>>& inputs,
         const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
-        : Work(-1, opType, prof_title), logger_(logger) {}
+        : Work(-1, opType, prof_title, inputs), logger_(logger) {}
     ~WorkUCC();
     void setException();
     void setAndThrowException();
