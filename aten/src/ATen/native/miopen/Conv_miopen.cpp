@@ -9,7 +9,9 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/miopen_convolution_add_relu_native.h>
 #include <ATen/ops/miopen_convolution_native.h>
+#include <ATen/ops/miopen_convolution_relu_native.h>
 #include <ATen/ops/miopen_convolution_transpose_native.h>
 #include <ATen/ops/miopen_depthwise_convolution_native.h>
 #include <ATen/ops/squeeze.h>
