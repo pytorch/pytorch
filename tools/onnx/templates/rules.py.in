@@ -1,0 +1,16 @@
+"""
+${generated_comment}
+"""
+
+import dataclasses
+
+# flake8: noqa
+from torch.onnx._internal.diagnostics import infra
+
+
+@dataclasses.dataclass
+class _POERules(infra.RuleCollection):
+${rules}
+
+
+rules = _POERules()

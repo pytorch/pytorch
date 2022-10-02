@@ -790,6 +790,8 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=(hi, lo))
 
 def sample_inputs_ones_zeros(op, device, dtype, requires_grad, **kwargs):
+    # this is a bit messy, as we want the args to be tuples
+    # so if we pass size as a tuple, we have a tuple containing a tuple
     sizes = (
         (M,),
         (S, S),
@@ -3052,75 +3054,141 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
+
 def error_inputs_max_pool1d(op_info, device, **kwargs):
-    # error inputs when pad is negative
-    x = torch.rand([0, 1, 49], dtype=torch.float32)
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
-                     error_regex='pad must be non-negative')
+    # Toggle requires_grad because `max_pool1d` has different path
+    # based on whether `requires_grad` is set or not.
+    for requires_grad in (True, False):
+        make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=requires_grad)
+        # error inputs when pad is negative
+        x = make_arg((0, 1, 49))
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                         error_regex='pad must be non-negative')
 
-    # error inputs when pad > kernel_size / 2
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
-                     error_regex='pad should be at most half of kernel size')
+        # error inputs when pad > kernel_size / 2
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                         error_regex='pad should be at most half of kernel size')
 
-    # error inputs for input tensor
-    yield ErrorInput(SampleInput(torch.tensor(0), kwargs={'kernel_size': 1}),
-                     error_regex='Expected 2D or 3D input tensor, but got')
+        # error inputs for input tensor
+        error_msg = r'Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input'
+        yield ErrorInput(SampleInput(make_arg((), requires_grad=requires_grad), kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for empty input
-    yield ErrorInput(SampleInput(torch.tensor([]), kwargs={'kernel_size': 1}),
-                     error_regex='Expected 2D or 3D input tensor, but got')
+        # error inputs for empty input
+        yield ErrorInput(SampleInput(torch.tensor([], device=device, requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for empty input with stride=0
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 0}),
-                     error_regex='stride must be greater than zero, but got 0')
+        # error: unbatched input with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((0, 10), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for empty input with dilation=0
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
-                     error_regex='dilation must be greater than zero, but got 0')
+        # error: batched input with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((1, 10, 0), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for invalied output size
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
-                     error_regex='Invalid computed output size: -4')
+        # error inputs for empty input with stride=0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'stride must be greater than zero, but got 0' if torch.device(
+            device).type == 'cpu' and not requires_grad else 'stride should not be zero'
+        yield ErrorInput(SampleInput(make_arg((3, 3, 3)), kwargs={'kernel_size': 1, 'stride': 0}),
+                         error_regex=error_msg)
 
-    # error inputs when kernel_size=0
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
-                     error_regex='kernel_size must be greater than zero')
+        # error inputs for empty input with dilation=0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'dilation must be greater than zero, but got 0' if torch.device(
+            device).type == 'cpu' and not requires_grad else 'dilation should be greater than zero, but got dilation'
+        yield ErrorInput(SampleInput(make_arg((3, 3, 3)),
+                                     kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
+                         error_regex=error_msg)
 
-    # error inputs for strides > 0
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
-                     error_regex='stride must be greater than zero')
+        # error inputs for invalied output size
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' and not requires_grad \
+            else \
+            r'Given input size: \(2x1x2\). Calculated output size: \(2x1x-2\). Output size is too small'
+        yield ErrorInput(SampleInput(make_arg((2, 2, 2)),
+                                     kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
+                         error_regex=error_msg)
+
+        # error inputs when kernel_size=0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'kernel_size must be greater than zero' if torch.device(
+            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
+                         error_regex=error_msg)
+
+        # error inputs for strides > 0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'stride must be greater than zero' if torch.device(
+            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
+                         error_regex=error_msg)
+
 
 def error_inputs_max_pool2d(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     # error inputs when pad is negative
-    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    x = make_arg((0, 1, 49))
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
     # 2-dimensional kernel
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
 
-    # error inputs when pad > kernel_size / 2
+    # error inputs when pad > kernel_size / 2 (kernel_size : int)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
-    # 2-dimensional kernel
+
+    # error inputs when pad > kernel_size / 2 (kernel_size : tuple)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
 
+    # error: unbatched input with 0 sized non-batch dims.
+    err_msg = r'Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input'
+    yield ErrorInput(SampleInput(make_arg((1, 0, 10)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
+    # error: batched input with 0 sized non-batch dims.
+    yield ErrorInput(SampleInput(make_arg((2, 1, 10, 0)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
+
 def error_inputs_max_pool3d(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     # error inputs when pad is negative
-    x = torch.rand([0, 1, 49, 50], dtype=torch.float32)
+    x = make_arg((0, 1, 49, 50))
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
     # 3-dimensional kernel
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50,
+                                            'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
 
-    # error inputs when pad > kernel_size / 2
+    # error inputs when pad > kernel_size / 2 (kernel_size: int)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
-    # 3-dimensional kernel
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
+
+    # error inputs when pad > kernel_size / 2 (kernel_size: tuple)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50,
+                                            'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
+
+    # error: unbatched input with 0 sized non-batch dims.
+    err_msg = r'Expected input\'s non-batch dimensions to have positive length'
+    yield ErrorInput(SampleInput(make_arg((0, 1, 2, 10)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
+    # error: batched inputs with 0 sized non-batch dims.
+    yield ErrorInput(SampleInput(make_arg((2, 1, 0, 1, 2)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -7196,6 +7264,18 @@ def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
         d['delta'] = random.uniform(1e-3, 9)
         yield SampleInput(input, args=(target, ), kwargs=d)
 
+def error_inputs_huber_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction value
+    err = 'is not a valid value for reduction'
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'reduction': 'abc'}),
+                     error_type=ValueError, error_regex=err)
+    # delta <= 0
+    for delta in (0, -1):
+        err = 'huber_loss does not support non-positive values for delta.'
+        yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'delta': delta}),
+                         error_type=RuntimeError, error_regex=err)
+
 def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -11237,6 +11317,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_leaky_relu,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           inplace_variant=lambda x, negative_slope=0.01:
+               torch.nn.functional.leaky_relu(x, negative_slope, inplace=True),
            supports_autograd=True,
            assert_autodiffed=True,
            supports_gradgrad=True,
@@ -11436,7 +11518,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -11909,14 +11991,16 @@ op_db: List[OpInfo] = [
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        inplace_variant=lambda x, threshold, value:
+            torch.nn.functional.threshold(x, threshold, value, inplace=True),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'threshold': 0.123,
+        sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9},
-                                                    {'threshold': 0.123,
+                                                    {'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9}),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
@@ -12375,6 +12459,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
@@ -13239,7 +13324,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.bfloat16]),
                    ),),
     OpInfo('lerp',
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
@@ -14139,6 +14224,7 @@ op_db: List[OpInfo] = [
     OpInfo('ones',
            op=torch.ones,
            supports_autograd=False,
+           supports_varargs=True,
            is_factory_function=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=True,
@@ -16085,6 +16171,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
+        error_inputs_func=error_inputs_huber_loss,
         skips=(
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -16941,6 +17028,13 @@ python_ref_db = [
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
         supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.huber_loss",
+        torch_opinfo_name="nn.functional.huber_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
