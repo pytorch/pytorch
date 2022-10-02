@@ -1,5 +1,8 @@
 {
   "being_migrated": {
+    "torch.nn.intrinsic": "torch.ao.nn.intrinsic",
+    "torch.nn.intrinsic.modules": "torch.ao.nn.intrinsic.modules",
+    "torch.nn.intrinsic.modules.fused": "torch.ao.nn.intrinsic.modules.fused",
     "torch.nn.qat": "torch.ao.nn.qat",
     "torch.nn.qat.dynamic": "torch.ao.nn.qat.dynamic",
     "torch.nn.qat.dynamic.modules": "torch.ao.nn.qat.dynamic.modules",
@@ -373,6 +376,7 @@
     "GradBucket",
     "HashStore",
     "Logger",
+    "namedtuple",
     "Optional",
     "PrefixStore",
     "ProcessGroup",
