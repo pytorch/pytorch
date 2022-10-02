@@ -1,5 +1,7 @@
 import torch
+import contextlib
 from typing import Callable, Any
+
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
@@ -47,11 +49,11 @@ class saved_tensors_hooks():
         >>> b = torch.ones(5, requires_grad=True) * 2
         >>> with torch.autograd.graph.saved_tensors_hooks(pack_hook, unpack_hook):
         ...     y = a * b
-        Packing tensor([1., 1., 1., 1., 1.])
-        Packing tensor([2., 2., 2., 2., 2.])
+        Packing tensor([1., 1., 1., 1., 1.], requires_grad=True)
+        Packing tensor([2., 2., 2., 2., 2.], grad_fn=<MulBackward0>)
         >>> y.sum().backward()
-        Unpacking tensor([1., 1., 1., 1., 1.])
-        Unpacking tensor([2., 2., 2., 2., 2.])
+        Unpacking tensor([1., 1., 1., 1., 1.], requires_grad=True)
+        Unpacking tensor([2., 2., 2., 2., 2.], grad_fn=<MulBackward0>)
 
     .. warning ::
         Performing an inplace operation on the input to either hooks may lead
@@ -93,6 +95,7 @@ class save_on_cpu(saved_tensors_hooks):
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> a = torch.randn(5, requires_grad=True, device="cuda")
         >>> b = torch.randn(5, requires_grad=True, device="cuda")
         >>> c = torch.randn(5, requires_grad=True, device="cuda")
@@ -130,3 +133,17 @@ class save_on_cpu(saved_tensors_hooks):
             return tensor.to(device, non_blocking=pin_memory)
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks(error_message):
+    try:
+        maybe_prev_message = torch._C._autograd._saved_tensors_hooks_get_disabled_error_message()
+        torch._C._autograd._saved_tensors_hooks_disable(error_message)
+        yield
+    finally:
+        # See NOTE: [disabled_error_message invariant]
+        if maybe_prev_message is None:
+            torch._C._autograd._saved_tensors_hooks_enable()
+        else:
+            torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)

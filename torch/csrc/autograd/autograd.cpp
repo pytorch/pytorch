@@ -1,6 +1,12 @@
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/variable.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/ones_like.h>
+#endif
+
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>

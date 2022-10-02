@@ -15,6 +15,45 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+export VALGRIND=ON
+if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
+  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # such that valgrind complains along these lines:
+  #
+  # Conditional jump or move depends on uninitialised value(s)
+  #    at 0x40303A: ~optional_base (Optional.h:281)
+  #    by 0x40303A: call (Dispatcher.h:448)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x403700: main (basic.cpp:16)
+  #  Uninitialised value was created by a stack allocation
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #
+  # The problem does not appear with gcc or newer versions of clang (we tested
+  # clang14).  So we suppress valgrind testing for clang9 specifically.
+  # You may need to suppress it for other versions of clang if they still have
+  # the bug.
+  #
+  # A minimal repro for the valgrind error is below:
+  #
+  # #include <ATen/ATen.h>
+  # #include <ATen/core/dispatch/Dispatcher.h>
+  #
+  # using namespace at;
+  #
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  #   auto op = c10::Dispatcher::singleton()
+  #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
+  #       .typed<at::_ops::as_strided::schema>();
+  #   return op.call(self, size, stride, storage_offset);
+  # }
+  #
+  # int main(int argv) {
+  #   Tensor b = empty({3, 4});
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  # }
+  export VALGRIND=OFF
+fi
+
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
@@ -82,12 +121,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
-
-  # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
-  # TODO: Can remove this once ROCm migration from Jenkins to GHA is complete.
-  if [[ -z "${GITHUB_ACTIONS}" ]]; then
-    export NUM_TEST_SHARDS=2
-  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
@@ -169,12 +202,46 @@ test_python_shard() {
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
   fi
+
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+
   assert_git_not_dirty
 }
 
 test_python() {
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
+  assert_git_not_dirty
+}
+
+
+test_dynamo_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  # Temporarily disable test_fx for dynamo pending the investigation on TTS
+  # regression in https://github.com/pytorch/torchdynamo/issues/784
+  time python test/run_test.py \
+    --exclude-jit-executor \
+    --exclude-distributed-tests \
+    --exclude \
+      test_autograd \
+      test_proxy_tensor \
+      test_quantization \
+      test_public_bindings \
+      test_dataloader \
+      test_reductions \
+      test_namedtensor \
+      test_namedtuple_return_api \
+      profiler/test_profiler \
+      profiler/test_profiler_tree \
+      test_overrides \
+      test_python_dispatch \
+      test_fx \
+      test_package \
+      test_vmap \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose
   assert_git_not_dirty
 }
 
@@ -301,6 +368,14 @@ test_libtorch() {
 
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+
+  # Make test_reports directory
+  # NB: the ending test_libtorch must match the current function name for the current
+  # test reporting process (in print_test_stats.py) to function as expected.
+  TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
+  mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
   # shellcheck source=test/mobile/nnc/test_aot_compile.sh
   if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
@@ -310,12 +385,12 @@ test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
     ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_TEST_DIR"
     ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_TEST_DIR"
-    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
+    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/vk_swiftshader_icd.json
     # NB: the ending test_vulkan must match the current function name for the current
     # test reporting process (in print_test_stats.py) to function as expected.
     TEST_REPORTS_DIR=test/test-reports/cpp-vulkan/test_vulkan
     mkdir -p $TEST_REPORTS_DIR
-    "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
+    LD_LIBRARY_PATH=/var/lib/jenkins/swiftshader/swiftshader/build/Linux/ "$TORCH_TEST_DIR"/vulkan_api_test --gtest_output=xml:$TEST_REPORTS_DIR/vulkan_test.xml
   fi
 }
 
@@ -429,7 +504,7 @@ build_xla() {
   source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
   XLA_DIR=xla
-  USE_CACHE=0
+  USE_CACHE=1
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
@@ -455,32 +530,49 @@ test_xla() {
 }
 
 # Do NOT run this test before any other tests, like test_python_shard, etc.
-# Because this function uninstalls the torch built from branch, and install
-# nightly version.
+# Because this function uninstalls the torch built from branch and installs
+# the torch built on its base commit.
 test_forward_backward_compatibility() {
   set -x
+  REPO_DIR=$(pwd)
+  if [[ "${BASE_SHA}" == "${SHA1}" ]]; then
+    echo "On trunk, we should compare schemas with torch built from the parent commit"
+    SHA_TO_COMPARE=$(git rev-parse "${SHA1}"^)
+  else
+    echo "On pull, we should compare schemas with torch built from the merge base"
+    SHA_TO_COMPARE=$(git merge-base "${SHA1}" "${BASE_SHA}")
+  fi
+  export SHA_TO_COMPARE
+
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
-  REPO_DIR=$(pwd)
-  pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
-  # install the nightly before the base commit -- fallback to most recent nightly in case of error
-  VERSION=$(cat "${REPO_DIR}/version.txt")
-  DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
-  pip_install --pre "torch<${VERSION::-2}.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html || \
-  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+
+  # build torch at the base commit to generate a base function schema for comparison
+  git reset --hard "${SHA_TO_COMPARE}"
+  echo "::group::Installing Torch From Base Commit"
+  pip install -r requirements.txt
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+  python setup.py bdist_wheel --bdist-dir="base_bdist_tmp" --dist-dir="base_dist"
+  python -mpip install base_dist/*.whl
+  echo "::endgroup::"
+
+  pushd test/forward_backward_compatibility
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
-  # FC: verify newmodel can be load with old code.
+
+  git reset --hard "${SHA1}"
+  # FC: verify new model can be load with old code.
   if ! python ../load_torchscript_model.py /tmp/model_new.pt; then
       echo "FC check failed: new model cannot be load in old code"
       return 1
   fi
   python ../create_dummy_torchscript_model.py /tmp/model_old.pt
   deactivate
-  rm -r venv
+  rm -r "${REPO_DIR}/venv" "${REPO_DIR}/base_dist"
   pip show torch
   python check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt
   # BC: verify old model can be load with new code
@@ -554,7 +646,7 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest tests
+  pytest test
   popd
 }
 
@@ -599,6 +691,17 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
   fi
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_without_numpy
+  install_torchvision
+  install_torchdynamo
+  test_dynamo_shard 1
+  test_aten
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  checkout_install_torchdynamo
+  test_dynamo_shard 2
+  test_dynamo
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
@@ -614,20 +717,20 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-  test_dynamo
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchdynamo
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-  # TODO: re-enable vulkan test
-  echo "no-op at the moment"
+  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
+elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
+  test_functorch
 else
   install_torchvision
   install_torchdynamo

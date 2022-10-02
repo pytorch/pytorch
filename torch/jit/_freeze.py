@@ -26,12 +26,10 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     Args:
         mod (:class:`ScriptModule`): a module to be frozen
-
         preserved_attrs (Optional[List[str]]): a list of attributes to preserve in addition to the forward method.
-        Attributes modified in preserved methods will also be preserved.
-
+            Attributes modified in preserved methods will also be preserved.
         optimize_numerics (bool): If ``True``, a set of optimization passes will be run that does not strictly
-        preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
+            preserve numerics. Full details of optimization can be found at `torch.jit.run_frozen_optimizations`.
 
     Returns:
         Frozen :class:`ScriptModule`.
@@ -164,7 +162,8 @@ def run_frozen_optimizations(
         assert "batch_norm" not in str(frozen_mod.graph)
 
     """
-    torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
+    if mod._c._has_method("forward"):
+        torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
 
     if preserved_methods is None:
         preserved_methods = []

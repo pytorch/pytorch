@@ -16,6 +16,7 @@ import math
 import warnings
 import inspect
 
+__all__ = ["PythonCode", "CodeGen", "Graph"]
 
 if TYPE_CHECKING:
     from .graph_module import GraphModule  # noqa: F401
@@ -294,7 +295,7 @@ class CodeGen(object):
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace) -> PythonCode:
+    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -408,6 +409,51 @@ class CodeGen(object):
             else:
                 body.append('\n')
 
+        prev_stacktrace = None
+
+        def append_stacktrace_summary(node : Node):
+            """
+            Append a summary of the stacktrace to the generated code. This is
+            useful for debugging.
+            """
+            nonlocal prev_stacktrace
+            pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
+
+            if node.op not in {'placeholder', 'output'}:
+                if node.stack_trace:
+                    if node.stack_trace != prev_stacktrace:
+                        prev_stacktrace = node.stack_trace
+
+                        lines = node.stack_trace.strip().split('\n')
+                        idx = 0
+                        context_lines = []
+                        while idx < len(lines):
+                            line = lines[idx].strip()
+                            if line.startswith('File '):
+                                break
+                            context_lines.append(line)
+                            idx += 1
+
+                        summary_lines = []
+                        if context_lines:
+                            summary_lines.append(', '.join(context_lines))
+
+                        if idx + 1 < len(lines):
+                            matches = pattern.match(lines[idx].strip())
+                            if matches:
+                                file = matches.group(1)
+                                lineno = matches.group(2)
+                                lineage = f'File: {file}:{lineno}'
+                                summary_lines.append(lineage)
+
+                            code = f"code: {lines[idx + 1].strip()}"
+                            summary_lines.append(code)
+
+                        summary_str = ', '.join(summary_lines)
+                        body.append(f'\n# {summary_str}\n')
+                elif prev_stacktrace != "":
+                    prev_stacktrace = ""
+                    body.append('\n# No stacktrace found for following nodes \n')
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
@@ -475,6 +521,8 @@ class CodeGen(object):
         for node in nodes:
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
+            if verbose:
+                append_stacktrace_summary(node)
             emit_node(node)
             delete_unused_values(node)
 
@@ -907,7 +955,7 @@ class Graph:
                           "GraphModule.add_parameter to add the "
                           "necessary Parameter, or "
                           "nn.Module.register_buffer to add the "
-                          "necessary buffer")
+                          "necessary buffer", stacklevel=2)
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
     @compatibility(is_backward_compatible=True)
@@ -1089,7 +1137,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(self, root_module: str) -> PythonCode:
+    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1148,10 +1196,10 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace)
+            return self._python_code(root_module, namespace, verbose=verbose)
 
-    def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
-        return self._codegen._gen_python_code(self.nodes, root_module, namespace)
+    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
 
 
     def __str__(self) -> str:
@@ -1289,6 +1337,14 @@ class Graph:
 
             def forward(self, x):
                 return x + self.attr_1
+
+        .. warning::
+
+            Dead code elimination has some heuristics to avoid removing
+            side-effectful nodes (see Node.is_impure) but in general coverage
+            is very bad, so you should assume that this method is not sound
+            to call unless you know that your FX graph consists entirely
+            of functional operations.
         """
         # Lint the graph first to make sure its topologically sorted, otherwise
         # DCE below will not behave as expected.
