@@ -946,6 +946,8 @@ void TensorIteratorBase::build_ternary_op(
     const TensorBase& out, const TensorBase& a,
     const TensorBase& b, const TensorBase& c) {
   build(TensorIteratorConfig()
+      .promote_inputs_to_common_dtype(true)
+      .enforce_safe_casting_to_output(true)
       .add_owned_output(out)
       .add_owned_input(a)
       .add_owned_input(b)
@@ -1239,7 +1241,7 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
 
 void TensorIteratorBase::compute_strides(const TensorIteratorConfig& config) {
   for (auto& op : operands_) {
-    if (op.tensor_base().defined()) {
+    if (op.tensor_base().defined() && !op.will_resize) {
       IntArrayRef original_shape = config.static_shape_ ? shape_ : op.tensor_base().sizes();
       auto original_stride = op.tensor_base().strides();
       auto element_size_in_bytes = op.tensor_base().element_size();

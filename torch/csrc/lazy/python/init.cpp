@@ -129,6 +129,8 @@ void initLazyBindings(PyObject* module) {
   lazy.def(
       "_reset_metrics", []() { torch::lazy::MetricsArena::Get()->Reset(); });
   lazy.def("_counter_names", []() { return torch::lazy::GetCounterNames(); });
+  lazy.def(
+      "_metrics_report", []() { return torch::lazy::CreateMetricReport(); });
   lazy.def("_counter_value", [](const std::string& name) -> py::object {
     torch::lazy::CounterData* data = torch::lazy::GetCounter(name);
     return data != nullptr ? py::cast<int64_t>(data->Value()) : py::none();
@@ -198,6 +200,9 @@ void initLazyBindings(PyObject* module) {
   });
   lazy.def("_get_symbolic_shape_mode", []() {
     return FLAGS_ltc_enable_symbolic_shapes;
+  });
+  lazy.def("_get_default_device_type", []() {
+    return getBackend()->GetDefaultDeviceType()->toString();
   });
 
   lazy_ts_backend.def("_init", []() {

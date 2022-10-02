@@ -1,11 +1,11 @@
 # Owner(s): ["module: onnx"]
 
 import numpy as np
-from test_pytorch_common import run_tests, skipIfUnsupportedMinOpsetVersion, TestCase
 
 import torch
-from torch.onnx import _constants
-from torch.onnx.symbolic_helper import _set_onnx_shape_inference, _set_opset_version
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
+from torch.onnx import _constants, symbolic_helper
+from torch.testing._internal import common_utils
 
 
 def expect_tensor(scalar_type, shape=None):
@@ -19,12 +19,11 @@ def expect_tensor(scalar_type, shape=None):
     return verify
 
 
-class TestONNXShapeInference(TestCase):
-    def __init__(self, *args, **kwargs):
-        TestCase.__init__(self, *args, **kwargs)
-        self.opset_version = _constants.onnx_main_opset
-        _set_onnx_shape_inference(True)
-        _set_opset_version(self.opset_version)
+class TestONNXShapeInference(common_utils.TestCase):
+    def setUp(self):
+        self.opset_version = _constants.ONNX_MAX_OPSET
+        symbolic_helper._set_onnx_shape_inference(True)
+        symbolic_helper._set_opset_version(self.opset_version)
 
     def run_test(self, g, n, type_assertion_funcs):
         if not isinstance(type_assertion_funcs, list):
@@ -269,6 +268,20 @@ class TestONNXShapeInference(TestCase):
         )
         self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
 
+    def test_reduce_prod_with_axes(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
+        reduce_prod = g.op("ReduceProd", input, axes_i=[0])
+        self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
+
+    def test_reduce_prod_without_axes(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
+        reduce_prod = g.op("ReduceProd", input)
+        self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
+
 
 if __name__ == "__main__":
-    run_tests()
+    common_utils.run_tests()
