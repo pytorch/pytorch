@@ -1,9 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NestedTensorImpl.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorProperties.h>
 
@@ -11,6 +9,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/contiguous_native.h>
 #include <ATen/ops/cudnn_is_acceptable_native.h>
 #include <ATen/ops/detach_native.h>
@@ -38,8 +37,8 @@ bool nested_is_same_size(const Tensor& self, const Tensor& other) {
       "nested. While Other ",
       other.is_nested()? "is " : "is not ",
       "nested.")
-  const auto self_nt_size = get_nested_size_tensor(self);
-  const auto other_nt_size = get_nested_size_tensor(other);
+  const auto self_nt_size = _nested_tensor_size(self);
+  const auto other_nt_size = _nested_tensor_size(other);
   return at::equal(self_nt_size, other_nt_size);
 }
 int64_t size(const Tensor& self, int64_t dim) {

@@ -78,7 +78,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
     GRADLE_PARAMS+=" -PABI_FILTERS=x86"
 fi
 
-if [ -n "{GRADLE_OFFLINE:-}" ]; then
+if [ -n "${GRADLE_OFFLINE:-}" ]; then
     GRADLE_PARAMS+=" --offline"
 fi
 

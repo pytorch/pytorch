@@ -47,7 +47,8 @@
 //                   ...)
 //
 // where & and * represent the C-style address-of and indirection operations.
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/ATen.h>
 
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
@@ -60,7 +61,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorMeta.h>
@@ -87,6 +87,7 @@
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/argwhere_native.h>
+#include <ATen/ops/as_strided.h>
 #include <ATen/ops/broadcast_to.h>
 #include <ATen/ops/count_nonzero.h>
 #include <ATen/ops/count_nonzero_native.h>
@@ -94,13 +95,18 @@
 #include <ATen/ops/empty_quantized.h>
 #include <ATen/ops/gather.h>
 #include <ATen/ops/gather_backward_native.h>
+#include <ATen/ops/gather_meta.h>
 #include <ATen/ops/gather_native.h>
+#include <ATen/ops/index.h>
+#include <ATen/ops/index_add_meta.h>
 #include <ATen/ops/index_add_native.h>
+#include <ATen/ops/index_copy_meta.h>
 #include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_fill_native.h>
-#include <ATen/ops/index.h>
+#include <ATen/ops/index_meta.h>
 #include <ATen/ops/index_native.h>
 #include <ATen/ops/index_put_native.h>
+#include <ATen/ops/index_reduce_meta.h>
 #include <ATen/ops/index_reduce_native.h>
 #include <ATen/ops/index_select_backward_native.h>
 #include <ATen/ops/index_select_native.h>
@@ -113,12 +119,14 @@
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/put_native.h>
 #include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/scatter_add_meta.h>
 #include <ATen/ops/scatter_add_native.h>
+#include <ATen/ops/scatter_meta.h>
 #include <ATen/ops/scatter_native.h>
+#include <ATen/ops/scatter_reduce_meta.h>
 #include <ATen/ops/scatter_reduce_native.h>
 #include <ATen/ops/take_along_dim_native.h>
 #include <ATen/ops/take_native.h>
-#include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
 #endif
 
@@ -126,7 +134,6 @@
 #include <c10/util/Unroll.h>
 
 #include <algorithm>
-#include <functional>
 #include <numeric>
 #include <vector>
 
@@ -471,6 +478,7 @@ DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -576,9 +584,9 @@ AdvancedIndex::AdvancedIndex(const Tensor& src, TensorList indices_list)
     }
   }
 
-  // For CUDA tensors, force all index tensors to have the same striding to
-  // simplify the CUDA kernel.
-  if (indices.size() >= 2 && this->src.device().type() == kCUDA) {
+  // For CUDA/MPS tensors, force all index tensors to have the same striding to
+  // simplify the CUDA/MPS kernel.
+  if (indices.size() >= 2 && (this->src.device().type() == kCUDA || this->src.device().type() == kMPS)) {
     if (!all_strides_match(indices)) {
       for (auto & indice : indices) {
         indice = indice.contiguous();
@@ -1150,8 +1158,6 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "index_select(): self and result must have the same scalar type");
-  TORCH_CHECK(dim == 0 || dim < self.dim(),
-              "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, index);
@@ -1559,16 +1565,101 @@ TORCH_IMPL_FUNC(scatter_add)
 
   if (index.numel() == 0) return;
 
-  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA && self.dim() == 1) {
-    TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
-      "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
-    TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
-      "but got ", index.numel(), " versus ", src.numel());
-    TORCH_CHECK(dim == 0, "dim should be zero for 1D self tensor, but got ", dim);
-    torch::List<c10::optional<Tensor>> indices;
-    indices.reserve(1);
-    indices.push_back(index);
-    mut_out.index_put_(indices, src, true);
+  // See Note [Enabling Deterministic Operations]
+  // Avoid gpuAtomicAdd for CUDA if deterministic mode is turned on
+  if (globalContext().deterministicAlgorithms() && self.device().type() == DeviceType::CUDA) {
+    if (self.dim() == 1) {
+      // TODO: Pretty sure these checks can be removed, since they're done in
+      // `scatter_meta_impl`, which I think is always called before this
+      TORCH_CHECK(index.dim() == 1 && src.dim() == 1, "index and src should be 1D tensors when self is a 1D tensor, "
+        "but their dims are ", index.dim(), " and ", src.dim(), ", respectively");
+      TORCH_CHECK(index.numel() == src.numel(), "index and src should have same number of elements for 1D tensors, "
+        "but got ", index.numel(), " versus ", src.numel());
+      TORCH_CHECK(dim == 0, "dim should be zero for 1D self tensor, but got ", dim);
+      torch::List<c10::optional<Tensor>> indices;
+      indices.reserve(1);
+      indices.push_back(index);
+      mut_out.index_put_(indices, src, true);
+    } else {
+      Tensor mut_out_contig = mut_out.contiguous();
+
+      auto index_coords_sizes = index.sizes().vec();
+      index_coords_sizes.push_back(self.dim());
+      auto index_coords = at::empty(
+        index_coords_sizes,
+        at::TensorOptions().dtype(at::ScalarType::Long).device(self.device()));
+
+      for (int64_t dim_other = 0; dim_other < self.dim(); dim_other++) {
+        if (dim_other == dim) {
+          continue;
+        }
+        auto dim_coord_vals = at::arange(
+          index.size(dim_other),
+          at::TensorOptions().device(self.device()));
+
+        for (int64_t dim_unsqueeze = 0; dim_unsqueeze < self.dim() - 1; dim_unsqueeze++) {
+          dim_coord_vals = dim_coord_vals.unsqueeze((dim_unsqueeze >= dim_other) ? -1 : 0);
+        }
+
+        auto view_sizes = index.sizes().vec();
+        view_sizes.push_back(1);
+        auto view_strides = index_coords.strides().vec();
+        view_strides[self.dim()] = self.dim();
+
+        at::as_strided(
+          index_coords,
+          view_sizes,
+          view_strides,
+          dim_other
+        ).copy_(dim_coord_vals.unsqueeze(-1));
+      }
+
+      auto view_sizes = index.sizes().vec();
+      view_sizes.push_back(1);
+      auto view_strides = index_coords.strides().vec();
+      view_strides[self.dim()] = self.dim();
+
+      at::as_strided(
+        index_coords,
+        view_sizes,
+        view_strides,
+        dim
+      ).copy_(index.unsqueeze(-1));
+
+      Tensor index_coords_flat = index_coords.flatten(0, -2);
+
+      // Copy mut_out_contig's strides into a tensor
+      // TODO: Is there a utility function that already does this?
+      IntArrayRef mut_out_contig_strides = mut_out_contig.strides();
+      Tensor coord_strides = at::empty(
+        {mut_out_contig.dim()},
+        TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
+      std::memcpy(
+        coord_strides.data_ptr(),
+        mut_out_contig_strides.data(),
+        coord_strides.nbytes());
+      coord_strides = coord_strides.to(mut_out_contig.device());
+
+      // `index_flat` contains the 1-D indices corresponding with the
+      // flattened `mut_out`
+      Tensor index_flat = (index_coords_flat * coord_strides).sum({-1});
+      Tensor mut_out_flat = mut_out_contig.flatten();
+      Tensor src_flat = at::as_strided(
+        src,
+        index.sizes(),
+        src.strides()
+      ).flatten();
+
+      torch::List<c10::optional<Tensor>> indices;
+      indices.reserve(1);
+      indices.push_back(index_flat);
+
+      mut_out_flat.index_put_(indices, src_flat, true);
+
+      if (!mut_out.is_contiguous()) {
+        mut_out.copy_(mut_out_flat.reshape(mut_out.sizes()));
+      }
+    }
   } else {
     scatter_add_stub(self.device().type(), mut_out, dim, index, src);
   }

@@ -45,8 +45,7 @@ void _dim_apply(
           return;
         }
 
-        for (const auto i : c10::irange(n)) {
-          (void)i; //Suppress unused variable warning
+        for (const auto i C10_UNUSED : c10::irange(n)) {
           f(
             reinterpret_cast<scalar_t*>(values_data_bytes),
             values_dim_stride,
@@ -60,7 +59,8 @@ void _dim_apply(
         }
       };
 
-      iter.for_each(loop);
+      int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, dim_size);
+      iter.for_each(loop, /*grain_size=*/grain_size);
     }
   );
 }
