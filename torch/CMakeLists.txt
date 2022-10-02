@@ -74,6 +74,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
+    ${TORCH_ROOT}/third_party/kineto/libkineto/include
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -117,6 +118,13 @@ if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       -Wno-writable-strings)
 endif()
 
+if(USE_ITT)
+  list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/itt.cpp
+  )
+  list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_ITT)
+endif()
+
 if(USE_CUDA)
     include(${TORCH_ROOT}/cmake/public/cuda.cmake)
     append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
@@ -140,6 +148,10 @@ if(USE_ROCM)
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
+endif()
+
+if(USE_EXPERIMENTAL_CUDNN_V8_API)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_EXPERIMENTAL_CUDNN_V8_API)
 endif()
 
 if(USE_CUDNN OR USE_ROCM)
@@ -195,6 +207,10 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
+
+file(GLOB_RECURSE torchgen_python "${PROJECT_SOURCE_DIR}/torchgen/*.py")
+file(GLOB_RECURSE autograd_python "${TOOLS_PATH}/autograd/*.py")
+file(GLOB_RECURSE pyi_python "${TOOLS_PATH}/pyi/*.py")
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -206,13 +222,15 @@ add_custom_command(
       --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
-    "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
-    "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
-    "${TORCH_SRC_DIR}/nn/functional.pyi.in"
-    "${TOOLS_PATH}/pyi/gen_pyi.py"
-    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
-    "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+      "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
+      "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
+      "${TORCH_SRC_DIR}/nn/functional.pyi.in"
+      "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+      "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
+      "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+      ${pyi_python}
+      ${autograd_python}
+      ${torchgen_python}
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
@@ -268,7 +286,6 @@ if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
   if(NOT MSVC)
     target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
-    target_compile_options(torch_python_obj PRIVATE -Wno-unused-local-typedefs)
   endif()
   if(USE_DISTRIBUTED)
     # Set c10d-related compile definitions. For a "normal" build of
@@ -279,6 +296,9 @@ if(USE_DEPLOY)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_DISTRIBUTED)
     if(USE_GLOO AND USE_C10D_GLOO)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_GLOO)
+    endif()
+    if(USE_UCC AND USE_C10D_UCC)
+      list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_UCC)
     endif()
     if(USE_NCCL AND USE_C10D_NCCL)
         list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D_NCCL)
@@ -300,9 +320,6 @@ if(USE_DEPLOY)
     if(USE_TENSORPIPE)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_TENSORPIPE)
     endif()
-
-    # Set c10d-related include directories as well.
-    target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   endif()
   target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
@@ -380,7 +397,6 @@ endif()
 
 if(NOT MSVC)
   target_compile_options(torch_python PRIVATE -Wno-unused-variable)
-  target_compile_options(torch_python PRIVATE -Wno-unused-local-typedefs)
 endif()
 
 # Required workaround for generated sources
@@ -424,6 +440,11 @@ target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEF
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
+
+if(USE_UCC)
+  target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+  target_compile_definitions(torch_python PRIVATE USE_UCC)
+endif()
 
 if(BUILD_ONEDNN_GRAPH)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
@@ -472,3 +493,6 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
 endif()
+
+set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)

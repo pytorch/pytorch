@@ -9,6 +9,7 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
     final_name = name
     is_all = suffix == "all"
     is_cuda = suffix == "cuda" or is_all
+    is_hip = suffix == "hip"
     platform_static_lib = []
     for platform in ["platform009", "platform010"]:
         name = platform + "_" + final_name
@@ -37,10 +38,13 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
                 ":builtin_registry_cuda",
                 "//caffe2:torch_python_cuda_without_torch",
                 "//deeplearning/trt/python:frozen_tensorrt",
-            ] if is_cuda else [
+            ] if is_cuda else ([
+                ":builtin_registry_hip",
+                "//caffe2:torch_python_hip_without_torch",
+            ] if is_hip else [
                 ":builtin_registry",
                 "//caffe2:torch_python_without_torch",
-            ]),
+            ])),
             external_deps =
                 [
                     # needed for interpreter.cpp itself, it uses pybind currently
@@ -66,7 +70,7 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
         # and loading the cuda part additively.  Hence to achieve requirement (1) we bundle
         # two complete interpreter libs, one with and one without cuda.
 
-        cp_cmd = "$(location //caffe2/torch/csrc/deploy:remove_dt_needed)" if suffix == "all" else "cp"
+        cp_cmd = "$(exe //caffe2/torch/csrc/deploy:remove_dt_needed)" if suffix == "all" else "cp"
 
         build_name = "build_" + name
         if not legacy:
@@ -75,9 +79,14 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
                 out = "embedded_interpreter_" + suffix + ".a",
                 cmd = """\
                 """ + cp_cmd + """ $(location :""" + so_name + """) libtorch_deployinterpreter_internal_""" + suffix + """.so
-                ld -r -b binary -o ${TMP}/embedded_interpreter_""" + suffix + """.o libtorch_deployinterpreter_internal_""" + suffix + """.so
-                objcopy --rename-section .data=.torch_deploy_payload.interpreter_""" + suffix + """,readonly,contents -N _binary_libtorch_deployinterpreter_""" + suffix + """_so_start -N _binary_libtorch_deployinterpreter_""" + suffix + """_so_end ${TMP}/embedded_interpreter_""" + suffix + """.o
-                ar rcs ${OUT} ${TMP}/embedded_interpreter_""" + suffix + """.o
+                $(exe fbsource//third-party/binutils:ld) -r \\
+                -m """ + select({
+                    "ovr_config//cpu:arm64": "aarch64linux",
+                    "ovr_config//cpu:x86_64": "elf_x86_64",
+                }) + """ \\
+                -b binary -o ${TMP}/embedded_interpreter_""" + suffix + """.o libtorch_deployinterpreter_internal_""" + suffix + """.so
+                 $(exe fbsource//third-party/binutils:objcopy) --rename-section .data=.torch_deploy_payload.interpreter_""" + suffix + """,readonly,contents -N _binary_libtorch_deployinterpreter_""" + suffix + """_so_start -N _binary_libtorch_deployinterpreter_""" + suffix + """_so_end ${TMP}/embedded_interpreter_""" + suffix + """.o
+                $(exe fbsource//third-party/binutils:ar) rcs ${OUT} ${TMP}/embedded_interpreter_""" + suffix + """.o
                 """,
             )
         else:
@@ -86,8 +95,13 @@ def embedded_interpreter(name, suffix, legacy = False, exported_deps = [], expor
                 out = "embedded_interpreter_cuda_legacy.a",
                 cmd = """\
                 cp $(location :""" + so_name + """) libtorch_deployinterpreter_cuda.so
-                ld -r -b binary -o ${TMP}/embedded_interpreter_cuda.o libtorch_deployinterpreter_cuda.so
-                ar rcs ${OUT} ${TMP}/embedded_interpreter_cuda.o
+                $(exe fbsource//third-party/binutils:ld) -r \\
+                -m """ + select({
+                    "ovr_config//cpu:arm64": "aarch64linux",
+                    "ovr_config//cpu:x86_64": "elf_x86_64",
+                }) + """ \\
+                -b binary -o ${TMP}/embedded_interpreter_cuda.o libtorch_deployinterpreter_cuda.so
+                $(exe fbsource//third-party/binutils:ar) rcs ${OUT} ${TMP}/embedded_interpreter_cuda.o
                 """,
             )
         platform_static_lib.append(["^" + platform, ":" + build_name])

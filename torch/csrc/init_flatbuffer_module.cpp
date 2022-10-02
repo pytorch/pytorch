@@ -9,6 +9,7 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/utils/pybind.h>
 
 #include <Python.h> // NOLINT
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
@@ -20,21 +21,24 @@
 
 namespace py = pybind11;
 
+using torch::jit::kFlatbufferDataAlignmentBytes;
+
 static std::shared_ptr<char> copyStr(const std::string& bytes) {
-  size_t size = (bytes.size() / FLATBUFFERS_MAX_ALIGNMENT + 1) *
-      FLATBUFFERS_MAX_ALIGNMENT;
+  size_t size = (bytes.size() / kFlatbufferDataAlignmentBytes + 1) *
+      kFlatbufferDataAlignmentBytes;
 #ifdef _WIN32
   std::shared_ptr<char> bytes_copy(
-      static_cast<char*>(_aligned_malloc(size, FLATBUFFERS_MAX_ALIGNMENT)),
+      static_cast<char*>(_aligned_malloc(size, kFlatbufferDataAlignmentBytes)),
       _aligned_free);
 #elif defined(__APPLE__)
   void* p;
-  ::posix_memalign(&p, FLATBUFFERS_MAX_ALIGNMENT, size);
+  ::posix_memalign(&p, kFlatbufferDataAlignmentBytes, size);
   TORCH_INTERNAL_ASSERT(p, "Could not allocate memory for flatbuffer");
   std::shared_ptr<char> bytes_copy(static_cast<char*>(p), free);
 #else
   std::shared_ptr<char> bytes_copy(
-      static_cast<char*>(aligned_alloc(FLATBUFFERS_MAX_ALIGNMENT, size)), free);
+      static_cast<char*>(aligned_alloc(kFlatbufferDataAlignmentBytes, size)),
+      free);
 #endif
   memcpy(bytes_copy.get(), bytes.data(), bytes.size());
   return bytes_copy;
@@ -95,8 +99,8 @@ extern "C"
         auto detached_buffer =
             torch::jit::save_mobile_module_to_bytes(module, _extra_files);
         return py::bytes(
-            reinterpret_cast<char*>(detached_buffer.data()),
-            detached_buffer.size());
+            reinterpret_cast<char*>(detached_buffer->data()),
+            detached_buffer->size());
       });
   pym.def(
       "_save_jit_module_to_bytes",
@@ -105,8 +109,8 @@ extern "C"
         auto detached_buffer =
             torch::jit::save_jit_module_to_bytes(module, _extra_files);
         return py::bytes(
-            reinterpret_cast<char*>(detached_buffer.data()),
-            detached_buffer.size());
+            reinterpret_cast<char*>(detached_buffer->data()),
+            detached_buffer->size());
       });
   pym.def(
       "_get_module_info_from_flatbuffer", [](std::string flatbuffer_content) {

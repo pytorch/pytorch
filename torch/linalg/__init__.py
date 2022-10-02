@@ -28,8 +28,7 @@ Computes the cross product of two 3-dimensional vectors.
 
 Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
 of vectors, for which it computes the product along the dimension :attr:`dim`.
-In this case, the output has the same batch dimensions as the inputs broadcast to
-a common shape.
+It broadcasts over the batch dimensions.
 
 Args:
     input (Tensor): the first input tensor.
@@ -39,9 +38,6 @@ Args:
 Keyword args:
     out (Tensor, optional): the output tensor. Ignored if `None`. Default: `None`.
 
-Raises:
-    RuntimeError: If after broadcasting :attr:`input`\ `.size(\ `:attr:`dim`\ `) != 3`
-                  or :attr:`other`\ `.size(\ `:attr:`dim`\ `) != 3`.
 Example:
     >>> a = torch.randn(4, 3)
     >>> a
@@ -1040,7 +1036,7 @@ See also the `full description of these drivers`_
 when :attr:`driver` is one of (`'gelsy'`, `'gelsd'`, `'gelss'`).
 In this case, if :math:`\sigma_i` are the singular values of `A` in decreasing order,
 :math:`\sigma_i` will be rounded down to zero if :math:`\sigma_i \leq \text{rcond} \cdot \sigma_1`.
-If :attr:`rcond`\ `= None` (default), :attr:`rcond` is set to the machine precision of the dtype of :attr:`A`.
+If :attr:`rcond`\ `= None` (default), :attr:`rcond` is set to the machine precision of the dtype of :attr:`A` times `max(m, n)`.
 
 This function returns the solution to the problem and some extra information in a named tuple of
 four tensors `(solution, residuals, rank, singular_values)`. For inputs :attr:`A`, :attr:`B`
@@ -2800,4 +2796,39 @@ Example::
             [ 1,  2,  4],
             [ 1,  3,  9],
             [ 1,  5, 25]])
+""")
+
+vecdot = _add_docstr(_linalg.linalg_vecdot, r"""
+linalg.vecdot(x, y, *, dim=-1, out=None) -> Tensor
+
+Computes the dot product of two batches of vectors along a dimension.
+
+In symbols, this function computes
+
+.. math::
+
+    \sum_{i=1}^n \overline{x_i}y_i.
+
+over the dimension :attr:`dim` where :math:`\overline{x_i}` denotes the conjugate for complex
+vectors, and it is the identity for real vectors.
+
+Supports input of half, bfloat16, float, double, cfloat, cdouble and integral dtypes.
+It also supports broadcasting.
+
+Args:
+    x (Tensor): first batch of vectors of shape `(*, n)`.
+    y (Tensor): second batch of vectors of shape `(*, n)`.
+
+Keyword args:
+    dim (int): Dimension along which to compute the dot product. Default: `-1`.
+    out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> v1 = torch.randn(3, 2)
+    >>> v2 = torch.randn(3, 2)
+    >>> linalg.vecdot(v1, v2)
+    tensor([ 0.3223,  0.2815, -0.1944])
+    >>> torch.vdot(v1[0], v2[0])
+    tensor(0.3223)
 """)

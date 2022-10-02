@@ -3,7 +3,6 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Cache.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
 #include <c10/util/hash.h>
@@ -13,230 +12,176 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-//
-// This struct defines pipeline, and pipeline layout, caches intended to minimize
-// redundant object reconstructions at the cost of extra memory consumption.
-//
-// A Vulkan pipeline contains the entirety of states, as one coherent monolithic
-// bundle, required to configure the GPU's execution pipeline.  This usage
-// pattern minimizes driver overhead, promotes pipeline state reuse, and is a
-// departure from, and in direct contrast with, OpenGL's individually confiurable
-// state machine.
-//
-// A Vulkan pipeline layout represents a sequence of Vulkan descriptor sets each
-// having a specific layout, and deterimines the interface between all shader
-// stages and shader resources.  For more information on shaders and shader
-// layouts check the description of at::navie::vulkan::api::Shader.
-//
-// This struct defines the facilities required to create, reuse, and destruct
-// these Vulkan objects.
-//
+struct PipelineBarrier final {
+  struct Stages final {
+    VkPipelineStageFlags src;
+    VkPipelineStageFlags dst;
+  } stage;
 
-struct Pipeline final {
-  //
-  // Barrier
-  //
+  c10::SmallVector<BufferMemoryBarrier, 4u> buffers;
+  c10::SmallVector<ImageMemoryBarrier, 4u> images;
 
-  struct Barrier final {
-    struct Stage final {
-      VkPipelineStageFlags src;
-      VkPipelineStageFlags dst;
-    } stage;
+  inline operator bool() const {
+    return (0u != stage.src) || (0u != stage.dst) || !buffers.empty() ||
+        !images.empty();
+  }
+};
 
-    c10::SmallVector<Resource::Buffer::Barrier, 4u> buffers;
-    c10::SmallVector<Resource::Image::Barrier, 4u> images;
+using PipelineStageFlags = uint8_t;
 
-    operator bool() const;
-  };
+enum PipelineStage : PipelineStageFlags {
+  NO_STAGE = 0u << 0u,
+  COMPUTE = 1u << 0u,
+  HOST = 1u << 1u,
+  TRANSFER = 1u << 2u,
+};
 
-  //
-  // Layout
-  //
+VkAccessFlags vk_access(const PipelineStageFlags, const MemoryAccessFlags);
+VkPipelineStageFlags vk_stage(const PipelineStageFlags);
+VkImageLayout vk_layout(const PipelineStageFlags, const MemoryAccessFlags);
 
-  struct Layout final {
-    /*
-      Descriptor
-    */
+class PipelineLayout final {
+ public:
+  explicit PipelineLayout(const VkDevice, const VkDescriptorSetLayout);
 
-    struct Descriptor final {
-      VkDescriptorSetLayout descriptor_set_layout;
-    };
+  PipelineLayout(const PipelineLayout&) = delete;
+  PipelineLayout& operator=(const PipelineLayout&) = delete;
 
-    /*
-      Factory
-    */
+  PipelineLayout(PipelineLayout&&) noexcept;
+  PipelineLayout& operator=(PipelineLayout&&) = delete;
 
-    class Factory final {
-     public:
-      explicit Factory(const GPU& gpu);
+  ~PipelineLayout();
 
-      typedef Layout::Descriptor Descriptor;
-      typedef VK_DELETER(PipelineLayout) Deleter;
-      typedef api::Handle<VkPipelineLayout, Deleter> Handle;
+ private:
+  VkDevice device_;
+  VkPipelineLayout handle_;
 
-      struct Hasher {
-        size_t operator()(const Descriptor& descriptor) const;
-      };
+ public:
+  VkPipelineLayout handle() const {
+    return handle_;
+  }
 
-      Handle operator()(const Descriptor& descriptor) const;
+  // We need to define a custom swap function since this class
+  // does not allow for move assignment. The swap function will
+  // be used in the hash map.
+  friend void swap(PipelineLayout& lhs, PipelineLayout& rhs) noexcept;
+};
 
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
-
-    explicit Layout(const GPU& gpu)
-      : cache(Factory(gpu)) {
-    }
-  } layout;
-
-  //
-  // Stage
-  //
-
-  struct Stage final {
-    typedef uint8_t Flags;
-
-    enum Type : Flags {
-      None = 0u << 0u,
-      Compute = 1u << 0u,
-      Host = 1u << 1u,
-      Transfer = 1u << 2u,
-    };
-  };
-
-  /*
-    Descriptor
-  */
-
+class ComputePipeline final {
+ public:
   struct Descriptor final {
     VkPipelineLayout pipeline_layout;
     VkShaderModule shader_module;
-    Shader::WorkGroup local_work_group;
+    utils::uvec3 local_work_group;
   };
 
-  /*
-    Factory
-  */
+  explicit ComputePipeline(
+      const VkDevice device,
+      const Descriptor& descriptor,
+      const VkPipelineCache pipeline_cache);
 
-  class Factory final {
-   public:
-    explicit Factory(const GPU& gpu);
+  ComputePipeline(const ComputePipeline&) = delete;
+  ComputePipeline& operator=(const ComputePipeline&) = delete;
 
-    typedef Pipeline::Descriptor Descriptor;
-    typedef VK_DELETER(Pipeline) Deleter;
-    typedef api::Handle<VkPipeline, Deleter> Handle;
+  ComputePipeline(ComputePipeline&&) noexcept;
+  ComputePipeline& operator=(ComputePipeline&&) = delete;
 
-    struct Hasher {
-      size_t operator()(const Descriptor& descriptor) const;
-    };
+  ~ComputePipeline();
 
-    Handle operator()(const Descriptor& descriptor) const;
+ private:
+  VkDevice device_;
+  VkPipeline handle_;
 
-   private:
-    VkDevice device_;
-    api::Handle<VkPipelineCache, VK_DELETER(PipelineCache)> pipeline_cache_;
-  };
-
-  /*
-    Object
-  */
-
-  struct Object final {
-    VkPipeline handle;
-    VkPipelineLayout layout;
-    Shader::WorkGroup local_work_group;
-
-    operator bool() const;
-  };
-
-  /*
-    Cache
-  */
-
-  class Cache final {
-   public:
-    explicit Cache(Factory factory);
-    Cache(const Cache&) = delete;
-    Cache& operator=(const Cache&) = delete;
-    Cache(Cache&&) = default;
-    Cache& operator=(Cache&&) = default;
-    ~Cache() = default;
-
-    Object retrieve(const Descriptor& descriptor);
-    void purge();
-
-   private:
-    api::Cache<Factory> cache_;
-  } cache;
-
-  explicit Pipeline(const GPU& gpu)
-    : layout(gpu),
-      cache(Factory(gpu)) {
+ public:
+  inline VkPipeline handle() const {
+    return handle_;
   }
+
+  // We need to define a custom swap function since this class
+  // does not allow for move assignment. The swap function will
+  // be used in the hash map.
+  friend void swap(ComputePipeline& lhs, ComputePipeline& rhs) noexcept;
+};
+
+class PipelineLayoutCache final {
+ public:
+  explicit PipelineLayoutCache(const VkDevice device);
+
+  PipelineLayoutCache(const PipelineLayoutCache&) = delete;
+  PipelineLayoutCache& operator=(const PipelineLayoutCache&) = delete;
+
+  PipelineLayoutCache(PipelineLayoutCache&&) noexcept;
+  PipelineLayoutCache& operator=(PipelineLayoutCache&&) = delete;
+
+  ~PipelineLayoutCache();
+
+  using Key = VkDescriptorSetLayout;
+  using Value = PipelineLayout;
+
+  struct Hasher {
+    inline size_t operator()(
+        const VkDescriptorSetLayout descriptor_layout) const {
+      return c10::get_hash(descriptor_layout);
+    }
+  };
+
+ private:
+  // Multiple threads could potentially be adding entries into the cache, so use
+  // a mutex to manage access
+  std::mutex cache_mutex_;
+
+  VkDevice device_;
+  ska::flat_hash_map<Key, Value, Hasher> cache_;
+
+ public:
+  VkPipelineLayout retrieve(const Key&);
+  void purge();
+};
+
+class ComputePipelineCache final {
+ public:
+  explicit ComputePipelineCache(const VkDevice device);
+
+  ComputePipelineCache(const ComputePipelineCache&) = delete;
+  ComputePipelineCache& operator=(const ComputePipelineCache&) = delete;
+
+  ComputePipelineCache(ComputePipelineCache&&) noexcept;
+  ComputePipelineCache& operator=(ComputePipelineCache&&) = delete;
+
+  ~ComputePipelineCache();
+
+  using Key = ComputePipeline::Descriptor;
+  using Value = ComputePipeline;
+
+  struct Hasher {
+    inline size_t operator()(
+        const ComputePipeline::Descriptor& descriptor) const {
+      return c10::get_hash(
+          descriptor.pipeline_layout,
+          descriptor.shader_module,
+          descriptor.local_work_group.data[0u],
+          descriptor.local_work_group.data[1u],
+          descriptor.local_work_group.data[2u]);
+    };
+  };
+
+ private:
+  // Multiple threads could potentially be adding entries into the cache, so use
+  // a mutex to manage access
+  std::mutex cache_mutex_;
+
+  VkDevice device_;
+  VkPipelineCache pipeline_cache_;
+  ska::flat_hash_map<Key, Value, Hasher> cache_;
+
+ public:
+  VkPipeline retrieve(const Key&);
+  void purge();
 };
 
 //
 // Impl
 //
-
-inline Pipeline::Barrier::operator bool() const {
-  return (0u != stage.src) ||
-         (0u != stage.dst) ||
-         !buffers.empty() ||
-         !images.empty();
-}
-
-inline bool operator==(
-    const Pipeline::Layout::Descriptor& _1,
-    const Pipeline::Layout::Descriptor& _2) {
-
-  return (_1.descriptor_set_layout == _2.descriptor_set_layout);
-}
-
-inline size_t Pipeline::Layout::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  return c10::get_hash(descriptor.descriptor_set_layout);
-}
-
-inline bool operator==(
-    const Pipeline::Descriptor& _1,
-    const Pipeline::Descriptor& _2) {
-
-  return (_1.pipeline_layout == _2.pipeline_layout && \
-          _1.shader_module == _2.shader_module && \
-          _1.local_work_group == _2.local_work_group);
-}
-
-inline size_t Pipeline::Factory::Hasher::operator()(
-    const Descriptor& descriptor) const {
-  return c10::get_hash(
-      descriptor.pipeline_layout,
-      descriptor.shader_module,
-      descriptor.local_work_group.data[0u],
-      descriptor.local_work_group.data[1u],
-      descriptor.local_work_group.data[2u]);
-}
-
-inline Pipeline::Object::operator bool() const {
-  return (VK_NULL_HANDLE != handle) &&
-         (VK_NULL_HANDLE != layout);
-}
-
-inline Pipeline::Object Pipeline::Cache::retrieve(
-    const Descriptor& descriptor) {
-  return {
-    cache_.retrieve(descriptor),
-    descriptor.pipeline_layout,
-    descriptor.local_work_group,
-  };
-}
 
 } // namespace api
 } // namespace vulkan
