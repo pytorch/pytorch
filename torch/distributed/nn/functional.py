@@ -134,6 +134,7 @@ def _all_gather_base(output_tensor, input_tensor, group=group.WORLD):
     Examples:
         >>> # All tensors below are of torch.int64 dtype.
         >>> # We have 2 process groups, 2 ranks.
+        >>> # xdoctest: +SKIP("incorrect want text")
         >>> output_tensor = torch.zeros(2, dtype=torch.int64)
         >>> output_tensor
         [tensor([0, 0])] # Rank 0 and 1
@@ -353,7 +354,6 @@ class _AllGatherBase(Function):
     @staticmethod
     def backward(ctx, grad_output):
         if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            rank = dist.get_rank(group=ctx.group)
             world_size = dist.get_world_size(group=ctx.group)
             out_size = list(grad_output.size())
             if out_size[0] % world_size != 0:

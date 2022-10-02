@@ -1,9 +1,9 @@
-import os
 import modulefinder
-import sys
+import os
 import pathlib
+import sys
 import warnings
-from typing import Dict, Any, List, Set
+from typing import Any, Dict, List, Set
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
@@ -20,6 +20,7 @@ TARGET_DET_LIST = [
     "test_cpp_extensions_aot_ninja",
     "test_cpp_extensions_aot_no_ninja",
     "test_cpp_extensions_jit",
+    "test_cpp_extensions_open_device_registration",
     "test_cuda",
     "test_cuda_primary_ctx",
     "test_dataloader",

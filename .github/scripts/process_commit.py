@@ -99,7 +99,7 @@ if __name__ == "__main__":
     repo_labels = get_repo_labels()
 
     primary_labels = set(filter(lambda x: x.startswith(PRIMARY_LABEL_FILTER), repo_labels))
-    has_both_labels = bool(primary_labels.intersection(labels) and SECONDARY_LABELS.intersection(labels))
+    has_both_labels = bool(primary_labels.intersection(labels)) and bool(SECONDARY_LABELS.intersection(labels))
     is_properly_labeled = has_both_labels or bool(ALLOWED_ONLY_SECONDARY.intersection(labels))
 
     if not is_properly_labeled:

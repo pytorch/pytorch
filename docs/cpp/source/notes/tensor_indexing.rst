@@ -5,8 +5,10 @@ Indexing a tensor in the PyTorch C++ API works very similar to the Python API.
 All index types such as ``None`` / ``...`` / integer / boolean / slice / tensor
 are available in the C++ API, making translation from Python indexing code to C++
 very simple. The main difference is that, instead of using the ``[]``-operator
-similar to the Python API syntax, in the C++ API the indexing methods are
-``torch::Tensor::index`` and `torch::Tensor::index_put_`.
+similar to the Python API syntax, in the C++ API the indexing methods are:
+
+- ``torch::Tensor::index`` (`link <https://pytorch.org/cppdocs/api/classat_1_1_tensor.html#_CPPv4NK2at6Tensor5indexE8ArrayRefIN2at8indexing11TensorIndexEE>`_)
+- ``torch::Tensor::index_put_`` (`link <https://pytorch.org/cppdocs/api/classat_1_1_tensor.html#_CPPv4N2at6Tensor10index_put_E8ArrayRefIN2at8indexing11TensorIndexEERK6Tensor>`_)
 
 It's also important to note that index types such as ``None`` / ``Ellipsis`` / ``Slice``
 live in the ``torch::indexing`` namespace, and it's recommended to put ``using namespace torch::indexing``
