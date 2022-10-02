@@ -33,7 +33,7 @@ __all__ = [
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_bessel_j0,
 )
-def bessel_j0(a):
+def bessel_j0(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j0(a)
 
 
@@ -41,28 +41,28 @@ def bessel_j0(a):
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_bessel_j1,
 )
-def bessel_j1(a):
+def bessel_j1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j1(a)
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0e
 )
-def i0e(a):
+def i0e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i0e(a)
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1
 )
-def i1(a):
+def i1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1(a)
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1e
 )
-def i1e(a):
+def i1e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1e(a)
 
 
@@ -97,7 +97,7 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     aten_op=torch.ops.aten.special_spherical_bessel_j0,
 )
-def spherical_bessel_j0(a):
+def spherical_bessel_j0(a: TensorLikeType) -> TensorLikeType:
     return prims.spherical_bessel_j0(a)
 
 
