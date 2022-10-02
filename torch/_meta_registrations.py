@@ -1000,6 +1000,21 @@ def meta_max_pool2d_with_indices(
     )
 
 
+@register_meta(
+    [
+        aten.randint_like.default,
+        aten.randint_like.low_dtype,
+        aten.randn_like.default,
+        aten.rand_like.default,
+        aten.full_like.default,
+        aten.zeros_like.default,
+        aten.ones_like.default,
+    ]
+)
+def meta_like(self, *args, **kwargs):
+    return aten.empty_like.default(self, **kwargs)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs

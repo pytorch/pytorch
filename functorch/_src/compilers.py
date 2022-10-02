@@ -193,7 +193,6 @@ def memory_efficient_fusion(
         "fw_compiler": ts_compile,
         "bw_compiler": ts_compile,
         "partition_fn": min_cut_rematerialization_partition,
-        "hasher_type": "StaticShapeHasher",
         "decompositions": default_decompositions,
         "static_argnums": static_argnums,
     }
