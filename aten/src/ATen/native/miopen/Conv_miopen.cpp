@@ -8,6 +8,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/miopen_convolution_add_relu_native.h>
 #include <ATen/ops/miopen_convolution_native.h>
@@ -16,6 +17,7 @@
 #include <ATen/ops/miopen_depthwise_convolution_native.h>
 #include <ATen/ops/squeeze.h>
 #include <ATen/ops/sum.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
