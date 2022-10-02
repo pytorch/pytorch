@@ -69,6 +69,10 @@ from .match_utils import (
 
 from ..utils import _parent_name
 from .utils import (
+    _insert_dequant_stubs_for_custom_module_lstm_output,
+    _is_custom_module_lstm,
+    _maybe_get_custom_module_lstm_from_node_arg,
+    _qconfig_satisfies_dtype_config_constraints,
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
@@ -129,7 +133,6 @@ __all__ = [
     "is_input_arg_dtype_supported_by_backend",
     "is_observer_in_same_graph",
     "is_output_dtype_supported_by_backend",
-    "is_pattern_dtype_config_supported_by_backend",
     "maybe_insert_input_equalization_observers_for_node",
     "maybe_insert_input_observer_for_arg_or_kwarg",
     "maybe_insert_input_observers_for_node",
@@ -158,6 +161,7 @@ def is_input_arg_dtype_supported_by_backend(
     arg: Argument,
     node: Node,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
+    qconfig: QConfigAny,
     dtype_config: DTypeConfig,
     backend_config: BackendConfig,
 ) -> bool:
@@ -165,8 +169,9 @@ def is_input_arg_dtype_supported_by_backend(
     is supported by the backend or not
     """
     if isinstance(arg, (list, tuple)):
-        return all(is_input_arg_dtype_supported_by_backend(a, node, node_name_to_target_dtype,
-                                                           dtype_config, backend_config) for a in arg)
+        return all(is_input_arg_dtype_supported_by_backend(
+            a, node, node_name_to_target_dtype, qconfig,
+            dtype_config, backend_config) for a in arg)
     if not isinstance(arg, Node):
         return True
     # TODO: support check for standalone module
@@ -182,13 +187,18 @@ def is_input_arg_dtype_supported_by_backend(
             qconfig_dtype, qconfig_is_dynamic = None, None
         # TODO(future PR): remove the cast to bool below after figuring
         # out why backend_config has is_dynamic set to None in some cases.
-        return (dtype_config.input_dtype is None) or \
-            (dtype_config.input_dtype == qconfig_dtype and
-             bool(dtype_config.is_dynamic) == bool(qconfig_is_dynamic))
+        return (dtype_config.input_dtype is None) or (
+            dtype_config.input_dtype == qconfig_dtype and
+            bool(dtype_config.is_dynamic) == bool(qconfig_is_dynamic) and
+            _qconfig_satisfies_dtype_config_constraints(qconfig, dtype_config.input_dtype_with_constraints)
+        )
     elif is_weight:
+        # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
         weight_dtype = dtype_config.weight_dtype
-        return weight_dtype is None or \
-            node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
+        dtype_matches = node_name_to_target_dtype[node.name]["weight_dtype"][0] == weight_dtype  # type: ignore[index]
+        qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
+            qconfig, dtype_config.weight_dtype_with_constraints, is_activation=False)
+        return weight_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
     else:  # bias
         bias_dtype = dtype_config.bias_dtype
         return bias_dtype is None or \
@@ -197,14 +207,17 @@ def is_input_arg_dtype_supported_by_backend(
 def is_output_dtype_supported_by_backend(
     node: Node,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
+    qconfig: QConfigAny,
     dtype_config: DTypeConfig,
 ) -> bool:
     """ Check if the configured qconfig for the output
     is supported by the backend or not
     """
     output_dtype = dtype_config.output_dtype
-    return output_dtype is None or \
-        output_dtype == node_name_to_target_dtype[node.name]["output_activation_dtype"][0]  # type: ignore[index]
+    dtype_matches = node_name_to_target_dtype[node.name]["output_activation_dtype"][0] == output_dtype  # type: ignore[index]
+    qconfig_satisfies_constraints = _qconfig_satisfies_dtype_config_constraints(
+        qconfig, dtype_config.output_dtype_with_constraints)
+    return output_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
 
 def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     """ Check if observer in same graph
@@ -218,14 +231,16 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
             return False
     return True
 
-def is_pattern_dtype_config_supported_by_backend(
+def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     pattern: Optional[Pattern],
-    matched_node_pattern: Optional[NodePattern],
+    matched_node_pattern: Optional[List[Node]],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]],
+    qconfig: QConfigAny,
     backend_config: BackendConfig,
 ) -> bool:
-    """ Check is the dtype configuration of a pattern is supported by
-    the backend or not
+    """ Check if the dtype configuration of a pattern is supported by
+    the backend or not, and whether the qconfig satisfies constraints
+    specified in the corresponding dtype config.
     """
     if backend_config is None or pattern is None:
         return True
@@ -241,17 +256,12 @@ def is_pattern_dtype_config_supported_by_backend(
     for dtype_config in dtype_configs:
         # check if arg dtype are supported
         supported = True
-        for arg in input_node.args:
-            supported = supported and \
-                is_input_arg_dtype_supported_by_backend(
-                    arg, input_node, node_name_to_target_dtype, dtype_config, backend_config)
-        for k, arg in input_node.kwargs.items():
-            supported = supported and \
-                is_input_arg_dtype_supported_by_backend(
-                    arg, input_node, node_name_to_target_dtype, dtype_config, backend_config)
+        for arg in list(input_node.args) + list(input_node.kwargs.values()):
+            supported = supported and is_input_arg_dtype_supported_by_backend(
+                arg, input_node, node_name_to_target_dtype, qconfig, dtype_config, backend_config)
         # check if output dtype is supported
         supported = supported and is_output_dtype_supported_by_backend(
-            output_node, node_name_to_target_dtype, dtype_config)
+            output_node, node_name_to_target_dtype, qconfig, dtype_config)
         if supported:
             return True
     return False
@@ -465,7 +475,15 @@ def get_arg_target_dtype_as_output(
     argument in quantized graph will match what is specified by the qconfig
     """
     assert isinstance(arg, Node)
-    if is_activation_post_process_node(arg, modules):
+    # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
+    # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
+    # Since we modified the graph in this case, we must trace back from the args through
+    # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
+    # not be able to accurately detect whether this node is a consumer of custom module LSTM.
+    custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, modules)
+    if custom_module_lstm_node is not None:
+        return node_name_to_target_dtype[custom_module_lstm_node.name]["output_activation_dtype"][0]  # type: ignore[index]
+    elif is_activation_post_process_node(arg, modules):
         observed_arg = arg.args[0]
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
         return node_name_to_target_dtype[observed_arg.name]["output_activation_dtype"][0]  # type: ignore[index]
@@ -811,8 +829,7 @@ def maybe_insert_output_observer_for_node(
                 matched_pattern,
                 is_qat)
         observer = act_post_process_ctr()
-        new_obs = insert_observer(node, observer, model, modules, graph)
-        return new_obs
+        return insert_observer(node, observer, model, modules, graph)
     else:
         return None
 
@@ -1235,8 +1252,8 @@ def insert_observers_for_model(
                 not node.op == 'output'
             )
 
-            is_supported_by_backend = is_pattern_dtype_config_supported_by_backend(
-                pattern, matched_node_pattern, node_name_to_target_dtype, backend_config)
+            is_supported_by_backend = _is_pattern_dtype_config_and_qconfig_supported_by_backend(
+                pattern, matched_node_pattern, node_name_to_target_dtype, qconfig, backend_config)
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
@@ -1295,44 +1312,60 @@ def insert_observers_for_model(
                     is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
-                        # this returns the new observer node if it was needed
-                        maybe_output_obs_node = maybe_insert_output_observer_for_node(
-                            node, model, modules, graph, matches,
-                            node_name_to_target_dtype, pattern, qhandler, is_qat)
-                        if maybe_output_obs_node is not None:
-                            # Update users of original node to use the output observer
-                            # instead. For example, change
-                            #
-                            #           next_node
-                            #          /
-                            #   cur_node -> obs
-                            #
-                            # to
-                            #
-                            #                 next_node
-                            #                 /
-                            #   cur_node -> obs
-                            #
-                            # We need to save orig users before updating uses because
-                            # the list of users will change as we update uses
-                            orig_users = list(node.users.keys())
-                            for user_node in orig_users:
-                                if user_node is maybe_output_obs_node:
-                                    continue
-                                user_node.replace_input_with(node, maybe_output_obs_node)
+                        if _is_custom_module_lstm(node, modules, qconfig, qhandler):
+                            # Currently custom module outputs are assumed to be already quantized,
+                            # so we need to insert a DeQuantStub after the output. For custom module
+                            # LSTM specifically, the outputs are also a nested tuple, so we must first
+                            # break down the tuple to insert DeQuantStubs after the internal nodes.
 
-                            is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
+                            # TODO: This currently diverges from how custom modules are handled today,
+                            # where we insert observers after the output instead of DeQuantStubs, and
+                            # replace these observers with "dequantize" nodes during convert. Conceptually,
+                            # these output observers are the same as DeQuantStubs. In the future, we
+                            # should resolve this inconsistency by inserting DeQuantStubs for all custom
+                            # modules, not just for LSTM.
+                            _insert_dequant_stubs_for_custom_module_lstm_output(node, model, modules, graph)
+                            swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
+                        else:
+                            # this returns the new observer node if it was needed
+                            maybe_output_obs_node = maybe_insert_output_observer_for_node(
+                                node, model, modules, graph, matches,
+                                node_name_to_target_dtype, pattern, qhandler, is_qat)
 
-                            # for general tensor value ops, we modify the graph
-                            # to make all inputs and outputs use the first input's
-                            # observer
-                            if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
-                                    is_reuse_input_qconfig_:
-                                if not maybe_make_input_output_share_observers(node, model, modules):
-                                    remove_output_observer(node, model, modules)
+                            if maybe_output_obs_node is not None:
+                                # Update users of original node to use the output observer
+                                # instead. For example, change
+                                #
+                                #           next_node
+                                #          /
+                                #   cur_node -> obs
+                                #
+                                # to
+                                #
+                                #                 next_node
+                                #                 /
+                                #   cur_node -> obs
+                                #
+                                # We need to save orig users before updating uses because
+                                # the list of users will change as we update uses
+                                orig_users = list(node.users.keys())
+                                for user_node in orig_users:
+                                    if user_node is maybe_output_obs_node:
+                                        continue
+                                    user_node.replace_input_with(node, maybe_output_obs_node)
 
-                            if qhandler is not None and qhandler.is_custom_module():
-                                swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
+                                is_observer_in_same_graph_ = is_observer_in_same_graph(node, modules, node_name_to_target_dtype)
+
+                                # for general tensor value ops, we modify the graph
+                                # to make all inputs and outputs use the first input's
+                                # observer
+                                if (is_general_tensor_value_op and is_observer_in_same_graph_) or \
+                                        is_reuse_input_qconfig_:
+                                    if not maybe_make_input_output_share_observers(node, model, modules):
+                                        remove_output_observer(node, model, modules)
+
+                                if qhandler is not None and qhandler.is_custom_module():
+                                    swap_custom_module_to_observed(node, qconfig, modules, prepare_custom_config)
 
                 else:  # output
                     maybe_insert_observers_before_graph_output(

@@ -8,10 +8,12 @@ reviewers:
       - anjali411
       - albanD
       - Krovatkin
+      - miladm
 
   per_author:
     symbolic-shapes:
       - symbolic-shapes
+      - antoniojkim
 
 files:
   # none yet, TODO: migrate CODEOWNERS here
