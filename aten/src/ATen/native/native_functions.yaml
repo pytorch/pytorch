@@ -2105,7 +2105,7 @@
     CompositeExplicitAutogradNonFunctional: new_empty_strided_symint
   autogen: new_empty_strided.out
 
-- func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_full(Tensor self, SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2113,7 +2113,7 @@
     CompositeExplicitAutograd: new_full
   autogen: new_full.out
 
-- func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_zeros(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2121,7 +2121,7 @@
     CompositeExplicitAutograd: new_zeros
   autogen: new_zeros.out
 
-- func: new_ones(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_ones(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2460,11 +2460,11 @@
     CompositeExplicitAutograd: full
   autogen: full.names_out
 
-- func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: full(SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: full
 
-- func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
+- func: full.out(SymInt[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: full_out
 
@@ -3792,11 +3792,11 @@
     CompositeExplicitAutograd: ones
   autogen: ones.names_out
 
-- func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: ones(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: ones
 
-- func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: ones.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: ones_out
 

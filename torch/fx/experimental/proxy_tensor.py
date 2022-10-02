@@ -384,6 +384,7 @@ class PythonKeyTracer(Tracer):
 
             return self.create_node('get_attr', qualname, (), {})
         elif isinstance(a, (SymInt, SymFloat)):
+            breakpoint()
             assert a.get_pyobj().constant is not None
             return a.get_pyobj().constant
         return super().create_arg(a)
