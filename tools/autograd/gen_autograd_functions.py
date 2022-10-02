@@ -576,6 +576,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                     op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
                 )
             )
+        elif type == OptionalCType(BaseCType(symIntArrayRefT)):
+            saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
+            getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
+                )
+            )
         elif type == OptionalCType(ArrayRefCType(BaseCType(doubleT))):
             saved_variables.append(f"c10::OptionalArray<double> {name};")
             getter_definitions.append(

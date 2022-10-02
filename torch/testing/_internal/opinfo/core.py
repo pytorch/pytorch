@@ -740,6 +740,10 @@ class OpInfo(object):
     # If the value is False, we test that forward grad is not implemented
     supports_forward_ad: bool = False
 
+    # Whether the operation has a varargs variant
+    # (e.g. functions like ones, zeros, methods like view, permute)
+    supports_varargs: bool = False
+
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
 

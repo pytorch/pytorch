@@ -61,7 +61,7 @@ Pytorch's C++ API provides the following ways to set CUDA stream:
 
 .. attention::
 
-  This function may have nosthing to do with the current device. It only changes the current stream on the stream's device.
+  This function may have nothing to do with the current device. It only changes the current stream on the stream's device.
   We recommend using ``CUDAStreamGuard``, instead, since it switches to the stream's device and makes it the current stream on that device.
   ``CUDAStreamGuard`` will also restore the current device and stream when it's destroyed
 
