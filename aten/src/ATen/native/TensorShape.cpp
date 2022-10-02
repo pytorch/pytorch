@@ -31,7 +31,6 @@
 #include <c10/util/StringUtil.h>
 
 namespace at {
-
 namespace meta {
 inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
   size_t i = 0;
@@ -1377,15 +1376,15 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
-  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+  DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
   if (self.is_mkldnn()) {
-    return at::_mkldnn_reshape(self, c10::asIntArrayRefSlow(shape));
+    return at::_mkldnn_reshape(self, shape);
   }
 
   // `computeStride` returns the proper strides to use if this
   // `reshape` can be just a view.
-  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
 
   // NB: Even though we have viewable geometry and the target strides here,
   //     we do not just call `as_strided` on `self` because the backward
@@ -1404,12 +1403,12 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return self._reshape_alias_symint(shape, stride.value());
+      return self._reshape_alias(shape, stride.value());
     } else {
-      return self.view_symint(shape);
+      return self.view(shape);
     }
   }
-  return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+  return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
 Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
