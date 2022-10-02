@@ -31,7 +31,7 @@ from torch._C._functorch import (
     _assert_wrapped_functional,
     _propagate_functional_input_mutation,
     set_inplace_requires_grad_allowed,
-    get_inplace_requires_grad_allowed,
+    get_inplace_requires_grad_allowed
 )
 
 argnums_t = Union[int, Tuple[int, ...]]

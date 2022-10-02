@@ -7,8 +7,6 @@ import dataclasses
 import re
 from typing import Any, Dict, Iterable, Sequence, Tuple, Union
 
-from typing_extensions import Protocol, runtime_checkable
-
 import torch
 from torch import _C
 from torch._C import _onnx as _C_onnx
@@ -19,22 +17,8 @@ _ATTR_PATTERN = re.compile("^(.+)_(([ifstgz])|(ty))$")
 _SKIP_NODE_ATTRIBUTES = {"inplace", "aten"}
 
 
-@runtime_checkable
-class _WithOp(Protocol):
-    """A protocol for classes that implements the op method for create a node in a graph."""
-
-    def op(
-        self,
-        opname: str,
-        *raw_args: Union[torch.Tensor, _C.Value],
-        outputs: int = 1,
-        **kwargs,
-    ):
-        ...
-
-
 @dataclasses.dataclass
-class GraphContext(_WithOp):
+class GraphContext:
     """Extra context for symbolic functions with all methods from torch.Graph.
 
     NOTE: This class is not meant for external consumption. Please do not depend on
@@ -69,7 +53,7 @@ class GraphContext(_WithOp):
         outputs: int = 1,
         **kwargs,
     ):
-        """Creates an ONNX operator "opname", taking "raw_args" as inputs and attributes "kwargs".
+        """Creates an ONNX operator "opname", taking "raw_args" as inputs and "kwargs" as attributes.
 
         The set of operators and the inputs/attributes they take
         is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
@@ -245,7 +229,7 @@ def _create_node(
     n_outputs: int,
     shape_inference: bool = True,
 ) -> _C.Node:
-    """Creates an node 'opname', taking "args" as inputs and attributes 'kwargs'."""
+    """Creates an node 'domain_op', taking inputs and attributes."""
     if isinstance(graph_or_block, _C.Graph):
         graph = graph_or_block
         node = graph.create(domain_op, inputs, n_outputs)
