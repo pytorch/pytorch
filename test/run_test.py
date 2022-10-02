@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import json
+import glob
 from typing import Dict, Optional, List, cast, Any
 
 import torch
@@ -27,6 +28,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
+from torch.multiprocessing import Pool, get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -63,7 +65,9 @@ def discover_tests(
             rc |= name in blocklisted_tests
         return rc
     cwd = pathlib.Path(__file__).resolve().parent if base_dir is None else base_dir
-    all_py_files = list(cwd.glob('**/test_*.py'))
+    # This supports symlinks, so we can link domain library tests like functorch
+    # to PyTorch test directory
+    all_py_files = [pathlib.Path(p) for p in glob.glob(f"{cwd}/**/test_*.py", recursive=True)]
     rc = [str(fname.relative_to(cwd))[:-3] for fname in all_py_files]
     # Invert slashes on Windows
     if sys.platform == "win32":
@@ -97,6 +101,8 @@ TESTS = discover_tests(
         'test_jit_string',
         'test_kernel_launch_checks',
         'test_metal',
+        # Right now we have a separate CI job for running MPS
+        'test_mps',
         'test_nnapi',
         'test_segment_reductions',
         'test_static_runtime',
@@ -124,7 +130,6 @@ TESTS = discover_tests(
         "distributed/elastic/utils/util_test",
         "distributed/elastic/utils/distributed_test",
         "distributed/elastic/multiprocessing/api_test",
-        "test_deploy",
     ]
 )
 
@@ -246,7 +251,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
-    "test_openmp",
 ]
 
 RUN_PARALLEL_BLOCKLIST = [
@@ -298,6 +302,14 @@ if dist.is_available():
             "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
+    if dist.is_ucc_available():
+        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+            "UCX_TLS": "tcp",
+            "UCC_TLS": "nccl,ucp",
+            "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+        }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {
@@ -320,19 +332,7 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
-
-
-def discover_functorch_tests():
-    pytorch_root = pathlib.Path(__file__).resolve().parent.parent
-    functorch_test_dir = os.path.join(pytorch_root, 'functorch', 'test')
-    result = discover_tests(pathlib.Path(functorch_test_dir))
-    result = [os.path.join(functorch_test_dir, r) for r in result]
-
-    # Sanity check
-    assert len(result) >= 8
-    return result
-
-FUNCTORCH_TESTS = discover_functorch_tests()
+FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -360,8 +360,13 @@ def get_executable_command(options, allow_pytest, disable_coverage=False):
 
 
 def run_test(
-    test_module, test_directory, options, launcher_cmd=None, extra_unittest_args=None
-):
+    test_module,
+    test_directory,
+    options,
+    launcher_cmd=None,
+    extra_unittest_args=None,
+    env=None,
+) -> int:
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -389,9 +394,17 @@ def run_test(
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + ".py"] + unittest_args
 
+    os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
+    log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
+                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")))
+    os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
-    return shell(command, test_directory)
+    with open(log_path, "w") as f:
+        ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
+    print_log_file(test_module, log_path, failed=(ret_code != 0))
+    os.remove(log_path)
+    return ret_code
 
 
 def test_cuda_primary_ctx(test_module, test_directory, options):
@@ -482,15 +495,24 @@ def test_distributed(test_module, test_directory, options):
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
     config = DISTRIBUTED_TESTS_CONFIG
-    for backend, env_vars in config.items():
-        if sys.platform == "win32" and backend != "gloo":
-            continue
-        if backend == "mpi" and not mpi_available:
-            continue
-        for with_init_file in {True, False}:
+
+    for with_init_file in {True, False}:
+        # Run all distributed backends in parallel, trying to run env/file init
+        # methods in parallel too ends in failures in which the subprocesses
+        # timeout
+        pool = Pool(processes=len(config))
+        return_codes = []
+        tmp_dirs = []
+
+        for backend, env_vars in config.items():
+            if sys.platform == "win32" and backend != "gloo":
+                continue
+            if backend == "mpi" and not mpi_available:
+                continue
             if sys.platform == "win32" and not with_init_file:
                 continue
             tmp_dir = tempfile.mkdtemp()
+            tmp_dirs.append(tmp_dir)
             if options.verbose:
                 init_str = "with {} init_method"
                 with_init = init_str.format("file" if with_init_file else "env")
@@ -510,6 +532,7 @@ def test_distributed(test_module, test_directory, options):
                 else:
                     init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
                 os.environ["INIT_METHOD"] = init_method
+
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -540,18 +563,41 @@ def test_distributed(test_module, test_directory, options):
                         )
 
                     mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-
-                    return_code = run_test(
-                        test_module, test_directory, options, launcher_cmd=mpiexec
+                    return_code = pool.apply_async(
+                        run_test,
+                        args=(test_module, test_directory, options),
+                        kwds={
+                            "launcher_cmd": mpiexec,
+                            "env": os.environ.copy(),
+                        }
                     )
                 else:
-                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
-                if return_code != 0:
-                    return return_code
+                    return_code = pool.apply_async(
+                        run_test,
+                        args=(test_module, test_directory, options),
+                        kwds={
+                            "extra_unittest_args": ["--subprocess"],
+                            "env": os.environ.copy(),
+                        }
+                    )
+
+                return_codes.append(return_code)
+
             finally:
-                shutil.rmtree(tmp_dir)
                 os.environ.clear()
                 os.environ.update(old_environ)
+
+        pool.close()
+        # Close the pool and wait for all the processes to finish
+        pool.join()
+
+        for tmp_dir in tmp_dirs:
+            shutil.rmtree(tmp_dir)
+
+        for return_code in return_codes:
+            if return_code.get() != 0:
+                return return_code
+
     return 0
 
 
@@ -630,6 +676,54 @@ def run_doctests(test_module, test_directory, options):
     return result
 
 
+def print_log_file(test: str, file_path: str, failed: bool) -> None:
+    with open(file_path, "r") as f:
+        print_to_stderr("")
+        if failed:
+            print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
+            print_to_stderr(f.read())
+            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
+        else:
+            print_to_stderr(f"Expand the folded group to see the log file of {test}")
+            print_to_stderr(f"##[group]PRINTING LOG FILE of {test} ({file_path})")
+            print_to_stderr(f.read())
+            print_to_stderr("##[endgroup]")
+            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
+        print_to_stderr("")
+
+
+def run_test_ops(test_module, test_directory, options):
+    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
+        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
+        # it's also on periodic so we don't care about TTS as much
+        return run_test(test_module, test_directory, copy.deepcopy(options),
+                        extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
+                        )
+    NUM_PROCS = 2
+    return_codes = []
+    os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+    pool = get_context("spawn").Pool(NUM_PROCS)
+    for i in range(NUM_PROCS):
+        return_code = pool.apply_async(run_test, args=(test_module, test_directory, copy.deepcopy(options)),
+                                       kwds={"extra_unittest_args": ["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                                     f'--shard-id={i}', f'--num-shards={NUM_PROCS}',
+                                                                     "-k=not _linalg_cholesky_"],
+                                             })
+        return_codes.append(return_code)
+    pool.close()
+    pool.join()
+    del os.environ['NUM_PARALLEL_PROCS']
+
+    for return_code in return_codes:
+        if return_code.get() != 0:
+            return return_code.get()
+    return_code = run_test(test_module, test_directory, copy.deepcopy(options),
+                           extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX',
+                                                "-k=_linalg_cholesky_"],
+                           )
+    return return_code
+
+
 CUSTOM_HANDLERS = {
     "test_cuda_primary_ctx": test_cuda_primary_ctx,
     "test_cuda_trace": get_run_test_with_subprocess_fn(),
@@ -649,6 +743,10 @@ CUSTOM_HANDLERS = {
     "distributed/rpc/test_share_memory": get_run_test_with_subprocess_fn(),
     "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
     "doctests": run_doctests,
+    "test_ops": run_test_ops,
+    "test_ops_gradients": run_test_ops,
+    "test_ops_jit": run_test_ops,
+    "functorch/test_ops": run_test_ops,
 }
 
 
@@ -887,6 +985,9 @@ def get_selected_tests(options):
 
     if options.functorch:
         selected_tests = FUNCTORCH_TESTS
+    else:
+        # Exclude all functorch tests otherwise
+        options.exclude.extend(FUNCTORCH_TESTS)
 
     # process reordering
     if options.bring_to_front:
@@ -994,7 +1095,7 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
     return_code = handler(test_module, test_directory, options)
     assert isinstance(return_code, int) and not isinstance(
         return_code, bool
-    ), "Return code should be an integer"
+    ), f"While running {test} got non integer return code {return_code}"
     if return_code == 0:
         return None
 

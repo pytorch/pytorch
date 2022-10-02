@@ -1,21 +1,9 @@
-- name: Core Maintainers
-  patterns:
-  - '*'
-  approved_by:
-  - soumith
-  - gchanan
-  - ezyang
-  - dzhulgakov
-  mandatory_checks_name:
-  - Facebook CLA Check
-  - Lint
-  - pull
-
 - name: ONNX exporter
   patterns:
   - .jenkins/caffe2/*
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
+  - docs/source/onnx*
   - docs/source/scripts/onnx/**
   - scripts/onnx/**
   - test/jit/test_export_modes.py
@@ -28,6 +16,8 @@
   - torch/csrc/jit/serialization/onnx.*
   - torch/csrc/onnx/**
   - torch/onnx/**
+  - third_party/onnx
+  - caffe2/python/onnx/**
   approved_by:
   - BowenBao
   - abock
@@ -130,7 +120,7 @@
   - test/test_linalg.py
   approved_by:
   - mruberry
-  - Lezcano
+  - lezcano
   - IvanYashchuk
   mandatory_checks_name:
   - Facebook CLA Check
@@ -336,6 +326,30 @@
   - '*'
   approved_by:
   - pytorch/metamates
+  mandatory_checks_name:
+  - Facebook CLA Check
+  - Lint
+  - pull
+
+- name: Core Reviewers
+  patterns:
+  - '*'
+  approved_by:
+  - mruberry
+  - lezcano
+  mandatory_checks_name:
+  - Facebook CLA Check
+  - Lint
+  - pull
+
+- name: Core Maintainers
+  patterns:
+  - '*'
+  approved_by:
+  - soumith
+  - gchanan
+  - ezyang
+  - dzhulgakov
   mandatory_checks_name:
   - Facebook CLA Check
   - Lint

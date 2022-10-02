@@ -41,12 +41,8 @@ class NVFuserEnabler {
 
  public:
   static bool nvfuserCanBeEnabled() {
-#ifdef USE_ROCM
-    return false;
-#else
     return at::globalContext().hasCUDA() &&
         NVFuserPassManager::isRegistered() && getExecutorMode();
-#endif
   }
 
  private:
@@ -899,8 +895,7 @@ RegisterOperators reg_expand_copy({
                 "alias ops, should be restored after fusion pass!");
             IValue self, size, implicit;
             pop(stack, self, size, implicit);
-            push(
-                stack, at::native::expand(self.toTensor(), size.toIntVector()));
+            push(stack, self.toTensor().expand(size.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),

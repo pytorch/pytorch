@@ -320,9 +320,6 @@ if(USE_DEPLOY)
     if(USE_TENSORPIPE)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_TENSORPIPE)
     endif()
-
-    # Set c10d-related include directories as well.
-    target_include_directories(torch_python_obj PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   endif()
   target_compile_definitions(torch_python_obj PRIVATE "-DTHP_BUILD_MAIN_LIB -DUSE_DEPLOY")
 
@@ -444,6 +441,11 @@ target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
+if(USE_UCC)
+  target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+  target_compile_definitions(torch_python PRIVATE USE_UCC)
+endif()
+
 if(BUILD_ONEDNN_GRAPH)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
   target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
@@ -491,3 +493,6 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Pybind11 requires explicit linking of the torch_python library
   target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
 endif()
+
+set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)

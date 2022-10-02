@@ -215,6 +215,9 @@ TensorView* unsqueeze(TensorView* x, int dim) {
 
 TensorView* permute(TensorView* x, const std::vector<int64_t>& new2old) {
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  if (new2old.size() == 0) {
+    return set(x);
+  }
   auto inp_domain = TensorDomain::noReductions(x->getMaybeRFactorDomain());
   std::vector<IterDomain*> out_domain(inp_domain.size());
 

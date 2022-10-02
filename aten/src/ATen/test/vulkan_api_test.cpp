@@ -173,7 +173,8 @@ static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>&
     slice_test(dim2size.second, dim2size.first, -30, -10, 1);       // i.e., 4D tensor's equivalent indexing = [:,:,:,-30:-10:1] with negative start/end
     slice_test(dim2size.second, dim2size.first, 0, INT64_MAX, 1);   // i.e., 4D 's equivalent indexing = [:,:,:,0:9223372036854775807:1] with end=INT64_MAX
     slice_test(dim2size.second, dim2size.first, -10, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-10:9223372036854775807:1] with negative start and end=INT64_MAX
-    slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
+    // This triggers a SymInt assert since [-2^63, -2^62-1] range is reserved for packed symints
+    //slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
     slice_test(dim2size.second, dim2size.first, {}, {}, 1);         // i.e., 4D 's equivalent indexing = [:,:,:,::1] with empty start/end
   }
 }
@@ -781,7 +782,7 @@ TEST_F(VulkanAPITest, batch_norm_large) {
   c10::InferenceMode mode;
 
 
-  const auto input_cpu = at::rand({79, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto input_cpu = at::rand({11, 52, 139, 109}, at::device(at::kCPU).dtype(at::kFloat));
   const auto input_vulkan = input_cpu.vulkan();
 
   const auto weight_cpu = at::rand({52}, at::device(at::kCPU).dtype(at::kFloat));
@@ -1897,7 +1898,7 @@ TEST_F(VulkanAPITest, hardswish_) {
   auto cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
   auto vulkan = cpu.vulkan();
 
-  at::native::hardswish_(cpu);
+  at::hardswish_(cpu);
   at::hardswish_(vulkan);
 
   const auto check = almostEqual(cpu, vulkan.cpu());

@@ -15,6 +15,45 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
+export VALGRIND=ON
+if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
+  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # such that valgrind complains along these lines:
+  #
+  # Conditional jump or move depends on uninitialised value(s)
+  #    at 0x40303A: ~optional_base (Optional.h:281)
+  #    by 0x40303A: call (Dispatcher.h:448)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x403700: main (basic.cpp:16)
+  #  Uninitialised value was created by a stack allocation
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #
+  # The problem does not appear with gcc or newer versions of clang (we tested
+  # clang14).  So we suppress valgrind testing for clang9 specifically.
+  # You may need to suppress it for other versions of clang if they still have
+  # the bug.
+  #
+  # A minimal repro for the valgrind error is below:
+  #
+  # #include <ATen/ATen.h>
+  # #include <ATen/core/dispatch/Dispatcher.h>
+  #
+  # using namespace at;
+  #
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  #   auto op = c10::Dispatcher::singleton()
+  #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
+  #       .typed<at::_ops::as_strided::schema>();
+  #   return op.call(self, size, stride, storage_offset);
+  # }
+  #
+  # int main(int argv) {
+  #   Tensor b = empty({3, 4});
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  # }
+  export VALGRIND=OFF
+fi
+
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
@@ -194,8 +233,8 @@ test_dynamo_shard() {
       test_reductions \
       test_namedtensor \
       test_namedtuple_return_api \
-      test_profiler \
-      test_profiler_tree \
+      profiler/test_profiler \
+      profiler/test_profiler_tree \
       test_overrides \
       test_python_dispatch \
       test_fx \
@@ -329,6 +368,14 @@ test_libtorch() {
 
 test_aot_compilation() {
   echo "Testing Ahead of Time compilation"
+  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
+  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
+
+  # Make test_reports directory
+  # NB: the ending test_libtorch must match the current function name for the current
+  # test reporting process (in print_test_stats.py) to function as expected.
+  TEST_REPORTS_DIR=test/test-reports/cpp-unittest/test_aot_compilation
+  mkdir -p $TEST_REPORTS_DIR
   if [ -f "$TORCH_BIN_DIR"/test_mobile_nnc ]; then "$TORCH_BIN_DIR"/test_mobile_nnc --gtest_output=xml:$TEST_REPORTS_DIR/test_mobile_nnc.xml; fi
   # shellcheck source=test/mobile/nnc/test_aot_compile.sh
   if [ -f "$TORCH_BIN_DIR"/aot_model_compiler_test ]; then source test/mobile/nnc/test_aot_compile.sh; fi
@@ -683,7 +730,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
 elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  install_functorch
   test_functorch
 else
   install_torchvision

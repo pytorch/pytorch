@@ -18,6 +18,7 @@ auto parseDebugDumpOptions() {
   std::unordered_map<DebugDumpOption, bool> options_map = {
       {DebugDumpOption::FusionIr, false},
       {DebugDumpOption::FusionIrMath, false},
+      {DebugDumpOption::FusionIrPresched, false},
       {DebugDumpOption::KernelIr, false},
       {DebugDumpOption::ComputeAtMap, false},
       {DebugDumpOption::CudaKernel, false},
@@ -37,6 +38,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::ParallelDimensions, false},
       {DebugDumpOption::Halo, false},
       {DebugDumpOption::PerfDebugVerbose, false},
+      {DebugDumpOption::PythonDefinition, false},
+      {DebugDumpOption::PythonFrontendDebug, false},
       {DebugDumpOption::TransformPropagator, false},
       {DebugDumpOption::Cubin, false},
       {DebugDumpOption::Ptx, false}};
@@ -50,6 +53,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::FusionIr] = true;
       } else if (token == "fusion_ir_math") {
         options_map[DebugDumpOption::FusionIrMath] = true;
+      } else if (token == "fusion_ir_presched") {
+        options_map[DebugDumpOption::FusionIrPresched] = true;
       } else if (token == "kernel_ir") {
         options_map[DebugDumpOption::KernelIr] = true;
       } else if (token == "ca_map") {
@@ -88,6 +93,10 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::Halo] = true;
       } else if (token == "perf_debug_verbose") {
         options_map[DebugDumpOption::PerfDebugVerbose] = true;
+      } else if (token == "python_definition") {
+        options_map[DebugDumpOption::PythonDefinition] = true;
+      } else if (token == "python_frontend_debug") {
+        options_map[DebugDumpOption::PythonFrontendDebug] = true;
       } else if (token == "transform_propagator") {
         options_map[DebugDumpOption::TransformPropagator] = true;
       } else if (token == "cubin") {
@@ -100,11 +109,12 @@ auto parseDebugDumpOptions() {
             "Invalid debug dump option: '",
             token,
             "'\nAvailable options:\n",
-            "\tfusion_ir, fusion_ir_math, kernel_ir, ca_map, cuda_kernel, cuda_full,\n",
-            "\tcuda_to_file, debug_info, launch_param, segmented_fusion, fusion_args,\n",
-            "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
-            "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
-            "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose\n",
+            "\tfusion_ir, fusion_ir_math, fusion_ir_presched, kernel_ir, ca_map,\n",
+            "\tcuda_kernel, cuda_full, cuda_to_file, debug_info, launch_param,\n",
+            "\tsegmented_fusion, fusion_args, kernel_args, dump_eff_bandwidth,\n",
+            "\tdraw_segmented_fusion, scheduler_params, parallel_dimensions,\n",
+            "\tbuffer_reuse_verbose, ptxas_verbose, halo, segmenter_logging,\n",
+            "\tperf_debug_verbose, python_definition, python_frontend_debug,\n",
             "\ttransform_propagator, cubin, ptx\n");
       }
       options_view = (end_pos != c10::string_view::npos)
