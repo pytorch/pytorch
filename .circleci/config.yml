@@ -693,7 +693,7 @@ jobs:
       - run_brew_for_macos_build
       - run:
           name: Test
-          no_output_timeout: "1h"
+          no_output_timeout: "2h"
           command: |
             set -x
 

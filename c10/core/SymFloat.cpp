@@ -13,4 +13,13 @@ c10::SymFloat SymFloat::toSymFloat(SymFloatNode sin_sp) {
   return c10::SymFloat(std::move(sin_sp));
 }
 
+std::ostream& operator<<(std::ostream& os, SymFloat s) {
+  if (s.is_symbolic()) {
+    os << s.toSymFloatNodeImpl()->str();
+  } else {
+    os << s.as_float_unchecked();
+  }
+  return os;
+}
+
 } // namespace c10
