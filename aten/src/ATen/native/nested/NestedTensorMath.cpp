@@ -161,7 +161,7 @@ bool NestedTensor_nested_tensor_from_mask_left_aligned(const Tensor& t, const Te
     return sizes.equal(nums);
 }
 
-Tensor nested_tensor(
+Tensor _nested_tensor_from_tensor_list(
     TensorList list,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
