@@ -212,7 +212,7 @@ def generate_wheels_matrix(os: str,
 
             # special 11.7 wheels package without dependencies
             # dependency downloaded via pip install
-            if arch_version == "11.7":
+            if arch_version == "11.7" and os == "linux":
                 ret.append(
                     {
                         "python_version": python_version,
