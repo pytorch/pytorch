@@ -107,20 +107,6 @@ def meta_index_select_out(self, dim, index, out):
     return out.copy_(torch.index_select(self, dim, index))
 
 
-@register_meta(
-    [
-        aten.relu_.default,
-        aten.add_.Tensor,
-        aten.hardtanh_.default,
-        aten.hardswish_.default,
-        aten.leaky_relu_.default,
-    ],
-    register_dispatcher=False,
-)
-def meta_inplace_(self, *args, **kwargs):
-    return self
-
-
 @register_meta([aten.max.default, aten.min.default])
 def meta_max(self):
     return self.new_empty(())
