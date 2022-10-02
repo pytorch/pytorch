@@ -281,9 +281,6 @@ class MaskedTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args, kwargs):
         func = func.overloadpacket
 
-        if func == torch.ops.aten.sym_stride:
-            return None
-
         from ._ops_refs import _MASKEDTENSOR_DISPATCH_TABLE
         if func in _MASKEDTENSOR_DISPATCH_TABLE:
             return _MASKEDTENSOR_DISPATCH_TABLE[func](*args, **kwargs)
