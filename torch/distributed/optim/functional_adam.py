@@ -4,6 +4,8 @@ import torch.optim._functional as F
 
 from torch import Tensor
 
+__all__ : List[str] = []
+
 # Define a TorchScript compatible Functional Adam Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
@@ -25,6 +27,7 @@ class _FunctionalAdam(object):
         amsgrad: bool = False,
         maximize: bool = False,
         foreach: bool = False,
+        fused: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         if not 0.0 <= lr:
@@ -48,6 +51,7 @@ class _FunctionalAdam(object):
         self.amsgrad = amsgrad
         self.maximize = maximize
         self.foreach = foreach
+        self.fused = fused
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -103,7 +107,10 @@ class _FunctionalAdam(object):
                    lr=self.defaults['lr'],
                    weight_decay=self.defaults['weight_decay'],
                    eps=self.defaults['eps'],
-                   foreach=self.foreach)
+                   foreach=self.foreach,
+                   fused=self.fused,
+                   grad_scale=None,
+                   found_inf=None)
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
@@ -162,4 +169,7 @@ class _FunctionalAdam(object):
                    lr=self.defaults['lr'],
                    weight_decay=self.defaults['weight_decay'],
                    eps=self.defaults['eps'],
-                   foreach=self.foreach)
+                   foreach=self.foreach,
+                   fused=self.fused,
+                   grad_scale=None,
+                   found_inf=None)

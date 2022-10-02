@@ -191,6 +191,14 @@ serialize::InputArchive& operator>>(
 } // namespace nn
 } // namespace torch
 
+// Workaround for CUDA 10.2 and below not allowing attribute unused on
+// using declarations.
+#ifdef __CUDACC__
+#define TORCH_UNUSED_EXCEPT_CUDA
+#else
+#define TORCH_UNUSED_EXCEPT_CUDA C10_UNUSED
+#endif
+
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
 /// wrapper over a `std::shared_ptr<ImplType>`.
 /// `Impl` is a type alias for `ImplType` which provides a way to call static
@@ -199,7 +207,7 @@ serialize::InputArchive& operator>>(
   class Name : public torch::nn::ModuleHolder<ImplType> { /* NOLINT */ \
    public:                                                             \
     using torch::nn::ModuleHolder<ImplType>::ModuleHolder;             \
-    using Impl = ImplType;                                             \
+    using Impl TORCH_UNUSED_EXCEPT_CUDA = ImplType;                    \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `ImplType` name to `<Name>Impl`.

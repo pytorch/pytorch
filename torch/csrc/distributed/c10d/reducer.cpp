@@ -1,7 +1,7 @@
-#include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/reducer.hpp>
 
-#include <c10d/Utils.hpp>
-#include <c10d/default_comm_hooks.hpp>
+#include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
 
 #include <functional>
 
@@ -11,8 +11,6 @@
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
-#include <c10d/comm.hpp>
-#include <c10d/logger.hpp>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
@@ -20,6 +18,8 @@
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/Ops.hpp>
+#include <torch/csrc/distributed/c10d/comm.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -474,7 +474,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
 }
 
 void Reducer::set_forward_pass_work_handle(
-    c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+    c10::intrusive_ptr<c10d::Work> forwardPassWorkHandle,
     bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
@@ -551,6 +551,37 @@ void Reducer::delay_all_reduce() {
       mark_variable_ready_sparse(variable_index);
     } else {
       mark_variable_ready_dense(variable_index);
+    }
+  }
+
+  // To avoid confusion around why static graph is picking up
+  // some parameters as unused on a rank vs not, we log
+  // unused parameter names for each rank for better
+  // debugability when TORCH_DISTRIBUTED_DEBUG is set to
+  // INFO or DETAIL
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
+    // construct one string to output
+    std::ostringstream unused_params_stream;
+
+    for (const auto& unused_index : unused_parameters_) {
+      auto param_name = param_names_.find(unused_index);
+      TORCH_INTERNAL_ASSERT(
+          param_name != param_names_.end(),
+          "Expected to find parameter name from unused parameters map in debug mode.");
+      // Add the param_name
+      unused_params_stream << "{" << param_name->second << "," << unused_index
+                           << "}";
+    }
+
+    // Each rank prints out all the unused parameters detected
+    if (unused_parameters_.size() > 0) {
+      LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
+                << "Parameter(s) (in the format of {param_name, index}): "
+                << unused_params_stream.str()
+                << " is(are) unused during first iteration. Since"
+                << " static_graph=True is enabled for DDP, we expect"
+                << " this set of unused parameters to remain consistent"
+                << " on this rank throughout the training.";
     }
   }
 
@@ -846,7 +877,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
     GradBucket& grad_bucket) {
   if (comm_hook_ == nullptr) {
-    _AllReduceBySumCommHook allreduce_hook(process_group_.get());
+    _AllReduceBySumCommHook allreduce_hook(process_group_);
     return allreduce_hook.runHook(grad_bucket);
   } else {
     return comm_hook_->runHook(grad_bucket);
@@ -1729,13 +1760,11 @@ void Reducer::register_builtin_comm_hook(
 
   switch (comm_hook_type) {
     case c10d::BuiltinCommHookType::ALLREDUCE:
-      comm_hook_ =
-          std::make_unique<c10d::AllReduceCommHook>(process_group_.get());
+      comm_hook_ = std::make_unique<c10d::AllReduceCommHook>(process_group_);
       LOG(INFO) << "Built-in communication hook ALLREDUCE is registered.";
       break;
     case c10d::BuiltinCommHookType::FP16_COMPRESS:
-      comm_hook_ =
-          std::make_unique<c10d::FP16CompressCommHook>(process_group_.get());
+      comm_hook_ = std::make_unique<c10d::FP16CompressCommHook>(process_group_);
       LOG(INFO) << "Built-in communication hook FP16_COMPRESS is registered.";
       break;
     default:
