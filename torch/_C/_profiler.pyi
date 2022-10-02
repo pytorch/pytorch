@@ -71,6 +71,8 @@ class _ProfilerEvent:
         _ExtraFields_PyCCall,
         _ExtraFields_Kineto,
     ]
+
+    @property
     def name(self) -> str: ...
     ...
 
