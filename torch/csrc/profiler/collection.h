@@ -196,6 +196,10 @@ template <>
 struct ExtraFields<EventType::Allocation> : RawAllocation {
   ExtraFields(const RawAllocation& allocation) : RawAllocation(allocation) {}
 
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
   c10::optional<TensorID> id_;
 };
 

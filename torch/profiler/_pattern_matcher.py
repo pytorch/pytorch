@@ -2,7 +2,7 @@ import json
 import math
 import os
 import re
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 import torch
 from torch.profiler import profile
@@ -571,7 +571,7 @@ class MatMulDimInFP16Pattern(Pattern):
         return shapes_factor_map
 
 
-def source_code_location(event: _ProfilerEvent):
+def source_code_location(event: Optional[_ProfilerEvent]):
     while event:
         if event.tag == _EventType.PyCall or event.tag == _EventType.PyCCall:
             assert isinstance(event.extra_fields,
