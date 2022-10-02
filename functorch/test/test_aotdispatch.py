@@ -1019,6 +1019,7 @@ symbolic_aot_autograd_failures = {
     xfail('ravel', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('remainder', ''),  # 'int' and 'torch._C.SymIntNode'
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
+    xfail('repeat', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('reshape_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('reshape', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
@@ -1066,6 +1067,7 @@ symbolic_aot_autograd_failures = {
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition
     xfail('tensordot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('tile', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('topk', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trace', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
