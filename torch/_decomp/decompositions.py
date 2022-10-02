@@ -166,12 +166,6 @@ def hardsigmoid_backward(grad_output: Tensor, self: Tensor):
     )
 
 
-@register_decomposition(aten.hardtanh_)
-@pw_cast_for_opmath
-def hardtanh_(x, min_val, max_val):
-    return x.copy_(torch.nn.functional.hardtanh(x, min_val, max_val))
-
-
 @register_decomposition(aten.hardtanh_backward)
 @pw_cast_for_opmath
 def hardtanh_backward(
