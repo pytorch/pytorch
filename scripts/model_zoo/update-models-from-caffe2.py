@@ -85,7 +85,26 @@ def download_onnx_model(model_name, zoo_dir, use_cache=True, only_local=False):
         urlretrieve(url, download_file.name)
         with tarfile.open(download_file.name) as t:
             print('Extracting ONNX model {} to {} ...\n'.format(model_name, zoo_dir))
-            t.extractall(zoo_dir)
+            def is_within_directory(directory, target):
+                
+                abs_directory = os.path.abspath(directory)
+                abs_target = os.path.abspath(target)
+            
+                prefix = os.path.commonprefix([abs_directory, abs_target])
+                
+                return prefix == abs_directory
+            
+            def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
+            
+                for member in tar.getmembers():
+                    member_path = os.path.join(path, member.name)
+                    if not is_within_directory(path, member_path):
+                        raise Exception("Attempted Path Traversal in Tar File")
+            
+                tar.extractall(path, members, numeric_owner) 
+                
+            
+            safe_extract(t, zoo_dir)
     except Exception as e:
         print('Failed to download/backup data for ONNX model {}: {}'.format(model_name, e))
         if not os.path.exists(model_dir):
