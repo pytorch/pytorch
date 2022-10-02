@@ -1,7 +1,6 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
-#include <c10/core/SymFloat.h>
 #include <array>
 
 namespace c10 {
