@@ -14,8 +14,8 @@
 #include <ATen/Functions.h>
 #else
 #include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/quantize_per_tensor.h>
 #endif
 
