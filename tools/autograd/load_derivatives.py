@@ -42,6 +42,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsViewGroup,
     OperatorName,
+    SchemaKind,
     Type,
     Variant,
 )
@@ -297,6 +298,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
+            assert (
+                f.func.kind() != SchemaKind.inplace
+            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
@@ -776,6 +780,17 @@ def saved_variables(
                     name, OptionalCType(BaseCType(intArrayRefT))
                 ),
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
+            },
+        ),
+        # replace self->sym_sizes() with self_sym_sizes_opt
+        (
+            r"{}->sym_sizes\(\)",
+            {
+                "suffix": "_sym_sizes_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
             },
         ),
         # replace self.options() with self_options
