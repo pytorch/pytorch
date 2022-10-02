@@ -2455,3 +2455,19 @@ def upsample_bicubic2d_vec(
         )
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
+
+
+def register_inplace(aten_op, outplace_op):
+    @register_decomposition(aten_op)
+    def inplace_op(*args, **kwargs):
+        out = outplace_op(*args, **kwargs)
+        return args[0].copy_(out)
+
+    return inplace_op
+
+
+register_inplace(aten.add_, aten.add)
+register_inplace(aten.relu_, aten.relu)
+register_inplace(aten.hardtanh_, aten.hardtanh)
+register_inplace(aten.hardswish_, aten.hardswish)
+register_inplace(aten.leaky_relu_, aten.leaky_relu)

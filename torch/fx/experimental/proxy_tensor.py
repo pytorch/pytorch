@@ -611,7 +611,9 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
             return x
 
-        shape_env = ShapeEnv()
+        shape_env = None
+        if tracing_mode == "symbolic":
+            shape_env = ShapeEnv()
         sym_mode = proxy_mode.sym_mode
 
         # todo: Figure out a more informative name for symints
@@ -641,7 +643,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
-        t.shape_env = shape_env  # type: ignore[assignment]
+        if tracing_mode == "symbolic":
+            t.shape_env = shape_env  # type: ignore[assignment]
         return t
 
     return wrapped
