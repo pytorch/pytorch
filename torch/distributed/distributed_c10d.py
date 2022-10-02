@@ -2571,8 +2571,8 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         >>>     scatter_list = [t_ones, t_fives] # Only Tensors
         >>> else:
         >>>     scatter_list = None
-        >>> dist.scatter(output_tensor, objects, src=0)
-        >>> # Rank i gets objects[i]. For example, on rank 1:
+        >>> dist.scatter(output_tensor, scatter_list, src=0)
+        >>> # Rank i gets scatter_list[i]. For example, on rank 1:
         >>> output_tensor
         tensor([5., 5., 5.])
 
