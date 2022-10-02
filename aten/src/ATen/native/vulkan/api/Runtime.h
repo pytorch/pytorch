@@ -2,6 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
+#include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Common.h>
 
 namespace at {
@@ -32,9 +33,10 @@ struct RuntimeConfiguration final {
 
 class Runtime final {
  public:
-  explicit Runtime(const RuntimeConfiguration config);
+  explicit Runtime(const RuntimeConfiguration);
 
-  // Do not allow copying. There should be only one global instance of this class.
+  // Do not allow copying. There should be only one global instance of this
+  // class.
   Runtime(const Runtime&) = delete;
   Runtime& operator=(const Runtime&) = delete;
 
@@ -43,9 +45,16 @@ class Runtime final {
 
   ~Runtime();
 
+  using DeviceMapping = std::pair<PhysicalDevice, int32_t>;
+  using AdapterPtr = std::unique_ptr<Adapter>;
+
  private:
+  RuntimeConfiguration config_;
+
   VkInstance instance_;
-  std::vector<Adapter> adapters_;
+
+  std::vector<DeviceMapping> device_mappings_;
+  std::vector<AdapterPtr> adapters_;
   uint32_t default_adapter_i_;
 
   VkDebugReportCallbackEXT debug_report_callback_;
@@ -59,30 +68,25 @@ class Runtime final {
     TORCH_CHECK(
         default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
         "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
-    return &adapters_[default_adapter_i_];
-  }
-
-  inline Adapter& get_adapter() {
-    TORCH_CHECK(
-        default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
-        "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
-    return adapters_[default_adapter_i_];
+    return adapters_[default_adapter_i_].get();
   }
 
   inline Adapter* get_adapter_p(uint32_t i) {
-    return &adapters_[i];
-  }
-
-  inline Adapter& get_adapter(uint32_t i) {
-    return adapters_[i];
+    TORCH_CHECK(
+        i >= 0 && i < adapters_.size(),
+        "Pytorch Vulkan Runtime: Adapter at index ",
+        i,
+        " is not available!");
+    return adapters_[i].get();
   }
 
   inline uint32_t default_adapter_i() const {
     return default_adapter_i_;
   }
 
-  using Selector = std::function<uint32_t (const std::vector<Adapter>&)>;
-  uint32_t init_adapter(const Selector& selector);
+  using Selector =
+      std::function<uint32_t(const std::vector<Runtime::DeviceMapping>&)>;
+  uint32_t create_adapter(const Selector&);
 };
 
 // The global runtime is retrieved using this function, where it is declared as

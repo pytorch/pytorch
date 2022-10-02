@@ -639,7 +639,7 @@ void ReplaceWithMaybeCopy(
     static const auto select_tensor_symbol =
         fromQualString("static_runtime::select_tensor");
     auto* select_tensor_node = graph->create(select_tensor_symbol, 1);
-    DCHECK_EQ(new_node->outputs().size(), 2);
+    TORCH_DCHECK_EQ(new_node->outputs().size(), 2);
     select_tensor_node->addInput(n->input(0));
     for (auto* output : new_node->outputs()) {
       select_tensor_node->addInput(output);
@@ -869,6 +869,12 @@ bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
 
 void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
   const FastMap<c10::Symbol, c10::Symbol> unfused_to_fused = {
+      OP_PAIR(
+          "torcharrow::inference_wrapper_run_flat",
+          "static_runtime::fused_inference_wrapper_run_flat"),
+      OP_PAIR(
+          "torcharrow::variadic_inference_wrapper_run_flat",
+          "static_runtime::fused_variadic_inference_wrapper_run_flat"),
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
           "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
@@ -1021,6 +1027,10 @@ void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
       graph,
       fromQualString("grouped_accessor::grouped_accessor_op_v2"),
       fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
+  UseVariadicOp(
+      graph,
+      fromQualString("fb::grouped_accessor_op_async"),
+      fromQualString("static_runtime::variadic_grouped_accessor_op_async"));
 }
 
 namespace {
@@ -1033,6 +1043,10 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   }
 
   auto outputs = block->outputs();
+  // Create owned refs for inputs. Otherwise, the input cleanup process
+  // will destroy our outputs before we return.
+  FastSet<Value*> inputs = {block->inputs().begin(), block->inputs().end()};
+
   for (const auto i : c10::irange(outputs.size())) {
     auto* output = outputs[i];
 
@@ -1042,7 +1056,7 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
       continue;
     }
 
-    if (toIValue(output).has_value() ||
+    if ((inputs.find(output) != inputs.end()) || toIValue(output).has_value() ||
         // If the output's owning block is not this one, it's from an outer
         // scope
         output->node()->owningBlock() != block) {
@@ -1349,6 +1363,34 @@ void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void UseInPlaceGetRealInputsFromOptionalInputsV2(
+    std::shared_ptr<Graph>& graph) {
+#ifdef FBCODE_CAFFE2
+  const std::string original_pattern = R"IR(
+    graph(%optional_input: (Tensor, Tensor?, Tensor?)?[], %include_last_offsets: bool[]):
+        %x : (Tensor, Tensor?, Tensor?)[] = remote_collection::get_real_inputs_from_optional_inputs_v2(%optional_input, %include_last_offsets)
+        return (%x))IR";
+
+  const std::string new_pattern = R"IR(
+    graph(%optional_input: (Tensor, Tensor?, Tensor?)?[], %include_last_offsets: bool[]):
+        %x : (Tensor, Tensor?, Tensor?)[] = static_runtime::get_real_inputs_from_optional_inputs_v2_inplace(%optional_input, %include_last_offsets)
+        return (%x))IR";
+
+  auto isSingleUse = [](Value* value) { return value->uses().size() == 1; };
+
+  auto filter = [&isSingleUse](
+                    const Match& match,
+                    const std::unordered_map<std::string, Value*>& vmap) {
+    auto* real_node = match.nodes_map.at(vmap.at("x")->node());
+    return isSingleUse(real_node->input(0));
+  };
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(original_pattern, new_pattern);
+  fuse.runOnGraph(graph, filter);
+#endif
+}
+
 void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
 #ifdef FBCODE_CAFFE2
   std::string pattern = R"IR(
@@ -1387,6 +1429,28 @@ void FuseClampNaNToNum(std::shared_ptr<Graph>& graph) {
   fuse.RegisterRewritePattern(pattern, fused_pattern);
   fuse.runOnGraph(graph, clampValuesAreConstant);
 #endif
+}
+
+void PrepackWeights(std::shared_ptr<Graph>& graph) {
+  const auto pattern = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %result: Tensor = fb::quantized_linear_unpacked_weight_v2(%input, %weight, %bias, %scale, %zero_point)
+        return (%result)
+  )IR";
+
+  const auto split_pattern = R"IR(
+    graph(%input: Tensor, %weight: Tensor, %bias: Tensor?, %scale: Tensor, %zero_point: Tensor):
+        %packed_params = quantized::linear_prepack(%weight, %bias)
+        %scale_float: float = aten::item(%scale)
+        %zero_point_int: int = aten::item(%zero_point)
+        %result: Tensor = quantized::linear(%input, %packed_params, %scale_float, %zero_point_int)
+        return (%result)
+  )IR";
+
+  SubgraphRewriter fuse;
+  fuse.RegisterRewritePattern(pattern, split_pattern);
+  fuse.runOnGraph(graph);
+  // Constant propagation should be called after this pass + others.
 }
 
 } // namespace jit

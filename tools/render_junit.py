@@ -5,7 +5,13 @@ import os
 from typing import Any, List, Union
 
 try:
-    from junitparser import JUnitXml, TestSuite, TestCase, Error, Failure  # type: ignore[import]
+    from junitparser import (  # type: ignore[import]
+        Error,
+        Failure,
+        JUnitXml,
+        TestCase,
+        TestSuite,
+    )
 except ImportError:
     raise ImportError(
         "junitparser not found, please install with 'pip install junitparser'"
