@@ -26,12 +26,6 @@ class SymbolicContext:
         onnx_block (_C.Block): Current ONNX block that converted nodes are being appended to.
     """
 
-    @_deprecation.deprecated(
-        "1.13",
-        "1.14",
-        # TODO(justinchuby): Fix the instruction when GraphContext is public.
-        "remove the 'ctx' argument and annotate 'g: GraphContext' instead",
-    )
     def __init__(
         self,
         params_dict: Dict[str, _C.IValue],
