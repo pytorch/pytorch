@@ -24,6 +24,10 @@ struct SmallSizeTPairHash {
 
 // Returns true if the TE fuser supports this conv2d.
 bool conv2dIsSupportedJit(const Node* node);
+// Returns true if the TE fuser supports this conv2d with mkldnn prepacked conv.
+bool mkldnnPrepackedConvIsSupportedJit(const Node* node);
+// Returns true if the the _convolution node is Conv2d.
+bool isConv2d(const Node* node);
 // Returns true if the TE fuser supports this matmul.
 bool matmulIsSupported(const Node* node);
 template <typename T>
@@ -368,6 +372,10 @@ TORCH_API bool& getOptConditionals();
 
 TORCH_API c10::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
+
+bool isContiguous(
+    const torch::jit::Value* v,
+    at::MemoryFormat memory_format = at::MemoryFormat::Contiguous);
 
 } // namespace tensorexpr
 } // namespace jit

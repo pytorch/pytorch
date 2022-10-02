@@ -3,8 +3,10 @@
 
 #include <ATen/ArrayRef.h>
 #include <ATen/FunctionalStorageImpl.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/core/List.h>
-#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/BoxedKernel.h>
+#include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <c10/core/DispatchKey.h>
@@ -133,15 +135,15 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   ~FunctionalTensorWrapper() override = default;
 
   // FunctionalTensorWrapper overrides all custom size/stride function,
-  // so that if the inner tensor has a custo implementation
+  // so that if the inner tensor has a custom implementation
   // we make sure to call that implementation.
   at::IntArrayRef sizes_custom() const override;
   at::IntArrayRef strides_custom() const override;
   int64_t dim_custom() const override;
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
-  c10::SymIntArrayRef sym_sizes() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_strides_custom() const override;
 
  private:
   const char* tensorimpl_type_name() const override;
@@ -182,44 +184,38 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
 
 TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
 TORCH_API bool isFunctionalTensor(const c10::optional<Tensor>& t);
-TORCH_API bool isFunctionalTensor(const c10::List<Tensor>& t_list);
 TORCH_API bool isFunctionalTensor(
     const c10::List<c10::optional<Tensor>>& t_list);
-TORCH_API bool isFunctionalTensor(const c10::ArrayRef<Tensor> t_list);
+TORCH_API bool isFunctionalTensor(ITensorListRef list);
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
 TORCH_API c10::optional<Tensor> to_functional_tensor(
     const c10::optional<Tensor>& tensor);
-TORCH_API c10::List<Tensor> to_functional_tensor(
-    const c10::List<Tensor>& t_list);
 TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(
     const c10::List<c10::optional<Tensor>>& t_list);
-TORCH_API std::vector<Tensor> to_functional_tensor(
-    const std::vector<Tensor>& t_list);
-TORCH_API std::vector<Tensor> to_functional_tensor(const TensorList& t_list);
+TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
 
 TORCH_API Tensor
 from_functional_tensor(const Tensor& tensor, bool assert_functional = true);
 TORCH_API c10::optional<Tensor> from_functional_tensor(
     const c10::optional<Tensor>& t,
     bool assert_functional = true);
-TORCH_API c10::List<Tensor> from_functional_tensor(
-    const c10::List<Tensor>& t_list);
 TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(
     const c10::List<c10::optional<Tensor>>& t_list);
-TORCH_API std::vector<Tensor> from_functional_tensor(const TensorList& tensors);
+TORCH_API std::vector<Tensor> from_functional_tensor(ITensorListRef t_list);
 
 TORCH_API void sync(const at::Tensor& t);
 TORCH_API void sync(const c10::optional<Tensor>& t);
-TORCH_API void sync(const c10::List<Tensor> t_list);
-TORCH_API void sync(const at::TensorList t_list);
 TORCH_API void sync(const c10::List<c10::optional<Tensor>> t_list);
+TORCH_API void sync(ITensorListRef t_list);
 
 TORCH_API void replace_(const Tensor& functional_tensor, const Tensor& other);
-TORCH_API void replace_(const TensorList functional_tensor, TensorList other);
+TORCH_API void replace_(
+    const ITensorListRef functional_tensor,
+    ITensorListRef other);
 
 TORCH_API void commit_update(const Tensor& functional_tensor);
-TORCH_API void commit_update(const TensorList functional_tensor);
+TORCH_API void commit_update(ITensorListRef functional_tensor);
 
 Tensor create_functional_tensor_with_view_meta(
     const Tensor& view_to_wrap,
@@ -227,11 +223,7 @@ Tensor create_functional_tensor_with_view_meta(
     functionalization::ViewMeta meta,
     int64_t out_idx = 0);
 std::vector<Tensor> create_functional_tensor_with_view_meta(
-    const c10::List<Tensor>& view_to_wrap,
-    const Tensor& base,
-    functionalization::ViewMeta meta);
-std::vector<Tensor> create_functional_tensor_with_view_meta(
-    const std::vector<Tensor>& view_to_wrap,
+    ITensorListRef view_to_wrap,
     const Tensor& base,
     functionalization::ViewMeta meta);
 
@@ -291,8 +283,7 @@ struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
                   .typed<ReturnType(ParameterTypes...)>();
 
     return c10::impl::BoxedKernelWrapper<ReturnType(ParameterTypes...)>::call(
-        c10::KernelFunction::make_boxed_function<functionalize_op_helper>,
-        nullptr,
+        c10::BoxedKernel::makeFromFunction<functionalize_op_helper>(),
         op,
         // BoxedKernelWrapper knows to ignore this keyset argument,
         // because functionalize_op_helper doesn't take in a DispatchKeySet

@@ -27,7 +27,6 @@
 #include <ATen/ops/huber_loss_backward.h>
 #include <ATen/ops/huber_loss_backward_native.h>
 #include <ATen/ops/huber_loss_native.h>
-#include <ATen/ops/kl_div_backward_native.h>
 #include <ATen/ops/kl_div_native.h>
 #include <ATen/ops/l1_loss_native.h>
 #include <ATen/ops/log.h>
@@ -36,6 +35,7 @@
 #include <ATen/ops/min.h>
 #include <ATen/ops/mse_loss_backward.h>
 #include <ATen/ops/mse_loss_backward_native.h>
+#include <ATen/ops/mse_loss_meta.h>
 #include <ATen/ops/mse_loss_native.h>
 #include <ATen/ops/mul.h>
 #include <ATen/ops/neg.h>
@@ -43,6 +43,7 @@
 #include <ATen/ops/poisson_nll_loss_native.h>
 #include <ATen/ops/smooth_l1_loss_backward.h>
 #include <ATen/ops/smooth_l1_loss_backward_native.h>
+#include <ATen/ops/smooth_l1_loss_meta.h>
 #include <ATen/ops/smooth_l1_loss_native.h>
 #include <ATen/ops/soft_margin_loss.h>
 #include <ATen/ops/soft_margin_loss_backward.h>
@@ -52,6 +53,7 @@
 #include <ATen/ops/sum.h>
 #include <ATen/ops/triplet_margin_loss_native.h>
 #include <ATen/ops/where.h>
+#include <ATen/ops/xlogy.h>
 #include <ATen/ops/zeros_like.h>
 #endif
 
@@ -232,46 +234,25 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output = at::exp(target) * (target - input);
-  return apply_loss_reduction(output, reduction);
-}
-
-Tensor _kl_div_non_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto output_pos = target * (at::log(target) - input);
-  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto output = at::where(target > 0, output_pos, zeros);
-  return apply_loss_reduction(output, reduction);
-}
-
 Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  return log_target ? _kl_div_log_target(input, target, reduction)
-                    : _kl_div_non_log_target(input, target, reduction);
-}
-
-Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  auto grad_expand = grad.expand_as(input);
-  if (!log_target) {
-    auto iter = TensorIteratorConfig()
-      .add_output(grad_input)
-      .add_input(target)
-      .add_input(grad_expand)
-      .build();
-    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
-      cpu_serial_kernel(iter, [](scalar_t target_val, scalar_t grad_val) -> scalar_t{
-        return target_val > 0 ? -target_val * grad_val : 0;
-      });
-    });
+  TORCH_CHECK(!input.is_complex() && !target.is_complex(),
+              "kl_div: Complex inputs not supported.");
+  TORCH_CHECK(!at::isIntegralType(input.scalar_type(), /*include_bool*/true) &&
+              !at::isIntegralType(target.scalar_type(), /*include_bool*/true),
+              "kl_div: Integral inputs not supported.");
+  Tensor output;
+  if (log_target) {
+    output = at::exp(target) * (target - input);
+  } else {
+    if (input.is_mps() || target.is_mps()) {
+      // MPS fallback, as MPS does not currently implement xlogy.
+      // MPS will give the wrong results at `target[i] = 0`
+      output = target * (at::log(target) - input);
+    } else {
+      output = at::xlogy(target, target) - target * input;
+    }
   }
-  else {
-    grad_input = -at::exp(target) * grad_expand;
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    return grad_input / input.numel();
-  }
-  return grad_input;
+  return apply_loss_reduction(output, reduction);
 }
 
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {

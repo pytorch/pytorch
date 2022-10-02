@@ -1,10 +1,13 @@
 #pragma once
-#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
+
+namespace at {
+class TensorBase;
+}
 
 namespace at { namespace native {
 
-using pixel_shuffle_fn = void(*)(Tensor&, const Tensor&, int64_t);
+using pixel_shuffle_fn = void(*)(TensorBase&, const TensorBase&, int64_t);
 DECLARE_DISPATCH(pixel_shuffle_fn, pixel_shuffle_kernel);
 DECLARE_DISPATCH(pixel_shuffle_fn, pixel_unshuffle_kernel);
 

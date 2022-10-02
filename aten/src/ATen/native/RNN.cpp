@@ -758,7 +758,7 @@ struct GRUCell : Cell<Tensor, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    if (input.is_cuda()) {
+    if (input.is_cuda() || input.is_xpu()) {
       TORCH_CHECK(!pre_compute_input);
       auto igates = params.matmul_ih(input);
       auto hgates = params.matmul_hh(hidden);
