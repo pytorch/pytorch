@@ -34,6 +34,11 @@ class C10_API SymFloat {
     return data_;
   }
 
+  SymFloat operator+(SymFloat) const;
+  SymFloat operator-(SymFloat) const;
+  SymFloat operator*(SymFloat) const;
+  SymFloat operator/(SymFloat) const;
+
   // N.B. It's important to keep this definition in the header
   // as we expect if checks to be folded for mobile builds
   // where `is_symbolic` is always false
