@@ -1,5 +1,6 @@
 #include <caffe2/torch/csrc/deploy/deploy.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/utils/pybind.h>
 #include <cstdint>
 #include <cstdio>
 #include <iostream>

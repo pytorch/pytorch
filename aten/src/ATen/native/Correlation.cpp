@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -64,7 +65,7 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        num_observations == 0 || w.min().ge(0).item<bool>(),
+        num_observations == 0 || at::is_scalar_tensor_true(w.min().ge(0)),
         "cov(): fweights cannot be negative");
   }
 
@@ -87,7 +88,7 @@ Tensor cov(
         " != ",
         num_observations);
     TORCH_CHECK(
-        num_observations == 0 || aw.min().ge(0).item<bool>(),
+        num_observations == 0 || at::is_scalar_tensor_true(aw.min().ge(0)),
         "cov(): aweights cannot be negative");
     w = w.defined() ? w * aw : aw;
   }
@@ -98,7 +99,7 @@ Tensor cov(
       : at::scalar_tensor(num_observations, in.options().dtype(kLong));
 
   TORCH_CHECK(
-      !w.defined() || w_sum.ne(0).item<bool>(),
+      !w.defined() || at::is_scalar_tensor_true(w_sum.ne(0)),
       "cov(): weights sum to zero, can't be normalized");
 
   const auto avg = (w.defined() ? in * w : in).sum(OBSERVATIONS_DIM) / w_sum;
@@ -112,7 +113,7 @@ Tensor cov(
     norm_factor = w_sum - correction;
   }
 
-  if (norm_factor.le(0).item<bool>()) {
+  if (at::is_scalar_tensor_true(norm_factor.le(0))) {
     TORCH_WARN("cov(): degrees of freedom is <= 0");
     norm_factor.zero_();
   }

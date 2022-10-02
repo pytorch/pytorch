@@ -12,6 +12,9 @@ PR_BRANCH_LIST = [
 
 RC_PATTERN = r"/v[0-9]+(\.[0-9]+)*-rc[0-9]+/"
 
+MAC_IOS_EXCLUSION_LIST = ["nightly", "postnightly"]
+
+
 def gen_filter_dict(
         branches_list=NON_PR_BRANCH_LIST,
         tags_list=None
@@ -26,3 +29,11 @@ def gen_filter_dict(
     if tags_list is not None:
         filter_dict["tags"] = {"only": tags_list}
     return filter_dict
+
+
+def gen_filter_dict_exclude(branches_list=MAC_IOS_EXCLUSION_LIST):
+    return {
+        "branches": {
+            "ignore": branches_list,
+        },
+    }
