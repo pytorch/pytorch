@@ -65,27 +65,31 @@ static void testCudaTestVectorAdd01_impl() {
 
   // TODO: move gpu support into PaddedBuffer
   ctype* a_dev = nullptr;
-  cudaMalloc(&a_dev, N * sizeof(ctype));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, N * sizeof(ctype)));
   ctype* b_dev = nullptr;
-  cudaMalloc(&b_dev, N * sizeof(ctype));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, N * sizeof(ctype)));
   ctype* c_dev = nullptr;
-  cudaMalloc(&c_dev, N * sizeof(ctype));
-  cudaMemcpy(a_dev, a_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, N * sizeof(ctype)));
+  C10_CUDA_CHECK(
+      cudaMemcpy(a_dev, a_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(
+      cudaMemcpy(b_dev, b_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(
+      cudaMemcpy(c_dev, c_v.data(), N * sizeof(ctype), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, N * sizeof(ctype), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(c_v.data(), c_dev, N * sizeof(ctype), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
 }
 
 float sigmoid(float x) {
@@ -127,23 +131,26 @@ TEST(Cuda, Sigmoid_CUDA) {
 
   // TODO: move gpu support into PaddedBuffer
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, N * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, N * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, N * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, N * sizeof(float)));
+  C10_CUDA_CHECK(
+      cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(
+      cudaMemcpy(c_dev, c_v.data(), N * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, a_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(c_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
 }
 
 TEST(Cuda, TestVectorAdd01_CUDA) {
@@ -188,27 +195,31 @@ static void testCudaTestVectorAdd02_impl(int64_t N, int64_t block_size) {
 
   // TODO: move gpu support into PaddedBuffer
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, N * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, N * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, N * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, N * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, N * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, N * sizeof(float)));
+  C10_CUDA_CHECK(
+      cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(
+      cudaMemcpy(b_dev, b_v.data(), N * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(
+      cudaMemcpy(c_dev, c_v.data(), N * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
 }
 
 TEST(Cuda, TestVectorAdd02_CUDA) {
@@ -235,23 +246,23 @@ TEST(Cuda, HalfCast_CUDA) {
   auto aSize = aData.size() * sizeof(aData[0]);
   auto bSize = bData.size() * sizeof(bData[0]);
 
-  cudaMalloc(&aDev, aSize);
-  cudaMalloc(&bDev, bSize);
-  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
-  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&aDev, aSize));
+  C10_CUDA_CHECK(cudaMalloc(&bDev, bSize));
+  C10_CUDA_CHECK(cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cg.call({aDev, bDev});
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
-  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
-  cudaMemcpy(bData.data(), bDev, bSize, cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(bData.data(), bDev, bSize, cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   assertAllEqual(bData, 2.0f);
 
-  cudaFree(aDev);
-  cudaFree(bDev);
+  C10_CUDA_CHECK(cudaFree(aDev));
+  C10_CUDA_CHECK(cudaFree(bDev));
 }
 
 TEST(Cuda, DynamicShape2D_CUDA) {
@@ -275,41 +286,41 @@ TEST(Cuda, DynamicShape2D_CUDA) {
     float* aDev = nullptr;
     float* bDev = nullptr;
     float* cDev = nullptr;
-    cudaMalloc(&aDev, aData.size() * sizeof(aData[0]));
-    cudaMalloc(&bDev, bData.size() * sizeof(bData[0]));
-    cudaMalloc(&cDev, cData.size() * sizeof(cData[0]));
-    cudaMemcpy(
+    C10_CUDA_CHECK(cudaMalloc(&aDev, aData.size() * sizeof(aData[0])));
+    C10_CUDA_CHECK(cudaMalloc(&bDev, bData.size() * sizeof(bData[0])));
+    C10_CUDA_CHECK(cudaMalloc(&cDev, cData.size() * sizeof(cData[0])));
+    C10_CUDA_CHECK(cudaMemcpy(
         aDev,
         aData.data(),
         aData.size() * sizeof(aData[0]),
-        cudaMemcpyHostToDevice);
-    cudaMemcpy(
+        cudaMemcpyHostToDevice));
+    C10_CUDA_CHECK(cudaMemcpy(
         bDev,
         bData.data(),
         bData.size() * sizeof(bData[0]),
-        cudaMemcpyHostToDevice);
-    cudaMemcpy(
+        cudaMemcpyHostToDevice));
+    C10_CUDA_CHECK(cudaMemcpy(
         cDev,
         cData.data(),
         cData.size() * sizeof(cData[0]),
-        cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
+        cudaMemcpyHostToDevice));
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
 
     cg.call({aDev, bDev, cDev, M, N});
-    cudaDeviceSynchronize();
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
 
-    cudaMemcpy(
+    C10_CUDA_CHECK(cudaMemcpy(
         cData.data(),
         cDev,
         cData.size() * sizeof(cData[0]),
-        cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
+        cudaMemcpyDeviceToHost));
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
 
     ExpectAllNear(cData, std::vector<float>(M * N, 3.0f), 1e-7);
 
-    cudaFree(aDev);
-    cudaFree(bDev);
-    cudaFree(cDev);
+    C10_CUDA_CHECK(cudaFree(aDev));
+    C10_CUDA_CHECK(cudaFree(bDev));
+    C10_CUDA_CHECK(cudaFree(cDev));
   };
   testWithSize(32, 32);
   testWithSize(1, 16);
@@ -342,14 +353,15 @@ TEST(Cuda, TestRand01_CUDA) {
 
   // TODO: move gpu support into PaddedBuffer
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, N * sizeof(float));
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, N * sizeof(float)));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   float sum1 = 0;
   float sum2 = 0;
@@ -371,7 +383,7 @@ TEST(Cuda, TestRand01_CUDA) {
   ASSERT_NEAR(sum1, sum1_mean, 2e-2);
   ASSERT_NEAR(sum2, sum2_mean, 2e-2);
   ASSERT_NEAR(sum3, sum3_mean, 2e-2);
-  cudaFree(c_dev);
+  C10_CUDA_CHECK(cudaFree(c_dev));
 }
 
 TEST(Cuda, DynamicShapeSplit_CUDA) {
@@ -393,34 +405,34 @@ TEST(Cuda, DynamicShapeSplit_CUDA) {
   std::vector<float> bData(N, 1.0f);
   float* aDev = nullptr;
   float* bDev = nullptr;
-  cudaMalloc(&aDev, aData.size() * sizeof(aData[0]));
-  cudaMalloc(&bDev, bData.size() * sizeof(bData[0]));
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMalloc(&aDev, aData.size() * sizeof(aData[0])));
+  C10_CUDA_CHECK(cudaMalloc(&bDev, bData.size() * sizeof(bData[0])));
+  C10_CUDA_CHECK(cudaMemcpy(
       aDev,
       aData.data(),
       aData.size() * sizeof(aData[0]),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       bDev,
       bData.data(),
       bData.size() * sizeof(aData[0]),
-      cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cg.call({aDev, bDev, N});
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMemcpy(
       bData.data(),
       bDev,
       bData.size() * sizeof(aData[0]),
-      cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(bData, std::vector<float>(N, 2.0f), 1e-7);
 
-  cudaFree(aDev);
-  cudaFree(bDev);
+  C10_CUDA_CHECK(cudaFree(aDev));
+  C10_CUDA_CHECK(cudaFree(bDev));
 }
 
 TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
@@ -469,24 +481,24 @@ TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   }
 
   float* data_dev = nullptr;
-  cudaMalloc(&data_dev, N * sizeof(float));
-  cudaMemcpy(
-      data_dev, data_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMalloc(&data_dev, N * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      data_dev, data_v.data(), N * sizeof(float), cudaMemcpyHostToDevice));
   float* output_dev = nullptr;
-  cudaMalloc(&output_dev, 1 * sizeof(float));
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&output_dev, 1 * sizeof(float)));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(data_dev, output_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(
-      output_v.data(), output_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
+      output_v.data(), output_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(output_v, output_ref, 1e-5);
 
-  cudaFree(data_dev);
-  cudaFree(output_dev);
+  C10_CUDA_CHECK(cudaFree(data_dev));
+  C10_CUDA_CHECK(cudaFree(output_dev));
 }
 
 TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
@@ -548,22 +560,24 @@ TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, N * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, N * sizeof(float)));
+  C10_CUDA_CHECK(
+      cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, 1 * sizeof(float));
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, 1 * sizeof(float)));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(b_v, b_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
 }
 
 TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
@@ -642,23 +656,25 @@ TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
 
   // TODO: add check of the generated code.
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, 2 * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, 2 * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, N * sizeof(float));
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, N * sizeof(float)));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(a_v.data(), a_dev, 2 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(b_v.data(), b_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(a_v.data(), a_dev, 2 * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(
+      cudaMemcpy(b_v.data(), b_dev, N * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(a_v, a_ref, 1e-5);
   ExpectAllNear(b_v, b_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
 }
 
 TEST(Cuda, SharedMemReduce_1_CUDA) {
@@ -779,23 +795,24 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, kTotalSize * sizeof(float));
-  cudaMemcpy(
-      a_dev, a_v.data(), kTotalSize * sizeof(float), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, kTotalSize * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      a_dev, a_v.data(), kTotalSize * sizeof(float), cudaMemcpyHostToDevice));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, 1 * sizeof(float));
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, 1 * sizeof(float)));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(b_v, b_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
 }
 
 TEST(Cuda, LocalMemReduce_1_CUDA) {
@@ -889,23 +906,24 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, kTotalSize * sizeof(float));
-  cudaMemcpy(
-      a_dev, a_v.data(), kTotalSize * sizeof(float), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, kTotalSize * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      a_dev, a_v.data(), kTotalSize * sizeof(float), cudaMemcpyHostToDevice));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, 1 * sizeof(float));
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, 1 * sizeof(float)));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(
+      cudaMemcpy(b_v.data(), b_dev, 1 * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(b_v, b_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
 }
 
 TEST(Cuda, HalfSupport_CUDA) {
@@ -940,29 +958,29 @@ TEST(Cuda, HalfSupport_CUDA) {
   auto cSize = cData.size() * sizeof(float);
   auto dSize = dData.size() * sizeof(dData[0]);
 
-  cudaMalloc(&aDev, aSize);
-  cudaMalloc(&bDev, bSize);
-  cudaMalloc(&cDev, cSize);
-  cudaMalloc(&dDev, dSize);
-  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
-  cudaMemcpy(cDev, cData.data(), cSize, cudaMemcpyHostToDevice);
-  cudaMemcpy(dDev, dData.data(), dSize, cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&aDev, aSize));
+  C10_CUDA_CHECK(cudaMalloc(&bDev, bSize));
+  C10_CUDA_CHECK(cudaMalloc(&cDev, cSize));
+  C10_CUDA_CHECK(cudaMalloc(&dDev, dSize));
+  C10_CUDA_CHECK(cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(cDev, cData.data(), cSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(dDev, dData.data(), dSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cg.call({aDev, bDev, cDev, dDev});
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
-  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
-  cudaMemcpy(cData.data(), cDev, cSize, cudaMemcpyDeviceToHost);
-  cudaMemcpy(dData.data(), dDev, dSize, cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(cData.data(), cDev, cSize, cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(dData.data(), dDev, dSize, cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   assertAllEqual(cData, 46.0f);
 
-  cudaFree(aDev);
-  cudaFree(bDev);
-  cudaFree(cDev);
-  cudaFree(dDev);
+  C10_CUDA_CHECK(cudaFree(aDev));
+  C10_CUDA_CHECK(cudaFree(bDev));
+  C10_CUDA_CHECK(cudaFree(cDev));
+  C10_CUDA_CHECK(cudaFree(dDev));
 }
 
 TEST(Cuda, HalfPropagation_CUDA) {
@@ -997,20 +1015,22 @@ TEST(Cuda, HalfPropagation_CUDA) {
   auto aSize = aData.size() * sizeof(aData[0]);
   auto reluSize = reluData.size() * sizeof(reluData[0]);
 
-  cudaMalloc(&aDev, aSize);
-  cudaMalloc(&reluDev, reluSize);
-  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
-  cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&aDev, aSize));
+  C10_CUDA_CHECK(cudaMalloc(&reluDev, reluSize));
+  C10_CUDA_CHECK(cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(
+      cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cg.call({aDev, reluDev});
-  cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(
+      cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   assertAllEqual(aData, reluData);
 
-  cudaFree(aDev);
-  cudaFree(reluDev);
+  C10_CUDA_CHECK(cudaFree(aDev));
+  C10_CUDA_CHECK(cudaFree(reluDev));
 }
 
 TEST(Cuda, UnusedHalfArgument_CUDA) {
@@ -1050,23 +1070,25 @@ TEST(Cuda, UnusedHalfArgument_CUDA) {
   auto bSize = bData.size() * sizeof(bData[0]);
   auto reluSize = reluData.size() * sizeof(reluData[0]);
 
-  cudaMalloc(&aDev, aSize);
-  cudaMalloc(&bDev, bSize);
-  cudaMalloc(&reluDev, reluSize);
-  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
-  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
-  cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&aDev, aSize));
+  C10_CUDA_CHECK(cudaMalloc(&bDev, bSize));
+  C10_CUDA_CHECK(cudaMalloc(&reluDev, reluSize));
+  C10_CUDA_CHECK(cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(
+      cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cg.call({aDev, bDev, reluDev});
-  cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(
+      cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   assertAllEqual(aData, reluData);
 
-  cudaFree(aDev);
-  cudaFree(bDev);
-  cudaFree(reluDev);
+  C10_CUDA_CHECK(cudaFree(aDev));
+  C10_CUDA_CHECK(cudaFree(bDev));
+  C10_CUDA_CHECK(cudaFree(reluDev));
 }
 
 TEST(Cuda, PrioritizeDependents_CUDA) {
@@ -1114,20 +1136,23 @@ TEST(Cuda, PrioritizeDependents_CUDA) {
   float* a_dev = nullptr;
   float* b_dev = nullptr;
   float* c_dev = nullptr;
-  cudaMalloc(&a_dev, 10 * sizeof(float));
-  cudaMalloc(&b_dev, 12 * sizeof(float));
-  cudaMalloc(&c_dev, 12 * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, 10 * sizeof(float)));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, 12 * sizeof(float)));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, 12 * sizeof(float)));
 
-  cudaMemcpy(a_dev, a_v.data(), 10 * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), 12 * sizeof(float), cudaMemcpyHostToDevice);
+  C10_CUDA_CHECK(cudaMemcpy(
+      a_dev, a_v.data(), 10 * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      b_dev, b_v.data(), 12 * sizeof(float), cudaMemcpyHostToDevice));
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(a_dev, b_dev, c_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, 12 * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_v.data(), c_dev, 12 * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   for (const auto i : c10::irange(12)) {
     if (i < 10) {
@@ -1201,33 +1226,39 @@ TEST(Cuda, MaskBlockDim_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 /// Tests the case with two loops, which have different extents that are bound
@@ -1292,33 +1323,39 @@ TEST(Cuda, MaskThreadDim_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 /// Tests the case where there are two loops, and each is bound to a different
@@ -1384,33 +1421,39 @@ TEST(Cuda, MaskMultiBlockDim_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 /// Tests the case where both the blockDim and threadDim are bound to different
@@ -1476,33 +1519,39 @@ TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, B_SIZE * sizeof(float));
-  cudaMemcpy(a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaMemcpy(d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
+      a_dev, a_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      b_dev, b_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_dev, c_v.data(), A_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_dev, d_v.data(), B_SIZE * sizeof(float), cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaMemcpy(d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
+      c_v.data(), c_dev, A_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
+      d_v.data(), d_dev, B_SIZE * sizeof(float), cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 /// Tests the case where the loopnest has two loops of depth two: each with the
@@ -1577,57 +1626,57 @@ TEST(Cuda, MaskMultiDim_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
       a_dev,
       a_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       b_dev,
       b_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       c_dev,
       c_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_dev,
       d_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
       c_v.data(),
       c_dev,
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaMemcpy(
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_v.data(),
       d_dev,
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 // Tests the case where loop extents are symbolic and not known at compile time.
@@ -1707,57 +1756,57 @@ TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, OUTER_EXTENT * A_EXTENT * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, OUTER_EXTENT * A_EXTENT * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, OUTER_EXTENT * B_EXTENT * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, OUTER_EXTENT * B_EXTENT * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, OUTER_EXTENT * A_EXTENT * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, OUTER_EXTENT * A_EXTENT * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, OUTER_EXTENT * B_EXTENT * sizeof(float));
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, OUTER_EXTENT * B_EXTENT * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
       a_dev,
       a_v.data(),
       OUTER_EXTENT * A_EXTENT * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       b_dev,
       b_v.data(),
       OUTER_EXTENT * B_EXTENT * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       c_dev,
       c_v.data(),
       OUTER_EXTENT * A_EXTENT * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_dev,
       d_v.data(),
       OUTER_EXTENT * B_EXTENT * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, OUTER_EXTENT, A_EXTENT, B_EXTENT, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
       c_v.data(),
       c_dev,
       OUTER_EXTENT * A_EXTENT * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaMemcpy(
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_v.data(),
       d_dev,
       OUTER_EXTENT * B_EXTENT * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 // Tests the case where two loops are fused at a common parent loop, which is
@@ -1845,57 +1894,57 @@ TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
       a_dev,
       a_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       b_dev,
       b_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       c_dev,
       c_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_dev,
       d_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(a_dev, b_dev, c_dev, d_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
       c_v.data(),
       c_dev,
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaMemcpy(
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_v.data(),
       d_dev,
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 // Tests the case with two loops fused into a common parent, which is not bound
@@ -1983,57 +2032,57 @@ TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
       a_dev,
       a_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       b_dev,
       b_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       c_dev,
       c_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_dev,
       d_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(a_dev, b_dev, c_dev, d_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
       c_v.data(),
       c_dev,
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaMemcpy(
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_v.data(),
       d_dev,
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 // Tests the case with two loop nests, each of which bound to the same block
@@ -2109,57 +2158,57 @@ TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, OUTER_SIZE * A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float));
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, OUTER_SIZE * B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
       a_dev,
       a_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       b_dev,
       b_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       c_dev,
       c_v.data(),
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_dev,
       d_v.data(),
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
       c_v.data(),
       c_dev,
       OUTER_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaMemcpy(
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_v.data(),
       d_dev,
       OUTER_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 // Tests the case with two loop nests, each bound to both Block and Thread but
@@ -2236,57 +2285,57 @@ TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   }
 
   float* a_dev = nullptr;
-  cudaMalloc(&a_dev, OUTER_A_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&a_dev, OUTER_A_SIZE * A_SIZE * sizeof(float)));
   float* b_dev = nullptr;
-  cudaMalloc(&b_dev, OUTER_B_SIZE * B_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&b_dev, OUTER_B_SIZE * B_SIZE * sizeof(float)));
   float* c_dev = nullptr;
-  cudaMalloc(&c_dev, OUTER_A_SIZE * A_SIZE * sizeof(float));
+  C10_CUDA_CHECK(cudaMalloc(&c_dev, OUTER_A_SIZE * A_SIZE * sizeof(float)));
   float* d_dev = nullptr;
-  cudaMalloc(&d_dev, OUTER_B_SIZE * B_SIZE * sizeof(float));
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaMalloc(&d_dev, OUTER_B_SIZE * B_SIZE * sizeof(float)));
+  C10_CUDA_CHECK(cudaMemcpy(
       a_dev,
       a_v.data(),
       OUTER_A_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       b_dev,
       b_v.data(),
       OUTER_B_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       c_dev,
       c_v.data(),
       OUTER_A_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaMemcpy(
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_dev,
       d_v.data(),
       OUTER_B_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyHostToDevice);
-  cudaDeviceSynchronize();
+      cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   cuda_cg(c_dev, d_dev, a_dev, b_dev);
 
-  cudaDeviceSynchronize();
-  cudaMemcpy(
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_CHECK(cudaMemcpy(
       c_v.data(),
       c_dev,
       OUTER_A_SIZE * A_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaMemcpy(
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
       d_v.data(),
       d_dev,
       OUTER_B_SIZE * B_SIZE * sizeof(float),
-      cudaMemcpyDeviceToHost);
-  cudaDeviceSynchronize();
+      cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   ExpectAllNear(c_v, c_ref, 1e-5);
   ExpectAllNear(d_v, d_ref, 1e-5);
 
-  cudaFree(a_dev);
-  cudaFree(b_dev);
-  cudaFree(c_dev);
-  cudaFree(d_dev);
+  C10_CUDA_CHECK(cudaFree(a_dev));
+  C10_CUDA_CHECK(cudaFree(b_dev));
+  C10_CUDA_CHECK(cudaFree(c_dev));
+  C10_CUDA_CHECK(cudaFree(d_dev));
 }
 
 } // namespace jit

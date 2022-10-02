@@ -135,6 +135,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
 
     Examples::
 
+            >>> # xdoctest: +SKIP
             >>> m = M().eval()
             >>> # m is a module containing the sub-modules below
             >>> modules_to_fuse = [ ['conv1', 'bn1', 'relu1'], ['submodule.conv', 'submodule.relu']]

@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/TensorIterator.h>
@@ -1088,12 +1089,20 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   // We need to trim the front padding away if centered
   const auto start = center ? n_fft / 2 : 0;
-  const auto end = lengthOpt.has_value() ? start + lengthOpt.value() : (center ? - n_fft / 2 : -1);
+  const auto end = [&] () -> int64_t {
+    if (lengthOpt.has_value()) {
+      return start + *lengthOpt;
+    }
+    if (center) {
+      return -(n_fft / 2);
+    }
+    return expected_output_signal_len;
+  }();
 
   y = y.slice(2, start, end, 1);
   window_envelop = window_envelop.slice(2, start, end, 1);
-  const auto window_envelop_lowest = window_envelop.abs().min().item().toDouble();
-  if (window_envelop_lowest < 1e-11) {
+  const auto window_envelop_lowest = window_envelop.abs().min().lt(1e-11);
+  if (at::is_scalar_tensor_true(window_envelop_lowest)) {
     std::ostringstream ss;
     REPR(ss) << "window overlap add min: " << window_envelop_lowest;
     AT_ERROR(ss.str());
@@ -1113,7 +1122,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   }
   return y;
 
-  #undef REPR
+#undef REPR
 }
 
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,

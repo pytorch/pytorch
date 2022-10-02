@@ -2,10 +2,19 @@
 
 # Static Runtime
 
-The premise of this approach is that a small subset of neural networks are well represented by a
-completely flattened dataflow graph.
-TorchScript supports a far more feature programming paradigm,
-so many models will not work out of the box.
+Static Runtime is an optimized CPU inference runtime for PyTorch models.
+It can be used as a drop-in replacement for the TorchScript JIT interpreter
+in either C++ or Python.
+
+Static Runtime is mainly useful if the following conditions are met:
+1. The model has very little control flow.
+2. PyTorch overhead (tensor creation, etc) accounts for
+a non-trivial fraction of the model's runtime. In particular, if
+tensor allocation consumes a significant amount of time, Static
+Runtime can help. Memory for intermediate tensors is coalesced into
+a single slab, so most dynamic allocations are avoided during
+inference.
+3. Inference performance is extremely important.
 
 ## Assumptions
 
@@ -64,11 +73,7 @@ Static runtime's memory planner does two things:
 1) Coalesces internal allocations for tensor storage
 2) Does static analysis to figure out how to efficiently re-use memory.
 
-For (2), there are two algorithms used. Specify which algorithm with
-the `memory_planner_algorithm` field in `StaticModuleOptions`. The
-algorithms are briefly described below:
-
-### Standard Resizing (default)
+### Standard Resizing
 Static runtime will record the space required for each intermediate managed tensor it sees
 on the first inference iteration. An intermediate tensor is *managed* if two conditions
 are satisfied:
@@ -94,16 +99,6 @@ will occur. This is why dynamic shapes will degrade performance. With the standa
 strategy, static runtime will record the new largest tensor size in each storage group at the
 end of the iteration and allocate a buffer that is possibly bigger on the next iteration.
 
-### Precomputed Offsets Memory Planner (experimental)
-This algorithm is based on [arXiv:2001.03288](https://arxiv.org/pdf/2001.03288.pdf), section 5.2 "Greedy by Size for Offset Calculation".
-
-The paper describes the algorithm in detail, but the key considerations are:
-
-1) This algorithm will tend to be more efficient with respect to maximum memory usage
-2) This algorithm will *not* resize the tensor buffer since recomputing offsets is a quadratic operation. Therefore,
-to avoid performance degradation, the model should be warmed up with the largest possible inputs.
-
-
 ### Managed Output Tensors
 
 `StaticRuntime` can optionally manage output tensors via the `manage_output_tensors` option in `StaticModuleOptions`.
@@ -112,17 +107,7 @@ output tensors is separated from the one containing intermediate tensors. The fo
 of the inference run, but the latter needs deallocated at the end of the run.
 
 Under the hood, we store a refcounted pointer to the output arena in each returned `Tensor`. The arena is destroyed
-only when all output tensors are destroyed.
-
-```
-auto output = runtime(args);
-auto& elems = output.toTupleRef().elements();
-auto tensor_1 = elems[0].toTensor();
-auto tensor_2 = elems[1].toTensor();
-
-tensor_1 = at::empty({0}); // Output buffer not deallocated yet!
-tensor_2 = at::empty({0}); // This call deallocates the output buffer.
-```
+explicitly.
 
 ## Registering Ops
 Static runtime has three op execution modes:
@@ -238,3 +223,16 @@ a reference to `ivalue_array[some_set_of_indices[i]]`)
 Each `ProcessedNode` stores a `ProcessedFunction`, which represents the actual op to execute. `ProcessedFunction`s are initialized
 upon `StaticModule` construction according to the out variant/native/JIT fallback lookup rules described in "Registering Ops".
 **Note that all `ProcessedFunction`s are shared amongst all runtime instances**, so all `ProcessedFunction`s must be thread-safe.
+
+### `ProcessedNodeMetadata`
+
+`ProcessedNodeMetadata` holds various "extra" fields on behalf of `ProcessedNode`. Typically, this field is unused. But a few ops need extra machinery to work:
+* `prim::If` operations have two `BlockRunner`s for the execution of true and false sub-blocks depending upon the condition check.
+* `prim::Loop` operations have a `BlockRunner` for the execution of the looping sub-block.
+* `prim::fork` operations have `torch::jit::TaskLauncher` (`std::function<void(std::function<void()>)>`) responsible for forked graph execution.
+
+### Asynchronous Execution
+
+The `StaticRuntime::runAsync()` API allows the execution of asynchronous operations on the `TaskLauncher` passed as arguments.
+`StaticRuntime::runAsync()` performs inline execution of the parent graph on the caller thread. Asynchronous operations like `prim::fork` are executed
+on the launcher passed in. In the case that no launcher is provided, the execution happens via `at::launch`, i.e. on the inter-op thread pool.

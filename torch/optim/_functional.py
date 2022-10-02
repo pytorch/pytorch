@@ -28,13 +28,15 @@ def sparse_adam(params: List[Tensor],
                 eps: float,
                 beta1: float,
                 beta2: float,
-                lr: float):
+                lr: float,
+                maximize: bool):
     r"""Functional API that performs Sparse Adam algorithm computation.
 
     See :class:`~torch.optim.SparseAdam` for details.
     """
     for i, param in enumerate(params):
         grad = grads[i]
+        grad = grad if not maximize else -grad
         grad = grad.coalesce()  # the update is non-linear so indices must be unique
         grad_indices = grad._indices()
         grad_values = grad._values()
