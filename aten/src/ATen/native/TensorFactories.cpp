@@ -17,12 +17,18 @@
 #include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/eye.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <string>
+#include <c10/core/SymIntArrayRef.h>
 
 namespace at {
 namespace native {
@@ -95,8 +101,12 @@ Tensor arange(
   return at::arange_out(result, start, end, step);
 }
 
+Tensor& arange_start_out(const Scalar& start, const Scalar& end, Tensor& result) {
+    return at::arange_out(result, start, end, /*step=*/1);
+}
+
 Tensor& arange_out(const Scalar& end, Tensor& result) {
-  return at::arange_out(result, /*start=*/0, end);
+  return at::arange_out(result, /*start=*/0, end, /*step=*/1);
 }
 
 Tensor& arange_out(Tensor& result, const Scalar& start, const Scalar& end) {
@@ -176,7 +186,7 @@ Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::opt
   return at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
-Tensor empty(
+Tensor empty_names(
     IntArrayRef size,
     c10::optional<DimnameList> names,
     c10::optional<ScalarType> dtype,
@@ -373,9 +383,9 @@ Tensor empty_like_quantized(
   }
 }
 
-Tensor new_empty(
+Tensor new_empty_symint(
     const Tensor& self,
-    IntArrayRef size,
+    SymIntArrayRef size,
     c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
@@ -385,13 +395,13 @@ Tensor new_empty(
   auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
   auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
   auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
-  return at::empty(size, dtype, layout, device, pin_memory, c10::nullopt);
+  return at::empty_symint(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
-Tensor new_empty_strided(
+Tensor new_empty_strided_symint(
     const Tensor& self,
-    IntArrayRef size,
-    IntArrayRef stride,
+    c10::SymIntArrayRef size,
+    c10::SymIntArrayRef stride,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -400,7 +410,7 @@ Tensor new_empty_strided(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::empty_strided(size, stride, self.options().merge_in(options));
+  return at::empty_strided_symint(size, stride, self.options().merge_in(options));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -411,7 +421,7 @@ Tensor eye(int64_t n,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // the default value of `m` equals to `n`
-  return native::eye(n, n, dtype, layout, device, pin_memory);
+  return at::eye(n, n, dtype, layout, device, pin_memory);
 }
 
 Tensor eye(int64_t n, int64_t m,
@@ -436,6 +446,9 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
 
   result.resize_({n, m});
+
+  if (result.is_meta()) return result;
+
   result.zero_();
 
   int64_t sz = std::min<int64_t>(n, m);
@@ -994,12 +1007,12 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_INDEX_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data_ptr<scalar_t>();
+    index_t* result_data = result.data_ptr<index_t>();
     int64_t i = 0;
 
-    scalar_t r = std::max<int64_t>(0, -offset), c = 0;
+    index_t r = std::max<int64_t>(0, -offset), c = 0;
     while (i < tril_size) {
       result_data[i] = r;
       result_data[tril_size + i++] = c;
@@ -1032,14 +1045,14 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_INDEX_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
-    scalar_t* result_data = result.data_ptr<scalar_t>();
+    index_t* result_data = result.data_ptr<index_t>();
     int64_t i = 0;
     // not typing std::max with scalar_t as it could be an unsigned type
     // NOTE: no need to check if the returned value of std::max overflows
-    // scalar_t, as i and triu_size act as a guard.
-    scalar_t c = std::max<int64_t>(0, offset), r = 0;
+    // index_t, as i and triu_size act as a guard.
+    index_t c = std::max<int64_t>(0, offset), r = 0;
     while (i < triu_size) {
       result_data[i] = r;
       result_data[triu_size + i++] = c;
@@ -1061,7 +1074,7 @@ Tensor triu_indices_cpu(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros(IntArrayRef size,
+Tensor zeros_symint(SymIntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -1069,7 +1082,7 @@ Tensor zeros(IntArrayRef size,
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  auto result = at::empty(size, options);
+  auto result = at::empty_symint(size, options);
   return result.zero_();
 }
 
@@ -1086,8 +1099,16 @@ Tensor _efficientzerotensor(IntArrayRef size,
     return out;
 }
 
+Tensor& zeros_sparse_out(IntArrayRef size, Tensor& result) {
+  result.sparse_resize_and_clear_(size, size.size(), 0.);
+  return result;
+}
+
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
   if (result.is_sparse()) {
+    // TODO: I think this branch should be dead, but we don't have an easy
+    // way to cover all sparse kernels with zeros_sparse_out, so retain this
+    // for now
     result.sparse_resize_and_clear_(size, size.size(), 0.);
     return result;
   } else {
@@ -1110,7 +1131,7 @@ Tensor zeros_like(
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
-    auto res = at::empty({0}, options); // to be resized
+    auto res = at::empty({0}, self.options().merge_in(options)); // to be resized
 
     if (self.is_sparse()) {
       res.sparse_resize_and_clear_(
@@ -1118,6 +1139,7 @@ Tensor zeros_like(
     } else {
       res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
     }
+    res._coalesced_(true);
 
     return res;
   }
@@ -1152,11 +1174,12 @@ Tensor bartlett_window(int64_t window_length,
 Tensor bartlett_window(
     int64_t window_length,
     bool periodic,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("bartlett_window", options, window_length);
@@ -1190,11 +1213,12 @@ Tensor blackman_window(int64_t window_length,
 Tensor blackman_window(
     int64_t window_length,
     bool periodic,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("blackman_window", options, window_length);
@@ -1260,11 +1284,12 @@ Tensor hamming_window(
     bool periodic,
     double alpha,
     double beta,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("hamming_window", options, window_length);
@@ -1336,11 +1361,12 @@ Tensor kaiser_window(
     int64_t window_length,
     bool periodic,
     double beta,
-    c10::optional<ScalarType> dtype,
+    c10::optional<ScalarType> dtype_opt,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
+  ScalarType dtype = c10::dtype_or_default(dtype_opt);
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
   window_function_checks("kaiser_window", options, window_length);
@@ -1453,7 +1479,7 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
   if (memory_format == MemoryFormat::Preserve) {
     if (src.is_non_overlapping_and_dense()) {
       // Copy all strides, this is marginally faster than calling empty_like
-      self = at::empty_strided(src.sizes(), src.strides(), src.options());
+      self = at::empty_strided_symint(src.sym_sizes(), src.sym_strides(), src.options());
     } else {
       self = at::empty_like(src);
     }
