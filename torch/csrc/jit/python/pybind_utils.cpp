@@ -627,8 +627,9 @@ py::object toPyObject(IValue ivalue) {
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isSymInt()) {
-    auto si = ivalue.toSymInt();
-    return py::cast(si);
+    return py::cast(ivalue.toSymInt());
+  } else if (ivalue.isSymFloat()) {
+    return py::cast(ivalue.toSymFloat());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
