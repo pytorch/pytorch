@@ -1558,7 +1558,7 @@ Tensor var_backward(
   }
   const c10::SymInt dof = _safe_size(self.sym_sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / dof.guard_int(__FILE__, __LINE__)) * grad *
+  return (c10::SymFloat(2.0) / c10::SymFloat(dof)) * grad *
       (self - self.mean(dim, /*keepdim=*/true));
 }
 
