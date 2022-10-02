@@ -232,7 +232,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
               newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@1]));
             }
             if (needsScatter) {
-              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()));
+              newCachedGraph->updatesTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, inputType);
             }
             newCachedGraph->outputTensor = chainViewOperation(newCachedGraph, size, stride, storage_offset, base_shape, needsScatter, needsBoolCast);
         }
