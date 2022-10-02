@@ -85,8 +85,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(diff);
   OP_DECOMPOSE(dstack);
   OP_DECOMPOSE(einsum);
-  // TODO symintify
-  // OP_DECOMPOSE(embedding_backward);
+  m.impl("embedding_backward", native::embedding_backward_symint);
   OP_DECOMPOSE(expand_as);
   OP_DECOMPOSE(fft_fft);
   OP_DECOMPOSE(fft_fftshift);
