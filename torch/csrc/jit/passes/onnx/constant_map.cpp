@@ -1,11 +1,11 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/passes/onnx/constant_map.h>
-
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/onnx/constant_map.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
@@ -205,6 +205,15 @@ c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
   return ConstantValueMap::getInstance().shapeValueMap[tensorName];
 }
 
+// Gets the inferredShapeData which is obtained by ONNX data propagation
+ShapeDataMap& ConstantValueMap::GetInferredShapeData() {
+  return ConstantValueMap::getInstance().inferredShapeData;
+}
+
+SymbolDimMap& ConstantValueMap::GetSymbolDimMap() {
+  return ConstantValueMap::getInstance().symbolDimMap;
+}
+
 template <typename Map>
 void UpdateStrKey(
     Map& map,
@@ -236,6 +245,8 @@ void ConstantValueMap::UpdateValueName(
       ConstantValueMap::getInstance().useInferredTypeMap, old_name, new_name);
   UpdateStrKey<decltype(shapeValueMap)>(
       ConstantValueMap::getInstance().shapeValueMap, old_name, new_name);
+  UpdateStrKey<decltype(inferredShapeData)>(
+      ConstantValueMap::getInstance().inferredShapeData, old_name, new_name);
 }
 
 void ConstantValueMap::ClearMaps() {
@@ -245,6 +256,8 @@ void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().typeReliableMap.clear();
   ConstantValueMap::getInstance().useInferredTypeMap.clear();
   ConstantValueMap::getInstance().shapeValueMap.clear();
+  ConstantValueMap::getInstance().inferredShapeData.clear();
+  ConstantValueMap::getInstance().symbolDimMap.clear();
 }
 
 // For debug only.
@@ -299,6 +312,34 @@ void ConstantValueMap::PrintMaps() {
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().shapeValueMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
+  }
+  std::cout << std::endl;
+  std::cout << "InferredShape Map:" << std::endl;
+  count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().inferredShapeData) {
+    std::cout << "(node " << x.first << ": ";
+    for (const auto& dim : x.second.dim()) {
+      if (dim.has_dim_param()) {
+        std::cout << dim.dim_param() << " ";
+      } else {
+        std::cout << dim.dim_value() << " ";
+      }
+    }
+    std::cout << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
+  }
+  std::cout << std::endl;
+  std::cout << "SymbolDim Map:" << std::endl;
+  count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().symbolDimMap) {
+    std::cout << "(" << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
       std::cout << std::endl;

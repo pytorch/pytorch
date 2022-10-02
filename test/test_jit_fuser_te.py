@@ -1387,13 +1387,19 @@ class TestTEFuser(JitTestCase):
                 F.hardsigmoid,
                 F.hardswish,
                 F.softplus,
+                F.silu,
+                F.mish,
+                F.elu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,
-                torch.ceil,
-                torch.floor,
-                torch.round,
-                torch.trunc,
+                # TODO broken on int8 since
+                # https://github.com/pytorch/pytorch/pull/85144
+                # RuntimeError: Invalid integral op_type: 23
+                # torch.ceil,
+                # torch.floor,
+                # torch.round,
+                # torch.trunc,
                 torch.frac,
                 # TODO: broken on ROCm?
                 # F.hardshrink,
@@ -2342,6 +2348,32 @@ class TestTEFuser(JitTestCase):
         scr(x)
         self.assertLastGraphAllFused()
 
+    @unittest.skipIf(not LLVM_ENABLED, "Compiles with TensorExprKernel")
+    def test_to_dtype(self):
+        def f(x):
+            y = torch.sigmoid(x)
+            z = y._autocast_to_reduced_precision(True, True, torch.half, torch.bfloat16)
+            h = z._autocast_to_full_precision(True, True)
+            i = h.to(dtype=torch.bfloat16)
+            j = i.to(dtype=torch.float32)
+            return j
+
+        x = torch.rand((2, 2), dtype=torch.float32)
+        scr = torch.jit.trace(f, x)
+        scr(x)
+        scr(x)
+        self.assertLastGraphAllFused()
+        self.assertEqual(f(x), scr(x), atol=4e-3, rtol=4e-3)
+
+        bf_x = torch.rand((2, 2), dtype=torch.bfloat16)
+        bf_scr = torch.jit.trace(f, bf_x)
+        bf_scr(bf_x)
+        bf_scr(bf_x)
+        graph = bf_scr.graph_for(bf_x)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 2)
+        self.assertEqual(f(bf_x), bf_scr(bf_x), atol=4e-3, rtol=4e-3)
+
     def test_with_strict_fusion(self):
 
         def success(x):
@@ -2394,6 +2426,42 @@ class TestTEFuser(JitTestCase):
 
         f = FileCheck().check("Found multiple fusions")
         f.run(str(error_out.exception))
+
+    def test_constant_chunk_shapes(self):
+        # We had an issue where buildShapeExpressions would fail as show below:
+        #
+        # %1 : Tensor = Constant[..]  # not supported, we don't build this shape
+        # %2 : Tensor = Constant[..]  # not supported
+        # %3 : Tensor = aten::add(%1, %2)  # inputs not supported, we don't build shape
+        # ... = prim::ConstantChunk[..](%3)  # it forgets to check whether input shapes exist, and fails
+        if self.dynamic_shapes:
+            self.skipTest("TODO: chunk dynamic shapes")
+
+        for device in self.devices:
+            def f(x, y):
+                r = torch.tensor(4)
+                z1, z2 = (x + y + r).chunk(2, dim=1)
+                return z1 * z2
+
+            x = torch.randn(4, 4, dtype=torch.float, device=device)
+            y = torch.randn(4, 4, dtype=torch.float, device=device)
+
+            ge = self.checkTrace(f, (x, y))
+            graph = ge.graph_for(x, y)
+
+            # make sure that we are actually testing the right scenario
+            FileCheck().check("with " + FUSION_GROUP + "_").check_count(
+                "ConstantChunk", 1, exactly=True
+            ).run(str(graph))
+
+            f_traced = torch.jit.trace(f, (x, y))
+
+            for i in range(4):
+                # make sure this doesn't error out
+                res = f_traced(x, y)
+
+            self.assertEqual(res, f(x, y))
+
 
 class TestTEFuserStatic(TestTEFuser):
     dynamic_shapes = False
@@ -2637,7 +2705,9 @@ def f({', '.join(param_names)}):
                 trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
                 val = trace(*clone_inputs((sample.input, *sample.args)), **sample.kwargs)
 
-                self.assertEqual(ref, val)
+                atol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                rtol = 2e-1 if dtype == torch.bfloat16 else 1e-5
+                self.assertEqual(ref, val, atol=atol, rtol=rtol)
 
             # https://github.com/pytorch/pytorch/issues/35600
             # each torch.jit.trace adds state to the _python_cu compilation unit

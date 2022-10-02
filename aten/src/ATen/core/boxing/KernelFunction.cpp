@@ -44,10 +44,11 @@ void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Dispa
 // single line summary of state
 std::string KernelFunction::dumpState() const {
   std::ostringstream oss;
-  if (boxed_kernel_func_ == fallthrough_kernel) {
+  auto boxed_kernel_fn = boxed_kernel_func_.getFnPtr();
+  if (boxed_kernel_fn == fallthrough_kernel) {
     oss << "fallthrough ";
   }
-  if (boxed_kernel_func_) {
+  if (boxed_kernel_fn) {
     oss << "boxed ";
   }
   if (unboxed_kernel_func_) {
@@ -57,7 +58,7 @@ std::string KernelFunction::dumpState() const {
 }
 
 bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
-  return boxed_kernel_func_ == other.boxed_kernel_func_ &&
+  return boxed_kernel_func_.getFnPtr() == other.boxed_kernel_func_.getFnPtr() &&
          unboxed_kernel_func_ == other.unboxed_kernel_func_;
 }
 
