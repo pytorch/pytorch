@@ -172,7 +172,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
 {
   MPSStream* stream = getCurrentMPSStream();
-  Tensor dst;
   Tensor src;
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
@@ -180,12 +179,15 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
   uint64_t src_total_size = 0;
 
-  if (src_.is_view()) {
+  // This is weird, but sometimes this function can be called
+  //  with contiguous destination and non-contiguous source
+  if (src_.is_view() || dst_.is_contiguous() != src_.is_contiguous()) {
     src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
     // Get the actual size of a View (takes into account the storage offset)
     // For View tensors, the storage offset can be bigger than what's being reported by nbytes
     src_total_size = at::detail::computeStorageNbytesContiguous(src.sizes(), src.element_size(), src.storage_offset());
   } else {
+    TORCH_INTERNAL_ASSERT(src_.strides() == dst_.strides());
     src = src_;
     if (src.dtype() != dst_.dtype()) {
       // In case of dtype change, perform conversion on source device
