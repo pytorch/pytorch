@@ -2556,6 +2556,26 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         Async work handle, if async_op is set to True.
         None, if not async_op or if not part of the group
 
+    .. note:: Note that all Tensors in scatter_list must have the same size.
+
+    Example::
+        >>> # xdoctest: +SKIP("need process group init")
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> size_of_tensor = 2
+        >>> t_ones = torch.ones(size_of_tensor)
+        >>> t_fives = torch.ones(size_of_tensor) * 5
+        >>> output_tensor = torch.zeros(size_of_tensor)
+        >>> if dist.get_rank() == 0:
+        >>>     # Assumes world_size of 2.
+        >>>     scatter_list = [t_ones, t_fives] # Only Tensors
+        >>> else:
+        >>>     scatter_list = None
+        >>> dist.scatter(output_tensor, objects, src=0)
+        >>> # Rank i gets objects[i]. For example, on rank 1:
+        >>> output_tensor
+        tensor([5., 5., 5.])
+
     """
     _check_single_tensor(tensor, "tensor")
 
