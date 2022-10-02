@@ -1,5 +1,8 @@
 {
   "being_migrated": {
+    "torch.nn.intrinsic": "torch.ao.nn.intrinsic",
+    "torch.nn.intrinsic.modules": "torch.ao.nn.intrinsic.modules",
+    "torch.nn.intrinsic.modules.fused": "torch.ao.nn.intrinsic.modules.fused",
     "torch.nn.qat": "torch.ao.nn.qat",
     "torch.nn.qat.dynamic": "torch.ao.nn.qat.dynamic",
     "torch.nn.qat.dynamic.modules": "torch.ao.nn.qat.dynamic.modules",
@@ -1373,10 +1376,6 @@
   "torch.random": [
     "Generator"
   ],
-  "torch.return_types": [
-    "attr",
-    "pytree_register_structseq"
-  ],
   "torch.serialization": [
     "Any",
     "BinaryIO",
@@ -1550,18 +1549,6 @@
     "Serialization",
     "wrapper_singleton"
   ],
-  "torch.utils.cpp_extension": [
-    "ExtensionVersioner",
-    "FileBaton",
-    "GeneratedFileCleaner",
-    "List",
-    "Optional",
-    "TorchVersion",
-    "Tuple",
-    "Union",
-    "build_ext",
-    "get_hip_file_path"
-  ],
   "torch.utils.data": [
     "_DatasetKind",
     "argument_validation",
@@ -1585,26 +1572,6 @@
   "torch.utils.dlpack": [
     "Any",
     "to_dlpack"
-  ],
-  "torch.utils.hipify.hipify_python": [
-    "Dict",
-    "HipifyFinalResult",
-    "HipifyResult",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Mapping",
-    "Optional"
-  ],
-  "torch.utils.hooks": [
-    "Any",
-    "OrderedDict"
-  ],
-  "torch.utils.show_pickle": [
-    "Any",
-    "BinaryIO",
-    "IO",
-    "Union"
   ],
   "torch": [
     "BFloat16Storage",

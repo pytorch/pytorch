@@ -8,7 +8,7 @@
 
 from typing import OrderedDict
 from unittest.case import skipIf
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -30,6 +30,8 @@ from torch.testing._internal.common_device_type import \
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
+    expectedFailureIf,
+    decorate,
     xfail,
     skip,
     skipOps,
@@ -47,7 +49,7 @@ from collections import namedtuple
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
-from functorch._C import reshape_dim_into, reshape_dim_outof
+from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
 
 FALLBACK_REGEX = 'There is a performance drop'
@@ -3194,6 +3196,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__'),  # dynamic mask
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
         xfail('unique', ''),  # dynamic op
@@ -3249,6 +3252,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
+        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
@@ -3335,6 +3339,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('count_nonzero'),
         xfail('nanmean'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
