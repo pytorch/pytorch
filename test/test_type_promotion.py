@@ -321,16 +321,16 @@ class TestTypePromotion(TestCase):
 
     @float_double_default_dtype
     def test_alternate_result(self, device):
-        f = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=device)
+        x = torch.tensor([1, 1, 1, 1], dtype=torch.float, device=device)
         o = torch.tensor([0, 0, 0, 0], dtype=torch.long, device=device)
         self.assertRaisesRegex(RuntimeError,
                                "can't be cast to",
-                               lambda: torch.add(f, f, out=o))
+                               lambda: torch.add(x, x, out=o))
         d = torch.tensor([1, 1, 1, 1], dtype=torch.double, device=device)
-        torch.add(f, f, out=d)
+        torch.add(x, x, out=d)
         self.assertEqual(d.dtype, torch.double)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(f + f, d)
+        x = x.to(torch.double)
+        self.assertEqual(x + x, d)
 
     @float_double_default_dtype
     def test_mixed_type_backward(self, device):
@@ -339,8 +339,8 @@ class TestTypePromotion(TestCase):
         tens = f * ten
         s = (tens + 2).sum()
         s.backward()
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(f.grad, tens)
+        expected = f.grad.to(torch.double)
+        self.assertEqual(tens, expected)
 
         # If we don't convert the returned grad_input to the actual input type
         # we get an error like:
@@ -444,8 +444,7 @@ class TestTypePromotion(TestCase):
         self.assertEqual(torch.arange(False, True, device=device), expected)
         self.assertEqual(torch.arange(True, device=device), expected)
         expected = torch.tensor([0, 0.5], dtype=torch.get_default_dtype(), device=device)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(torch.arange(False, True, 0.5, device=device), expected)
+        self.assertEqual(torch.arange(False, True, 0.5, device=device), expected)
         expected = torch.ones(0, dtype=torch.int64, device=device)
         self.assertEqual(torch.arange(False, False, device=device), expected)
 
@@ -816,8 +815,9 @@ class TestTypePromotion(TestCase):
         suffix = '_' if inplace else ''
         err = "{} {}({}, {})".format("  coalesced" if coalesced else "uncoalesced", op_name + suffix, dtype1, dtype2)
 
-        def op(t1, t2):
-            return getattr(t1, op_name + suffix)(t2)
+        def op(t1, t2, suf=None):
+            suf = suffix if suf is None else suf
+            return getattr(t1, op_name + suf)(t2)
 
         add_sub = op_name == 'add' or op_name == 'sub'
 
@@ -852,21 +852,25 @@ class TestTypePromotion(TestCase):
             self.assertRaises(RuntimeError, lambda: op(s1, s2).to_dense())
 
         # Test op(dense, sparse)
-        if add_sub:
+        if add_sub or op_name == 'mul':
             if inplace:
                 e, d1, s1, d2, s2 = [x.clone() for x in test_tensors]
             dense_sparse = op(d1, s2)
+            dense_sparse = dense_sparse.to_dense() if dense_sparse.is_sparse else dense_sparse
             self.assertEqual(e, dense_sparse, atol=precision, rtol=rtol, msg=err)
         else:
             # sparse division only supports division by a scalar
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
             self.assertRaises(RuntimeError, lambda: op(d1, s2))
 
-        # Test op(sparse, dense) not supported for any ops:
+        # Test op(sparse, dense) not supported for all ops but 'mul'.
         # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
         # sparse division only supports division by a scalar
-        # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'.
-        self.assertRaises(RuntimeError, lambda: op(s1, d2))
+        if op_name != 'mul':
+            self.assertRaises(RuntimeError, lambda: op(s1, d2))
+        else:
+            # No type promotions for inplace operations, hence suf=''
+            op(s1, d2, suf='')
 
         # Test op(sparse, scalar)
         if not add_sub and not (self.device_type == 'cpu' and dtype1 == torch.half):
@@ -1021,6 +1025,13 @@ class TestTypePromotion(TestCase):
             res = torch.cat([x, y])
             self.assertEqual(res, expected_res, exact_dtype=True)
 
+            # cat: full and an empty tensor.
+            y = torch.tensor([], device=device, dtype=y_dtype)
+            res_dtype = torch.result_type(x, y)
+            expected_res = torch.tensor(x_vals + [], device=device, dtype=res_dtype)
+            res = torch.cat([x, y])
+            self.assertEqual(res, expected_res, exact_dtype=True)
+
     @onlyNativeDeviceTypes
     def test_cat_out_different_dtypes(self, device):
         dtypes = all_types_and_complex_and(torch.half)
@@ -1052,7 +1063,7 @@ class TestTypePromotion(TestCase):
         out = torch.empty(0, dtype=dtypes[1], device=device)
 
         ops = (torch.neg, torch.floor, torch.ceil)
-        float_only_ops = {torch.floor, torch.ceil}
+        float_and_int_only_ops = {torch.floor, torch.ceil}
         real_only_ops = {torch.floor, torch.ceil}
         for op in ops:
             if dtypes[0] is not dtypes[1]:
@@ -1062,8 +1073,9 @@ class TestTypePromotion(TestCase):
                 with self.assertRaises(RuntimeError):
                     op(t, out=out)
             elif (
-                    op in float_only_ops
+                    op in float_and_int_only_ops
                     and (not dtypes[0].is_floating_point and not dtypes[0].is_complex)
+                    and (not (dtypes[0] == torch.int64 and dtypes[1] == torch.int64))
                     and device != "meta"
             ):
                 with self.assertRaises(RuntimeError):

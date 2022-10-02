@@ -166,11 +166,7 @@ class TORCH_API PyTorchStreamWriter final {
   std::function<size_t(const void*, size_t)> writer_func_;
   // This number will be updated when the model has operators
   // that have valid upgraders.
-#if ENABLE_UPGRADERS
   uint64_t version_ = kMinProducedFileFormatVersion;
-#else
-  uint64_t version_ = kProducedFileFormatVersion;
-#endif
   bool finalized_ = false;
   bool err_seen_ = false;
   friend size_t ostream_write_func(

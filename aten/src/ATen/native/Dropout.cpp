@@ -109,7 +109,7 @@ native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
   return std::make_tuple(output, mask);
 }
 
-Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, double scale) {
+Tensor native_dropout_backward(const Tensor& grad, const Tensor& mask, double scale) {
   Tensor result = grad * mask * scale;
   return result;
 }
@@ -117,7 +117,10 @@ Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, doubl
 Tensor dropout(const Tensor& input, double p, bool train) {
   auto result = [&]() {
     NoNamesGuard guard;
-    if (train && is_fused_kernel_acceptable(input, p)) {
+    // TODO: we can remove this is_nested() code smell in the future
+    //       if we find a way to support _dropout for nested tensor
+    //       e.g. make it an op (at::_dropout) to use dispatcher?
+    if (input.is_nested() || (train && is_fused_kernel_acceptable(input, p))) {
       return std::get<0>(at::native_dropout(input, p, train));
     }
     return _dropout<false>(input, p, train);
