@@ -2,8 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <utility>
 #include <c10/util/Exception.h>
+#include <utility>
 
 #include <ATen/native/vulkan/api/vk_api.h>
 
