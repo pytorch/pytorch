@@ -18,7 +18,9 @@
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/SmallBuffer.h>
+#include <c10/util/C++17.h>
 
+#include <initializer_list>
 #include <type_traits>
 #include <tuple>
 #include <mutex>
@@ -58,12 +60,12 @@ struct JittedKernelVariantCache {
   at::cuda::jit::NvrtcFunction dynamic_noncontiguous;
 };
 
-template <typename... Args>
-c10::SmallBuffer<void*, 64> pack_kernel_args(c10::ArrayRef<void*> extra_args, Args... args) {
-  std::array<void*, sizeof...(Args)> args_array({static_cast<void*>(args)...});
-  c10::SmallBuffer<void*, 64> ret(args_array.size() + extra_args.size());
-  std::copy_n(args_array.data(), args_array.size(), ret.data());
-  std::copy_n(extra_args.data(), extra_args.size(), ret.data() + args_array.size());
+inline c10::SmallBuffer<void*, 64> pack_kernel_args(
+    std::initializer_list<void*> args,
+    c10::ArrayRef<void*> extra_args) {
+  c10::SmallBuffer<void*, 64> ret(args.size() + extra_args.size());
+  std::copy(args.begin(), args.end(), ret.data());
+  std::copy(extra_args.begin(), extra_args.end(), ret.data() + args.size());
   return ret;
 }
 
@@ -102,7 +104,7 @@ void launch_jitted_unrolled_kernel(
     }
   }
 
-  auto args = pack_kernel_args(extra_args, &N, &data, &ic, &oc, &l, &s, scalar_val);
+  auto args = pack_kernel_args({&N, &data, &ic, &oc, &l, &s, scalar_val}, extra_args);
   at::cuda::jit::launch_jitted_pwise_function(fn_cache, args.data(), {grid, 1u, 1u},
   {num_threads(), 1u, 1u});
 }
@@ -150,7 +152,7 @@ void launch_jitted_vectorized_kernel(
   }
 
   if (vectorized) {
-    auto args = pack_kernel_args(extra_args, &N, &data, scalar_val);
+    auto args = pack_kernel_args({&N, &data, scalar_val}, extra_args);
     at::cuda::jit::launch_jitted_pwise_function(
         *fn_ptr, args.data(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
@@ -160,7 +162,7 @@ void launch_jitted_vectorized_kernel(
     auto s = memory::StoreWithoutCast();
 
     auto args = pack_kernel_args(
-        extra_args, &N, &data, &ic, &oc, &l, &s, scalar_val);
+        {&N, &data, &ic, &oc, &l, &s, scalar_val}, extra_args);
     at::cuda::jit::launch_jitted_pwise_function(
         *fn_ptr, args.data(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   }

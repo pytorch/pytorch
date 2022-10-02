@@ -299,7 +299,8 @@ class QLinearPackWeightInt8 final {
     auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeight::prepack(std::move(weight), std::move(bias));
     }
 #endif
@@ -331,7 +332,8 @@ class QLinearPackWeightFp16 final {
     // temporarily convert weight back to fp32, needs to be fixed
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0
     weight = weight.to(ScalarType::Float);
-    if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    if (ctx.qEngine() == at::QEngine::FBGEMM ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedLinearWeightFp16::prepack(
           std::move(weight), std::move(bias));
     }

@@ -3,8 +3,9 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from setuptools import distutils  # type: ignore[import]
 from typing import Optional, Union
+
+from setuptools import distutils  # type: ignore[import]
 
 
 UNKNOWN = "Unknown"

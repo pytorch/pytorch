@@ -15,7 +15,7 @@ import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                                                  load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_ROCM)
+                                                  load_tests, slowTest, TEST_WITH_TSAN)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -590,7 +590,6 @@ if __name__ == "__main__":
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip the test for ROCm')
     def test_event_multiprocess(self):
         event = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
@@ -649,7 +648,6 @@ if __name__ == "__main__":
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip the test for ROCm')
     def test_event_handle_importer(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
@@ -689,7 +687,6 @@ if __name__ == "__main__":
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(TEST_WITH_ROCM, 'Skip the test for ROCm')
     def test_event_handle_exporter(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
 
