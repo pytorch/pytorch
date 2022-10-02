@@ -3122,7 +3122,7 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
         # error inputs for empty input with stride=0
         # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
         error_msg = 'stride must be greater than zero, but got 0' if torch.device(
-            device).type == 'cpu' and not requires_grad else 'stride should not be zero'
+            device).type in ('cpu','cuda') and not requires_grad else 'stride should not be zero'
         yield ErrorInput(SampleInput(make_arg((3, 3, 3)), kwargs={'kernel_size': 1, 'stride': 0}),
                          error_regex=error_msg)
 
