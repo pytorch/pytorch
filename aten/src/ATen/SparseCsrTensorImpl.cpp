@@ -104,7 +104,7 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
 void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
+      "resize_and_clear_ called on tensor with symbolic shape");
   TORCH_CHECK(sparse_dim >= 2, "resize_and_clear_ sparse dimensionality must be at least 2, got ", sparse_dim);
   TORCH_CHECK(static_cast<int64_t>(size.size()) >= sparse_dim, "resize_and_clear_ size length must be at least sparse dimensionality (=",
               sparse_dim, "), got ", size.size());
@@ -142,23 +142,42 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size
   refresh_numel();
 }
 
-void SparseCsrTensorImpl::resize_as_sparse_csr_tensor_(const Tensor& src) {
+void SparseCsrTensorImpl::resize_as_sparse_compressed_tensor_(
+    const Tensor& src) {
   TORCH_CHECK(
       !has_symbolic_sizes_strides_,
-      "resize_as_sparse_csr_tensor_ called on tensor with symbolic shape");
-  set_layout(src.layout());
-  crow_indices_ = at::empty_like(
-      src.crow_indices(),
-      src.crow_indices().options(),
-      src.crow_indices().suggest_memory_format());
-  col_indices_ = at::empty_like(
-      src.col_indices(),
-      src.col_indices().options(),
-      src.col_indices().suggest_memory_format());
-  values_ = at::empty_like(
-      src.values(),
-      src.values().options(),
-      src.values().suggest_memory_format());
+      "resize_as_sparse_compressed_tensor_ called on tensor with symbolic shape");
+
+  // We cannot resize as other layout and preserve the invariants for self
+  // layout
+  TORCH_CHECK(
+      src.layout() == layout_,
+      "resize_as_sparse_compressed_tensor_: self and src must have the same layout, but got: self (",
+      layout_,
+      ") and source (",
+      src.layout(),
+      ")");
+
+  Tensor compressed_indices;
+  Tensor plain_indices;
+  std::tie(compressed_indices, plain_indices) =
+      sparse_csr::getCompressedPlainIndices(src);
+  // reuse self indices storage
+  if (crow_indices_.sizes() != compressed_indices.sizes()) {
+    crow_indices_.resize_as_(compressed_indices);
+  }
+  if (col_indices_.sizes() != plain_indices.sizes()) {
+    col_indices_.resize_as_(plain_indices);
+  }
+  // Update indices data to ensure result is valid under invariants check
+  if ((sizes() != src.sizes()) || (dense_dim() != src.dense_dim())) {
+    crow_indices_.copy_(compressed_indices);
+    col_indices_.copy_(plain_indices);
+  }
+  // Reuse values storage
+  if (values_.sizes() != src.values().sizes()) {
+    values_.resize_as_(src.values());
+  }
   sizes_and_strides_.set_sizes(src.sizes());
   refresh_numel();
 }

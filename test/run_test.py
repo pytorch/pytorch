@@ -402,7 +402,7 @@ def run_test(
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
     with open(log_path, "w") as f:
         ret_code = shell(command, test_directory, stdout=f, stderr=f, env=env)
-    print_log_file(test_module, log_path)
+    print_log_file(test_module, log_path, failed=(ret_code != 0))
     os.remove(log_path)
     return ret_code
 
@@ -676,14 +676,19 @@ def run_doctests(test_module, test_directory, options):
     return result
 
 
-def print_log_file(test: str, file_path: str) -> None:
+def print_log_file(test: str, file_path: str, failed: bool) -> None:
     with open(file_path, "r") as f:
         print_to_stderr("")
-        print_to_stderr(f"PRINT LOG FILE of {test} ({file_path})")
-        print_to_stderr(f"##[group]PRINT LOG FILE of {test} ({file_path})")
-        print_to_stderr(f.read())
-        print_to_stderr("##[endgroup]")
-        print_to_stderr(f"FINISHED PRINT LOG FILE of {test} ({file_path})")
+        if failed:
+            print_to_stderr(f"PRINTING LOG FILE of {test} ({file_path})")
+            print_to_stderr(f.read())
+            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
+        else:
+            print_to_stderr(f"Expand the folded group to see the log file of {test}")
+            print_to_stderr(f"##[group]PRINTING LOG FILE of {test} ({file_path})")
+            print_to_stderr(f.read())
+            print_to_stderr("##[endgroup]")
+            print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         print_to_stderr("")
 
 
@@ -694,7 +699,7 @@ def run_test_ops(test_module, test_directory, options):
         return run_test(test_module, test_directory, copy.deepcopy(options),
                         extra_unittest_args=["--use-pytest", '-vv', '-x', '--reruns=2', '-rfEX'],
                         )
-    NUM_PROCS = 3
+    NUM_PROCS = 2
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
     pool = get_context("spawn").Pool(NUM_PROCS)

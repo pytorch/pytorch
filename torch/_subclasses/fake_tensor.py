@@ -9,7 +9,6 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 import torch
-import torch.fx.experimental.symbolic_shapes as symbolic_shapes
 from torch._ops import OpOverload
 from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from torch.fx.operator_schemas import normalize_function
@@ -46,8 +45,8 @@ class DataDependentOutputException(RuntimeError):
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
-    aten.nested_tensor.default,
-    aten.nested_tensor.out,
+    aten._nested_tensor_from_tensor_list.default,
+    aten._nested_tensor_from_tensor_list.out,
     aten.pin_memory.default,
     aten.is_pinned.default,
     aten.to.device,
@@ -335,14 +334,6 @@ def to_copy(fake_mode, func, *args, **kwargs):
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
 
-@register_op_impl(aten.clone.default)
-def clone(fake_mode, func, input, memory_format=None):
-    out_device = input.device
-    with no_dispatch():
-        out = aten._to_copy(input.to("meta"), memory_format=memory_format)
-        return FakeTensor(fake_mode, out, out_device)
-
-
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
     lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
@@ -425,20 +416,24 @@ def nyi(fake_mode, func, *args, **kwargs):
 
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
-    fake_mode.in_kernel_invocation = True
     # See: note [Fake Tensor Dispatch Keys]
-    torch._C._add_meta_to_tls_dispatch_include()
+    meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+    prev = fake_mode.in_kernel_invocation
+
+    fake_mode.in_kernel_invocation = True
+    if not meta_in_tls:
+        torch._C._add_meta_to_tls_dispatch_include()
     try:
         yield
     finally:
-        fake_mode.in_kernel_invocation = False
-        torch._C._remove_meta_from_tls_dispatch_include()
+        fake_mode.in_kernel_invocation = prev
+        if not meta_in_tls:
+            torch._C._remove_meta_from_tls_dispatch_include()
 
 
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
     fake_mode: "FakeTensorMode"
-    has_sym_ints: bool
     constant: Optional[torch.Tensor]
 
     # Note: [Fake Tensor Dispatch Keys]
@@ -486,10 +481,6 @@ class FakeTensor(torch.Tensor):
             device = torch.device(f"cuda:{torch.cuda.current_device()}")
         self.fake_device = device
         self.fake_mode = fake_mode
-        self.has_sym_ints = symbolic_shapes.has_symbolic_sizes_strides(elem)
-        assert not (
-            self.has_sym_ints and constant is not None
-        ), f"meta: {elem}, constant: {constant}"
         self.constant = constant
 
     @staticmethod
@@ -533,20 +524,6 @@ class FakeTensor(torch.Tensor):
                 return torch.device("meta")
             else:
                 return args[0].fake_device
-        # Need this to handle infinite recursion with sparse tensors.
-        # Sparse tensors have custom stride policy which means that
-        # they will dispatch here on dispatch, and we need to trigger
-        # the default behavior.
-        # TODO: when we get other tensor types online they will also
-        # need to get entries here.
-        elif func == torch.ops.aten.sym_size.default:
-            return None
-        elif func == torch.ops.aten.sym_stride.default:
-            return None
-        elif func == torch.ops.aten.size.default:
-            return None
-        elif func == torch.ops.aten.stride.default:
-            return None
 
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
@@ -672,7 +649,7 @@ class FakeTensorMode(TorchDispatchMode):
         flat_arg_fake_tensors = tree_flatten_only(FakeTensor, (args, kwargs))
         flat_symints = tree_flatten_only(torch.SymIntNode, (args, kwargs))
         has_symbolic_sizes = (
-            any([i.has_sym_ints for i in flat_arg_fake_tensors])
+            any([i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors])
             or len(flat_symints) > 0
         )
 
