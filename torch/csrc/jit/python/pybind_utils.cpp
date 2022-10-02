@@ -413,6 +413,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       } else if (PyComplex_CheckExact(obj.ptr())) {
         auto c_obj = py::cast<std::complex<double>>(obj.ptr());
         return static_cast<c10::complex<double>>(c_obj);
+      } else if (torch::is_symint_node(obj)) {
+        return py::cast<c10::SymInt>(obj);
+      } else if (torch::is_symfloat_node(obj)) {
+        return py::cast<c10::SymFloat>(obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
