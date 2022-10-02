@@ -266,7 +266,27 @@ def is_contiguous(func, *args, **kwargs):
         raise ValueError(
             "MaskedTensors with sparse data do not have is_contiguous"
         )
-    return data.is_contiguous()
+    return func(data, *args[1:], **kwargs)
+
+
+@register_dispatch_func([torch.ops.aten.is_strides_like_format])
+def is_strides_like_format(func, *args, **kwargs):
+    data = _get_data(args[0])
+    if data.is_sparse:
+        raise ValueError(
+            "MaskedTensors with sparse data do not have is_strides_like_format"
+        )
+    return func(data, *args[1:], **kwargs)
+
+
+@register_dispatch_func([torch.ops.aten.is_non_overlapping_and_dense])
+def is_non_overlapping_and_dense(func, *args, **kwargs):
+    data = _get_data(args[0])
+    if data.is_sparse:
+        raise ValueError(
+            "MaskedTensors with sparse data do not have is_non_overlapping_and_dense"
+        )
+    return func(data, *args[1:], **kwargs)
 
 
 @register_dispatch_func([torch.ops.aten.contiguous])
