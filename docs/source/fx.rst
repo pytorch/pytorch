@@ -294,7 +294,7 @@ on them and append them to the :class:`Graph`.
                 env[node.name] = new_node
         return fx.GraphModule(model, new_graph)
 
-In addition to avoiding explicit graph manipulation, using :class:`Proxy`\s
+In addition to avoiding explicit graph manipulation, using :class:`Proxy`\(s)
 also allows you to specify your rewrite rules as native Python code.
 For transformations that require a large amount of rewrite rules
 (such as vmap or grad), this can often improve readability and
@@ -306,7 +306,7 @@ tracer which can lead to unexpected runtime errors. We recommend this method
 of using :class:`Proxy` especially when the underlying operators can not be
 safely assumed to be unary.
 
-A worked example of using :class:`Proxy`\s for :class:`Graph` manipulation
+A worked example of using :class:`Proxy`\(s) for :class:`Graph` manipulation
 can be found
 `here <https://github.com/pytorch/examples/blob/master/fx/proxy_based_graph_creation.py>`__.
 
@@ -316,7 +316,7 @@ The Interpreter Pattern
 A useful code organizational pattern in FX is to loop over all the :class:`Node`\s
 in a :class:`Graph` and execute them. This can be used for several things including
 runtime analysis of values flowing through the graph or transformation of the code
-via retracing with :class:`Proxy`\s. For example, suppose we want to run a
+via retracing with :class:`Proxy`\(s). For example, suppose we want to run a
 :class:`GraphModule` and record the :class:`torch.Tensor` shape and dtype
 properties on the nodes as we see them at runtime. That might look like:
 
