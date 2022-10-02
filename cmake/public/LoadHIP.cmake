@@ -143,6 +143,9 @@ message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 
+#Disable kernel assert due to performance regression
+set(ROCM_ENABLE_KERNEL_ASSERTS FALSE CACHE BOOL "Kernel asserts are disabled by default for ROCm")
+
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
@@ -283,8 +286,18 @@ if(HIP_FOUND)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
 
-  # Disable Asserts In Code (Can't use asserts on HIP stack.)
-  add_definitions(-DNDEBUG)
+  if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "4.1.0")
+    if(ROCM_ENABLE_KERNEL_ASSERTS)
+      message("ROCm version >= 4.1; enabling asserts")
+    else()
+      add_definitions(-DROCM_DISABLE_GPU_ASSERTS)
+      message("ROCm version >= 4.1; kernel asserts are disabled")
+    endif()
+  else()
+    # Disable Asserts In Code (Can't use asserts on HIP stack.)
+    add_definitions(-DNDEBUG)
+    message("ROCm version < 4.1; disablng asserts")
+  endif()
 
   if(HIP_COMPILER STREQUAL clang)
     set(hip_library_name amdhip64)
@@ -300,10 +313,18 @@ if(HIP_FOUND)
   find_library(PYTORCH_HIP_HCC_LIBRARIES ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # TODO: miopen_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
-  find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
+  if(TARGET ${miopen_LIBRARIES})
+    set(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES})
+  else()
+    find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${MIOPEN_PATH}/lib)
+  endif()
   # TODO: rccl_LIBRARIES should return fullpath to the library file,
   # however currently it's just the lib name
-  find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
+  if(TARGET ${rccl_LIBRARIES})
+    set(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES})
+  else()
+    find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${RCCL_PATH}/lib)
+  endif()
   # hiprtc is part of HIP
   find_library(ROCM_HIPRTC_LIB ${hip_library_name} HINTS ${HIP_PATH}/lib)
   # roctx is part of roctracer

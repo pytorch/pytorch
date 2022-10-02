@@ -7,6 +7,7 @@
 
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
+#include <ATen/core/IListRef.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
@@ -214,6 +215,23 @@ inline at::Generator IValue::toGenerator() && {
 inline at::Generator IValue::toGenerator() const& {
   AT_ASSERT(isGenerator(), "Expected Generator but got ", tagKind());
   return at::Generator(toIntrusivePtr<at::GeneratorImpl>());
+}
+inline c10::SymInt IValue::toSymInt() const {
+  AT_ASSERT(isSymInt() || isInt(), "Expected SymInt or int but got ", tagKind());
+  if (isSymInt()) {
+    return c10::SymInt::toSymInt(toIntrusivePtr<c10::SymIntNodeImpl>());
+  } else {
+    return c10::SymInt(payload.u.as_int);
+  }
+}
+
+inline c10::SymFloat IValue::toSymFloat() const {
+  AT_ASSERT(isSymFloat() || isDouble(), "Expected SymFloat or double but got ", tagKind());
+  if (isSymFloat()) {
+    return c10::SymFloat::toSymFloat(toIntrusivePtr<c10::SymFloatNodeImpl>());
+  } else {
+    return c10::SymFloat(payload.u.as_double);
+  }
 }
 
 namespace ivalue {
@@ -498,6 +516,7 @@ struct TORCH_API TupleElements {
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
       return elementsInline_[idx];
     } else {
+      TORCH_CHECK(idx < elementsVector_.size(), "TupleElements: invalid index Index = ", idx, "; Length = ", elementsVector_.size());
       return elementsVector_.at(idx);
     }
   }
@@ -991,7 +1010,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
                  cb = std::move(callback)](Future& parentFut) mutable {
       try {
         guts::if_constexpr<std::is_convertible<
-            typename std::result_of<T && (Future&)>::type,
+            typename c10::invoke_result_t<T &&, Future&>,
             IValueWithStorages>::value>(
             [&](auto identity) {
               IValue value;
@@ -1446,6 +1465,10 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
     return !type_.holds_strong_ref();
   }
 
+  bool is_empty_strong_compilation_ref() const {
+    return type_.holds_empty_strong_ref();
+  }
+
  private:
   void resizeObject(size_t slot);
   WeakOrStrongTypePtr type_;
@@ -1585,6 +1608,7 @@ DEFINE_TO(at::QScheme, toQScheme)
 DEFINE_TO(at::Dimname, toDimname)
 DEFINE_TO(at::Generator, toGenerator)
 DEFINE_TO(c10::SymInt, toSymInt)
+DEFINE_TO(c10::SymFloat, toSymFloat)
 
 template <class T>
 struct _fake_type {};
@@ -1990,7 +2014,6 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-inline IValue::IValue(c10::SymIntArrayRef v) : IValue(at::ArrayRef<c10::SymInt>(v.data(), v.size())) {}
 template <class T, IValue::enable_if_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
   auto list = to<c10::List<T>>();
@@ -2012,6 +2035,25 @@ inline IValue::IValue(std::array<T, N> v) : IValue(c10::List<T>()) {
   list.reserve(v.size());
   for (auto& e : v) {
     list.push_back(std::move(e));
+  }
+}
+
+template <class T, IValue::enable_if_ilist_is_ivalue_constructible<T>>
+inline IValue::IValue(c10::IListRef<T> v) : IValue() {
+  constexpr bool boxed_type_constructs_ivalue =
+      std::is_constructible<IValue, typename c10::IListRef<T>::boxed_type>::value;
+  // First, we try to use the boxed value.
+  // If we fail (either it's not in the boxed state, or its boxed type
+  // can not construct an IValue), we fallback to copying the list.
+  if (boxed_type_constructs_ivalue && v.isBoxed()) {
+    *this = IValue(impl::toList(v.toBoxed()));
+  } else {
+    c10::List<T> list;
+    list.reserve(v.size());
+    for (const auto& t : v) {
+      list.push_back(t);
+    }
+    *this = IValue(impl::toList(std::move(list)));
   }
 }
 

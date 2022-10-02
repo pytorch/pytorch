@@ -1,4 +1,4 @@
-#include <c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
 
 #include <assert.h>
 #include <fcntl.h>
@@ -69,7 +69,7 @@ namespace c10d {
 namespace {
 
 template <typename F>
-typename std::result_of<F()>::type syscall(F fn) {
+typename c10::invoke_result_t<F> syscall(F fn) {
   while (true) {
     auto rv = fn();
     if (rv == -1) {

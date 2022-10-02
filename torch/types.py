@@ -21,6 +21,7 @@ _device = torch.device
 _qscheme = torch.qscheme
 _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
 _layout = torch.layout
+_dispatchkey = Union[str, torch._C.DispatchKey]
 
 class SymInt:
     pass

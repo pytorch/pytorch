@@ -1,11 +1,15 @@
 import collections
 import contextlib
 import warnings
-from typing import Any, Dict, Union
+from typing import Any, Dict, Union, Tuple
 
 import torch
 from . import is_initialized, _get_device_index, _lazy_init
+
+from ._memory_viz import segments as _segments, memory as _memory
+
 from torch.types import Device
+from torch import _C
 
 __all__ = ["caching_allocator_alloc", "caching_allocator_delete", "set_per_process_memory_fraction",
            "empty_cache", "memory_stats", "memory_stats_as_nested_dict", "reset_accumulated_memory_stats",
@@ -573,7 +577,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
         lines.append(f"process {p.pid:>10d} uses {mem:>12.3f} MB GPU memory")
     return "\n".join(lines)
 
-def mem_get_info(device: Union[Device, int] = None) -> int:
+def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     r"""Returns the global free and total GPU memory occupied for a given
     device using cudaMemGetInfo.
 
@@ -590,3 +594,26 @@ def mem_get_info(device: Union[Device, int] = None) -> int:
         device = torch.cuda.current_device()
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
+
+def _record_memory_history(enabled: bool, device: Union[Device, int] = None):
+    with torch.cuda.device(device):
+        _C._cuda_recordMemoryHistory(enabled)
+
+def _snapshot(device: Union[Device, int] = None):
+    with torch.cuda.device(device):
+        return _C._cuda_memorySnapshot()
+
+def _save_segment_usage(filename='output.svg', snapshot=None):
+    if snapshot is None:
+        snapshot = memory_snapshot()
+    with open(filename, 'w') as f:
+        f.write(_segments(snapshot))
+
+def _save_memory_usage(filename='output.svg', snapshot=None):
+    if snapshot is None:
+        snapshot = memory_snapshot()
+    with open(filename, 'w') as f:
+        f.write(_memory(snapshot))
+
+def _set_allocator_settings(env: str):
+    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)
