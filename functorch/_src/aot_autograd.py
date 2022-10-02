@@ -186,6 +186,7 @@ def normalize_as_list(x):
 
 aot_autograd_decompositions = {}
 
+
 # This is a list since looking forward, we can have this arbitrarily nested.
 graph_being_compiled: List[str] = []
 nth_graph: int = 0
@@ -273,25 +274,10 @@ class AOTConfig:
 
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    fw_module = make_fx(flat_fn, aot_config.decompositions, tracing_mode="real")(*flat_args)
+    fw_module = make_fx(flat_fn, aot_config.decompositions)(*flat_args)
     if config.debug_graphs:
         print("====== Forward (only) graph ======")
         fw_module.print_readable()
-    fw_module.graph.eliminate_dead_code()
-    fw_module.recompile()
-    fw_module.print_readable()
-    shape_env = fw_module.shape_env
-    guards = [shape_env.simplify(guard) for guard, _, _ in fw_module.shape_env.guards]
-    print("Guards: ", set(guards))
-    shape_env._update_divisible()
-    print("Divisibility: ", shape_env.divisible)
-    shape_groups = collections.defaultdict(list)
-    for k, v in shape_env.replacements.items():
-        shape_groups[v].append(k)
-    print("Shape Groups: ")
-    for k, v in shape_groups.items():
-        print(k, shape_env.size_hint(k),  v)
-    print()
     with track_graph_compiling("inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
