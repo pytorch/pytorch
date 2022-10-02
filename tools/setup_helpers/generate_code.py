@@ -2,8 +2,9 @@ import argparse
 import os
 import pathlib
 import sys
+from typing import Any, cast, Optional
+
 import yaml
-from typing import Any, Optional, cast
 
 try:
     # use faster C loader if available
@@ -25,9 +26,10 @@ def generate_code(
     force_schema_registration: bool = False,
     operator_selector: Any = None,
 ) -> None:
-    from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
-    from tools.autograd.gen_annotated_fn_args import gen_annotated
     from torchgen.selective_build.selector import SelectiveBuilder
+
+    from tools.autograd.gen_annotated_fn_args import gen_annotated
+    from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
 
     # Build ATen based Variable classes
     if install_dir is None:
@@ -207,8 +209,8 @@ def main() -> None:
         assert os.path.isfile(
             ts_native_functions
         ), f"Unable to access {ts_native_functions}"
-        from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
         from torchgen.dest.lazy_ir import GenTSLazyIR
+        from torchgen.gen_lazy_tensor import run_gen_lazy_tensor
 
         run_gen_lazy_tensor(
             aten_path=aten_path,

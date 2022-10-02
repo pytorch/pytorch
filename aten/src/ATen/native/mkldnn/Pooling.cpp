@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/grad_mode.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <c10/util/irange.h>
 #include <tuple>
@@ -78,6 +79,12 @@ Tensor& mkldnn_avg_pool3d_out(const Tensor& self,
 
 Tensor mkldnn_adaptive_avg_pool2d(Tensor const& input, IntArrayRef output_size) {
   TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d: ATen not compiled with MKLDNN support");
+}
+
+Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output) {
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
@@ -498,10 +505,19 @@ Tensor mkldnn_adaptive_avg_pool2d(
       /*algo*/ ideep::algorithm::pooling_avg);
 }
 
+Tensor& mkldnn_adaptive_avg_pool2d_out_stub(const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output) {
+  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out_stub: in-place mkldnn operations are not supported yet");
+}
+
 Tensor& mkldnn_adaptive_avg_pool2d_out(const Tensor& input,
     IntArrayRef output_size,
     Tensor& output) {
-  TORCH_CHECK(false, "mkldnn_adaptive_avg_pool2d_out: in-place mkldnn operations are not supported yet");
+  auto tmp_output = at::native::mkldnn_adaptive_avg_pool2d(input, output_size);
+  at::native::resize_output(output, tmp_output.sizes());
+  output.copy_(tmp_output);
+  return output;
 }
 
 Tensor mkldnn_max_pool2d_backward(

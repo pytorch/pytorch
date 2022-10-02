@@ -529,6 +529,21 @@ class QConvPackWeightInt8 final {
       bool transpose) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::X86) {
+#if AT_MKLDNN_ENABLED()
+    bool use_onednn = onednn_utils::should_use_onednn_quant(
+          weight, transpose, groups, output_padding);
+    if (use_onednn) {
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+    }
+#endif
+      return PackedConvWeight<kSpatialDim>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups, transpose);
+  } // x86
+#endif // defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+
+#ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
@@ -605,6 +620,25 @@ class QConv1dPackWeightInt8 final {
     padding = quant_utils::MakeArgForConv1d(padding, 0);
     output_padding = quant_utils::MakeArgForConv1d(output_padding, 0);
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+
+#ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::X86) {
+#if AT_MKLDNN_ENABLED()
+    bool use_onednn = onednn_utils::should_use_onednn_quant(
+        weight, transpose, groups, output_padding);
+    if (use_onednn) {
+      return PackedConvWeightsOnednn<2>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
+    }
+#endif
+    return PackedConvWeight<2>::prepack(
+        weight, bias, stride, padding, output_padding, dilation, groups,
+        transpose);
+
+  } // x86
+#endif
+
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(

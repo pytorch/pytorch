@@ -282,9 +282,10 @@ class TestModule(TestCase):
             # === Check that the inplace operation gives the same result ===
             input_arg_copy = deepcopy(input_args)
             input_arg_clone = tuple(i.clone() for i in input_arg_copy)
+            input_clone_version = input_arg_clone[0]._version
             with freeze_rng_state():
                 output_ip = m_inplace(*input_arg_clone, **input_kwargs)
-            self.assertNotEqual(input_arg_clone[0]._version, input_version)
+            self.assertGreater(input_arg_clone[0]._version, input_clone_version)
             self.assertEqual(output_op, output_ip)
 
             # === Check that the gradients are the same ===
@@ -532,6 +533,12 @@ class TestModule(TestCase):
             cpu_module.train(training)
             gpu_module = module_cls(*args, **kwargs).to(dtype).to(device)
             gpu_module.train(training)
+
+            # === Lazy modules need to see an input to initialize params ===
+            if issubclass(module_cls, torch.nn.modules.lazy.LazyModuleMixin):
+                with torch.no_grad():
+                    cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
+                    gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
 
             for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
                 gpu_p.data.copy_(cpu_p)
