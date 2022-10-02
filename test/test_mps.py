@@ -1644,7 +1644,7 @@ class TestMPS(TestCase):
 
     # See https://github.com/pytorch/pytorch/issues/85967
     def test_from_numpy_non_contiguous(self):
-        a = np.arange(9).reshape(3,3)[:,:2]
+        a = np.arange(9).reshape(3, 3)[:, :2]
         t_cpu = torch.tensor(a, device="cpu")
         t_mps = torch.tensor(a, device="mps")
         self.assertEqual(t_cpu, t_mps.to("cpu"))
