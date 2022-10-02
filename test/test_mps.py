@@ -1642,6 +1642,13 @@ class TestMPS(TestCase):
             mps_result = rotate_subset(mps_data)
             self.assertEqual(cpu_result, mps_result.to("cpu"))
 
+    # See https://github.com/pytorch/pytorch/issues/85967
+    def test_from_numpy_non_contiguous(self):
+        a = np.arange(9).reshape(3, 3)[:, :2]
+        t_cpu = torch.tensor(a, device="cpu")
+        t_mps = torch.tensor(a, device="mps")
+        self.assertEqual(t_cpu, t_mps.to("cpu"))
+
 
 class TestLogical(TestCase):
     def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
