@@ -1,20 +1,20 @@
 # coding=utf-8
 
-from typing import cast
-
 import torch
 import torch.distributed as dist
-from ._common import (
-    _communicate_size_to_each_rank,
-    _handle_col_wise_sharding_base,
-    _handle_row_wise_lookup_distribute,
-    _handle_max_norm_col_wise,
-)
+from torch.distributed._shard.replicated_tensor import ReplicatedTensor
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
-from torch.distributed._shard.sharded_tensor import (
-    ShardedTensor
+from torch.distributed.nn.functional import all_gather, all_reduce, reduce_scatter
+
+from ._common import (
+    _all_gather_base_input,
+    _handle_col_wise_sharding_base,
+    _handle_max_norm_col_wise,
+    _handle_row_wise_mask,
 )
+
 
 @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.embedding)
 def sharded_embedding(types, args, kwargs, pg):
@@ -39,34 +39,30 @@ def sharded_embedding(types, args, kwargs, pg):
     4 GPUs creating 3 shard of (3 x 17) and 1 shard of (1 x 17).
     The algorithm is as follows:
 
-    1. First the input is flattened to 1D and gets sorted so that we can distribute
-       them to the corresponding rank. For example if the given input is
+    1. First the input is all gathered to all ranks, since this is SPMD and
+       input is actually sharded across all ranks. The inputs then become a
+       4 (4 x 6) tensor on each rank. For example if the given input is
        tensor([[6, 5, 2, 9, 6, 3],
                [3, 1, 2, 4, 7, 6],
                [4, 0, 4, 9, 8, 9],
                [8, 6, 6, 4, 6, 1]])
-       Then we have the 1D array like:
-       tensor([6, 5, 2, 9, 6, 3, 3, 1, 2, 4, 7, 6, 4, 0, 4, 9, 8, 9, 8, 6, 6, 4, 6, 1])
-       And sort it:
-       tensor([0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 4, 5, 6, 6, 6, 6, 6, 6, 7, 8, 8, 9, 9, 9])
-       We also record the indices so that we can recover back.
-    2. Next we perform the split by search the index of the chunking
-       boundary. So the above array will be split into 4 parts:
-       tensor([[0, 1, 1, 2, 2], [3, 3, 4, 4, 4, 4, 5],
-              [6, 6, 6, 6, 6, 6, 7, 8, 8], [9, 9, 9])
-       Rearrangement may be needed if the rank order is different from
-       its index in the placement.
-    3. Next, we communicate the length of each part to each rank via all2all
-       so that each rank now knows what input it will get from all other ranks.
-    4. Before we send out the array to other ranks, we need to do the modular operation
-       so that each rank do use that for embedding lookup.
-       The above tensor will look like the below after performing the moduler of 3:
-       tensor([[0, 1, 1, 2, 2], [0, 0, 1, 1, 1, 1, 2],
-              [0, 0, 0, 0, 0, 0, 1, 2, 2], [0, 0, 0])
-    5. Now, each rank receives a matrix (size may vary) and do the lookup. We then use
-       all2all to send the result back to each rank.
-    6. We use the recorded indices to recover the sorted positions and reshape the
-       matrix to (4 x 6 x 17), which is what we need.
+       on rank 0.
+       Then on every rank, we will have this tensor.
+       If input itself is already replicated, no all-gather will be done.
+    2. Next, we mask the ID which are not stored on that rank.
+       For example on rank 0, we store ID [0, 1, 2]. We only keep the ID
+       inside the set of numbers. The rest of them will be masked to an extra row.
+       The masked matrix will be used for embedding look up and is like:
+       tensor([[4, 4, 2, 4, 4, 4],
+               [4, 1, 2, 4, 4, 4],
+               [4, 0, 4, 4, 4, 4],
+               [4, 4, 4, 4, 4, 1]])
+       The reason of having an extra row (aka, number 4 in the example) is
+       because when max_norm is specified only weight which has looked will
+       be re-normed so mask IDs whose embeddings are not stored in current
+       rank will to an extra row will ensure max_norm still works as expected.
+    3. If max_norm is specified, the extra row gurantee that the mask ID will
+       not affect the behavior of weigh re-norm.
 
     COLWISE SHARDING
     ================
@@ -148,17 +144,15 @@ def _validate_embedding_param(args, kwargs):
     input = args[0]
     weight = args[1]
     max_norm = kwargs.get("max_norm")
-    norm_type = kwargs.get("norm_type")
     scale_grad_by_freq = kwargs.get("scale_grad_by_freq")
     sparse = kwargs.get("sparse")
-    padding_idx = kwargs.get("padding_idx")
 
     # Validate types
     if not isinstance(input, torch.Tensor):
         raise TypeError("input need to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
-    weight_size = cast(torch.Size, weight.size())
+    weight_size = weight.size()
     if len(weight_size) != 2:
         raise ValueError("Weight needs to have exactly 2 dims")
     if int(torch.min(input).item()) < 0:
@@ -215,11 +209,16 @@ def _handle_col_wise_sharding(
 
     Returns: final result of lookup.
     """
-    gathered_inputs = None
+    if not isinstance(input, ReplicatedTensor):
+        # allgather the inputs first for non Replicated Tensor.
+        gathered_inputs = all_gather(input, group=pg)
+    else:
+        gathered_inputs = input
+
     if max_norm is not None:
         # max_norm changes the weight in-place
-        local_shard, gathered_inputs = _handle_max_norm_col_wise(
-            max_norm, norm_type, local_shard, input, world_size, pg
+        local_shard = _handle_max_norm_col_wise(
+            max_norm, norm_type, local_shard, input, world_size, gathered_inputs, pg
         )
 
     output = _handle_col_wise_sharding_base(
@@ -230,8 +229,8 @@ def _handle_col_wise_sharding(
         weight,
         local_shard,
         pg,
+        gathered_inputs,
         padding_idx=padding_idx,
-        gathered_inputs=gathered_inputs,
     )
     return (output, local_shard)
 
@@ -262,77 +261,44 @@ def _handle_row_wise_sharding(
 
     Returns: final result of lookup.
     """
-    # flatten the ids across all input and sort
-    input_size = input.size()
-    input_1d = torch.reshape(input, (-1,)).contiguous()
-    input_sorted, indices_1d = torch.sort(input_1d)
-    rearrange_indices_1d = torch.argsort(indices_1d)
-    input_sorted.contiguous()
+    if not isinstance(input, ReplicatedTensor):
+        # allgather the inputs first for non Replicated Tensor.
+        gather_inp = _all_gather_base_input(input, pg)
+    else:
+        gather_inp = input
 
-    (
-        input_sorted,
-        input_split_sizes,
-        sharded_dim_size_max,
-        _,
-        rearrange_indices_1d_second_order,
-        padding_idx,
-    ) = _handle_row_wise_lookup_distribute(
-        input_sorted, input, world_size, weight, rank, padding_idx
+    # Mask the input according to sharding spec.
+    lookup_input, padding_idx, padding_row = _handle_row_wise_mask(
+        gather_inp, padding_idx, weight, world_size, rank
     )
 
-    # Get the input split size to be sent from each rank to the current rank.
-    # We can then infer the output split size.
-    output_split_sizes = _communicate_size_to_each_rank(
-        input_split_sizes, world_size, input, pg
-    )
-
-    # Input sent from each rank to the current rank may have different sizes.
-    gathered_input = torch.empty(
-        sum(output_split_sizes), dtype=torch.int64, device=input.device
-    )
-
-    # Perform the modular operation of the 1D tensor to be sent to each rank.
-    input_sorted = torch.remainder(input_sorted, sharded_dim_size_max)
-
-    # Perform alltoall
-    dist.all_to_all_single(
-        gathered_input,
-        input_sorted,
-        input_split_sizes=input_split_sizes,
-        output_split_sizes=output_split_sizes,
-        group=pg,
-    )
-
-    # If input is None, passing in max_norm causes
-    # errors in CUDA.
-    if max_norm is not None and gathered_input.size(0) == 0:
+    # When input is a large tensor, the value of weight is changed.
+    # This is a walk-around for now. GH issue: #81717
+    if max_norm is not None:
+        torch.nn.functional.embedding(
+            torch.unique(lookup_input)[:-1],
+            local_shard,
+            padding_idx=padding_idx,
+            max_norm=max_norm,
+            norm_type=norm_type,
+        )
         max_norm = None
 
-    # Perform local embedding look up.
-    gathered_input_embeddings = torch.nn.functional.embedding(
-        gathered_input,
-        local_shard,
+    local_input_embeddings = torch.nn.functional.embedding(
+        lookup_input,
+        torch.cat([local_shard, padding_row]),
         padding_idx=padding_idx,
         max_norm=max_norm,
         norm_type=norm_type,
     )
 
-    # Gather all lookup result appropriately by performing alltoall again
-    gathered_output = torch.empty(
-        input_sorted.size(0), weight.size(1), device=input.device
-    )
-    dist.all_to_all_single(
-        gathered_output,
-        gathered_input_embeddings,
-        input_split_sizes=output_split_sizes,
-        output_split_sizes=input_split_sizes,
-        group=pg,
-    )
-
-    # Rearrange the results to its original shape.
-    if rearrange_indices_1d_second_order is not None:
-        gathered_output = gathered_output[rearrange_indices_1d_second_order]
-    gathered_output = gathered_output[rearrange_indices_1d]
-
-    # Return the appropriate local result.
-    return torch.reshape(gathered_output, (*input_size, weight.size(1)))
+    # TODO: Make the result a PartialTensor.
+    if isinstance(input, ReplicatedTensor):
+        return all_reduce(local_input_embeddings, group=pg)
+    else:
+        local_shards = local_input_embeddings.chunk(pg.size())
+        return reduce_scatter(
+            torch.empty_like(local_shards[0]),
+            list(local_shards),
+            group=pg,
+        )

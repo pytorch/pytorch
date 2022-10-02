@@ -89,6 +89,28 @@ void initStaticModuleBindings(PyObject* module) {
                 kwargs.begin(), kwargs.end()};
             return self.runtime().benchmark_individual_ops(
                 {arg_ivalues}, {kwarg_ivalues}, warmup_runs, main_runs);
+          })
+      .def(
+          "runAsync",
+          [](StaticModule& self,
+             const py::tuple& args,
+             const py::dict& kwargs) {
+            std::vector<c10::IValue> arg_ivalues;
+            for (const auto& elem : args) {
+              arg_ivalues.push_back(
+                  torch::jit::toIValue(elem, c10::AnyType::get()));
+            }
+            std::unordered_map<std::string, c10::IValue> kwarg_ivalues;
+            for (const auto& kv : kwargs) {
+              kwarg_ivalues[py::cast<std::string>(kv.first)] =
+                  torch::jit::toIValue(kv.second, c10::AnyType::get());
+            }
+            // custom executor for async op execution
+            auto task_launcher = [](const std::function<void()>& f) {
+              at::launch(f);
+            };
+            return toPyObject(self.runtime().runAsync(
+                arg_ivalues, kwarg_ivalues, task_launcher));
           });
   m.def(
        "_jit_to_static_module",
