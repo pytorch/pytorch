@@ -636,7 +636,6 @@ class TestOperators(TestCase):
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("masked.softmin", device_type='cuda'),  # Mismatch in values!
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
