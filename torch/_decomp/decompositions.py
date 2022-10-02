@@ -666,7 +666,9 @@ def diagonal_backward(
     grad_output: Tensor, input_sizes: List[int], offset: int, dim1: int, dim2: int
 ):
     # TODO remove when new_zeros supports symint
-    grad_input = torch.zeros(input_sizes, device=grad_output.device, dtype=grad_output.dtype)
+    grad_input = torch.zeros(
+        input_sizes, device=grad_output.device, dtype=grad_output.dtype
+    )
     # grad_input = grad_output.new_zeros(input_sizes)
     return torch.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
 
@@ -2256,9 +2258,7 @@ def binary_cross_entropy_with_logits(
 
 
 @register_decomposition(aten._unsafe_view)
-def _unsafe_view(
-    self, shape
-):
+def _unsafe_view(self, shape):
     return self.view(shape)
 
 

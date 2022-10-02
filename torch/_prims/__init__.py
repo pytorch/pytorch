@@ -2757,14 +2757,19 @@ fft_c2r = _make_prim(
 # the new shape will be [*indices[0].shape, *(1 if i in dims else tensor.size(i) if for i in range(tensor.dim))]
 # always creates a new tensor, never a view
 def _gather_meta(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tensor]):
-    shape = [*indices[0].shape, *(1 if i in dims else tensor.size(i) for i in range(tensor.dim()))]
+    shape = [
+        *indices[0].shape,
+        *(1 if i in dims else tensor.size(i) for i in range(tensor.dim())),
+    ]
     strides = utils.make_contiguous_strides_for(shape)
     """
     if len(indices) == 1:
         for i in range(indices[0].ndim):
             strides = move_strides(strides, dims[0] + i, i)
     """
-    return TensorMeta(shape=shape, strides=strides, dtype=tensor.dtype, device=tensor.device)
+    return TensorMeta(
+        shape=shape, strides=strides, dtype=tensor.dtype, device=tensor.device
+    )
 
 
 # Stride modification from movedim
@@ -2784,6 +2789,7 @@ def move_strides(arr, source, dest):
 def _gather_aten(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tensor]):
     # print(f"prim_gather {dims} {indices[0].shape}")
     from builtins import slice
+
     args = []
     for i in range(tensor.ndim):
         if i in dims:
@@ -2805,6 +2811,7 @@ def _gather_aten(tensor: torch.Tensor, dims: List[int], indices: List[torch.Tens
     # but it means the implementation of gather here is suboptimal;
     # we're gathering into the wrong contiguity.
     return r.contiguous()
+
 
 gather = _make_prim(
     schema="gather(Tensor a, SymInt[] dims, Tensor[] indices) -> Tensor",

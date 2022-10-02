@@ -437,7 +437,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         const auto& in0_t = p_node->Input(0).toTensor();
         const auto in1_iv = p_node->Input(1).toDimVector();
-        p_node->Output(0) = at::native::reshape_symint(in0_t, c10::fromIntArrayRef(in1_iv));
+        p_node->Output(0) =
+            at::native::reshape_symint(in0_t, c10::fromIntArrayRef(in1_iv));
       };
     });
 

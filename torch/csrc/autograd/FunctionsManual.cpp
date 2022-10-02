@@ -609,7 +609,8 @@ Tensor sum_backward(
     bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     if (opt_dims.has_value() && opt_dims.value().size() > 0) {
-      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand_symint(sizes);
+      return unsqueeze_multiple(grad, opt_dims, sizes.size())
+          .expand_symint(sizes);
     }
   }
   return grad.expand_symint(sizes);
@@ -1546,7 +1547,9 @@ Tensor var_backward(
     if (n == correction) {
       return INFINITY * grad;
     } else {
-      return (c10::SymFloat(2.0) / c10::SymFloat(self.sym_numel() - correction)) * grad * (self - self.mean());
+      return (c10::SymFloat(2.0) /
+              c10::SymFloat(self.sym_numel() - correction)) *
+          grad * (self - self.mean());
     }
   }
   auto dim = dim_opt.value();
@@ -1555,7 +1558,8 @@ Tensor var_backward(
   }
   const c10::SymInt dof = _safe_size(self.sym_sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / dof.guard_int(__FILE__, __LINE__)) * grad * (self - self.mean(dim, /*keepdim=*/true));
+  return (2.0 / dof.guard_int(__FILE__, __LINE__)) * grad *
+      (self - self.mean(dim, /*keepdim=*/true));
 }
 
 Tensor std_backward(

@@ -704,9 +704,7 @@ RegisterOperators reg_reshape_copy({
                 "alias ops, should be restored after fusion pass!");
             IValue self, shape;
             pop(stack, self, shape);
-            push(
-                stack,
-                at::reshape(self.toTensor(), shape.toIntVector()));
+            push(stack, at::reshape(self.toTensor(), shape.toIntVector()));
           };
         },
         aliasAnalysisFromSchema()),

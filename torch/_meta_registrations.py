@@ -1,9 +1,9 @@
 from typing import List, Optional, Union
 
 import torch
-from torch._C import memory_format
 import torch._prims_common as utils
 from torch import Tensor
+from torch._C import memory_format
 from torch._prims_common import (
     check,
     corresponding_complex_dtype,
@@ -381,6 +381,7 @@ def meta_conv(
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
 
+
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
@@ -398,6 +399,7 @@ def meta_adaptive_avg_pool3d(self, output_size):
     )
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
+
 @register_meta(aten._adaptive_avg_pool2d_backward.default)
 def meta__adaptive_avg_pool2d_backward(grad_out, self):
     ndim = grad_out.ndim
@@ -411,9 +413,9 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
         ndim == 3 or ndim == 4,
         lambda: f"adaptive_avg_pool2d_backward(): Expected 3D or 4D tensor, but got {self.shape}",
     )
-    check (
+    check(
         self.dtype == grad_out.dtype,
-        lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}"
+        lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
     return self.new_empty(self.shape)
 
@@ -559,14 +561,18 @@ def meta_index_Tensor(self, indices):
 
 @register_meta([aten.add.Tensor], register_dispatcher=False)
 def meta_add(self, other, *, alpha=1):
-    check(torch.is_tensor(self), lambda: f"expected self to be tensor but got {type(self)}")
+    check(
+        torch.is_tensor(self),
+        lambda: f"expected self to be tensor but got {type(self)}",
+    )
     out_shape = self.shape
     if torch.is_tensor(other):
         out_shape = _broadcast_shapes(self.shape, other.shape)
     _, out_dtype = elementwise_dtypes(
-            self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-        )
+        self, other, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
     return self.new_empty(out_shape, dtype=out_dtype)
+
 
 @register_meta([aten.add_.Tensor], register_dispatcher=False)
 def meta_add_(self, other, *, alpha=1):
@@ -575,7 +581,19 @@ def meta_add_(self, other, *, alpha=1):
 
 
 @register_meta([aten.convolution_backward.default])
-def meta_convolution_backward(grad_output_, input_, weight_, bias_sizes_opt, stride, padding, dilation, transposed, output_padding, groups, output_mask):
+def meta_convolution_backward(
+    grad_output_,
+    input_,
+    weight_,
+    bias_sizes_opt,
+    stride,
+    padding,
+    dilation,
+    transposed,
+    output_padding,
+    groups,
+    output_mask,
+):
     # TODO: THIS IS SUPER WRONG AND WOULD WORK FOR SOME MODELS!!!!
     backend_grad_input = None
     backend_grad_weight = None
@@ -586,8 +604,9 @@ def meta_convolution_backward(grad_output_, input_, weight_, bias_sizes_opt, str
     if output_mask[1]:
         backend_grad_weight = aten.empty_like.default(weight_)
     if output_mask[2]:
-        backend_grad_bias = aten.empty.memory_format(bias_sizes_opt, dtype=weight_.dtype,
-                                                     layout=weight_.layout)
+        backend_grad_bias = aten.empty.memory_format(
+            bias_sizes_opt, dtype=weight_.dtype, layout=weight_.layout
+        )
 
     return (backend_grad_input, backend_grad_weight, backend_grad_bias)
 
@@ -761,6 +780,7 @@ def meta_diag(self, dim=0):
     else:
         sz = min(self.size(0) + dim, self.size(1))
     return self.new_empty((sz,))
+
 
 @register_meta(aten.diagonal_scatter.default)
 def diagonal_scatter(self, src, offset=0, dim1=0, dim2=1):
@@ -1010,6 +1030,7 @@ def pool2d_shape_check(
         "Output size is too small",
     )
 
+
 @register_meta(aten.max_pool2d_with_indices_backward.default, register_dispatcher=False)
 def meta_max_pool2d_with_indices_backward(
     grad_output, self, kernel_size, stride, padding, dilation, ceil_mode, indices
@@ -1029,6 +1050,7 @@ def meta_max_pool2d_with_indices_backward(
             lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
         )
     return self.new_empty(self.shape)
+
 
 @register_meta(aten.max_pool2d_with_indices.default, register_dispatcher=False)
 def meta_max_pool2d_with_indices(
