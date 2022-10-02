@@ -4,7 +4,6 @@ import enum
 from typing import Dict
 
 from torch import _C
-from torch.onnx import _deprecation
 
 
 class ExportTypes:
