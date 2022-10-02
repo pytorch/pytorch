@@ -150,6 +150,12 @@ class PythonSymIntNodeImpl : public c10::SymIntNodeImpl {
         pyobj.release().ptr(), getPyInterpreter());
   };
 
+  virtual SymIntNode clone() override {
+    py::gil_scoped_acquire acquire;
+    auto r = getPyObj().attr("clone")();
+    return c10::make_intrusive<PythonSymIntNodeImpl>(r);
+  }
+
   virtual SymIntNode wrap(int64_t num) override {
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr("wrap")(num);

@@ -154,6 +154,7 @@ void initPythonBindings(PyObject* module) {
           [](const allocation_t& a) {
             return reinterpret_cast<intptr_t>(a.ptr_);
           })
+      .def_readonly("id", &allocation_t::id_)
       .def_readonly("alloc_size", &allocation_t::alloc_size_)
       .def_readonly("device_type", &allocation_t::device_type_)
       .def_readonly("device_index", &allocation_t::device_index_)
