@@ -213,6 +213,7 @@ if(USE_PYTORCH_METAL_EXPORT)
 elseif(APPLE AND USE_PYTORCH_METAL)
   # Compile Metal kernels
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp} ${native_metal_srcs})
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
 else()
   set(all_cpu_cpp ${all_cpu_cpp} ${metal_cpp})
 endif()

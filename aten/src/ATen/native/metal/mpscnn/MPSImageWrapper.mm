@@ -23,6 +23,7 @@ using namespace at::native::metal;
 
 - (void)dealloc {
   _imageWrapper = nullptr;
+  [super dealloc];
 }
 
 - (void)beginSynchronization {
