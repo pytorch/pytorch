@@ -180,6 +180,17 @@ cannot specify additional metadata in keyword arguments"""
             broadcasts_input if broadcasts_input is not None else False
         )
 
+    def with_metadata(
+        self, *, output_process_fn_grad=None, broadcasts_input=None, name=None
+    ):
+        if output_process_fn_grad is not None:
+            self.output_process_fn_grad = output_process_fn_grad
+        if broadcasts_input is not None:
+            self.broadcasts_input = broadcasts_input
+        if name is not None:
+            self.name = name
+        return self
+
     def _repr_helper(self, formatter):
         # Helper function to return the details of the SampleInput as `str`
         # It consolidates all the fields of SampleInput and allows,
