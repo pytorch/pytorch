@@ -255,18 +255,6 @@ class TestQuantizedOps(TestCase):
         ]
         devices = ["cpu", "cuda"] if TEST_CUDA else ["cpu"]
         for device in devices:
-            # Only test the non-in-place version relu quantized cuda,
-            # will remove this when creating in-place version relu quantized cuda.
-            if device == 'cuda':
-                relu_test_configs = [
-                    {
-                        'quantized_fn': [
-                            torch.relu,
-                            torch.nn.functional.relu,
-                        ],
-                        'reference_fn': torch.nn.functional.relu
-                    },
-                ]
             shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
             dtypes = (torch.quint8, torch.qint8)
             scales = (0.05, 0.1)
