@@ -7392,7 +7392,7 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
             kwargs["distance_function"] = torch.nn.PairwiseDistance()
         yield SampleInput(input, args=args, kwargs=kwargs)
 
-def error_inputs_triplet_margin_loss(op_info, device, with_distance=False, **kwargs):
+def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
 
     samples = (
@@ -12101,7 +12101,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.triplet_margin_with_distance_loss",
         sample_inputs_func=partial(sample_inputs_triplet_margin_loss, with_distance=True),
-        error_inputs_func=partial(error_inputs_triplet_margin_loss, with_distance=True),
+        error_inputs_func=error_inputs_triplet_margin_loss,
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,
