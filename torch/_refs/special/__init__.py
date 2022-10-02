@@ -17,13 +17,24 @@ from torch._refs import (
 
 
 __all__ = [
+    "erfcx",
     "i0e",
     "i1",
     "i1e",
+    "log_ndtr",
     "logit",
     "multigammaln",
+    "ndtr",
+    "ndtri",
     "zeta",
 ]
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_erfcx
+)
+def erfcx(a: TensorLikeType) -> TensorLikeType:
+    return prims.erfcx(a)
 
 
 @_make_elementwise_unary_reference(
@@ -45,6 +56,21 @@ def i1(a):
 )
 def i1e(a):
     return prims.bessel_i1e(a)
+
+
+@register_decomposition(torch.ops.aten.special_log_ndtr)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def log_ndtr(a: TensorLikeType) -> TensorLikeType:
+    t = a * 0.707106781186547524400844362104849039
+    return torch.where(
+        a < 1.0,
+        torch.log(torch.special.erfcx(-t) / 2) - t * t,
+        torch.log1p(-refs.erfc(t) / 2),
+    )
 
 
 @register_decomposition(torch.ops.aten.logit)
@@ -72,6 +98,27 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     c = 0.25 * p * (p - 1) * math.log(math.pi)
     b = 0.5 * torch.arange(start=(1 - p), end=1, step=1, dtype=a.dtype, device=a.device)
     return torch.sum(torch.lgamma(a.unsqueeze(-1) + b), dim=-1) + c
+
+
+@register_decomposition(torch.ops.aten.special_ndtr)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def ndtr(a: TensorLikeType) -> TensorLikeType:
+    a_sqrt_2 = a / 1.414213562373095048801688724209698
+    return (1 + torch.erf(a_sqrt_2)) * 0.5
+
+
+@register_decomposition(torch.ops.aten.special_ndtri)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+)
+def ndtri(a: TensorLikeType) -> TensorLikeType:
+    return prims.ndtri(a)
 
 
 zeta = _make_elementwise_binary_reference(
