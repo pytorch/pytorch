@@ -1194,7 +1194,7 @@ class TestOperators(TestCase):
         tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
         tol1('masked.cumprod',
-             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+             {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
         tol1('linalg.vander',
