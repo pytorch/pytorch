@@ -9,6 +9,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 
@@ -26,6 +27,8 @@ struct THPVariable {
 TORCH_API void registerPythonTensorClass(
     const std::string& device,
     PyObject* python_tensor_class);
+
+TORCH_API void activateCUDATrace();
 
 TORCH_PYTHON_API extern PyObject* THPVariableClass;
 TORCH_PYTHON_API extern PyObject* ParameterClass;

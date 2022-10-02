@@ -1,6 +1,6 @@
 #pragma once
 
-#include <c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <memory>
 
 namespace c10d {
@@ -41,6 +41,8 @@ class TORCH_API PrefixStore : public Store {
   void setTimeout(const std::chrono::milliseconds& timeout) override;
 
   void watchKey(const std::string& key, WatchKeyCallback callback) override;
+
+  c10::intrusive_ptr<Store> getUnderlyingStore();
 
  protected:
   std::string prefix_;

@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
+#include <c10/core/SymIntArrayRef.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -95,3 +96,15 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
+
+
+namespace at {
+namespace native {
+
+
+Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
+  return mkldnn_view(self, c10::asIntArrayRefSlow(size));
+}
+
+} // namespace native
+} // namespace at
