@@ -136,7 +136,7 @@
         /* r8 = num_blocks that needs to be processed */                      ;\
         SUB r8, lr, ip                                                        ;\
         SUBS r8, r8, 2                                                        ;\
-        BLO _1_w##W_INDEX_DTYPE_NUM_BITS##                                    ;\
+        BLO _1_w##W_INDEX_DTYPE_NUM_BITS                                      ;\
                                                                               ;\
         .p2align 5                                                            ;\
     k_loop_w##W_INDEX_DTYPE_NUM_BITS##:                                       ;\
@@ -196,10 +196,10 @@
                                                                               ;\
         SUBS r8, r8, 2                                                        ;\
                                                                               ;\
-        BHS k_loop_w##W_INDEX_DTYPE_NUM_BITS##                                ;\
+        BHS k_loop_w##W_INDEX_DTYPE_NUM_BITS                                  ;\
     _1_w##W_INDEX_DTYPE_NUM_BITS##:                                           ;\
         CMP r8, -2                                                            ;\
-        BEQ _3_w##W_INDEX_DTYPE_NUM_BITS##                                    ;\
+        BEQ _3_w##W_INDEX_DTYPE_NUM_BITS                                      ;\
                                                                               ;\
         /* Load last nonzero block */                                         ;\
         /* For this we will load 4 8 bit values as one 32 bit value */        ;\
@@ -301,7 +301,7 @@
         MOVNE r4, r3                                                          ;\
                                                                               ;\
         CMP r11, 8                                                            ;\
-        BNE _4_w##W_INDEX_DTYPE_NUM_BITS##                                    ;\
+        BNE _4_w##W_INDEX_DTYPE_NUM_BITS                                      ;\
                                                                               ;\
         VST1.32 {q8}, [r1]!                                                   ;\
         VST1.32 {q10}, [r2]!                                                  ;\
@@ -319,7 +319,7 @@
         .p2align 3                                                            ;\
     _4_w##W_INDEX_DTYPE_NUM_BITS##:                                           ;\
         CMP r11, 4                                                            ;\
-        BLO _5_w##W_INDEX_DTYPE_NUM_BITS##                                    ;\
+        BLO _5_w##W_INDEX_DTYPE_NUM_BITS                                      ;\
                                                                               ;\
         VST1.32 {q8}, [r1]!                                                   ;\
         VST1.32 {q10}, [r2]!                                                  ;\
@@ -335,7 +335,7 @@
                                                                               ;\
     _5_w##W_INDEX_DTYPE_NUM_BITS##:                                           ;\
         CMP r11, 2                                                            ;\
-        BLO _6_w##W_INDEX_DTYPE_NUM_BITS##                                    ;\
+        BLO _6_w##W_INDEX_DTYPE_NUM_BITS                                      ;\
                                                                               ;\
         VST1.32 {d16}, [r1]!                                                  ;\
         VST1.32 {d20}, [r2]!                                                  ;\
@@ -351,7 +351,7 @@
                                                                               ;\
     _6_w##W_INDEX_DTYPE_NUM_BITS##:                                           ;\
         TEQ r11, 0                                                            ;\
-        BEQ _7_w##W_INDEX_DTYPE_NUM_BITS##                                    ;\
+        BEQ _7_w##W_INDEX_DTYPE_NUM_BITS                                      ;\
                                                                               ;\
         VST1.32 {d16[0]}, [r1]                                                ;\
         VST1.32 {d20[0]}, [r2]                                                ;\
