@@ -66,7 +66,7 @@ from ._optim_utils import (
     _process_pos_dim_tensor_state,
     _rekey_sharded_optim_state_dict,
 )
-from ._shard_utils import _create_chunk_sharded_tensor
+from ._fsdp_extensions import _ext_chunk_tensor, _ext_pre_load_state_dict_transform
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -2218,6 +2218,9 @@ class FullyShardedDataParallel(nn.Module):
                     f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
                 )
                 fqn = f"{prefix}{clean_key}"
+                if fqn not in state_dict:
+                    # A buffer can be registered as non-persistent.
+                    continue
                 if state_dict[fqn].device != cpu_device:
                     state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
@@ -2279,11 +2282,11 @@ class FullyShardedDataParallel(nn.Module):
             for fqn, _, _ in self._param_fqns:
                 # Create a ShardedTensor for the unflattened, non-sharded parameter.
                 param = functools.reduce(getattr, fqn.split("."), self.module)
-                state_dict[f"{prefix}{fqn}"] = _create_chunk_sharded_tensor(
+                state_dict[f"{prefix}{fqn}"] = _ext_chunk_tensor(
                     tensor=param,
                     rank=self.rank,
                     world_size=self.world_size,
-                    device_per_node=torch.cuda.device_count(),
+                    num_devices_per_node=torch.cuda.device_count(),
                     pg=self.process_group
                 )  # type: ignore[assignment]
         state_dict.pop(f"{prefix}{FLAT_PARAM}")
@@ -2527,7 +2530,10 @@ class FullyShardedDataParallel(nn.Module):
             param = state_dict.pop(fqn)
 
             # All-gather the param (ShardedTensor)
-            shards = param.local_shards()
+            param, shards = _ext_pre_load_state_dict_transform(param)
+            assert len(shards) < 2, (
+                f"Expects 0 or 1 shard per rank but got {len(shards)} shards on rank {self.rank}"
+            )
             param_numel = param.size().numel()
             dim_0_size = param.size()[0]
             chunk_size = (
@@ -3650,7 +3656,7 @@ class FullyShardedDataParallel(nn.Module):
     def _warn_optim_input(optim_input):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated. You may remove it "
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
                 "from your code without changing its functionality."
             )
 
