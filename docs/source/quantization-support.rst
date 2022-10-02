@@ -543,7 +543,7 @@ as follows:
 
 where :math:`\text{clamp}(.)` is the same as :func:`~torch.clamp` while the
 scale :math:`s` and zero point :math:`z` are then computed
-as decribed in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifically:
+as described in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifically:
 
     .. math::
 
