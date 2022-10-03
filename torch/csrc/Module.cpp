@@ -428,11 +428,13 @@ PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPModule_isXPUAvailable_wrap(
-    PyObject* self,
-    PyObject* noargs) {
+PyObject* THPModule_isXPUAvailable_wrap(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return at::hasXPU() ? Py_RETURN_TRUE : Py_RETURN_FALSE;
+  if (at::hasXPU()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
   END_HANDLE_TH_ERRORS
 }
 
