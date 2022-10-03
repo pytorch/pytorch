@@ -264,8 +264,6 @@ def _make_magic(method, func, py_type):
         if method in ["ceil"]:
             return PySymInt(out, self.shape_env)
         else:
-            # TODO: relational operators actually technically return a
-            # PySymBool, this is a type error
             return py_type(out, self.shape_env)
 
     # this should be wrapped transparently into torch.SymIntNode
