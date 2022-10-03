@@ -400,9 +400,9 @@ def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
     if rounding_mode is None:
         return true_divide(g, self, other)
     elif rounding_mode == "floor":
-        return _floor_divide(g, self, other)
+        return floor_divide(g, self, other)
     elif rounding_mode == "trunc":
-        return _trunc_divide(g, self, other)
+        return trunc_divide(g, self, other)
     else:
         raise errors.SymbolicValueError(
             f'Unsupported rounding mode: "{rounding_mode}". Expected None, "floor" or "trunc"',
@@ -410,15 +410,16 @@ def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
         )
 
 
+@_onnx_symbolic("aten::trunc")
 @_beartype.beartype
-def _trunc_divide(g: jit_utils.GraphContext, self, other):
-    out = g.op("Div", self, other)
+def trunc_divide(g: jit_utils.GraphContext, self, other):
+    quotient = g.op("Div", self, other)
     # the correct operation is truncate, which is not supported in ONNX,
     # we cannot call floor since it will behave differently for negative numbers
     # (eg. -0.1 should become -0 )
     # - if scalar_type information are not available, assume that
     # we need to call floor (treat as float)
-    out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.INT64)
+    casted = g.op("Cast", quotient, to_i=_C_onnx.TensorProtoDataType.INT64)
 
     # Matching PyTorch's behavior:
     # - if self is fp the output's type is self's type
@@ -433,20 +434,19 @@ def _trunc_divide(g: jit_utils.GraphContext, self, other):
             and other.type().scalarType() is not None
             and symbolic_helper._is_fp(other)
         ):
-            out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
+            return g.op("Cast", casted, to_i=_C_onnx.TensorProtoDataType.FLOAT)
         else:
-            out = g.op(
+            return g.op(
                 "Cast",
-                out,
+                casted,
                 to_i=_type_utils.JitScalarType.from_name(scalar_type).onnx_type(),
             )
-    else:
-        out = g.op("Cast", out, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-    return out
+    return g.op("Cast", casted, to_i=_C_onnx.TensorProtoDataType.FLOAT)
 
 
+@_onnx_symbolic("aten::floor_divide")
 @_beartype.beartype
-def _floor_divide(g: jit_utils.GraphContext, self, other):
+def floor_divide(g: jit_utils.GraphContext, self, other):
     if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
         out = true_divide(g, self, other)
         return g.op("Floor", out)
@@ -468,13 +468,6 @@ def _floor_divide(g: jit_utils.GraphContext, self, other):
         one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
         fixup = g.op("Mul", fixup_mask, one)
         return g.op("Sub", div, fixup)
-
-
-@_onnx_symbolic("aten::floor_divide")
-@_beartype.beartype
-def floor_divide(g: jit_utils.GraphContext, self, other):
-    # Deprecated behavior, floor_divide actually truncates
-    return _trunc_divide(g, self, other)
 
 
 @_onnx_symbolic("aten::floordiv")
@@ -5716,7 +5709,7 @@ def meshgrid(g: jit_utils.GraphContext, tensor_list, indexing: Optional[str] = N
 @_onnx_symbolic("aten::remainder")
 @_beartype.beartype
 def remainder(g: jit_utils.GraphContext, input, other):
-    div = _floor_divide(g, input, other)
+    div = floor_divide(g, input, other)
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
 
