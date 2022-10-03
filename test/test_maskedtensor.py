@@ -26,7 +26,7 @@ from torch.masked.maskedtensor.binary import NATIVE_BINARY_FNS, NATIVE_INPLACE_B
 from torch.masked.maskedtensor.reductions import REDUCE_NAMES
 
 
-def _compare_mt_t(mt_result, t_result):
+def _compare_mt_t(mt_result, t_result, rtol=1e-05, atol=1e-05):
     mask = mt_result.get_mask()
     mt_result_data = mt_result.get_data()
     if mask.layout in {torch.sparse_coo, torch.sparse_csr}:
@@ -35,10 +35,10 @@ def _compare_mt_t(mt_result, t_result):
         mt_result_data = mt_result_data.to_dense()
     a = mt_result_data.detach().masked_fill_(~mask, 0)
     b = t_result.detach().masked_fill_(~mask, 0)
-    if not _tensors_match(a, b, exact=False):
+    if not _tensors_match(a, b, exact=False, rtol=rtol, atol=atol):
         raise ValueError("The data in MaskedTensor a and Tensor b do not match")
 
-def _compare_mts(mt1, mt2):
+def _compare_mts(mt1, mt2, rtol=1e-05, atol=1e-08):
     mt_data1 = mt1.get_data()
     mt_data2 = mt2.get_data()
     if mt_data1.layout != mt_data2.layout:
@@ -61,7 +61,7 @@ def _compare_mts(mt1, mt2):
     a = mt_data1.detach().masked_fill_(~mask, 0)
     b = mt_data2.detach().masked_fill_(~mask, 0)
 
-    if not _tensors_match(a, b, exact=False):
+    if not _tensors_match(a, b, exact=False, rtol=rtol, atol=atol):
         raise ValueError("The data in MaskedTensor mt1 and MaskedTensor mt2 do not match")
 
 def _make_tensor_mask(shape, device):
@@ -174,7 +174,7 @@ class TestBasics(TestCase):
         tensor_res.sum().backward()
 
         _compare_mt_t(masked_res, tensor_res)
-        _compare_mt_t(mt.grad, xinf.grad)
+        _compare_mt_t(mt.grad, xinf.grad, atol=1e-06)
 
     def test_where(self, device):
         data = torch.tensor([-10.0, -5, 0, 5, 10, 50, 60, 70, 80, 90, 100], device=device)
