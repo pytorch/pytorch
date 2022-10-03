@@ -119,6 +119,7 @@ function checkout_install_torchdeploy() {
   export CFLAGS="-fPIC -g"
   pyenv install --force 3.8.6
   virtualenv -p ~/.pyenv/versions/3.8.6/bin/python3 ~/venvs/multipy
+  python setup.py install
   source ~/venvs/multipy/bin/activate
   pushd multipy/runtime
   python examples/generate_examples.py
