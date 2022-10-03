@@ -131,6 +131,18 @@ function install_torchdynamo() {
 
 function checkout_install_torchdynamo() {
   local commit
+  pushd ..
+  git clone https://github.com/pytorch/multipy
+  pushd multipy
+  export CFLAGS="-fPIC -g"
+
+  time python setup.py develop
+  popd
+  popd
+}
+
+function checkout_install_torchdeploy() {
+  local commit
   commit=$(get_pinned_commit torchdynamo)
   pushd ..
   git clone https://github.com/pytorch/torchdynamo
@@ -140,6 +152,8 @@ function checkout_install_torchdynamo() {
   popd
   popd
 }
+
+
 
 function test_functorch() {
   python test/run_test.py --functorch --verbose
