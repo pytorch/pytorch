@@ -559,7 +559,8 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
     return _gather();
   }
-  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather_with_cpp() {
+  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context>
+  gather_with_cpp() {
     auto r = _gather();
     r->cpp_frames = c10::get_backtrace();
     return std::move(r);
@@ -740,7 +741,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def("_cuda_recordMemoryHistory", [](bool enabled, bool cpp) {
     c10::cuda::CUDACachingAllocator::setContextRecorder(
-        enabled ? (cpp ? StackContext::gather_with_cpp : StackContext::gather) : nullptr);
+        enabled ? (cpp ? StackContext::gather_with_cpp : StackContext::gather)
+                : nullptr);
   });
 }
 
