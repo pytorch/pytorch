@@ -3104,7 +3104,7 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                                      kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
                          error_regex=error_msg)
 
-        # error inputs for invalied output size
+        # error inputs for invalid output size
         # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
         error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' and not requires_grad \
             else \
@@ -11130,7 +11130,6 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
-           aten_backward_name='im2col_backward',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
