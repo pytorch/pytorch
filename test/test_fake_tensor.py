@@ -227,6 +227,14 @@ class FakeTensorTest(TestCase):
             out = x + y
         self.checkType(out, "cuda", [1])
 
+    def test_recursive_invocation(self):
+        mode = FakeTensorMode()
+        with mode:
+            x = torch.tensor(2)
+            mode.in_kernel_invocation = True
+            y = x + x
+            self.assertTrue(mode.in_kernel_invocation)
+
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cudnn_rnn(self):
@@ -631,7 +639,7 @@ class FakeTensorOperatorInvariants(TestCase):
         for schema in self.get_all_aten_schemas():
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
-                self.assertTrue(op in torch._subclasses.fake_tensor._like_tensor_constructors)
+                self.assertIn(op, torch._subclasses.fake_tensor._like_tensor_constructors)
 
 if __name__ == "__main__":
     run_tests()

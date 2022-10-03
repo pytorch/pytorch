@@ -61,6 +61,12 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
   virtual SymIntNode ge(const SymIntNode& other) {
     TORCH_CHECK(false, "NYI");
   };
+  virtual SymIntNode clone() {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymFloatNode sym_float() {
+    TORCH_CHECK(false, "NYI");
+  }
   virtual SymIntNode wrap(int64_t num) {
     TORCH_CHECK(false, "NYI");
   };
