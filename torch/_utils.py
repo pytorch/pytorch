@@ -577,6 +577,10 @@ def _get_devices_properties(device_ids):
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
 
+def is_xpu_available():
+    return torch._C.is_xpu_available()
+
+
 def get_current_device_index() -> int:
     r"""Checks if there are GPU devices available and
     returns the device index of the current default GPU device.
@@ -585,7 +589,7 @@ def get_current_device_index() -> int:
     """
     if torch.cuda.device_count() > 0:
         return torch.cuda.current_device()
-    if torch._C._is_xpu_available() and torch.xpu.device_count() > 0:  # type: ignore[attr-defined]
+    if is_xpu_available() and torch.xpu.device_count() > 0:  # type: ignore[attr-defined]
         return torch.xpu.current_device()  # type: ignore[attr-defined]
     return -1
 

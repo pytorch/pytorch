@@ -428,6 +428,14 @@ PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_isXPUAvailable_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return at::hasXPU() ? Py_RETURN_TRUE : Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   size_t frames_to_skip;
@@ -860,6 +868,7 @@ static PyMethodDef TorchMethods[] = {
      THPModule_getNumInteropThreads,
      METH_NOARGS,
      nullptr},
+    {"is_xpu_available", THPModule_isXPUAvailable_wrap, METH_NOARGS, nullptr},
     {"set_num_interop_threads",
      THPModule_setNumInteropThreads,
      METH_O,
@@ -1297,7 +1306,6 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
   py_module.def("_is_mps_available", []() { return at::hasMPS(); });
-  py_module.def("_is_xpu_available", []() { return at::hasXPU(); });
 
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
