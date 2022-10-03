@@ -706,10 +706,10 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
             print_to_stderr(f"Expand the folded group to see the beginning of the log file of {test}")
             print_to_stderr(f"##[group]PRINTING BEGINNING OF LOG FILE of {test} ({file_path})")
             for _ in range(num_lines - n):
-                print_to_stderr(next(f))
+                print_to_stderr(next(f).rstrip())
             print_to_stderr("##[endgroup]")
             for _ in range(n):
-                print_to_stderr(next(f))
+                print_to_stderr(next(f).rstrip())
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         else:
             print_to_stderr(f"Expand the folded group to see the log file of {test}")
