@@ -577,7 +577,7 @@ def _get_devices_properties(device_ids):
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
 
-def is_xpu_available():
+def is_xpu_available() -> bool:
     return torch._C._is_xpu_available()
 
 
