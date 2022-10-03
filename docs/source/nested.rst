@@ -23,7 +23,7 @@ Construction is straightforward and involves passing a list of Tensors to the co
 tensor([0, 1, 2])
 >>> b
 tensor([3, 4, 5, 6, 7])
->>> nt = torch.nested_tensor([a, b])
+>>> nt = torch.nested.nested_tensor([a, b])
 >>> nt
 nested_tensor([
   tensor([0, 1, 2]),
@@ -32,7 +32,7 @@ nested_tensor([
 
 Data type and device can be chosen via the usual keyword arguments.
 
->>> nt = torch.nested_tensor([a, b], dtype=torch.float32, device="cuda")
+>>> nt = torch.nested.nested_tensor([a, b], dtype=torch.float32, device="cuda")
 >>> nt
 nested_tensor([
   tensor([0., 1., 2.], device='cuda:0'),
@@ -43,7 +43,7 @@ In order to form a valid NestedTensor the passed Tensors also all need to match 
 
 >>> a = torch.randn(3, 50, 70) # image 1
 >>> b = torch.randn(3, 128, 64) # image 2
->>> nt = torch.nested_tensor([a, b], dtype=torch.float32)
+>>> nt = torch.nested.nested_tensor([a, b], dtype=torch.float32)
 >>> nt.dim()
 4
 
@@ -51,7 +51,7 @@ If one of the dimensions don't match, the constructor throws an error.
 
 >>> a = torch.randn(50, 128) # text 1
 >>> b = torch.randn(3, 128, 64) # image 2
->>> nt = torch.nested_tensor([a, b], dtype=torch.float32)
+>>> nt = torch.nested.nested_tensor([a, b], dtype=torch.float32)
 Traceback (most recent call last):
   File "<stdin>", line 1, in <module>
 RuntimeError: All Tensors given to nested_tensor must have the same dimension. Found dimension 3 for Tensor at index 1 and dimension 2 for Tensor at index 0.
@@ -73,7 +73,7 @@ Even though a NestedTensor does not support .size() (or .shape), it supports .si
 
 >>> a = torch.randn(50, 128) # text 1
 >>> b = torch.randn(32, 128) # text 2
->>> nt = torch.nested_tensor([a, b], dtype=torch.float32)
+>>> nt = torch.nested.nested_tensor([a, b], dtype=torch.float32)
 >>> nt.size(0)
 2
 >>> nt.size(1)
@@ -86,7 +86,7 @@ RuntimeError: Given dimension 1 is irregular and does not have a size.
 If all dimensions are regular, the NestedTensor is intended to be semantically indistinguishable from a regular torch.Tensor.
 
 >>> a = torch.randn(20, 128) # text 1
->>> nt = torch.nested_tensor([a, a], dtype=torch.float32)
+>>> nt = torch.nested.nested_tensor([a, a], dtype=torch.float32)
 >>> nt.size(0)
 2
 >>> nt.size(1)
@@ -112,7 +112,7 @@ unbind allows you to retrieve a view of the constituents.
 >>> import torch
 >>> a = torch.randn(2, 3)
 >>> b = torch.randn(3, 4)
->>> nt = torch.nested_tensor([a, b], dtype=torch.float32)
+>>> nt = torch.nested.nested_tensor([a, b], dtype=torch.float32)
 >>> nt
 nested_tensor([
   tensor([[ 1.2286, -1.2343, -1.4842],
@@ -149,4 +149,6 @@ The following functions are related to nested tensors:
 
 .. currentmodule:: torch.nested
 
+.. autofunction:: nested_tensor
+.. autofunction:: as_nested_tensor
 .. autofunction:: to_padded_tensor
