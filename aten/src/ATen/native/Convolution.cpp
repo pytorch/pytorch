@@ -131,8 +131,7 @@ auto ConvParams::view1d_as_2d() -> void {
 
 auto ConvParams::use_cpu_depthwise3x3_winograd(
     const at::Tensor& input,
-    const at::Tensor& weight,
-    const c10::optional<at::Tensor>& bias) const -> bool {
+    const at::Tensor& weight) const -> bool {
 #if defined(__ARM_NEON__)
   // Currently only 3x3 depthwise convolutions on tensors of float are supported.
   return (input.ndimension() == 4) &&
@@ -148,7 +147,6 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          (weight.device().is_cpu()) &&
          (weight.scalar_type() == at::kFloat) &&
          weight.is_contiguous() &&
-         (!bias.has_value() || bias->is_contiguous()) &&
          !is_strided() &&
          !is_dilated() &&
          !transposed;
@@ -1097,22 +1095,12 @@ ConvBackend select_conv_backend(
   auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  return _select_conv_backend(input, weight, bias, bias_sizes_opt, need_backward, params);
+  return select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
 }
 
 ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const at::OptionalIntArrayRef bias_sizes_opt,
-    const bool need_backward,
-    const ConvParams& params) {
-  return _select_conv_backend(input, weight, {}, bias_sizes_opt, need_backward, params);
-}
-
-ConvBackend _select_conv_backend(
-    const Tensor& input,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
     const at::OptionalIntArrayRef bias_sizes_opt,
     const bool need_backward,
     const ConvParams& params) {
@@ -1157,7 +1145,7 @@ ConvBackend _select_conv_backend(
     // option for NHWC.
     return ConvBackend::Xnnpack2d;
   // 3x3 depthwith convolutions implementation is inference only
-  } else if (!need_backward && params.use_cpu_depthwise3x3_winograd(input, weight, bias)) {
+  } else if (!need_backward && params.use_cpu_depthwise3x3_winograd(input, weight)) {
     return ConvBackend::Winograd3x3Depthwise;
   } else if (
       !params.transposed && (input.ndimension() == 5) &&
@@ -1351,7 +1339,7 @@ at::Tensor _convolution(
   auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
   bool need_backward = GradMode::is_enabled() &&
       (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
-  ConvBackend backend = _select_conv_backend(input, weight, bias, bias_sizes_opt, need_backward, params);
+  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight, backend);
 
   // Call the backend.
