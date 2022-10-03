@@ -415,6 +415,9 @@ class CachingAllocatorConfig {
   static size_t roundup_power2_divisions() {
     return instance().m_roundup_power2_divisions;
   }
+  static size_t roundup_bypass_threshold() {
+    return instance().m_roundup_bypass_threshold;
+  }
 
   static CachingAllocatorConfig& instance() {
     static CachingAllocatorConfig* s_instance = ([]() {
@@ -430,6 +433,7 @@ class CachingAllocatorConfig {
     // If empty, set the default values
     m_max_split_size = std::numeric_limits<size_t>::max();
     m_roundup_power2_divisions = 0;
+    m_roundup_bypass_threshold = std::numeric_limits<size_t>::max();
     m_garbage_collection_threshold = 0;
 
     if (env == nullptr) {
@@ -468,6 +472,9 @@ class CachingAllocatorConfig {
               "For roundups, the divisons has to be power of 2 ",
               "");
           m_roundup_power2_divisions = val2;
+        } else if (kv[0].compare("roundup_bypass_threshold_mb") == 0) {
+          size_t val2 = stoi(kv[1]);
+          m_roundup_bypass_threshold = val2 * 1024 * 1024;
         } else if (kv[0].compare("garbage_collection_threshold") == 0) {
           /*
            * Perform garbage collection of GPU memory blocks to avoid
@@ -501,6 +508,7 @@ class CachingAllocatorConfig {
         m_garbage_collection_threshold(0) {}
   std::atomic<size_t> m_max_split_size;
   std::atomic<size_t> m_roundup_power2_divisions;
+  std::atomic<size_t> m_roundup_bypass_threshold;
   std::atomic<double> m_garbage_collection_threshold;
 };
 
@@ -1009,6 +1017,8 @@ class DeviceCachingAllocator {
   static size_t round_size(size_t size) {
     if (size < kMinBlockSize) {
       return kMinBlockSize;
+    } else if (size > CachingAllocatorConfig::roundup_bypass_threshold()) {
+      return kMinBlockSize * ((size + kMinBlockSize - 1) / kMinBlockSize);
     } else {
       auto divisions = CachingAllocatorConfig::roundup_power2_divisions();
       if (divisions > 0 && size > (kMinBlockSize * divisions)) {
