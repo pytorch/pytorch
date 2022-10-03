@@ -650,6 +650,12 @@ test_dynamo() {
   popd
 }
 
+test_deploy() {
+  pushd ../multipy/multipy/runtime/build
+  ./test_deploy
+  popd
+}
+
 test_torch_deploy() {
   python torch/csrc/deploy/example/generate_examples.py
   ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
@@ -670,6 +676,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
 fi
 if [[ "${TEST_CONFIG}" == *deploy* ]]; then
   install_torchdynamo
+  checkout_install_torchdeploy
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
