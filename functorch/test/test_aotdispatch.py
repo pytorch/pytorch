@@ -757,7 +757,6 @@ symbolic_aot_autograd_failures = {
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('diag_embed', ''),  # prims::arange() Expected a value of type 'number' for argument 'end' but inst...
     xfail('diagonal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diagonal_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
@@ -1040,8 +1039,6 @@ symbolic_aot_autograd_failures = {
     xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
-    xfail('tril', ''),  # prims::arange() Expected a value of type 'number' for argument 'end' but instead fo...
-    xfail('triu', ''),  # prims::arange() Expected a value of type 'number' for argument 'end' but instead fo...
     xfail('unbind', ''),  # tensor_split() received an invalid combination of arguments - got (FakeTensor, torch...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('unfold', ''),  # could not find kernel
