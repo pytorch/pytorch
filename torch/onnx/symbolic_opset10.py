@@ -69,46 +69,6 @@ def _apply_params(*args, **kwargs):
     return _apply
 
 
-@_onnx_symbolic("aten::div")
-@_beartype.beartype
-def div(g: jit_utils.GraphContext, self, other, *args):
-    if len(args) == 0:
-        return opset9.true_divide(g, self, other)
-    else:
-        return _div_rounding_mode(g, self, other, *args)
-
-
-@symbolic_helper.parse_args("v", "v", "s")
-@_beartype.beartype
-def _div_rounding_mode(g: jit_utils.GraphContext, self, other, rounding_mode):
-    if rounding_mode == "floor":
-        return _floor_divide(g, self, other)
-    else:
-        return opset9._div_rounding_mode(g, self, other, rounding_mode)
-
-
-@_onnx_symbolic("aten::_floor_divide")
-@_beartype.beartype
-def _floor_divide(g: jit_utils.GraphContext, self, other):
-    if symbolic_helper._is_fp(self) or symbolic_helper._is_fp(other):
-        out = opset9.true_divide(g, self, other)
-        return g.op("Floor", out)
-    else:
-        # Integer division does trunction rounding
-        div = g.op("Div", self, other)
-        # Division is negative if: self < 0 != other < 0
-        zero = g.op("Constant", value_t=torch.tensor(0, dtype=torch.int64))
-        negative = g.op("Xor", g.op("Less", self, zero), g.op("Less", other, zero))
-
-        # For negative numbers with self % other != 0, subtract 1 to round down instead of up
-        mod = g.op("Mod", self, other, fmod_i=0)
-        fixup_mask = g.op("And", negative, g.op("Not", g.op("Equal", mod, zero)))
-
-        one = g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64))
-        fixup = g.op("Sub", div, one)
-        return g.op("Where", fixup_mask, fixup, div)
-
-
 @_onnx_symbolic("aten::sort")
 @symbolic_helper.parse_args("v", "i", "i", "none")
 @_beartype.beartype
