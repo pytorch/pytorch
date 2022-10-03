@@ -160,7 +160,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_max_pool2d,
         torch.mkldnn_max_pool3d,
         torch.mkldnn_linear_backward_weights,
-        torch.nested_tensor,
         torch.normal,
         torch.ones,
         torch.promote_types,
@@ -278,6 +277,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._fix_weakref,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
+        Tensor._has_symbolic_sizes_strides.__get__,
         Tensor._conj,
         Tensor._conj_physical,
         Tensor._neg_view,
@@ -1511,10 +1511,10 @@ def handle_torch_function(
 
     # Check for __torch_function__ mode.
     if _is_torch_function_mode_enabled():
-        mode = _get_current_function_mode()
-        # NB: unlike on tensors, modes are instances
+        # if we're here, the mode must be set to a TorchFunctionStackMode
+        # this unsets it and calls directly into TorchFunctionStackMode's torch function
         with _no_torch_function_mode():
-            result = mode.__torch_function__(public_api, types, args, kwargs)
+            result = _TorchFunctionStackMode().__torch_function__(public_api, types, args, kwargs)
         if result is not NotImplemented:
             return result
 
