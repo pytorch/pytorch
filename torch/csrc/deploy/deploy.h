@@ -18,6 +18,12 @@ namespace deploy {
 struct ReplicatedObj;
 struct InterpreterManager;
 
+// An InterpreterSession is a "handle" on an Interpreter; it represents how
+// we can access the state inside of an interpreter.  When a thread has an
+// InterpreterSession, it has exclusive access over that interpreter (as it
+// has taken out that interpreter's GIL).  The converse is not true:
+// a single thread can take out multiple InterpreterSessions (for example,
+// this is useful if you need two interpreters to communicate to each other.)
 struct TORCH_API InterpreterSession {
   InterpreterSession(
       InterpreterSessionImpl* impl,
@@ -52,6 +58,11 @@ struct TORCH_API InterpreterSession {
   int64_t notifyIdx_ = -1;
 };
 
+// An Interpreter represents a single copy of the Python interpreter in the
+// process.  Constructing an interpreter involves writing out a new copy
+// of torch_deployXXXXXX.so and then dlopen'ing it into the process.  You
+// probably don't want to interact with this class directly; instead,
+// look at InterpreterManager.
 class TORCH_API Interpreter {
  private:
   std::string libraryName_;
@@ -85,6 +96,8 @@ class TORCH_API Interpreter {
 
 struct Package;
 
+// A small class for balancing load over multiple threads.  Check
+// LoadBalancer::acquire for the algorithm.
 struct TORCH_API LoadBalancer {
   explicit LoadBalancer(size_t n)
       : uses_(new uint64_t[8 * n]), allocated_(n), n_(n) {
@@ -110,12 +123,17 @@ struct TORCH_API LoadBalancer {
   size_t n_;
 };
 
+// An InterpreterManager manages a pool of interpreters.  The general
+// expectation is these interpreters are configured to run the same model;
+// and then you do not care which particular interpreter handles any given
+// request, any will do.  Think of it like managing the worker threads in a
+// multithreaded server.
 struct TORCH_API InterpreterManager {
   explicit InterpreterManager(
       size_t nInterp = 2,
       std::shared_ptr<Environment> env = std::make_shared<NoopEnvironment>());
 
-  // get a free model, guarenteed that no other user of acquireOne has the same
+  // get a free model, guaranteed that no other user of acquireOne has the same
   // model. It _is_ possible that other users will be using the interpreter.
   InterpreterSession acquireOne() {
     TORCH_DEPLOY_TRY
@@ -143,7 +161,7 @@ struct TORCH_API InterpreterManager {
   Package loadPackage(
       std::shared_ptr<caffe2::serialize::ReadAdapterInterface> reader);
 
-  // convience function for loading some python source code as a module across
+  // convenience function for loading some python source code as a module across
   // all interpreters. this can be used for writing tests of deploy that need to
   // execute python code, or for small amounts of application logic that are
   // best written in Python. For larger amounts of code, prefer creating and

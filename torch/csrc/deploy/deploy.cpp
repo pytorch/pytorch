@@ -301,6 +301,13 @@ Interpreter::~Interpreter() {
   }
 }
 
+// First, try to acquire a free interpreter (this is done by CAS-ing
+// each interpreter in a round-robin fashion, using a thread local
+// to remember the last interpreter we served from this thread, because
+// that interpreter is probably free unless another thread got to it.)
+//
+// If no interpreter is available, use the interpreter with the least
+// number of users.
 int LoadBalancer::acquire() {
   TORCH_DEPLOY_TRY
   thread_local int last = 0;
