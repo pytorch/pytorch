@@ -149,7 +149,7 @@ can point to torch.masked and its MaskedTensor, which is in turn also backed and
 powered by sparse storage formats and kernels.
 
 Also note that, for now, the user doesn't have a choice of the output layout. For example,
-adding a sparse Tensor to a regular strided Tensor results in a sparse Tensor.
+adding a sparse Tensor to a regular strided Tensor results in a strided Tensor.
 
     >>> a + b.to_sparse()
     tensor([[0., 3.],
@@ -522,6 +522,26 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix#Compressed_sparse_row_(CSR,_CRS_o
      1] <= plain_dim_size`` for ``i=1, ..., compressed_dim_size``,
      where ``plain_dim_size`` is the number of plain dimensions
      (orthogonal to compressed dimensions, e.g. columns or rows).
+
+.. note::
+
+   The generalization of sparse compressed layouts to N-dimensional
+   tensors can lead to some confusion regarding the count of specified
+   elements. When a sparse compressed tensor contains batch dimensions
+   the number of specified elements will correspond to the number of such
+   elements per-batch. When a sparse compressed tensor has dense dimensions
+   the element considered is now the K-dimensional array. Also for block
+   sparse compressed layouts the 2-D block is considered as the element
+   being specified.  Take as an example a 3-dimensional block sparse
+   tensor, with one batch dimension of length ``b``, and a block
+   shape of ``p, q``. If this tensor has ``n`` specified elements, then
+   in fact we have ``n`` blocks specified per batch. This tensor would
+   have ``values`` with shape ``(b, n, p, q)``. This interpretation of the
+   number of specified elements comes from all sparse compressed layouts
+   being derived from the compression of a 2-dimensional matrix. Batch
+   dimensions are treated as stacking of sparse matrices, dense dimensions
+   change the meaning of the element from a simple scalar value to an
+   array with its own dimensions.
 
 .. _sparse-csr-docs:
 
