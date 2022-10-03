@@ -276,8 +276,10 @@ struct _functionalize_aten_op final {};
 
 template <class Op, bool symint, class ReturnType, class... ParameterTypes>
 struct _functionalize_aten_op<Op, symint, ReturnType(ParameterTypes...)> final {
-  static ReturnType call(typename c10::maybe_keep_symint<symint, ParameterTypes>::type... args) {
-    using FuncType = ReturnType(typename c10::maybe_keep_symint<symint, ParameterTypes>::type...);
+  static ReturnType call(
+      typename c10::maybe_keep_symint<symint, ParameterTypes>::type... args) {
+    using FuncType = ReturnType(
+        typename c10::maybe_keep_symint<symint, ParameterTypes>::type...);
     auto op = c10::Dispatcher::singleton()
                   .findSchemaOrThrow(
                       (const char*)Op::name, (const char*)Op::overload_name)
@@ -294,10 +296,12 @@ struct _functionalize_aten_op<Op, symint, ReturnType(ParameterTypes...)> final {
 };
 
 template <class Op>
-using functionalize_aten_op = _functionalize_aten_op<Op, false, typename Op::schema>;
+using functionalize_aten_op =
+    _functionalize_aten_op<Op, false, typename Op::schema>;
 
 template <class Op>
-using functionalize_aten_op_symint = _functionalize_aten_op<Op, true, typename Op::schema>;
+using functionalize_aten_op_symint =
+    _functionalize_aten_op<Op, true, typename Op::schema>;
 
 } // namespace functionalization
 } // namespace at
