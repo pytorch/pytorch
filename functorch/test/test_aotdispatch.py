@@ -37,6 +37,7 @@ from common_utils import (
     skip,
     skipOps,
 )
+from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 USE_TORCHVISION = False
 try:
@@ -689,7 +690,6 @@ class TestAOTModuleSimplified(AOTTestCase):
 # entries in here don't work and need to be fixed.
 # Each one of these is a bug (or needs to be investigated)
 aot_autograd_failures = {
-    xfail('__getitem__', ''), # new failure? needs debug
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
@@ -725,7 +725,6 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('__getitem__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('__rmatmul__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addbmm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addcdiv', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
@@ -1085,30 +1084,33 @@ def _test_aot_autograd_helper(self, device, dtype, op):
 
         compiled_f = compiled_function(f, nop, nop)
 
-        reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
+        try:
+            reset_grads()
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
 
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+            reset_grads()
+            call_forwards_backwards(f)
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
 
-        def create_new_arg(x):
-            if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
-                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
-            return x
+            def create_new_arg(x):
+                if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
+                    return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
+                return x
 
-        args = pytree.tree_map(create_new_arg, args)
+            args = pytree.tree_map(create_new_arg, args)
 
-        reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
+            reset_grads()
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
 
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+            reset_grads()
+            call_forwards_backwards(f)
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
+        except DynamicOutputShapeException:
+            self.skipTest("Dynamic output shape operation in trace")
 
 class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
