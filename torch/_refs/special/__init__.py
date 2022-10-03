@@ -82,12 +82,12 @@ def _xlog1py(
         if isinstance(b, Number):
             b = refs.scalar_tensor(b, dtype=a.dtype, device=a.device)
         elif utils.is_cpu_scalar_tensor(b):
-            b = b.to(device=a.device)
+            b = prims.device_put(b, device=a.device)
     elif isinstance(b, TensorLike):
         if isinstance(a, Number):
             a = refs.scalar_tensor(a, dtype=b.dtype, device=b.device)
         elif utils.is_cpu_scalar_tensor(a):
-            a = a.to(device=b.device)
+            a = prims.device_put(a, device=b.device)
 
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
