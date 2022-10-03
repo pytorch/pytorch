@@ -381,6 +381,7 @@
     "GradBucket",
     "HashStore",
     "Logger",
+    "namedtuple",
     "Optional",
     "PrefixStore",
     "ProcessGroup",
