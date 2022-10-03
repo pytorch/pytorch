@@ -2786,7 +2786,7 @@ Tensor as_strided_backward(
   // Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
   auto storage_offset =
-      storage_offset_.value_or(input_geometry.storage_offset());
+      storage_offset_.value_or(input_geometry.storage_offset().expect_int());
   auto odim = grad.dim();
   std::vector<int64_t> out_sizes_, out_strides_;
   out_sizes_.reserve(odim);
@@ -2795,7 +2795,7 @@ Tensor as_strided_backward(
     auto size_i = sizes[i];
     auto stride_i = strides[i];
     if (size_i == 0) {
-      return at::zeros(input_geometry.sizes(), grad.options());
+      return at::zeros_symint(input_geometry.sizes(), grad.options());
     } else if (size_i == 1) {
       grad = grad.squeeze(i);
     } else if (stride_i == 0) {
@@ -2817,16 +2817,16 @@ Tensor as_strided_backward(
   // Strided Tensor ]
   //              on input geometry
   auto idim = input_geometry.dim();
-  IntArrayRef inp_sizes = input_geometry.sizes(),
-              inp_strides = input_geometry.strides();
-  std::vector<int64_t> inp_sizes_, inp_strides_;
+  auto inp_sizes = input_geometry.sizes(),
+       inp_strides = input_geometry.strides();
+  std::vector<c10::SymInt> inp_sizes_, inp_strides_;
   inp_sizes_.reserve(idim);
   inp_strides_.reserve(idim);
   for (int64_t i = idim - 1; i >= 0; i--) {
     auto size_i = inp_sizes[i];
     auto stride_i = inp_strides[i];
     if (size_i == 0) {
-      return at::zeros(input_geometry.sizes(), grad.options());
+      return at::zeros_symint(input_geometry.sizes(), grad.options());
     } else if (size_i != 1) {
       inp_sizes_.insert(inp_sizes_.begin(), size_i);
       inp_strides_.insert(inp_strides_.begin(), stride_i);
@@ -2835,7 +2835,8 @@ Tensor as_strided_backward(
   // Step (1)~(4) for the algorithm in NOTE [ Detecting Memory Overlap Within A
   // Strided Tensor ]
   //              on input geometry
-  auto inp_maybe_overlap = _maybe_overlapping_memory(inp_sizes_, inp_strides_);
+  auto inp_maybe_overlap = _maybe_overlapping_memory(
+      c10::asIntArrayRefSlow(inp_sizes_), c10::asIntArrayRefSlow(inp_strides_));
 
   // Rest of this function implements
   // Step (1)~(4) for the algorithm in NOTE [ as_strided Backward and
@@ -2849,11 +2850,15 @@ Tensor as_strided_backward(
 
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
-      std::min(input_geometry.storage_offset(), storage_offset);
+      // TODO: symint-ify. Do we need a min() and max() for SymInts?
+      std::min(input_geometry.storage_offset().expect_int(), storage_offset);
   auto inp_effective_offset = input_geometry.storage_offset() - shared_offset;
   auto out_effective_offset = storage_offset - shared_offset;
   auto base_size = std::max(
-      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
+      _min_storage_size(
+          c10::asIntArrayRefSlow(inp_sizes_),
+          c10::asIntArrayRefSlow(inp_strides_),
+          inp_effective_offset.expect_int()),
       _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
   auto storage = grad.new_zeros({base_size});
 
@@ -2881,14 +2886,15 @@ Tensor as_strided_backward(
     auto count = at::zeros_like(storage, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto inp_indices =
         flatten_full_indices
-            ->as_strided(inp_sizes_, inp_strides_, inp_effective_offset)
+            ->as_strided_symint(inp_sizes_, inp_strides_, inp_effective_offset)
             .reshape(-1);
     count.index_add_(
         0, inp_indices, at::ones({1}, grad.options()).expand_as(inp_indices));
     storage.div_(count); // this will give nan outside visible range
   }
   // Step (4): return as_strided view of the storage tensor with input geometry
-  return storage.as_strided(inp_sizes, inp_strides, inp_effective_offset);
+  return storage.as_strided_symint(
+      inp_sizes, inp_strides, inp_effective_offset);
 }
 
 Tensor as_strided_scatter_backward(
@@ -2907,9 +2913,8 @@ Tensor as_strided_scatter_backward(
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  // TODO: geometry should return symints
-  auto result =
-      grad_.new_empty_strided(input_geometry.sizes(), input_geometry.strides());
+  auto result = grad_.new_empty_strided_symint(
+      input_geometry.sizes(), input_geometry.strides());
   auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;

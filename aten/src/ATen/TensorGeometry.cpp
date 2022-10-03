@@ -25,11 +25,12 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
+// This doesn't appear to be used anywhere, so not bothering to SymInt-ify.
 bool TensorGeometry::is_contiguous() const {
   if (numel_ == 0) {
     return true;
   }
-  return at::geometry_is_contiguous(sizes_, strides_);
+  return at::geometry_is_contiguous(c10::asIntArrayRefSlow(sizes_), c10::asIntArrayRefSlow(strides_));
 }
 
 } // namespace at
