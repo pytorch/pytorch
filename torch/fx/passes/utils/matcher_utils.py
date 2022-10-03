@@ -12,8 +12,6 @@ import logging
 __all__ = ['SubgraphMatcher', 'InternalMatch']
 
 format_str = "%(levelname)s > %(message)s"
-LOGLEVEL = os.environ.get('LOGLEVEL', 'WARNING').upper()
-logging.basicConfig(level=LOGLEVEL, format=format_str)
 logger = logging.getLogger(__name__)
 
 @compatibility(is_backward_compatible=False)
