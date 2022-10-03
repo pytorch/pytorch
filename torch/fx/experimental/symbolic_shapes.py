@@ -2,6 +2,7 @@ import torch
 import torch.utils._pytree as pytree
 from typing import Set, Dict, List, Type, Optional, cast
 import operator
+import builtins
 import math
 import functools
 from functools import lru_cache, partial
@@ -217,7 +218,7 @@ reflectable_magic_methods = {
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
     'truediv': lambda a, b: a / b,
-    'floordiv': lambda a, b: FloorDiv(a, b)
+    'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
 magic_methods = {
@@ -227,7 +228,9 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'ceil': lambda a: Ceil(a)
+    'ceil': lambda a: Ceil(a),
+    'min': lambda a, b: sympy.Min(a, b),
+    'max': lambda a, b: sympy.Max(a, b),
 }
 
 unary_magic_methods = {
@@ -240,14 +243,19 @@ def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
 
     def magic_impl(self, other):
+        if method in ["min", "max"]:
+            # op = getattr(builtins, method)
+            return self
+        else:
+            op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
-            return _handle_sym_dispatch(getattr(operator, method), (self, other), {})
+            return _handle_sym_dispatch(op, (self, other), {})
         if isinstance(other, py_type):
-            other = other.expr
+            other_expr = other.expr
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
-        other = self.shape_env.replace(other)
-        out = func(expr, other)
+        other_expr = self.shape_env.replace(other_expr)
+        out = func(expr, other_expr)
         out = sympy.expand(out)
         if method in ["truediv"]:
             return PySymFloat(out, self.shape_env)
@@ -257,11 +265,11 @@ def _make_magic(method, func, py_type):
             return py_type(out, self.shape_env)
 
     def unary_magic_impl(self):
+        if method in ["ceil"]:
+            op = getattr(math, method)
+        else:
+            op = getattr(operator, method)
         if SYM_FUNCTION_MODE:
-            if method in ["ceil"]:
-                op = getattr(math, method)
-            else:
-                op = getattr(operator, method)
             return _handle_sym_dispatch(op, (self,), {})
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
