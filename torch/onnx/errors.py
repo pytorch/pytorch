@@ -6,6 +6,7 @@ from typing import Optional
 
 from torch import _C
 from torch.onnx import _constants
+from torch.onnx._internal import diagnostics
 
 __all__ = [
     "OnnxExporterError",
@@ -51,9 +52,43 @@ class UnsupportedOperatorError(OnnxExporterError):
                 f"Support for this operator was added in version {supported_version}. "
                 "Please try exporting with this version."
             )
+            diagnostics.context.diagnose(
+                diagnostics.rules.operator_supported_in_newer_opset_version,
+                diagnostics.levels.ERROR,
+                message_args=(
+                    name,
+                    version,
+                    supported_version,
+                ),
+            )
         else:
             msg += "Please feel free to request support or submit a pull request on PyTorch GitHub: "
             msg += _constants.PYTORCH_GITHUB_ISSUES_URL
+
+            if (
+                name.startswith("aten::")
+                or name.startswith("prim::")
+                or name.startswith("quantized::")
+            ):
+                diagnostics.context.diagnose(
+                    diagnostics.rules.missing_standard_symbolic_function,
+                    diagnostics.levels.ERROR,
+                    message_args=(
+                        name,
+                        version,
+                        _constants.PYTORCH_GITHUB_ISSUES_URL,
+                    ),
+                )
+            else:
+                msg += (
+                    "If you are trying to export a custom operator, make sure you registered "
+                    "it with the correct domain and version."
+                )
+                diagnostics.context.diagnose(
+                    diagnostics.rules.missing_custom_symbolic_function,
+                    diagnostics.levels.ERROR,
+                    message_args=(name,),
+                )
         super().__init__(msg)
 
 
