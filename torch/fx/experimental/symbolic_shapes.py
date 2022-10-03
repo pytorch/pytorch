@@ -184,6 +184,12 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
+            gcd = sympy.gcd(base, divisor)
+            if gcd != 1:
+                return FloorDiv(
+                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+                )
+
     class Ceil(sympy.Function):
         """
         sympy doesn't have its own ceil(), so rolling one here.
