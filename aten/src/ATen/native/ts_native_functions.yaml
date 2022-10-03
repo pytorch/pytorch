@@ -211,6 +211,7 @@ symint:
   - slice_scatter
   - empty_strided
   - new_empty_strided
+  - _reshape_alias_copy
 autograd:
   - max_pool3d
   - native_group_norm
