@@ -2770,9 +2770,6 @@ Tensor as_strided_backward(
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
-  auto storage_offset_ = sym_storage_offset_.has_value()
-      ? c10::make_optional(sym_storage_offset_)
-      : c10::nullopt;
 
   // For output geometry,
   //   check for size 0 dimensions,
@@ -2782,8 +2779,8 @@ Tensor as_strided_backward(
   // layout-aware/agnostic autograd ] Step (0)~(1) for the algorithm in NOTE [
   // Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
-  auto storage_offset =
-      storage_offset_.value_or(input_geometry.storage_offset());
+  auto sym_storage_offset =
+      sym_storage_offset_.value_or(input_geometry.sym_storage_offset());
   auto odim = grad.dim();
   std::vector<c10::SymInt> out_sizes_, out_strides_;
   out_sizes_.reserve(odim);
@@ -2846,11 +2843,10 @@ Tensor as_strided_backward(
 
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
-      // TODO: symint-ify. Do we need a min() and max() for SymInts?
-      std::min(input_geometry.sym_storage_offset(), *storage_offset);
+      std::min(input_geometry.sym_storage_offset(), sym_storage_offset);
   auto inp_effective_offset =
       input_geometry.sym_storage_offset() - shared_offset;
-  auto out_effective_offset = *storage_offset - shared_offset;
+  auto out_effective_offset = sym_storage_offset - shared_offset;
   auto base_size = std::max(
       _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
       _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
