@@ -71,6 +71,11 @@ inline typename remove_symint<c10::optional<c10::SymInt>>::type unpackSymInt(c10
   return x.has_value() ? c10::make_optional(x->expect_int()) : c10::nullopt;
 }
 
+template <>
+inline typename remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(at::OptionalSymIntArrayRef x) {
+  return x.has_value() ? c10::make_optional(c10::asIntArrayRefSlow(*x)) : c10::nullopt;
+}
+
 template<class Return, class... Args>
 C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
