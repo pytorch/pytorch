@@ -26,6 +26,7 @@ from torchgen.api.types import (
     MutRefCType,
     OptionalCType,
     optionalIntArrayRefT,
+    optionalSymIntArrayRefT,
     scalarT,
     stringT,
     symIntArrayRefT,
@@ -448,7 +449,8 @@ def gen_autograd_functions_python(
         infos,
         key_fn=lambda info: info.name,
         base_env={
-            "generated_comment": f"@generated from {fm.template_dir_for_comments()}/python_functions.cpp",
+            "generated_comment": "@"
+            + f"generated from {fm.template_dir_for_comments()}/python_functions.cpp",
         },
         env_callable=lambda info: {
             "py_function_initializers": [
@@ -569,6 +571,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                     op=info.op, name=name, body=GETTER_BODY_ARRAYREF_LONG
                 )
             )
+        elif type == BaseCType(optionalSymIntArrayRefT):
+            saved_variables.append(f"c10::OptionalArray<c10::SymInt> {name};")
+            getter_definitions.append(
+                GETTER_DEFINITION_OPT_ARRAYREF.substitute(
+                    op=info.op, name=name, body=GETTER_BODY_ARRAYREF_SYMINT
+                )
+            )
         elif type == OptionalCType(BaseCType(intArrayRefT)):
             saved_variables.append(f"c10::OptionalArray<int64_t> {name};")
             getter_definitions.append(
@@ -619,6 +628,16 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
         else:
+            # Check for indicators that you're putting a non-owning reference
+            # into the saved variable field.  If this is spuriously firing,
+            # edit this field.  Otherwise, you probably need to add a case
+            # above.
+            assert (
+                "ref" not in type.cpp_type().lower()
+                and "view" not in type.cpp_type().lower()
+                and "*" not in type.cpp_type()
+                and "&" not in type.cpp_type()
+            ), f"{type.cpp_type()} looks like it contains a non-owning reference"
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:
