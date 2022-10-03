@@ -1380,10 +1380,10 @@ class FlatParamHandle:
                 self._writeback_tensor(param, flat_param, expected_shape, offset, True)
                 wroteback = True
             # Check for gradient writeback
-            # NOTE: Since this method is called in the pre-unshard, which
-            # is only called in the pre-forward or pre-backward, the
-            # sharded gradient should be guaranteed to be in `.grad`, not
-            # in `._saved_grad_shard`.
+            # NOTE: Since this method is called in the pre-unshard, which is
+            # only called during computation in the pre-forward or
+            # pre-backward, the sharded gradient should be guaranteed to be in
+            # `.grad`, not in `._saved_grad_shard`.
             if param.grad is None and flat_param.grad is not None:
                 expected_shape = torch.Size([numel_in_shard])
                 self._writeback_tensor(
