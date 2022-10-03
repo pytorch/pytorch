@@ -13,7 +13,8 @@ void VmapInterpreterPtr::processImpl(
 
 void VmapInterpreterPtr::sendToNextInterpreterImpl(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack,
+    bool grad_special_case) {
   // Re-dispatch
   if (getDynamicLayerStack().size() == 0) {
     sanityCheckStack(op, stack);
