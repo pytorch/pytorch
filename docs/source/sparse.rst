@@ -15,18 +15,17 @@ torch.sparse
 Why and when to use sparsity
 ++++++++++++++++++++++++++++
 
-By default :class:`torch.Tensor` stores elements contiguously in
-physical memory leading. This leads to efficient implementations
-of various array processing algorithms that require fast access to
-elements.
+By default PyTorch stores :class:`torch.Tensor` stores elements contiguously
+physical memory. This leads to efficient implementations of various array
+processing algorithms that require fast access to elements.
 
 Now, some users might decide to represent data such as graph adjacency
 matrices, pruned weights or points clouds by Tensors whose *elements are
-mostly zero valued*. We can provide performance optimizations for these
-use cases by providing sparse storage formats.
+mostly zero valued*. We recognize these are important applications and aim
+to provide performance optimizations for these use cases via sparse storage formats.
 
-Various sparse storage formats (`such as COO, CSR/CSC, LIL, etc.`__)
-have been developed over the years. In a nutshell they all compress data by
+Various sparse storage formats such as COO, CSR/CSC, LIL, etc.
+have been developed over the years. In a nutshell, they all compress data by
 tracking the positions of non-zero valued elements and perhaps some,
 but *most importantly* not all, zero valued elements. We call the uncompressed
 values *specified*. They *may* be zero. In contrast *unspecified* elements
@@ -35,18 +34,17 @@ values *specified*. They *may* be zero. In contrast *unspecified* elements
 By compressing repeat zeros sparse storage formats aim to save memory
 and computational resources on various CPUs and GPUs. Especially for high
 degrees of sparsity or highly structured sparsity this can have significant
-performance implications. As such sparse storage formats are a performance
-optimization.
+performance implications. As such sparse storage formats can be seen as a
+performance optimization.
 
-Just like any performance optimization sparse storage formats are not
-always advantageous for every user and user environment. Details such as
-the distribution of zero valued elements, the level of sparsity and
-the user's device matter.
+Like many other performance optimization sparse storage formats are not
+always advantageous. Details such as the distribution of zero valued
+elements, the level of sparsity and the user's device matter.
 
 We aim to make it easy to try these different compression techniques,
 but we do not yet provide a programmatic means of determining the best one
 for your particular application. Of course you are always welcome to
-ask for help in our Discussion forum https://dev-discuss.pytorch.org/.
+ask for help in our discussion forum https://dev-discuss.pytorch.org/.
 
 Functionality overview
 ++++++++++++++++++++++
@@ -54,15 +52,12 @@ Functionality overview
 We want it to be straightforward to construct a sparse Tensor from a
 given dense Tensor by providing conversion routines for each layout.
 
-    >>> a = torch.tensor([[0, 1.], [0, 0]])
-    >>> b = torch.tensor([[0, 2.], [3, 0]])
-    >>> a + b
-    tensor([[0., 3.],
-            [3., 0.]])
-    >>> a + b.to_sparse()
-    tensor([[0., 3.],
-            [3., 0.]])
-    >>> b.to_sparse()
+In the next example we convert a 2D Tensor with default strided layout
+to a 2D Tensor backed by the COO memory layout. Only values and indices
+of non-zero elements are stored in this case.
+
+    >>> a = torch.tensor([[0, 2.], [3, 0]])
+    >>> a.to_sparse()
     tensor(indices=tensor([[0, 1],
                            [1, 0]]),
            values=tensor([2., 3.]),
@@ -70,11 +65,14 @@ given dense Tensor by providing conversion routines for each layout.
 
 PyTorch currently supports :ref:`COO<sparse-coo-docs>`, :ref:`CSR<sparse-csr-docs>`,
 :ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
+Please see the references for more details.
 
 Note that we provide slight generalizations of these formats.
 
 Batching: Devices such as GPUs require batching for optimal performance and
 thus we support batch dimensions.
+
+In this example we construct a 3D CSR Tensor from a 3D strided Tensor.
 
     >>> t = torch.tensor([[[1., 0], [2., 3.]], [[4., 0], [5., 6.]]])
     >>> t.dim()
@@ -88,12 +86,19 @@ thus we support batch dimensions.
                           [4., 5., 6.]]), size=(2, 2, 2), nnz=3,
            layout=torch.sparse_csr)
 
-We currently offer a very simple version of batching, where each component of a sparse format
+We currently offer a very simple version of batching where each component of a sparse format
 itself is batched. This also requires the same number of specified elements per batch entry.
-Please see the references for more details.
 
 On the other hand, some data such as Graph embeddings might be better viewed as sparse
 collections of vectors instead of scalars and thus we provide dense dimensions.
+
+In this example we create a 3D Hybrid COO Tensor with 2 sparse and 1 dense dimension
+from a 3D strided Tensor. If an entire row in the 3D strided Tensor is zero, it is
+not stored. If however any of the values in the row are non-zero, they are stored
+entirely. This reduces the number of indices since we need one index one per row instead
+of one per element. But it also increases the amount of storage for the values. Since
+only rows that are *entirely* zero can be emitted and the presence of any non-zero
+valued elements cause the entire row to be stored.
 
     >>> t = torch.tensor([[[0., 0], [1., 2.]], [[0., 0], [3., 4.]]])
     >>> t.to_sparse(sparse_dim=2)
@@ -109,8 +114,8 @@ Operator overview
 
 Fundamentally, operations on Tensor with sparse storage formats behave the same as
 operations on Tensor with strided (or other) storage formats. The particularities of
-storage, that is the physical layout of the data, does and should not influence the
-semantics.
+storage, that is the physical layout of the data, influences the performance of
+an operation but shhould not influence the semantics.
 
 Not as many operations support sparse Tensors as support dense Tensors. See our
 :ref:`operator<sparse-ops-docs>` documentation for a list.
@@ -126,20 +131,22 @@ Not as many operations support sparse Tensors as support dense Tensors. See our
            values=tensor([0.9093, 0.1411]), size=(2, 2), nnz=2,
            layout=torch.sparse_csr)
 
-As shown in the example above we don't support non-zero preserving unary operators. We view sparse
-storage formats as a performance optimization and assume our users employ them to gain maximum
-performance. The output of a non-zero preserving unary operation will not be able to take advantage
-of sparse storage formats to the same extent as the input and potentially result in a catastrophic
-increase in memory. We instead rely on the user to explicitly convert to a dense Tensor
-first and then run the operation.
+As shown in the example above, we don't support non-zero preserving unary operators.
+We view sparse storage formats as a performance optimization and assume our users
+employ them to gain maximum performance. The output of a non-zero preserving unary
+operation will not be able to take advantage of sparse storage formats to the same
+extent as the input and potentially result in a catastrophic increase in memory.
+We instead rely on the user to explicitly convert to a dense Tensor first and
+then run the operation.
 
     >>> b_s.to_dense().cos()
     tensor([[ 1.0000, -0.4161],
             [-0.9900,  1.0000]])
 
-We are aware that some users want to ignore compressed zero for operations such
-as `cos` and just move on. For this we'd like to kindly point to https://pytorch.org/maskedtensor, which
-is in turn also backed and powered by sparse storage formats and kernels.
+We are aware that some users want to ignore compressed zeros for operations such
+as `cos` instead of preserving the exact semantics of the operation. For this we
+can point to torch.masked and its MaskedTensor, which is in turn also backed and
+powered by sparse storage formats and kernels.
 
 Also note that, for now, the user doesn't have a choice of the output layout. For example,
 adding a sparse Tensor to a regular strided Tensor results in a sparse Tensor.
