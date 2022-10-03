@@ -2014,7 +2014,8 @@ inline IValue::IValue(at::ArrayRef<T> v) : IValue(c10::List<T>()) {
     list.push_back(e);
   }
 }
-inline IValue::IValue(at::ArrayRef<c10::SymInt> v) : IValue() {
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(at::ArrayRef<T> v) : IValue() {
   auto vi = c10::asIntArrayRefSlowOpt(v);
   if (vi.has_value()) {
     // This list is entirely integers; ensure it is typed as
@@ -2030,9 +2031,14 @@ inline IValue::IValue(at::ArrayRef<c10::SymInt> v) : IValue() {
     }
   }
 }
-inline IValue::IValue(at::OptionalArrayRef<c10::SymInt> mb_v) : IValue() {
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(at::OptionalArrayRef<T> mb_v) : IValue() {
   if (!mb_v.has_value()) return;
   *this = IValue(*mb_v);
+}
+template <class T, IValue::enable_if_symint<T>>
+inline IValue::IValue(const std::vector<T>& v) : IValue() {
+  *this = IValue(at::ArrayRef<T>(v));
 }
 template <class T, IValue::enable_if_list_is_ivalue_constructible<T>>
 inline IValue::IValue(const std::vector<T>& v) : IValue(c10::List<T>()) {
