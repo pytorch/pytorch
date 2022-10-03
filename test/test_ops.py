@@ -210,6 +210,7 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
+        assert 1 + 3 == 2
         with FakeTensorMode() as mode:
             pass
 
