@@ -42,6 +42,11 @@ def _addindent(s_, numSpaces):
     s = first + '\n' + s
     return s
 
+r"""This tracks hooks common to all modules that are executed immediately before
+.registering the buffer/module/parameter"""
+_global_buffer_registration_hooks: Dict[int, Callable] = OrderedDict()
+_global_module_registration_hooks: Dict[int, Callable] = OrderedDict()
+_global_parameter_registration_hooks: Dict[int, Callable] = OrderedDict()
 
 class _WrappedHook:
     def __init__(self, hook: Callable, module: Optional["Module"] = None):
@@ -88,6 +93,78 @@ _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
+
+
+def register_buffer_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Registers a buffer registration hook common to all modules.
+
+    .. warning ::
+
+        This adds global state to the `nn.Module` module
+
+    The hook will be called every time :func:`register_buffer` is invoked.
+    It should have the following signature::
+
+        hook(name, module) -> None or modified input
+
+    The hook can modify the input or return a single modified value in the hook.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_buffer_registration_hooks)
+    _global_buffer_registration_hooks[handle.id] = hook
+    return handle
+
+
+def register_module_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Registers a module registration hook common to all modules.
+
+    .. warning ::
+
+        This adds global state to the `nn.Module` module
+
+    The hook will be called every time :func:`register_module` is invoked.
+    It should have the following signature::
+
+        hook(name, module) -> None or modified input
+
+    The hook can modify the input or return a single modified value in the hook.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_module_registration_hooks)
+    _global_module_registration_hooks[handle.id] = hook
+    return handle
+
+
+def register_parameter_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Registers a parameter registration hook common to all modules.
+
+    .. warning ::
+
+        This adds global state to the `nn.Module` module
+
+    The hook will be called every time :func:`register_parameter` is invoked.
+    It should have the following signature::
+
+        hook(name, param) -> None or modified input
+
+    The hook can modify the input or return a single modified value in the hook.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_parameter_registration_hooks)
+    _global_parameter_registration_hooks[handle.id] = hook
+    return handle
 
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
@@ -380,6 +457,8 @@ class Module:
                             "(torch Tensor or None required)"
                             .format(torch.typename(tensor), name))
         else:
+            for hook in _global_buffer_registration_hooks.values():
+                tensor = hook(name, tensor) or tensor
             self._buffers[name] = tensor
             if persistent:
                 self._non_persistent_buffers_set.discard(name)
@@ -426,6 +505,8 @@ class Module:
                 "as a function of another Tensor, compute the value in "
                 "the forward() method.".format(name))
         else:
+            for hook in _global_parameter_registration_hooks.values():
+                param = hook(name, param) or param
             self._parameters[name] = param
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
@@ -450,6 +531,8 @@ class Module:
             raise KeyError("module name can't contain \".\", got: {}".format(name))
         elif name == '':
             raise KeyError("module name can't be empty string \"\"")
+        for hook in _global_module_registration_hooks.values():
+            module = hook(name, module) or module
         self._modules[name] = module
 
     def register_module(self, name: str, module: Optional['Module']) -> None:
@@ -1294,12 +1377,16 @@ class Module:
                     raise AttributeError(
                         "cannot assign module before Module.__init__() call")
                 remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
+                for hook in _global_module_registration_hooks.values():
+                    value = hook(name, value) or value
                 modules[name] = value
             elif modules is not None and name in modules:
                 if value is not None:
                     raise TypeError("cannot assign '{}' as child module '{}' "
                                     "(torch.nn.Module or None expected)"
                                     .format(torch.typename(value), name))
+                for hook in _global_module_registration_hooks.values():
+                    value = hook(name, value) or value
                 modules[name] = value
             else:
                 buffers = self.__dict__.get('_buffers')
@@ -1308,6 +1395,8 @@ class Module:
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch.typename(value), name))
+                    for hook in _global_buffer_registration_hooks.values():
+                        value = hook(name, value) or value
                     buffers[name] = value
                 else:
                     super().__setattr__(name, value)
