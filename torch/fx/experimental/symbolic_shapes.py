@@ -109,6 +109,9 @@ class PySymInt(object):
     def wrap(self, num):
         return PySymInt(sympy.Integer(num), self.shape_env, constant=num)
 
+    def clone(self):
+        return PySymInt(self.expr, self.shape_env, constant=self.constant)
+
     def __str__(self):
         return f"{self.expr}"
 
@@ -165,6 +168,9 @@ if HAS_SYMPY:
                 return base
             if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
                 return base // divisor
+            if isinstance(base, FloorDiv):
+                return FloorDiv(base.args[0], base.args[1] * divisor)
+
             gcd = sympy.gcd(base, divisor)
             if gcd != 1:
                 return FloorDiv(
