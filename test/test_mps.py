@@ -1373,6 +1373,18 @@ class TestMPS(TestCase):
         for op in ["<=", "<", ">=", ">", "==", "!="]:
             helper(op)
 
+    def test_slice_of_slice(self):
+        x = torch.tensor([0.5, 0.5], device="cpu")
+        x_mps = torch.tensor([0.5, 0.5], device="mps")
+
+        tensor = x[1][None]
+        tensor_mps = x_mps[1][None]
+
+        res = tensor.ne(0)
+        res_mps = tensor_mps.ne(0)
+
+        self.assertEqual(res, res_mps)
+
     def test_index_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/78107
 
@@ -1629,6 +1641,13 @@ class TestMPS(TestCase):
             cpu_result = rotate_subset(data)
             mps_result = rotate_subset(mps_data)
             self.assertEqual(cpu_result, mps_result.to("cpu"))
+
+    # See https://github.com/pytorch/pytorch/issues/85967
+    def test_from_numpy_non_contiguous(self):
+        a = np.arange(9).reshape(3, 3)[:, :2]
+        t_cpu = torch.tensor(a, device="cpu")
+        t_mps = torch.tensor(a, device="mps")
+        self.assertEqual(t_cpu, t_mps.to("cpu"))
 
 
 class TestLogical(TestCase):
@@ -3456,6 +3475,13 @@ class TestNLLLoss(TestCase):
 
         self.assertEqual(y_cpu, y_mps.cpu())
 
+    def test_constant_pad_4d_warning(self):
+        inputCPU = torch.rand((1, 2, 2, 2, 1, 1))
+        inputMPS = inputCPU.detach().clone().to('mps')
+        outputCPU = F.pad(inputCPU, [0, 0, 0, 0, 0, 0, 1, 0])
+        outputMPS = F.pad(inputMPS, [0, 0, 0, 0, 0, 0, 1, 0])
+        self.assertEqual(outputCPU, outputMPS)
+
     def test_pad(self):
         def helper(shape, padding, op, value=0):
             inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
@@ -3496,6 +3522,8 @@ class TestNLLLoss(TestCase):
         helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ReplicationPad2d)
         # Constant Pad 2D
         helper((2, 1, 6, 8), (2, 4, 3, 5), nn.ConstantPad2d)
+        # input size < pad size
+        helper((1, 2, 3), (0, 0, 0, 1), nn.ConstantPad2d)
 
         # 3D Padding
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
@@ -4250,6 +4278,28 @@ class TestNLLLoss(TestCase):
         helper((2, 8, 4, 5), 2, (1, 8, 10, 3))
         helper((2, 8, 4, 5), 3, (2, 5, 3, 12))
 
+    # Test pytorch gather
+    def test_gather_scalar(self):
+        idx_dtype = torch.int64
+        cpu_x = torch.tensor(3, device='cpu', dtype=torch.float, requires_grad=True)
+        x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+        idx_np = [0]
+
+        cpu_idx = torch.tensor(idx_np, device='cpu', dtype=idx_dtype)
+        idx = cpu_idx.detach().clone().to('mps')
+
+        gather_result = torch.gather(x, dim=0, index=idx)
+        gather_result_cpu = torch.gather(cpu_x, dim=0, index=cpu_idx)
+
+        cpu_grad = torch.randn([1], device='cpu', dtype=torch.float)
+        grad = cpu_grad.to('mps')
+        gather_result.backward(gradient=grad)
+        gather_result_cpu.backward(gradient=cpu_grad)
+
+        self.assertEqual(gather_result, gather_result_cpu)
+        self.assertEqual(cpu_x.grad, x.grad)
+
     # Test pytorch scatter_add and scatter
     def test_scatter_add(self):
         def helper(shape, dim, idx_shape, src_shape, idx_dtype=torch.int64, do_add=True):
@@ -4316,6 +4366,46 @@ class TestNLLLoss(TestCase):
         # Test scatter src
         helper((8, 3), 0, (5, 3), (5, 3), do_add=False)
         helper((10, 3), 0, (5, 3), (5, 8), do_add=False)
+
+    # Test pytorch scatter_add and scatter for scalar input
+    def test_scatter_add_scalar(self):
+        def helper(idx_dtype=torch.int64, do_add=True):
+            cpu_x = torch.tensor(2, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            cpu_src = torch.tensor(3, device='cpu', dtype=torch.float, requires_grad=True)
+            src = cpu_src.detach().clone().to('mps').requires_grad_()
+
+            # Indices should be taken from range of axis along which gathering is done
+            idx_np = [0]
+
+            cpu_idx = torch.tensor(idx_np, device='cpu', dtype=idx_dtype)
+            idx = cpu_idx.detach().clone().to('mps')
+
+            scatter_result = None
+            scatter_result_cpu = None
+
+            if(do_add):
+                scatter_result = torch.scatter_add(x, dim=0, index=idx, src=src)
+                scatter_result_cpu = torch.scatter_add(cpu_x, dim=0, index=cpu_idx, src=cpu_src)
+            else:
+                scatter_result = torch.scatter(x, dim=0, index=idx, src=src)
+                scatter_result_cpu = torch.scatter(cpu_x, dim=0, index=cpu_idx, src=cpu_src)
+
+            cpu_grad = None
+            grad = None
+
+            cpu_grad = torch.tensor(1.2, device='cpu', dtype=torch.float)
+            grad = cpu_grad.to('mps')
+            scatter_result.backward(gradient=grad)
+            scatter_result_cpu.backward(gradient=cpu_grad)
+
+            self.assertEqual(scatter_result, scatter_result_cpu)
+            self.assertEqual(cpu_x.grad, x.grad)
+            self.assertEqual(cpu_src.grad, src.grad)
+
+        helper()
+        helper(do_add=False)
 
     # Test pytorch scatter_reduce
     def test_scatter_reduce(self):
@@ -4623,27 +4713,25 @@ class TestNLLLoss(TestCase):
         helper((100, 100), 2.5, 1.2)
 
     def test_bernoulli(self):
-        def helper(shape, prob=0.5):
-            prob_array = np.ones(shape)
-            prob_array *= prob
-            cpu_prob_tensor = torch.tensor(prob_array, device='cpu', dtype=torch.float, requires_grad=False)
-            prob_tensor = cpu_prob_tensor.detach().clone().to('mps')
+        shape = (10, 10)
+        all_ones = torch.ones(shape, device='mps')
+        all_zeros = torch.zeros(shape, device='mps')
 
-            mps_out = torch.bernoulli(prob_tensor)
-            # We can't check reliably the mean and std.
-            # Just make sure we don't return constant values
-            self.assertNotEqual(mps_out.to('cpu').mean(), 0.)
-            self.assertNotEqual(mps_out.to('cpu').std() ** 2, 0.)
+        prob_tensor = all_ones * 0.5
+        # probability of drawing "1" is 0.5
+        mps_out = torch.bernoulli(prob_tensor)
+        # We can't check reliably the mean and std.
+        # Just make sure we don't return constant values
+        self.assertNotEqual(mps_out.to('cpu').mean(), 0.)
+        self.assertNotEqual(mps_out.to('cpu').std() ** 2, 0.)
 
-            mps_out = torch.zeros(shape, device='mps')
-            mps_out = torch.bernoulli(mps_out, prob)
+        # probability of drawing "1" is 0
+        mps_out = torch.bernoulli(all_zeros)
+        self.assertEqual(mps_out, all_zeros)
 
-            self.assertNotEqual(mps_out.to('cpu').mean(), 0.)
-            self.assertNotEqual(mps_out.to('cpu').std(), 0.)
-
-        helper((100, 100), 0.50)
-        helper((100, 100), 0.76)
-        helper((100, 100), 0.23)
+        # probability of drawing "1" is 1
+        mps_out = torch.bernoulli(all_ones)
+        self.assertEqual(mps_out, all_ones)
 
     # Test random_.to and random_.from
     def test_random(self):
@@ -6048,6 +6136,17 @@ class TestAdvancedIndexing(TestCase):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
 
+    def test_masked_select(self):
+        x = torch.randn(3, 4)
+        x_mps = x.to("mps")
+        mask = x.ge(0.5)
+        mask_mps = x_mps.ge(0.5)
+
+        res = torch.masked_select(x, mask)
+        res_mps = torch.masked_select(x_mps, mask_mps)
+
+        self.assertEqual(res, res_mps)
+
     # examples from https://www.tutorialspoint.com/numpy/numpy_advanced_indexing.htm
     def test_indexing_get(self):
         def helper(dtype):
@@ -6390,10 +6489,10 @@ class TestAdvancedIndexing(TestCase):
             delta = torch.empty(i, dtype=torch.float32, device=device).uniform_(-1, 1)
 
             # cumsum not supported on 'mps', fallback on 'cpu'
-            indices = delta.to("cpu").cumsum(0).long().to("mps")
+            indices = delta.cpu().cumsum(0).long().to("mps")
 
             # abs for int64 is not supported on mps, fallback on 'cpu' to calculate it
-            input = torch.randn(indices.to("cpu").abs().to("mps").max() + 1, device=device)
+            input = torch.randn(indices.cpu().abs().max().to("mps") + 1, device=device)
             values = torch.randn(indices.size(0), device=device)
             output = input.index_put((indices,), values, accumulate=True)
 
@@ -7188,7 +7287,10 @@ class TestConsistency(TestCase):
         'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
         'clamp_max': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
+        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
+        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8']}
 
 
     ALLOWLIST_OP_GRAD = {
