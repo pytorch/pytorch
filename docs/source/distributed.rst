@@ -468,6 +468,9 @@ Please refer to the `profiler documentation <https://pytorch.org/docs/master/pro
 Multi-GPU collective functions
 ------------------------------
 
+.. warning::
+    The multi-GPU functions will be deprecated. If you must use them, please revisit our documentation later.
+
 If you have more than one GPU on each node, when using the NCCL and Gloo backend,
 :func:`~torch.distributed.broadcast_multigpu`
 :func:`~torch.distributed.all_reduce_multigpu`
