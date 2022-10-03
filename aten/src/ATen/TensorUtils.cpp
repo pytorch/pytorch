@@ -75,7 +75,7 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
     " for ", t, " (while checking arguments for ", c, ")");
 }
 
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
   checkDim(c, t, sizes.size());
   TORCH_CHECK(
     t->sizes().equals(sizes),
@@ -85,13 +85,13 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef si
 
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size) {
   TORCH_CHECK(
-    c10::asIntArrayRefSlow(t->size(dim)) == size,
+    t->size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,
     ", but got size ", t->size(dim), " for ", t,
     " (while checking arguments for ", c, ")");
 }
 
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c10::SymInt size) {
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c10::SymInt size) {
   TORCH_CHECK(
     t->size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,

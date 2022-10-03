@@ -618,7 +618,7 @@ std::tuple<Tensor, Tensor> _thnn_fused_gru_cell_cuda(
 void checkGRUBackwardSizes(const TensorArg& grad_hy, const TensorArg& workspace) {
   CheckedFrom c = "fused_gru_cell_backward";
   checkDim(c, grad_hy, 2);
-  checkSize(c, workspace, std::vector<int64_t>({grad_hy->size(0), grad_hy->size(1) * GRU_WORKSPACE_MULTIPLIER}));
+  checkSize(c, workspace, {grad_hy->size(0), grad_hy->size(1) * GRU_WORKSPACE_MULTIPLIER});
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_gru_cell_backward_cuda(

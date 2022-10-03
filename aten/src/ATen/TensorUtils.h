@@ -85,7 +85,7 @@ TORCH_API void checkSize(
     CheckedFrom c,
     const TensorGeometryArg& t,
     IntArrayRef sizes);
-TORCH_API void checkSize(
+TORCH_API void checkSize_symint(
     CheckedFrom c,
     const TensorGeometryArg& t,
     c10::SymIntArrayRef sizes);
@@ -94,7 +94,7 @@ TORCH_API void checkSize(
     const TensorGeometryArg& t,
     int64_t dim,
     int64_t size);
-TORCH_API void checkSize(
+TORCH_API void checkSize_symint(
     CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t dim,
