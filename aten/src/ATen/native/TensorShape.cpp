@@ -921,7 +921,7 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
-  return self.expand(other.sizes());
+  return self.expand_symint(other.sym_sizes());
 }
 
 Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
