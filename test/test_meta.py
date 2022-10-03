@@ -586,6 +586,7 @@ meta_function_device_expected_failures['cuda'] = {
 meta_function_device_skips['cuda'] = {
     torch.cummax: {f16},
     torch.cummin: {f16},
+    torch.max.unary_out: {i8},
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
     torch.linalg.matrix_power: {f32, f64},
