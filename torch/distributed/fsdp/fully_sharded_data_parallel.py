@@ -2218,6 +2218,9 @@ class FullyShardedDataParallel(nn.Module):
                     f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
                 )
                 fqn = f"{prefix}{clean_key}"
+                if fqn not in state_dict:
+                    # A buffer can be registered as non-persistent.
+                    continue
                 if state_dict[fqn].device != cpu_device:
                     state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
@@ -3653,7 +3656,7 @@ class FullyShardedDataParallel(nn.Module):
     def _warn_optim_input(optim_input):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated. You may remove it "
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
                 "from your code without changing its functionality."
             )
 

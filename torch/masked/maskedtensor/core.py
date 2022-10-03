@@ -141,9 +141,9 @@ def _maybe_get_mask(a):
 class MaskedTensor(torch.Tensor):
     @staticmethod
     def __new__(cls, data, mask, requires_grad=False):
-        if not torch.is_tensor(data):
+        if is_masked_tensor(data) or not torch.is_tensor(data):
             raise TypeError("data must be a Tensor")
-        if not torch.is_tensor(mask):
+        if is_masked_tensor(mask) or not torch.is_tensor(mask):
             raise TypeError("mask must be a Tensor")
         # Use a Tensor that of the give size for the wrapper.
         kwargs = {}
@@ -208,8 +208,6 @@ class MaskedTensor(torch.Tensor):
             raise ValueError("data.dim() must equal mask.dim()")
         if data.size() != mask.size():
             raise ValueError("data.size() must equal mask.size()")
-        if mask.requires_grad:
-            raise ValueError("mask cannot have requires_grad=True")
 
     def __init__(self, data, mask, requires_grad=False):
         self._preprocess_data(data, mask)
