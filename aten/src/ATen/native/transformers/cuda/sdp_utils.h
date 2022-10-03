@@ -28,138 +28,91 @@ struct sdp_params {
 
 enum class SDPBackend {flash_attention, math, error};
 
-#define CHECK_DTYPE(tensor, types)                                    \
-  if (std::find(types.begin(), types.end(), params.tensor.dtype()) == \
-      types.end()) {                                                  \
-    TORCH_CHECK(                                                      \
-        debug,                                                        \
-        #tensor,                                                      \
-        " is not in the allowed dtypes. ",                            \
-        #tensor,                                                      \
-        " dtype: ",                                                   \
-        params.tensor.dtype());                                       \
-    return false;                                                     \
-  }
-template <typename dtype_vector>
-inline bool check_tensor_dtype(
-    sdp_params params,
-    dtype_vector allowed_dtypes,
-    bool debug) {
-  CHECK_DTYPE(query, allowed_dtypes)
-  CHECK_DTYPE(key, allowed_dtypes)
-  CHECK_DTYPE(value, allowed_dtypes)
-  return true;
+template <class D>
+inline bool check_tensor_dtype_fn(
+    caffe2::TypeMeta tensor_dtype,
+    D ref_dtype) {
+  return tensor_dtype == ref_dtype;
 }
 
-inline bool check_for_attn_weights(sdp_params params, bool debug) {
-  // This can be returned form flash attention but care is needed
-  // to convert from flash_attn format to attn_weights
-  if (params.need_attn_weights) {
-    TORCH_CHECK(debug, "Flash Attention does not support need attn weights");
-    return false;
-  }
-  return true;
+template <class D, class... E>
+inline bool check_tensor_dtype_fn(
+    caffe2::TypeMeta tensor_dtype,
+    D ref_dtype,
+    E... other_ref_dtype) {
+  return check_tensor_dtype_fn(tensor_dtype, ref_dtype)
+    || check_tensor_dtype_fn(tensor_dtype, other_ref_dtype...);
 }
 
-inline bool check_for_attn_mask(sdp_params params, bool debug) {
-  if (params.has_attn_mask) {
-    TORCH_CHECK(debug, "Flash Attention does not support attention mask.");
-    return false;
-  }
-  return true;
-}
-
-#define CHECK_DIM(tensor, n_dims)      \
-  if (params.tensor.dim() != n_dims) { \
-    TORCH_CHECK(                       \
-        debug,                         \
-        #tensor,                       \
-        " is not a ",                  \
-        #n_dims,                       \
-        " dimensional tensor. ",       \
-        #tensor,                       \
-        " dim: ",                      \
-        params.tensor.dim());          \
-    return false;                      \
-  }
-
-inline bool check_tensor_shapes(sdp_params params, bool debug) {
-  CHECK_DIM(query, 4)
-  CHECK_DIM(key, 4)
-  CHECK_DIM(value, 4)
-  return true;
-}
-
-#define CHECK_HEAD_SIZE(tensor)                                              \
-  if ((params.tensor.size(-1) % 8 != 0) && (params.tensor.size(-1) > 128)) { \
-    TORCH_CHECK(                                                             \
-        debug,                                                               \
-        #tensor,                                                             \
-        "'s last dimensions is not a multiple of 8 and last then 128. ",     \
-        #tensor,                                                             \
-        ".size(-1) = ",                                                      \
-        params.tensor.size(-1));                                             \
-    return false;                                                            \
-  }
-
-inline bool check_head_dim_size(
-    sdp_params params,
-    bool debug) {
-  CHECK_HEAD_SIZE(query)
-  CHECK_HEAD_SIZE(key)
-  CHECK_HEAD_SIZE(value)
-  return true;
-}
-
-inline bool check_runtime_disabled(sdp_params params, bool debug) {
-  // We check the global context to see if user has explicitly turned of flash sdp kernels
-  if (!at::globalContext().userEnabledFlashSDP()) {
-    TORCH_CHECK(debug, "Flash attention has been runtime disabled.");
-    return false;
-  }
-  return true;
-}
-
-inline bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
+inline bool check_gpu_sm75_or_greater(bool debug) {
   // Check that the gpu is capable of running flash attention
   auto dprops = at::cuda::getCurrentDeviceProperties();
-  bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
-  bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  if (!(is_sm8x || is_sm75)) {
-    TORCH_CHECK(
-        debug,
+  auto major = dprops->major;
+  auto minor = dprops->minor;
+  bool is_sm75 = major == 7 && minor == 5;
+  bool is_sm8x = major == 8 && minor >= 0;
+  if (debug) {
+    TORCH_CHECK(check_gpu_sm75_or_greater(false),
         "Flash attention only supports sm75 and sm8x gpu architectures. Attempting to run on a sm ",
-        dprops->major,
+        major,
         ".",
-        dprops->minor,
+        minor,
         " gpu.");
-    return false;
   }
-  return true;
+  return (is_sm75 || is_sm8x);
 }
 
 inline bool use_flash_attention(sdp_params params, bool debug) {
-  #ifndef USE_FLASH_ATTENTION
-    TORCH_CHECK(debug, "Torch was not compiled with flash attention.");
-    return false;
-  #endif
-  // Constraints specific to flash attention
-  static const std::vector<caffe2::ScalarType> flash_dtypes{at::kHalf, at::kBFloat16};
+#ifndef USE_FLASH_ATTENTION
+  TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
+  return false;
+#endif
 
-  //  Define gate functions that determine if a flash kernel can be ran
-  std::vector<std::function<bool(sdp_params, bool)>> constraints{
-      check_runtime_disabled,
-      check_tensor_shapes,
-      check_for_attn_weights,
-      check_for_attn_mask,
-      check_head_dim_size,
-      check_gpu_sm75_or_greater};
-  for (auto& constraint : constraints) {
-    if (!constraint(params, debug)) {
-      return false;
-    }
+  if (!at::globalContext().userEnabledFlashSDP()) {
+    TORCH_CHECK(!debug, "Flash attention has been runtime disabled.");
+    return false;
   }
-  if (!check_tensor_dtype(params, flash_dtypes, debug)) {
+
+  if (!check_gpu_sm75_or_greater(debug)) {
+    return false;
+  }
+
+  if (!(params.query.dim() == params.key.dim() &&
+        params.query.dim() == params.value.dim() &&
+        params.query.dim() == 4)) {
+    TORCH_CHECK(!debug, "Flash attention requires query, key and value to be 4 dimensional, but got ",
+        params.query.dim(), ", ", params.key.dim(), ", ", params.value.dim(), " instead.");
+    return false;
+  }
+
+  // This can be returned from flash attention but care is needed
+  // to convert from flash_attn format to attn_weights
+  if (params.need_attn_weights) {
+    TORCH_CHECK(!debug, "Flash Attention does not support returning attn weights.");
+    return false;
+  }
+
+  if (params.has_attn_mask) {
+    TORCH_CHECK(!debug, "Flash Attention does not support attention mask.");
+    return false;
+  }
+
+  if (!(params.query.size(-1) == params.key.size(-1) &&
+        params.query.size(-1) == params.value.size(-1) &&
+        params.query.size(-1) % 8 == 0 &&
+        params.query.size(-1) <= 128)) {
+    TORCH_CHECK(!debug, "Flash attention requires last dimension of inputs to be a multiple of 8 and less than or equal to 128.
+        Got " params.query.size(-1), ", ", params.key.size(-1), ", ", params.value.size(-1), " instead.");
+    return false;
+  }
+
+  if (!(
+      check_tensor_dtype_fn<at::kHalf, at::kBFloat16>(params.query.dtype()) &&
+      check_tensor_dtype_fn<at::kHalf, at::kBFloat16>(params.key.dtype()) &&
+      check_tensor_dtype_fn<at::kHalf, at::kBFloat16>(params.value.dtype()))) {
+    TORCH_CHECK(!debug, "Expected query, key and value to be of dtype float16 or bfloat16 but got ", params.query.dtype(),
+        ", "
+        params.key.dtype(), ", ", params.value.dtype(), " instead.");
     return false;
   }
   return true;
