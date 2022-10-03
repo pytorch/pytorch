@@ -758,7 +758,6 @@ symbolic_aot_autograd_failures = {
     xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
     xfail('diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diag_embed', ''),  # prims::arange() Expected a value of type 'number' for argument 'end' but inst...
-    xfail('diagflat', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diagonal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diagonal_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
@@ -841,7 +840,6 @@ symbolic_aot_autograd_failures = {
     xfail('linalg.tensorinv', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.tensorsolve', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.vander', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('linalg.vecdot', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('linalg.vector_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('logaddexp2', ''),  # aten.logaddexp2.default - couldn't find symbolic meta function/decomposition
     xfail('logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposition
@@ -891,9 +889,7 @@ symbolic_aot_autograd_failures = {
     xfail('mvlgamma', 'mvlgamma_p_1'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
     xfail('mvlgamma', 'mvlgamma_p_3'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
     xfail('mvlgamma', 'mvlgamma_p_5'),  # aten.digamma_.default - couldn't find symbolic meta function/decom...
-    xfail('nanmean', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nanmedian', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
-    xfail('nansum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('native_layer_norm', ''),  # could not find kernel
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -994,7 +990,6 @@ symbolic_aot_autograd_failures = {
     xfail('put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('qr', ''),  # aten.linalg_qr.default - couldn't find symbolic meta function/decomposition
     xfail('rad2deg', ''),  # aten.rad2deg.default - couldn't find symbolic meta function/decomposition
-    xfail('ravel', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('reshape_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1033,7 +1028,6 @@ symbolic_aot_autograd_failures = {
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('sum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('svd_lowrank', ''),  # could not find kernel
@@ -1055,7 +1049,6 @@ symbolic_aot_autograd_failures = {
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/deco...
     xfail('view_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('view', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('vstack', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('zero_', ''),  # aten.zero_.default - couldn't find symbolic meta function/decomposition
