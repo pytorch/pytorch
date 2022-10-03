@@ -586,7 +586,6 @@ meta_function_device_expected_failures['cuda'] = {
 meta_function_device_skips['cuda'] = {
     torch.cummax: {f16},
     torch.cummin: {f16},
-    torch.max.unary_out: {i8},
     torch.functional.tensordot: {f16},
     torch.inner: {f16},
     torch.linalg.matrix_power: {f32, f64},
@@ -674,6 +673,7 @@ meta_dispatch_expected_failures = {
     aten.native_group_norm.default : {bf16},
     aten.nonzero.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
     aten.nonzero.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, c32, b8, i16, u8},
+    aten.max.unary_out: {i8},
     aten.ormqr.default : {c64, c128, f64, f32},
     aten.ormqr.out : {c64, c128, f64, f32},
     aten.polar.out : {f32, f64},
