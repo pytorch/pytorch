@@ -651,19 +651,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
-  HANDLE_TH_ERRORS
-  THPUtils_assert(
-      PyBool_Check(enabled),
-      "recordMemoryHistory expects a bool, "
-      "but got %s",
-      THPUtils_typename(enabled));
-  c10::cuda::CUDACachingAllocator::setContextRecorder(
-      enabled == Py_True ? StackContext::gather : nullptr);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject* THCPModule_cudaSetSyncDebugMode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_WARN_ONCE(
@@ -736,6 +723,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ")";
         return stream.str();
       });
+
+  m.def("_cuda_recordMemoryHistory", [](bool enabled) {
+    c10::cuda::CUDACachingAllocator::setContextRecorder(
+        enabled ? StackContext::gather : nullptr);
+  });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
@@ -920,10 +912,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
-    {"_cuda_recordMemoryHistory",
-     THCPModule_recordMemoryHistory,
-     METH_O,
-     nullptr},
 
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,
