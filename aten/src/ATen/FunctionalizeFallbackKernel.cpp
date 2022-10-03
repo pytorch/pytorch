@@ -284,7 +284,7 @@ at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::IntArrayRef s
   auto inferred_size = at::infer_size_dv(size, self.numel());
   auto stride = at::detail::computeStride(self.sizes(), self.strides(), inferred_size);
   TORCH_INTERNAL_ASSERT(stride.has_value());
-  out.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride.value());
+  out.unsafeGetTensorImpl()->set_sizes_and_strides(inferred_size, stride.value());
   return out;
 }
 
