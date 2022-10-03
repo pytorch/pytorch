@@ -614,3 +614,6 @@ def _save_memory_usage(filename='output.svg', snapshot=None):
         snapshot = memory_snapshot()
     with open(filename, 'w') as f:
         f.write(_memory(snapshot))
+
+def _set_allocator_settings(env: str):
+    return torch._C._cuda_cudaCachingAllocator_set_allocator_settings(env)

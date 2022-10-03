@@ -30,6 +30,47 @@ struct AnalyzeViewResult;
 //! vals are `Int` will dispatch to v1->as<Int>()->sameAs(v2.as<Int>())
 bool areEqualScalars(Val* v1, Val* v2);
 
+class TORCH_CUDA_CU_API ARangeOp : public Expr {
+ public:
+  ARangeOp(
+      IrBuilderPasskey,
+      Val* out,
+      Val* start,
+      Val* end,
+      Val* step,
+      Val* linear_index = nullptr);
+
+  ARangeOp(const ARangeOp* src, IrCloner* ir_cloner);
+
+  bool sameAs(const Statement* other) const override;
+
+  Val* start() const {
+    return start_;
+  }
+
+  Val* end() const {
+    return end_;
+  }
+
+  Val* step() const {
+    return step_;
+  }
+
+  Val* getLinearIndex() const {
+    return linear_index_;
+  }
+
+  void setLinearIndex(Val* index) {
+    linear_index_ = index;
+  }
+
+ private:
+  Val* start_;
+  Val* end_;
+  Val* step_;
+  Val* linear_index_ = nullptr;
+};
+
 //! A specialization for Unary operations. Unary operations take in a single
 //! input and produce a single output. Examples include:
 //!   1) Casting operation i.e. float(a_val)
@@ -58,23 +99,12 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
     return unary_op_type_;
   }
 
-  int getRNGOffset() const {
-    return rng_offset_;
-  }
-
-  void setRNGOffset(int val) {
-    rng_offset_ = val;
-  }
-
   bool sameAs(const Statement* other) const override;
 
  private:
   const UnaryOpType unary_op_type_;
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
-  // TODO: pull RNG op out of Unary ops
-  // https://github.com/csarofeen/pytorch/pull/1892
-  int rng_offset_ = -1;
 };
 
 //! A specialization for Binary operations. Binary operations take in two inputs
@@ -108,6 +138,48 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
   Val* const out_ = nullptr;
   Val* const lhs_ = nullptr;
   Val* const rhs_ = nullptr;
+};
+
+//! A specialization for random number generator (RNG) operations. RNG
+//! operations take in no tensor input and produce a single output.
+class TORCH_CUDA_CU_API RNGOp : public Expr {
+ public:
+  RNGOp(
+      IrBuilderPasskey,
+      RNGOpType type,
+      Val* out,
+      int rng_offset = 0,
+      Val* philox_index = nullptr);
+
+  RNGOp(const RNGOp* src, IrCloner* ir_cloner);
+
+  RNGOpType getRNGOpType() const {
+    return rng_op_type_;
+  }
+
+  int getRNGOffset() const {
+    return rng_offset_;
+  }
+
+  void setRNGOffset(int val) {
+    rng_offset_ = val;
+  }
+
+  Val* getPhiloxIndex() const {
+    return philox_index_;
+  }
+
+  void setPhiloxIndex(Val* index) {
+    philox_index_ = index;
+  }
+
+  bool sameAs(const Statement* other) const override;
+
+ private:
+  const RNGOpType rng_op_type_;
+  int rng_offset_ = -1;
+  // The index used to feed philox's subsequence and component
+  Val* philox_index_ = nullptr;
 };
 
 //! Broadcast in to match out. is_broadcast_dims are relative to out. Where
@@ -247,6 +319,10 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
     return is_allreduce_;
   }
 
+  //! Return the index of the corresponding reduction expression for
+  //! a given output val.
+  int getExprIndexOfOutput(Val* output_val) const;
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -258,78 +334,215 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
   bool is_allreduce_ = false;
 };
 
+//! Average, variance and N (count) vals for Welford
+class TORCH_CUDA_CU_API WelfordTriplet {
+ public:
+  //! Names of the Welford triplet vals
+  enum class ValName { Avg, Var, N };
+
+  WelfordTriplet() = default;
+
+  WelfordTriplet(Val* avg, Val* var, Val* N) : vals_({avg, var, N}) {}
+
+  Val* const& avg() const {
+    return get(ValName::Avg);
+  }
+
+  Val*& avg() {
+    return get(ValName::Avg);
+  }
+
+  TensorView* avgTv() const {
+    TORCH_INTERNAL_ASSERT(avg()->isA<TensorView>());
+    return avg()->as<TensorView>();
+  }
+
+  Val* const& var() const {
+    return get(ValName::Var);
+  }
+
+  Val*& var() {
+    return get(ValName::Var);
+  }
+
+  TensorView* varTv() const {
+    TORCH_INTERNAL_ASSERT(var()->isA<TensorView>());
+    return var()->as<TensorView>();
+  }
+
+  Val* const& N() const {
+    return get(ValName::N);
+  }
+
+  Val*& N() {
+    return get(ValName::N);
+  }
+
+  TensorView* NTv() const {
+    TORCH_INTERNAL_ASSERT(N()->isA<TensorView>());
+    return N()->as<TensorView>();
+  }
+
+  //! Get the i-th val. Ordering is defined by ValName.
+  Val* const& get(int i) const {
+    return vals_.at(i);
+  }
+
+  //! Get the i-th val. Ordering is defined by ValName.
+  Val*& get(int i) {
+    return vals_.at(i);
+  }
+
+  Val* const& get(ValName name) const {
+    return get(valNameToIndex(name));
+  }
+
+  Val*& get(ValName name) {
+    return get(valNameToIndex(name));
+  }
+
+  //! Get the name of a given val in this triplet. None is returned if
+  //! not found.
+  c10::optional<ValName> getNameOf(Val* val) const;
+
+  //! Return a new triplet with outputs produced by a function applied
+  //! to each of this triplet
+  template <typename Func>
+  WelfordTriplet transform(Func func) const {
+    return WelfordTriplet(func(avg()), func(var()), func(N()));
+  }
+
+  bool sameAs(const WelfordTriplet& other) const;
+
+  WelfordTriplet clone(IrCloner* ir_cloner) const;
+
+  //! Clone a vector of triplets
+  static std::vector<WelfordTriplet> clone(
+      const std::vector<WelfordTriplet>& src,
+      IrCloner* ir_cloner);
+
+  auto begin() {
+    return vals_.begin();
+  }
+
+  auto begin() const {
+    return vals_.begin();
+  }
+
+  auto end() {
+    return vals_.end();
+  }
+
+  auto end() const {
+    return vals_.end();
+  }
+
+ private:
+  //! Convert a given val name to an index
+  static int valNameToIndex(ValName name) {
+    return static_cast<int>(name);
+  }
+
+  //! Convert a given index to a name
+  static ValName indexToValName(int index) {
+    TORCH_INTERNAL_ASSERT(index >= 0 && index < 3, "Invalid index: ", index);
+    return static_cast<ValName>(index);
+  }
+
+ private:
+  //! Holds avg, var and N in this order
+  std::array<Val*, 3> vals_ = {{nullptr, nullptr, nullptr}};
+};
+
 //! Welford Scan operation.
 class TORCH_CUDA_CU_API WelfordOp : public Expr {
  public:
   WelfordOp(
       IrBuilderPasskey,
+      const WelfordTriplet& output,
+      const WelfordTriplet& input,
+      const WelfordTriplet& init,
+      bool is_fused = false);
+
+  WelfordOp(
+      IrBuilderPasskey,
       Val* out_avg,
       Val* out_var,
       Val* out_N,
-      Val* init_avg,
-      Val* init_var,
-      Val* init_N,
       Val* in_avg,
       Val* in_var,
       Val* in_N,
+      Val* init_avg,
+      Val* init_var,
+      Val* init_N,
       bool is_fused = false);
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
 
   Val* out() const {
-    return out_avg_;
+    return output().avg();
   }
 
   Val* in() const {
-    return in_avg_;
+    return input().avg();
   }
 
   bool sameAs(const Statement* const other) const override;
 
-  // Welford Accessors
-  // TODO clean up
+  const WelfordTriplet& output() const {
+    return output_;
+  }
+
   Val* outAvg() const {
-    return out_avg_;
+    return output().avg();
   }
 
   Val* outVar() const {
-    return out_var_;
+    return output().var();
   }
 
   Val* outN() const {
-    return out_N_;
+    return output().N();
+  }
+
+  const WelfordTriplet& input() const {
+    return input_;
   }
 
   Val* inAvg() const {
-    return in_avg_;
+    return input().avg();
   }
 
   Val* inVar() const {
-    return in_var_;
+    return input().var();
   }
 
   Val* inN() const {
-    return in_N_;
+    return input().N();
+  }
+
+  const WelfordTriplet& init() const {
+    return init_;
   }
 
   Val* initAvg() const {
-    return init_avg_;
+    return init().avg();
   }
 
   Val* initVar() const {
-    return init_var_;
+    return init().var();
   }
 
   Val* initN() const {
-    return init_N_;
+    return init().N();
   }
 
   bool singleValue() const {
-    return in_N_->isOneInt();
+    return inN()->isOneInt();
   }
 
   bool hasInit() const {
-    return !init_N_->isZeroInt();
+    return !initN()->isZeroInt();
   }
 
   bool isAllreduce() const {
@@ -338,17 +551,118 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
   std::vector<Val*> getInitVals() const;
 
+  //! Return the init val for an output val
+  Val* getInitValOfOutput(Val* output_val) const;
+
  private:
-  Val* const out_avg_;
-  Val* const out_var_;
-  Val* const out_N_;
-  Val* const init_avg_;
-  Val* const init_var_;
-  Val* const init_N_;
-  Val* const in_avg_;
-  Val* const in_var_;
-  Val* const in_N_;
+  const WelfordTriplet output_;
+  const WelfordTriplet input_;
+  const WelfordTriplet init_;
   //! True if using the fused reduction kernel (not implemented yet)
+  bool is_allreduce_ = false;
+};
+
+class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
+ public:
+  GroupedWelfordOp(
+      IrBuilderPasskey,
+      std::vector<WelfordTriplet> output_vals,
+      std::vector<WelfordTriplet> input_vals,
+      std::vector<WelfordTriplet> init_vals,
+      bool is_allreduce = false,
+      ExprType expr_type = ExprType::GroupedWelfordOp);
+
+  GroupedWelfordOp(const GroupedWelfordOp* src, IrCloner* ir_cloner);
+
+  //! Number of expressions grouped horizontally. It does not reflect
+  //! iteration grouping. As horizontal grouping is not supported,
+  //! this always returns 1.
+  size_t numExprs() const {
+    return 1;
+  }
+
+  Val* out(size_t index) const {
+    return outAvg(index);
+  }
+
+  Val* in(size_t index) const {
+    return inAvg(index);
+  }
+
+  bool sameAs(const Statement* const other) const override;
+
+  const std::vector<WelfordTriplet>& outputVals() const {
+    return output_vals_;
+  }
+
+  const std::vector<WelfordTriplet>& inputVals() const {
+    return input_vals_;
+  }
+
+  const std::vector<WelfordTriplet>& initVals() const {
+    return init_vals_;
+  }
+
+  Val* outAvg(size_t index) const {
+    return outputVals().at(index).avg();
+  }
+
+  Val* outVar(size_t index) const {
+    return outputVals().at(index).var();
+  }
+
+  Val* outN(size_t index) const {
+    return outputVals().at(index).N();
+  }
+
+  Val* inAvg(size_t index) const {
+    return inputVals().at(index).avg();
+  }
+
+  Val* inVar(size_t index) const {
+    return inputVals().at(index).var();
+  }
+
+  Val* inN(size_t index) const {
+    return inputVals().at(index).N();
+  }
+
+  Val* initAvg(size_t index) const {
+    return initVals().at(index).avg();
+  }
+
+  Val* initVar(size_t index) const {
+    return initVals().at(index).var();
+  }
+
+  Val* initN(size_t index) const {
+    return initVals().at(index).N();
+  }
+
+  //! Return the index of the corresponding welford expression for
+  //! a given output val
+  int getExprIndexOfOutput(Val* output_val) const;
+
+  //! Return the init val for an output val
+  Val* getInitValOfOutput(Val* output_val) const;
+
+  bool singleValue(size_t index) const {
+    return inN(index)->isOneInt();
+  }
+
+  bool hasInit(size_t index) const {
+    return !initN(index)->isZeroInt();
+  }
+
+  bool isAllreduce() const {
+    return is_allreduce_;
+  }
+
+ private:
+  const std::vector<WelfordTriplet> output_vals_;
+  const std::vector<WelfordTriplet> input_vals_;
+  const std::vector<WelfordTriplet> init_vals_;
+  //! True if using the fused reduction kernel
   bool is_allreduce_ = false;
 };
 
@@ -902,6 +1216,13 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
         hasExpandedExtent(),
         "Requested expanded extent, but none found on this dimension.");
     return expanded_extent_;
+  }
+
+  Val* getMaybeExpandedExtent() const {
+    if (hasExpandedExtent()) {
+      return expandedExtent();
+    }
+    return extent();
   }
 
   //! Dimension padding interface:

@@ -344,6 +344,16 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cudaCachingAllocator_set_allocator_settings(
+    PyObject* _unused,
+    PyObject* env) {
+  HANDLE_TH_ERRORS
+  c10::cuda::CUDACachingAllocator::setAllocatorSettings(
+      THPUtils_unpackString(env));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_cudaSynchronize(PyObject* _unused, PyObject* noargs) {
   HANDLE_TH_ERRORS
   c10::cuda::device_synchronize();
@@ -925,6 +935,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_cudaCachingAllocator_raw_delete",
      THCPModule_cudaCachingAllocator_raw_delete,
+     METH_O,
+     nullptr},
+    {"_cuda_cudaCachingAllocator_set_allocator_settings",
+     THCPModule_cudaCachingAllocator_set_allocator_settings,
      METH_O,
      nullptr},
     {"_cuda_synchronize", THCPModule_cudaSynchronize, METH_NOARGS, nullptr},

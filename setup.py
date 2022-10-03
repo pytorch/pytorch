@@ -614,6 +614,23 @@ class build_ext(setuptools.command.build_ext.build_ext):
                     os.makedirs(dst_dir)
                 self.copy_file(src, dst)
                 i += 1
+
+        # Copy functorch extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "functorch._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
         setuptools.command.build_ext.build_ext.build_extensions(self)
 
 
@@ -827,6 +844,13 @@ def configure_extension_build():
             extra_compile_args += ['-g']
             extra_link_args += ['-g']
 
+    # special CUDA 11.7 package that requires installation of cuda runtime, cudnn and cublas
+    pytorch_extra_install_requirements = os.getenv("PYTORCH_EXTRA_INSTALL_REQUIREMENTS", "")
+    if pytorch_extra_install_requirements:
+        report(f"pytorch_extra_install_requirements: {pytorch_extra_install_requirements}")
+        extra_install_requires += pytorch_extra_install_requirements.split(";")
+
+
     # Cross-compile for M1
     if IS_DARWIN:
         macos_target_arch = os.getenv('CMAKE_OSX_ARCHITECTURES', '')
@@ -893,6 +917,12 @@ def configure_extension_build():
                     name=str('caffe2.python.caffe2_pybind11_state_hip'),
                     sources=[]),
             )
+    if cmake_cache_vars['BUILD_FUNCTORCH']:
+        extensions.append(
+            Extension(
+                name=str('functorch._C'),
+                sources=[]),
+        )
 
     cmdclass = {
         'bdist_wheel': wheel_concatenate,
@@ -939,6 +969,10 @@ def main():
     install_requires = [
         'typing_extensions',
     ]
+
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1138,6 +1172,7 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,

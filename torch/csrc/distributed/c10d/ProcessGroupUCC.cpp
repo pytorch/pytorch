@@ -1,8 +1,8 @@
 #ifdef USE_C10D_UCC
 
-#include <c10d/ProcessGroupUCC.hpp>
-#include <c10d/UCCTracing.hpp>
-#include <c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -267,9 +267,9 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
   setAndThrowException();
   // manually call profiling end callbacks if they are set,
   // since progress thread does not own WorkUCC
-  if (ProcessGroup::Work::recordFunctionEndCallback_) {
-    ProcessGroup::Work::recordFunctionEndCallback_();
-    ProcessGroup::Work::recordFunctionEndCallback_ = nullptr;
+  if (Work::recordFunctionEndCallback_) {
+    Work::recordFunctionEndCallback_();
+    Work::recordFunctionEndCallback_ = nullptr;
   }
   return true;
 }
@@ -281,7 +281,7 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupUCC::WorkUCC::getFuture() {
 int ProcessGroupUCC::WorkUCC::sourceRank() const {
   if (opType_ != OpType::RECV && opType_ != OpType::RECVANYSOURCE) {
     // Throw an error
-    return ProcessGroup::Work::sourceRank();
+    return Work::sourceRank();
   }
   return sourceRank_;
 }
@@ -748,7 +748,7 @@ std::unique_ptr<at::cuda::CUDAEvent> ProcessGroupUCC::getPooledEvent() {
 #endif
 
 template <typename PreProcess, typename PostProcess>
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::collective_post(
+c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     OpType opType,
     PreProcess preproc,
     PostProcess postproc,
@@ -759,8 +759,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::collective_post(
     std::vector<at::Tensor>& outputTensors,
     const char* prof_title) {
   set_timeout(coll);
-  auto work =
-      c10::make_intrusive<ProcessGroupUCC::WorkUCC>(opType, prof_title, logger);
+  auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
+      opType, prof_title, inputTensors, logger);
 
   if (opType == OpType::RECV) {
     work->sourceRank_ = coll.root;
@@ -823,7 +823,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::collective_post(
   }
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allgather(
+c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& /* unused */) {
@@ -864,7 +864,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allgather(
         tensor.device(),
         inputTensors,
         outputTensors[0],
-        "ucc:allgatherv");
+        "ucc:all_gather");
   } else {
     WorkData* data = new WorkData();
     std::vector<at::Tensor> flat_output(outputTensors.size());
@@ -925,7 +925,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allgather(
   }
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::_allgather_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::_allgather_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const AllgatherOptions& opts) {
@@ -965,7 +965,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::_allgather_base(
       "ucc:allgather_base");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allreduce(
+c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   check_tensor(tensors);
@@ -996,17 +996,17 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allreduce(
       tensor.device(),
       tensors,
       tensors,
-      "ucc:allreduce");
+      "ucc:all_reduce");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::allreduce_coalesced(
+c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce_coalesced(
     std::vector<at::Tensor>& /* unused */,
     const AllreduceCoalescedOptions& /* unused */) {
   throw std::runtime_error(
       "ProcessGroupUCC does not support allreduce_coalesced");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall(
+c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllToAllOptions& /* unused */) {
@@ -1070,7 +1070,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall(
       "ucc:alltoall");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall_base(
+c10::intrusive_ptr<Work> ProcessGroupUCC::alltoall_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     std::vector<int64_t>& outputSplitSizes,
@@ -1148,8 +1148,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::alltoall_base(
       "ucc:alltoall");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::barrier(
-    const BarrierOptions& opts) {
+c10::intrusive_ptr<Work> ProcessGroupUCC::barrier(const BarrierOptions& opts) {
   c10::Device device = c10::Device(c10::DeviceType::CPU);
 #ifdef USE_CUDA
   auto numGPUs = c10::cuda::device_count();
@@ -1196,7 +1195,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::barrier(
       "ucc:barrier");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::broadcast(
+c10::intrusive_ptr<Work> ProcessGroupUCC::broadcast(
     std::vector<at::Tensor>& tensors,
     const BroadcastOptions& opts) {
   check_tensor(tensors);
@@ -1231,7 +1230,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::broadcast(
       "ucc:broadcast");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::gather(
+c10::intrusive_ptr<Work> ProcessGroupUCC::gather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const GatherOptions& opts) {
@@ -1312,7 +1311,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::gather(
       "ucc:gather");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::reduce(
+c10::intrusive_ptr<Work> ProcessGroupUCC::reduce(
     std::vector<at::Tensor>& tensors,
     const ReduceOptions& opts) {
   check_tensor(tensors);
@@ -1347,7 +1346,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::reduce(
       "ucc:reduce");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::reduce_scatter(
+c10::intrusive_ptr<Work> ProcessGroupUCC::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
@@ -1421,7 +1420,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::reduce_scatter(
       "ucc:reduce_scatter");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::scatter(
+c10::intrusive_ptr<Work> ProcessGroupUCC::scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ScatterOptions& opts) {
@@ -1496,7 +1495,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::scatter(
       "ucc:scatter");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
+c10::intrusive_ptr<Work> ProcessGroupUCC::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
     int tag) {
@@ -1533,7 +1532,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::send(
       "ucc:send");
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupUCC::recv(
+c10::intrusive_ptr<Work> ProcessGroupUCC::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
     int tag) {

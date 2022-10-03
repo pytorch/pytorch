@@ -7,6 +7,7 @@
 #include <ATen/core/ivalue_to.h>
 #include <ATen/core/jit_type_base.h>
 #include <ATen/core/type_factory.h>
+#include <c10/core/SymFloat.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
@@ -27,6 +28,8 @@ template <class Key, class Value>
 class Dict;
 template <class T>
 class List;
+template <class T>
+class IListRef;
 struct IValue;
 struct ClassType;
 struct Type;
@@ -145,6 +148,7 @@ struct Capsule {
   _(ComplexDouble)           \
   _(Int)                     \
   _(SymInt)                  \
+  _(SymFloat)                \
   _(Bool)                    \
   _(Tuple)                   \
   _(String)                  \
@@ -571,6 +575,22 @@ public:
 
   c10::SymInt toSymInt() const;
 
+  IValue(c10::SymFloat i) {
+    if (i.is_symbolic()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = i.toSymFloatNodeImpl().release();
+    } else {
+      tag = Tag::Double;
+      payload.u.as_double = i.as_float_unchecked();
+    }
+  }
+
+  bool isSymFloat() const {
+    return Tag::SymFloat == tag;
+  }
+
+  c10::SymFloat toSymFloat() const;
+
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i) : IValue(static_cast<int64_t>(i)) {}
 
@@ -679,6 +699,15 @@ public:
   template <class T, size_t N>
   IValue(std::array<T, N> v);
 
+  template <class T>
+  using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
+      std::is_constructible<IValue, T>::value &&
+          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value,
+      std::nullptr_t>;
+
+  template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
+  IValue(c10::IListRef<T> v);
+
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
   bool isGenericDict() const {
@@ -751,7 +780,15 @@ public:
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
-    if (s.isFloatingPoint()) {
+    // NB: do the symbolic versions first, as isFloatingPoint is true
+    // for both SymFloat and double
+    if (s.isSymInt()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymIntNodeImpl().release();
+    } else if (s.isSymFloat()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = s.toSymFloat().toSymFloatNodeImpl().release();
+    } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();
     } else if (s.isComplex()) {
@@ -767,7 +804,7 @@ public:
   }
 
   bool isScalar() const {
-    return isDouble() || isInt() || isComplexDouble() || isBool();
+    return isDouble() || isInt() || isComplexDouble() || isBool() || isSymInt() || isSymFloat();
   }
 
   at::Scalar toScalar() const {
@@ -779,6 +816,10 @@ public:
       return toComplexDouble();
     else if (isBool())
       return toBool();
+    else if (isSymInt())
+      return toSymInt();
+    else if (isSymFloat())
+      return toSymFloat();
     throw std::runtime_error("IValue is not a Scalar");
   }
 
@@ -1075,6 +1116,8 @@ public:
         return false;
       case Tag::SymInt:
         return true;
+      case Tag::SymFloat:
+        return true;
       case Tag::Bool:
         return false;
       case Tag::Tuple:
@@ -1124,6 +1167,7 @@ public:
   }
 
   union Payload {
+    // [TriviallyCopyablePayload]
     // We use a nested union here so that we can make the copy easy
     // and efficient in the non-tensor (i.e., trivially copyable)
     // case. Specifically, we do not have to do a switch-on-tag to
@@ -1337,6 +1381,10 @@ struct WeakOrStrongCompilationUnit {
     return strong_ptr_ != c10::nullopt;
   }
 
+  bool holdingEmptyStrongRef() const {
+    return holdingStrongRef() && *strong_ptr_ == nullptr;
+  }
+
   c10::optional<std::shared_ptr<torch::jit::CompilationUnit>> strong_ptr_;
   c10::optional<std::weak_ptr<torch::jit::CompilationUnit>> weak_ptr_;
 };
@@ -1360,8 +1408,13 @@ struct TORCH_API WeakOrStrongTypePtr {
 
   WeakOrStrongCompilationUnit cu_;
   TypePtr type_;
+
   bool holds_strong_ref() const {
     return cu_.holdingStrongRef();
+  }
+
+  bool holds_empty_strong_ref() const {
+    return cu_.holdingEmptyStrongRef();
   }
 };
 

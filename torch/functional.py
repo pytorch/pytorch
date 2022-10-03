@@ -15,6 +15,15 @@ from ._jit_internal import _overload as overload
 Tensor = torch.Tensor
 from torch import _VF
 
+# Set a global declaring that we have opt_einsum
+# Reasons for not being able to import include opt_einsum not being found
+# OR numpy (an opt_einsum dependency) not being found
+try:
+    import opt_einsum as _opt_einsum  # type: ignore[import]
+except ModuleNotFoundError:
+    _opt_einsum = None
+
+
 __all__ = [
     'atleast_1d',
     'atleast_2d',
@@ -238,9 +247,10 @@ def einsum(*args: Any) -> Tensor:
 
     .. note::
 
-        This function does not optimize the given expression, so a different formula for the same computation may
-        run faster or consume less memory. Projects like opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/)
-        can optimize the formula for you.
+        This function uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up computation or to
+        consume less memory by optimizing contraction order. Note that finding _the_ optimal path is an NP-hard problem,
+        thus, opt_einsum relies on different heuristics to achieve near-optimal results. If opt_einsum is not available,
+        the default order is to contract from left to right.
 
     .. note::
 
@@ -361,7 +371,16 @@ def einsum(*args: Any) -> Tensor:
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
-    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+    if len(operands) <= 2:
+        # the path for contracting 0 or 1 time(s) is already optimized
+        return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+
+    path = None
+    if _opt_einsum is not None:
+        tupled_path = _opt_einsum.contract_path(equation, *operands)[0]
+        # flatten path for dispatching to C++
+        path = [item for pair in tupled_path for item in pair]
+    return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.

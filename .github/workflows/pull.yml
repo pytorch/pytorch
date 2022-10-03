@@ -25,7 +25,8 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -221,15 +222,6 @@ jobs:
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
-
-  linux-bionic-py3_7-clang8-xla-test:
-    name: linux-bionic-py3_7-clang8-xla
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-py3_7-clang8-xla-build
-    with:
-      build-environment: linux-bionic-py3_7-clang8-xla
-      docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.test-matrix }}
 
   win-vs2019-cpu-py3-build:
     name: win-vs2019-cpu-py3

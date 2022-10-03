@@ -151,6 +151,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<c10::SymInt>(obj);
       }
       return py::cast<int64_t>(obj);
+    case TypeKind::SymFloatType:
+      if (torch::is_symfloat_node(obj.ptr())) {
+        return py::cast<c10::SymFloat>(obj);
+      }
+      return py::cast<double>(obj);
     case TypeKind::NoneType:
       if (!obj.is_none()) {
         throw py::cast_error(
@@ -238,6 +243,15 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             symints.push_back(si);
           }
           return symints;
+        }
+        case TypeKind::SymFloatType: {
+          c10::List<c10::SymFloat> symfloats;
+          for (auto it = obj.begin(); it != obj.end(); it++) {
+            auto elm = *it;
+            auto si = py::cast<c10::SymFloat>(elm);
+            symfloats.push_back(si);
+          }
+          return symfloats;
         }
         case TypeKind::FloatType:
           if (!N || !py::isinstance<py::float_>(obj)) {
@@ -399,6 +413,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       } else if (PyComplex_CheckExact(obj.ptr())) {
         auto c_obj = py::cast<std::complex<double>>(obj.ptr());
         return static_cast<c10::complex<double>>(c_obj);
+      } else if (torch::is_symint_node(obj)) {
+        return py::cast<c10::SymInt>(obj);
+      } else if (torch::is_symfloat_node(obj)) {
+        return py::cast<c10::SymFloat>(obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
@@ -609,8 +627,9 @@ py::object toPyObject(IValue ivalue) {
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isSymInt()) {
-    auto si = ivalue.toSymInt();
-    return py::cast(si);
+    return py::cast(ivalue.toSymInt());
+  } else if (ivalue.isSymFloat()) {
+    return py::cast(ivalue.toSymFloat());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
