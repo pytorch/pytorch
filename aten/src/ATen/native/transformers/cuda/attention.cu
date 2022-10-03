@@ -490,7 +490,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
     auto backend = select_sdp_backend(kernel_params);
     switch(backend){
       case sdp::SDPBackend::flash_attention:
-          return flash_attention_helper_dense_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
+        return flash_attention_helper_dense_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
       case sdp::SDPBackend::math:
         return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
       default:
