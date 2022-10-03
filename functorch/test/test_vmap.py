@@ -3287,6 +3287,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
         xfail('cat'),
+        xfail('native_batch_norm'),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3306,6 +3307,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('cat'),
         xfail('complex'),
         xfail('copysign'),
+        xfail('native_batch_norm'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),

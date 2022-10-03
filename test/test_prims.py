@@ -548,6 +548,69 @@ class TestPrims(TestCase):
                 self.assertFalse(node.target == torch.ops.prims.add.default)
                 self.assertFalse(node.target == torch.ops.aten.add.default)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32, torch.float64)
+    def test_native_batch_norm_nvprims(self, device, dtype):
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims.executor import execute
+
+        # This test verifies that native_batch_norm is translated into nvprims
+        # and can be executed with nvFuser
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.testing._internal.common_methods_invocations import (
+            sample_inputs_native_batch_norm,
+        )
+
+        samples = sample_inputs_native_batch_norm(
+            None, device, dtype, requires_grad=False
+        )
+        batch_norms = [
+            torch.native_batch_norm,
+            torch.ops.aten.native_batch_norm,
+            torch.ops.aten.native_batch_norm.default,
+            torch.ops.nvprims.native_batch_norm.default,
+        ]
+        for sample, batch_norm in product(samples, batch_norms):
+            if sample.input.numel() == 0:
+                continue
+
+            def func(
+                input, weight, bias, running_mean, running_var, training, momentum, eps
+            ):
+                return batch_norm(
+                    input,
+                    weight,
+                    bias,
+                    running_mean,
+                    running_var,
+                    training,
+                    momentum,
+                    eps,
+                )
+
+            with TorchRefsNvfuserCapabilityMode():
+                gm = make_fx(func)(sample.input, *sample.args)
+
+            call_function_nodes = list(
+                filter(lambda n: n.op == "call_function", gm.graph.nodes)
+            )
+            includes_aten_batch_norm = any(
+                torch.ops.aten.native_batch_norm.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertFalse(includes_aten_batch_norm)
+
+            includes_nvprims_batch_norm = any(
+                torch.ops.nvprims.native_batch_norm.default == node.target
+                for node in call_function_nodes
+            )
+            self.assertTrue(includes_nvprims_batch_norm)
+
+            # Check that the graph can be executed with nvFuser
+            out = execute(gm, sample.input, *sample.args, executor="strictly_nvfuser")
+            self.assertEqual(out, gm(sample.input, *sample.args))
+
     # decomposition of native_batch_norm_backward uses a casting, which prevents nvprim lowering on CPU build
     @onlyCUDA
     @dtypes(torch.float32, torch.float16)

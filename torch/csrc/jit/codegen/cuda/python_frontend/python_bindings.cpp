@@ -127,6 +127,16 @@ void initNvFuserPythonBindings(PyObject* module) {
                 {self.recordingState(output())}));
           })
       .def(
+          "define_null_tensor",
+          [](nvfuser::FusionDefinition& self) -> nvfuser::Tensor {
+            FUSER_PERF_SCOPE("FusionDefinition.define_null_tensor");
+            nvfuser::Tensor out = self.defineTensor();
+            self.defineRecord(
+                new nvfuser::NullTensorRecord({self.recordingState(out())}));
+            return out;
+          },
+          py::return_value_policy::reference)
+      .def(
           "define_tensor",
           [](nvfuser::FusionDefinition& self,
              size_t ndims,
@@ -1258,6 +1268,48 @@ void initNvFuserPythonBindings(PyObject* module) {
       py::arg("axes"),
       py::arg("correction"),
       py::arg("keepdim") = false,
+      py::return_value_policy::reference);
+  nvf_ops.def(
+      "batch_norm",
+      [](nvfuser::FusionDefinition::Operators& self,
+         nvfuser::Tensor x,
+         nvfuser::Tensor weight,
+         nvfuser::Tensor bias,
+         nvfuser::Tensor running_mean,
+         nvfuser::Tensor running_var,
+         bool training,
+         nvfuser::Scalar momentum,
+         nvfuser::Scalar eps,
+         bool channels_last) -> decltype(auto) {
+        FUSER_PERF_SCOPE("Operators.batch_norm");
+        nvfuser::FusionDefinition* fd = self.fusion_definition;
+        nvfuser::Tensor output = fd->defineTensor();
+        nvfuser::Tensor mean = fd->defineTensor();
+        nvfuser::Tensor invstd = fd->defineTensor();
+        fd->defineRecord(new nvfuser::BatchNormOpRecord(
+            {fd->recordingState(x()),
+             fd->recordingState(weight()),
+             fd->recordingState(bias()),
+             fd->recordingState(running_mean()),
+             fd->recordingState(running_var()),
+             fd->recordingState(momentum()),
+             fd->recordingState(eps())},
+            {fd->recordingState(output()),
+             fd->recordingState(mean()),
+             fd->recordingState(invstd())},
+            training,
+            channels_last));
+        return std::make_tuple(output, mean, invstd);
+      },
+      py::arg("x"),
+      py::arg("weight").none(true),
+      py::arg("bias").none(true),
+      py::arg("running_mean").none(true),
+      py::arg("running_var").none(true),
+      py::arg("training"),
+      py::arg("momentum"),
+      py::arg("eps"),
+      py::arg("channels_last") = false,
       py::return_value_policy::reference);
   nvf_ops.def(
       "broadcast_in_dim",
