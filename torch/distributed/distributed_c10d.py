@@ -2562,19 +2562,20 @@ def scatter(tensor, scatter_list=None, src=0, group=None, async_op=False):
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
-        >>> size_of_tensor = 2
-        >>> t_ones = torch.ones(size_of_tensor)
-        >>> t_fives = torch.ones(size_of_tensor) * 5
-        >>> output_tensor = torch.zeros(size_of_tensor)
+        >>> tensor_size = 2
+        >>> t_ones = torch.ones(tensor_size)
+        >>> t_fives = torch.ones(tensor_size) * 5
+        >>> output_tensor = torch.zeros(tensor_size)
         >>> if dist.get_rank() == 0:
         >>>     # Assumes world_size of 2.
-        >>>     scatter_list = [t_ones, t_fives] # Only Tensors
+        >>>     # Only tensors, all of which must be the same size.
+        >>>     scatter_list = [t_ones, t_fives]
         >>> else:
         >>>     scatter_list = None
         >>> dist.scatter(output_tensor, scatter_list, src=0)
         >>> # Rank i gets scatter_list[i]. For example, on rank 1:
         >>> output_tensor
-        tensor([5., 5., 5.])
+        tensor([5., 5.])
 
     """
     _check_single_tensor(tensor, "tensor")
