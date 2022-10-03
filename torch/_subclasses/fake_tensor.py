@@ -45,8 +45,8 @@ class DataDependentOutputException(RuntimeError):
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
-    aten.nested_tensor.default,
-    aten.nested_tensor.out,
+    aten._nested_tensor_from_tensor_list.default,
+    aten._nested_tensor_from_tensor_list.out,
     aten.pin_memory.default,
     aten.is_pinned.default,
     aten.to.device,
@@ -416,14 +416,19 @@ def nyi(fake_mode, func, *args, **kwargs):
 
 @contextlib.contextmanager
 def in_kernel_invocation_manager(fake_mode):
-    fake_mode.in_kernel_invocation = True
     # See: note [Fake Tensor Dispatch Keys]
-    torch._C._add_meta_to_tls_dispatch_include()
+    meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+    prev = fake_mode.in_kernel_invocation
+
+    fake_mode.in_kernel_invocation = True
+    if not meta_in_tls:
+        torch._C._add_meta_to_tls_dispatch_include()
     try:
         yield
     finally:
-        fake_mode.in_kernel_invocation = False
-        torch._C._remove_meta_from_tls_dispatch_include()
+        fake_mode.in_kernel_invocation = prev
+        if not meta_in_tls:
+            torch._C._remove_meta_from_tls_dispatch_include()
 
 
 class FakeTensor(torch.Tensor):
