@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/python/init.h>
 
 #include <ATen/record_function.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
@@ -40,7 +41,8 @@ void initPythonBindings(PyObject* module) {
       .value("NONE", ActiveProfilerType::NONE)
       .value("LEGACY", ActiveProfilerType::LEGACY)
       .value("KINETO", ActiveProfilerType::KINETO)
-      .value("NVTX", ActiveProfilerType::NVTX);
+      .value("NVTX", ActiveProfilerType::NVTX)
+      .value("ITT", ActiveProfilerType::ITT);
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
@@ -136,7 +138,11 @@ void initPythonBindings(PyObject* module) {
                 torch::autograd::utils::wrap(metadata.layout_);
             return py::reinterpret_borrow<py::object>(layout_obj);
           })
-      .def_property_readonly("device", &TensorMetadata::device);
+      .def_property_readonly("device", &TensorMetadata::device)
+      .def_property_readonly("dtype", [](const TensorMetadata& metadata) {
+        return py::reinterpret_borrow<py::object>(
+            torch::autograd::utils::wrap(torch::getTHPDtype(metadata.dtype_)));
+      });
 
   using torch_op_t = ExtraFields<EventType::TorchOp>;
   py::class_<torch_op_t>(m, "_ExtraFields_TorchOp")
@@ -156,10 +162,17 @@ void initPythonBindings(PyObject* module) {
           })
       .def_readonly("id", &allocation_t::id_)
       .def_readonly("alloc_size", &allocation_t::alloc_size_)
-      .def_readonly("device_type", &allocation_t::device_type_)
-      .def_readonly("device_index", &allocation_t::device_index_)
       .def_readonly("total_allocated", &allocation_t::total_allocated_)
-      .def_readonly("total_reserved", &allocation_t::total_reserved_);
+      .def_readonly("total_reserved", &allocation_t::total_reserved_)
+      .def_property_readonly("device", &allocation_t::device);
+
+  py::class_<PyFrameState>(m, "_PyFrameState")
+      .def_readonly("line_number", &PyFrameState::line_no_)
+      .def_property_readonly(
+          "file_name", [](const PyFrameState& s) { return s.filename_.str(); })
+      .def_property_readonly("function_name", [](const PyFrameState& s) {
+        return s.funcname_.str();
+      });
 
   py::class_<NNModuleInfo>(m, "_NNModuleInfo")
       .def_property_readonly(
@@ -208,21 +221,13 @@ void initPythonBindings(PyObject* module) {
   py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall")
       .def_readonly("caller", &ExtraFields<EventType::PyCall>::caller_);
 
-  py::class_<PyFrameState>(m, "_PyFrameState")
-      .def_readonly("line_number", &PyFrameState::line_no_)
-      .def_property_readonly(
-          "file_name", [](const PyFrameState& s) { return s.filename_.str(); })
-      .def_property_readonly("function_name", [](const PyFrameState& s) {
-        return s.funcname_.str();
-      });
-
   py::class_<ExtraFields<EventType::OutOfMemory>>(
       m, "_ExtraFields_OutOfMemory");
 
   py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
   py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
-      .def("name", &Result::name)
+      .def_property_readonly("name", &Result::name)
       .def_property_readonly("tag", &Result::tag)
       .def_readonly("extra_fields", &Result::extra_fields_)
       .def_property_readonly(
