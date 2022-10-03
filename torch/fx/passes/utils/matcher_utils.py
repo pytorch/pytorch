@@ -10,7 +10,6 @@ import logging
 
 __all__ = ['SubgraphMatcher', 'InternalMatch']
 
-format_str = "%(levelname)s > %(message)s"
 logger = logging.getLogger(__name__)
 
 @compatibility(is_backward_compatible=False)
