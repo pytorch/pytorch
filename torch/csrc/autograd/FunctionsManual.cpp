@@ -248,7 +248,7 @@ Tensor norm_backward(
   //     the problematic values with something arbitrary before the division,
   //     but we decide not to due to the perf hit. Instead we just silence ASAN
   //     where necessary
-  size_t ndim = self.sizes().size();
+  size_t ndim = self.dim();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
@@ -2722,8 +2722,8 @@ Tensor softplus_double_backward(
 // NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 // Helper for as_strided_backward
 static inline bool _maybe_overlapping_memory(
-    IntArrayRef sizes,
-    IntArrayRef strides) {
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
   if (sizes.size() > 0) {
     std::vector<std::size_t> argsort(sizes.size());
     std::iota(argsort.begin(), argsort.end(), 0);
@@ -2732,7 +2732,7 @@ static inline bool _maybe_overlapping_memory(
           return strides[i] < strides[j];
         });
 
-    int64_t max_index_in_slice = 0;
+    c10::SymInt max_index_in_slice = 0;
     for (auto i : argsort) {
       auto stride_ = strides[i];
       if (stride_ <= max_index_in_slice) {
@@ -2746,11 +2746,11 @@ static inline bool _maybe_overlapping_memory(
 
 // Returns the minimum storage size needed to contain a tensor of sizes,
 // strides, and storage_offset Helper for as_strided_backward
-static inline int64_t _min_storage_size(
-    IntArrayRef sizes,
-    IntArrayRef strides,
-    int64_t storage_offset) {
-  int64_t storage_size = storage_offset + 1;
+static inline c10::SymInt _min_storage_size(
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides,
+    c10::SymInt storage_offset) {
+  c10::SymInt storage_size = storage_offset + 1;
   int64_t dim = sizes.size();
   for (const auto i : c10::irange(dim)) {
     auto size_i = sizes[i];
@@ -2770,11 +2770,8 @@ Tensor as_strided_backward(
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
-  // TODO: properly use sym
-  auto sizes = c10::asIntArrayRefSlow(sym_sizes);
-  auto strides = c10::asIntArrayRefSlow(sym_strides);
   auto storage_offset_ = sym_storage_offset_.has_value()
-      ? c10::make_optional(sym_storage_offset_->expect_int())
+      ? c10::make_optional(sym_storage_offset_)
       : c10::nullopt;
 
   // For output geometry,
@@ -2786,14 +2783,14 @@ Tensor as_strided_backward(
   // Detecting Memory Overlap Within A Strided Tensor ]
   //              on output geometry
   auto storage_offset =
-      storage_offset_.value_or(input_geometry.storage_offset().expect_int());
+      storage_offset_.value_or(input_geometry.storage_offset());
   auto odim = grad.dim();
-  std::vector<int64_t> out_sizes_, out_strides_;
+  std::vector<c10::SymInt> out_sizes_, out_strides_;
   out_sizes_.reserve(odim);
   out_strides_.reserve(odim);
   for (int64_t i = odim - 1; i >= 0; i--) {
-    auto size_i = sizes[i];
-    auto stride_i = strides[i];
+    auto size_i = sym_sizes[i];
+    auto stride_i = sym_strides[i];
     if (size_i == 0) {
       return at::zeros_symint(input_geometry.sizes(), grad.options());
     } else if (size_i == 1) {
@@ -2835,8 +2832,7 @@ Tensor as_strided_backward(
   // Step (1)~(4) for the algorithm in NOTE [ Detecting Memory Overlap Within A
   // Strided Tensor ]
   //              on input geometry
-  auto inp_maybe_overlap = _maybe_overlapping_memory(
-      c10::asIntArrayRefSlow(inp_sizes_), c10::asIntArrayRefSlow(inp_strides_));
+  auto inp_maybe_overlap = _maybe_overlapping_memory(inp_sizes_, inp_strides_);
 
   // Rest of this function implements
   // Step (1)~(4) for the algorithm in NOTE [ as_strided Backward and
@@ -2851,16 +2847,13 @@ Tensor as_strided_backward(
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
       // TODO: symint-ify. Do we need a min() and max() for SymInts?
-      std::min(input_geometry.storage_offset().expect_int(), storage_offset);
+      std::min(input_geometry.storage_offset(), *storage_offset);
   auto inp_effective_offset = input_geometry.storage_offset() - shared_offset;
-  auto out_effective_offset = storage_offset - shared_offset;
+  auto out_effective_offset = *storage_offset - shared_offset;
   auto base_size = std::max(
-      _min_storage_size(
-          c10::asIntArrayRefSlow(inp_sizes_),
-          c10::asIntArrayRefSlow(inp_strides_),
-          inp_effective_offset.expect_int()),
+      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
       _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
-  auto storage = grad.new_zeros({base_size});
+  auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
@@ -2871,12 +2864,12 @@ Tensor as_strided_backward(
 
   // Step (2): use output geometry to scatter gradients into storage
   if (out_maybe_overlap) {
-    auto out_indices = flatten_full_indices->as_strided(
+    auto out_indices = flatten_full_indices->as_strided_symint(
         out_sizes_, out_strides_, out_effective_offset);
     storage.index_add_(0, out_indices.reshape(-1), grad.reshape(-1));
   } else {
     // assume that new tensors have 0 storage offset
-    storage.as_strided(out_sizes_, out_strides_, out_effective_offset)
+    storage.as_strided_symint(out_sizes_, out_strides_, out_effective_offset)
         .copy_(grad);
   }
 
