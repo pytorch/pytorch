@@ -820,18 +820,14 @@ class FlatParamHandle:
         ].view(
             unsharded_size
         )  # this `.view()` is not autograd visible
-        # TODO (awgu): For `use_orig_params=True`, we create the unsharded
-        # views here, not through the FPW. This enables a *single* place for
-        # unsharded view creation during runtime. We should coalesce the
-        # `use_orig_params=False` code path to do the same.
+        in_forward = self._training_state == HandleTrainingState.FORWARD
         if self._use_orig_params:
-            if self._training_state != HandleTrainingState.FORWARD:
-                # NOTE: `as_params=True` suffices here because we only need to
-                # restore the tensor *values* for backward computation. It
-                # does not need to be a fresh `Tensor` view.
-                self._use_unsharded_views(as_params=True)
-            else:
-                self._use_unsharded_views(as_params=False)
+            # NOTE: When not in the forward, `as_params=True` suffices since we
+            # only need to restore the tensor *values* for backward computation
+            # and do not fresh `Tensor` views.
+            self._use_unsharded_views(as_params=(not in_forward))
+        elif in_forward:
+            self._use_unsharded_views(as_params=False)
 
     def post_unshard(self):
         """
