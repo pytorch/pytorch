@@ -5315,22 +5315,25 @@ class TestQuantizeFx(QuantizationTestCase):
 
         x = torch.randn(4, 4, 4, 4)
         models = [M1().eval(), M2().eval(), M3().eval()]
-        for i in range(len(models)):
-            m = models[i]
+        # torch.channel_shuffle is torch.nn.functional.channel_shuffle
+        expected_nodes = [
+            ns.call_module(torch.nn.ChannelShuffle),
+            ns.call_function(torch.channel_shuffle),
+            ns.call_function(torch.channel_shuffle)
+        ]
+        for m, node in zip(models, expected_nodes):
             m = prepare_fx(m, {"": default_qconfig}, example_inputs=(x,))
             m_copy = copy.deepcopy(m)
             m = convert_fx(m)
             m_ref = convert_to_reference_fx(m_copy)
             node_occurrence = {
+                node: 1,
                 ns.call_function(torch.quantize_per_tensor): 1,
-                ns.call_module(torch.nn.ChannelShuffle): 1 if i == 0 else 0,
-                ns.call_function(torch.channel_shuffle): 1 if i > 0 else 0,
                 ns.call_method("dequantize"): 1
             }
             node_occurrence_ref = {
+                node: 1,
                 ns.call_function(torch.quantize_per_tensor): 4,
-                ns.call_module(torch.nn.ChannelShuffle): 1 if i == 0 else 0,
-                ns.call_function(torch.channel_shuffle): 1 if i > 0 else 0,
                 ns.call_method("dequantize"): 4
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
