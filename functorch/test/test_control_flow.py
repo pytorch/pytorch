@@ -38,6 +38,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(result_true, torch.sin(x))
         self.assertEqual(result_false, torch.cos(x))
 
+    @unittest.expectedFailure
     def test_cond_nested_traced(self):
         def true_nested(y):
             return y * y
