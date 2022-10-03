@@ -1353,7 +1353,7 @@ void initJITBindings(PyObject* module) {
               "__rsub__",
               [](c10::SymIntNode a, py::object b) -> c10::SymIntNode {
                 auto snb = toSymIntNode(a, b);
-                return a->sub(snb);
+                return snb->sub(a);
               })
           .def(
               "__mul__",
