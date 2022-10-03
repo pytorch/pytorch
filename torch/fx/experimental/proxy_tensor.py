@@ -32,6 +32,9 @@ CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
 CONSTANT_NUMEL_LIMIT = 1
 
+# We currently convert all SymInt to proxies before we use them.
+# This could plausibly be handled at the Dynamo level.
+pytree._register_pytree_node(torch.Size, lambda x: (list(x), None), lambda xs, _: tuple(xs))
 
 def fake_signature(fn, nargs):
     """FX gets confused by varargs, de-confuse it"""
@@ -409,11 +412,17 @@ def wrap_key(f, tensors, tracer):
         track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
-        return pytree.tree_map_only(
+        out = pytree.tree_map_only(
             torch.Tensor,
             lambda t: get_proxy_slot(t, tracer, t, lambda x: x.proxy),
             out
         )
+        out = pytree.tree_map_only(
+            (SymInt, SymFloat),
+            lambda t: get_proxy_slot(t.get_pyobj(), tracer)(),
+            out
+        )
+        return out
 
     return wrapped
 
@@ -611,7 +620,9 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
 
             return x
 
-        shape_env = ShapeEnv()
+        shape_env = None
+        if tracing_mode == "symbolic":
+            shape_env = ShapeEnv()
         sym_mode = proxy_mode.sym_mode
 
         # todo: Figure out a more informative name for symints
@@ -641,7 +652,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
             t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
-        t.shape_env = shape_env  # type: ignore[assignment]
+        if tracing_mode == "symbolic":
+            t.shape_env = shape_env  # type: ignore[assignment]
         return t
 
     return wrapped
