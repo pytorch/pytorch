@@ -56,7 +56,7 @@ Tensor cudnn_affine_grid_generator_forward(
   TensorArg theta{ theta_t_contig, "theta", 1 };
   CheckedFrom c = "cudnn_affine_grid_generator_forward";
   checkContiguous(c, theta);
-  checkSize(c, theta, {N, 2, 3});
+  checkSize(c, theta, std::vector<int64_t>({N, 2, 3}));
 
   auto grid_t = at::empty({0}, theta->options());
   grid_t.resize_({N, H, W, 2});
@@ -78,7 +78,7 @@ Tensor cudnn_affine_grid_generator_backward(
   TensorArg grad_grid{ grad_grid_contig, "grad_grid", 1 };
   CheckedFrom c = "cudnn_affine_grid_generator_backward";
   checkContiguous(c, grad_grid);
-  checkSize(c, grad_grid, {N, H, W, 2});
+  checkSize(c, grad_grid, std::vector<int64_t>({N, H, W, 2}));
 
   auto grad_theta_t = at::empty({0}, grad_grid->options());
   grad_theta_t.resize_({N, 2, 3});

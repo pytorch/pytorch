@@ -867,7 +867,7 @@ copy_weights_to_flat_buf_views(
   // Why do we pad to 5 dims here (and elsewhere)?
   // https://docs.nvidia.com/deeplearning/sdk/cudnn-api/index.html#cudnnRNNForwardTraining
   // expects descriptors padded to 3 dimensions.
-  x_desc.set(flat_buf_datatype, x_geom.sizes(), x_geom.strides(), 5);
+  x_desc.set(flat_buf_datatype, c10::asIntArrayRefSlow(x_geom.sizes()), c10::asIntArrayRefSlow(x_geom.strides()), 5);
 
   auto num_weights =
       get_num_weights(handle, rnn_desc, x_desc, flat_buf_datatype);
@@ -1544,7 +1544,7 @@ Tensor try_get_weight_buf(
   // datatype for x_desc comes from any_param, not input.
   // try_get_weight_buf's job is to check "is the weight buffer correctly laid out
   // for us to run it with input of the same datatype?"
-  x_desc.set(datatype, x_geom.sizes(), x_geom.strides(), 5);
+  x_desc.set(datatype, c10::asIntArrayRefSlow(x_geom.sizes()), c10::asIntArrayRefSlow(x_geom.strides()), 5);
 
   auto num_params = get_num_weights(handle, rnn_desc, x_desc, datatype);
 
