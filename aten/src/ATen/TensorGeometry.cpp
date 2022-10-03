@@ -25,7 +25,6 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
-// This doesn't appear to be used anywhere, so not bothering to SymInt-ify.
 bool TensorGeometry::is_contiguous() const {
   if (numel_ == 0) {
     return true;
