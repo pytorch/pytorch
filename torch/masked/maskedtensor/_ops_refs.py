@@ -254,6 +254,11 @@ def stride(func, *args, **kwargs):
     return None
 
 
+@register_dispatch_func([torch.ops.aten.sym_stride])
+def sym_stride(func, *args, **kwargs):
+    return None
+
+
 @register_dispatch_func([torch.ops.prim.layout])
 def layout(func, *args, **kwargs):
     return _get_data(args[0]).layout
