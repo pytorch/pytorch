@@ -699,6 +699,9 @@ public:
   template <class T, size_t N>
   IValue(std::array<T, N> v);
 
+  // TODO: this is not robust
+  IValue(at::ArrayRef<c10::SymInt> v);
+
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
       std::is_constructible<IValue, T>::value &&
