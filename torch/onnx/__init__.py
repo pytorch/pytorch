@@ -8,7 +8,6 @@ from torch._C._onnx import (
     TensorProtoDataType,
     TrainingMode,
 )
-from torch.onnx._internal import registration as _registration
 
 from . import (  # usort:skip. Keep the order instead of sorting lexicographically
     _deprecation,
