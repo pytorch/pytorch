@@ -569,6 +569,10 @@ class TORCH_API TensorBase {
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
   PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    TORCH_CHECK(
+        impl_->numel() <=
+            static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+        "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
     return generic_packed_accessor<T,N,PtrTraits,int32_t>();
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
