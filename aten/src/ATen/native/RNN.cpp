@@ -624,20 +624,20 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 // It's a struct only because functional programming in C++ is a pain, and it's easier
 // to pass around "vtable pointers" than actual function pointers.
 
-void check_rnn_cell_forward_input(const Tensor& input, int64_t input_size) {
+void check_rnn_cell_forward_input(const Tensor& input, c10::SymInt input_size) {
   TORCH_CHECK(
-    input.size(1) == input_size,
-    "input has inconsistent input_size: got ", input.size(1), " expected ", input_size);
+    input.sym_size(1) == input_size,
+    "input has inconsistent input_size: got ", input.sym_size(1), " expected ", input_size);
 }
 
-void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, int64_t hidden_size, int64_t hidden_label) {
+void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, c10::SymInt hidden_size, c10::SymInt hidden_label) {
   TORCH_CHECK(
-    input.size(0) == hx.size(0),
-    "Input batch size ", input.size(0), " doesn't match hidden", hidden_label, " batch size ", hx.size(0));
+    input.sym_size(0) == hx.sym_size(0),
+    "Input batch size ", input.sym_size(0), " doesn't match hidden", hidden_label, " batch size ", hx.sym_size(0));
 
   TORCH_CHECK(
-    hx.size(1) == hidden_size,
-    "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.size(1), ", expected ", hidden_size);
+    hx.sym_size(1) == hidden_size,
+    "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.sym_size(1), ", expected ", hidden_size);
 }
 
 template<typename hidden_type_tmpl, typename cell_params_tmpl>
@@ -1465,8 +1465,8 @@ std::tuple<Tensor, Tensor> lstm_cell(
   const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
-  check_rnn_cell_forward_input(input, w_ih.size(1));
-  auto hidden_size = w_hh.size(1);
+  check_rnn_cell_forward_input(input, w_ih.sym_size(1));
+  auto hidden_size = w_hh.sym_size(1);
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
   check_rnn_cell_forward_hidden(input, hx[1], hidden_size, 0);
   static at::Tensor undefined;
