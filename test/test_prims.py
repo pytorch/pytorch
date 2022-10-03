@@ -27,6 +27,7 @@ from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, 
 import torch._prims as prims
 from torch._prims.executor import make_traced
 import torch._refs as refs
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 if TEST_SCIPY:
@@ -165,6 +166,55 @@ class TestPrims(TestCase):
         ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
             "while there exists nvfuser implementations for them.")
 
+    def test_skip_ops_nvfuser_prims_mode(self, device):
+        # This test verifies that the NvfuserPrimsMode skips the specified
+        # functions. Skipping a function means that it's not converted into
+        # nvprims counterparts.
+        from torch._prims.context import NvfuserPrimsMode
+
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+
+        def func(a):
+            return torch.ops.prims.sin.default(a)
+
+        skip_ops = {"prims.sin.default", }
+        with NvfuserPrimsMode(skip_ops=skip_ops):
+            gm = make_fx(func)(a)
+
+        includes_any_prims_sin = any(
+            node.target == torch.ops.prims.sin.default for node in gm.graph.nodes
+        )
+        self.assertTrue(includes_any_prims_sin)
+        include_any_nvprims_sin = any(
+            node.target == torch.ops.nvprims.sin.default for node in gm.graph.nodes
+        )
+        self.assertFalse(include_any_nvprims_sin)
+
+    def test_skip_ops_nvfuser_capability_mode(self, device):
+        # This test verifies that the NvfuserCapabilityMode skips the specified
+        # functions. Skipping a function means that specific
+        # reference/decomposition is not traced and there's no attempt to lower
+        # it to nvprims.
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+
+        a = make_tensor(5, 5, device=device, dtype=torch.float32)
+
+        def func(a):
+            return torch.sin(a)
+
+        skip_ops = {"torch.sin", }
+        with TorchRefsNvfuserCapabilityMode(skip_ops=skip_ops):
+            gm = make_fx(func)(a)
+
+        includes_any_aten_sin = any(
+            node.target == torch.ops.aten.sin.default for node in gm.graph.nodes
+        )
+        self.assertTrue(includes_any_aten_sin)
+        include_any_nvprims_sin = any(
+            node.target == torch.ops.nvprims.sin.default for node in gm.graph.nodes
+        )
+        self.assertFalse(include_any_nvprims_sin)
+
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_empty_fusion(self, device):
@@ -184,6 +234,38 @@ class TestPrims(TestCase):
         # Should pass with partitioned executor
         out = execute(gm, a, a, a, executor="nvfuser")
         self.assertEqual(out, (a, a, a))
+
+    @onlyCUDA
+    @dtypes(torch.float16, torch.uint8)
+    def test_nvprim_convert_element_type(self, device, dtype):
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.executor import execute
+        from torch._prims.context import TorchRefsNvfuserCapabilityMode
+        from torch._prims_common import _torch_dtype_to_nvfuser_dtype_map
+
+        # initialize input as float32, which is different from `dtype` in the argument.
+        # this ensures that tracing will have a _to_copy node.
+        a = torch.randn(3, 3, device=device, dtype=torch.float32)
+
+        def func(x, dtype):
+            return x.to(dtype).to(x.dtype)
+
+        with TorchRefsNvfuserCapabilityMode():
+            gm = make_fx(func)(a, dtype)
+            execute(gm, a, dtype, executor="nvfuser")
+
+        call_function_nodes = list(filter(lambda n: n.op == "call_function", gm.graph.nodes))
+        includes_aten_to_copy = any(
+            torch.ops.aten._to_copy.default == node.target
+            for node in call_function_nodes
+        )
+        includes_nvprim_convert_element_type = any(
+            torch.ops.nvprims.convert_element_type.default == node.target
+            for node in call_function_nodes
+        )
+        nvprim_support_flag = _torch_dtype_to_nvfuser_dtype_map.get(dtype) is not None
+        self.assertEqual(includes_aten_to_copy, not nvprim_support_flag)
+        self.assertEqual(includes_nvprim_convert_element_type, nvprim_support_flag)
 
     @onlyCUDA
     @skipCUDAIfRocm
@@ -529,6 +611,8 @@ class TestPrims(TestCase):
             out = execute(gm, sample.input, *sample.args, executor="strictly_nvfuser")
             self.assertEqual(out, gm(sample.input, *sample.args))
 
+    # decomposition of native_batch_norm_backward uses a casting, which prevents nvprim lowering on CPU build
+    @onlyCUDA
     @dtypes(torch.float32, torch.float16)
     def test_batch_norm_backward_nvprims(self, device, dtype):
         # This test verifies that the backward pass of batch norm is correctly decomposed into nvprims
@@ -811,10 +895,11 @@ class TestDecomp(TestCase):
 
         from torch._prims.context import TorchRefsNvfuserCapabilityMode, _is_func_unsupported_nvfuser
         from torch.fx.experimental.proxy_tensor import make_fx
-        op = torch._decomp.decomposition_table.get(torch.ops.aten.leaky_relu_backward.default)
+        op = torch.ops.aten.leaky_relu_backward.default
+        op_decomp = torch._decomp.decomposition_table.get(op)
 
         def fn0(*arg):
-            return _is_func_unsupported_nvfuser(TorchRefsNvfuserCapabilityMode(), op, arg, {})
+            return _is_func_unsupported_nvfuser(TorchRefsNvfuserCapabilityMode(), op, op_decomp, arg, {})
 
         def fn1(x):
             x = x * 2
