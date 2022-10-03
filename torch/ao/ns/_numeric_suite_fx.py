@@ -757,23 +757,23 @@ def prepare_n_shadows_model(
     """
     Given a model with a graph with M ops such as
 
-      ... (args_m, kwargs_m) -> op_m -> (output_m) -> ...
+
+      args_kwargs_m -> op_m -> output_m
+
 
     And a set of N qconfigs for each op, creates a new model, with
     each of the subgraph of `op_m` transformed into
 
-      ... (args_m, kwargs_m) -> op_m -> (output_m) -> ...
-                  |                        |
-                 ...                      ...
-                  |                        |
-                  |---------------------------> mod_with_op_m_transformed_with_qconfig_i
-                 ...                      ...
-                  |                        |
-                  |---------------------------> mod_with_op_m_transformed_with_qconfig_n
+    .. code::
 
+      args_kwargs_m -> op_m -> output_m
+           |                        |
+           |---------------------------> mod_with_op_m_transformed_with_qconfig_i
 
-    Where `mod_with_op_m_transformed_with_qconfig_i` is a submodule, and its
+    Where mod_with_op_m_transformed_with_qconfig_i is a submodule, and its
     inner graph looks like
+
+    .. code::
 
       args_m -------- op_m_prepared_with_qconfig_n -> output_m_n -> comparison_logger
                   /                                                    /

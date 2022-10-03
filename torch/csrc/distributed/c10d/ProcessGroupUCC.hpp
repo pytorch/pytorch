@@ -115,13 +115,12 @@ class TORCH_API ProcessGroupUCC : public ProcessGroup {
     friend class Comm;
 
    public:
-    WorkUCC(OpType opType, const char* prof_title)
-        : Work(-1, opType, prof_title) {}
     WorkUCC(
         OpType opType,
         const char* prof_title,
+        const c10::optional<std::vector<at::Tensor>>& inputs,
         const c10::intrusive_ptr<ProcessGroupUCCLogger>& logger)
-        : Work(-1, opType, prof_title), logger_(logger) {}
+        : Work(-1, opType, prof_title, inputs), logger_(logger) {}
     ~WorkUCC();
     void setException();
     void setAndThrowException();
