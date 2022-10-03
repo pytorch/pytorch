@@ -47,9 +47,9 @@ namespace {
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
-  static inline Tensor repeat_if_defined(const Tensor& t, int64_t repeat) {
+  static inline Tensor repeat_if_defined(const Tensor& t, SymInt repeat) {
     if (t.defined()) {
-      return t.repeat(repeat);
+      return t.repeat_symint(repeat);
     }
     return t;
   }
@@ -487,12 +487,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
       && (input.dim() >= 3)
-      && ((input.size(0) <= 880801 && training) // spatial, training
-          ||(input.size(0) <= 65535 && !training)) //spatial, eval
+      && ((input.sym_size(0) <= 880801 && training) // spatial, training
+          ||(input.sym_size(0) <= 65535 && !training)) //spatial, eval
       && detail::getCUDAHooks().compiledWithCuDNN()
       && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()
       && cudnn_enabled && detail::getCUDAHooks().versionCuDNN() >= 5110L
-      && input.numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
+      && input.sym_numel() < std::numeric_limits<std::int32_t>::max() // some cuDNN kernels have 32-bit indexing limitations
       );
 
   if (use_cudnn) {
@@ -611,32 +611,32 @@ Tensor instance_norm(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
+ TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
-  std::vector<int64_t> shape = input.sizes().vec();
-  int64_t b = input.size(0);
-  int64_t c = input.size(1);
+  std::vector<SymInt> shape = input.sym_sizes().vec();
+  SymInt b = input.sym_size(0);
+  SymInt c = input.sym_size(1);
   shape[1] = b * c;
-  shape[0] = 1;
+  shape[0] = SymInt(1);
 
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
   Tensor running_mean_ = repeat_if_defined(running_mean, b);
   Tensor running_var_ = repeat_if_defined(running_var, b);
 
-  auto input_reshaped = input.contiguous().view(shape);
+  auto input_reshaped = input.contiguous().view_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
                             use_input_stats, momentum, eps, cudnn_enabled);
 
   // we alias running_mean and running_var because they are const but we want to modify their data
   if (running_mean.defined()) {
-    at::alias(running_mean).copy_(running_mean_.view({ b, c }).mean(0, false));
+    at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
   }
   if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view({ b, c }).mean(0, false));
+    at::alias(running_var).copy_(running_var_.view_symint({ b, c }).mean(0, false));
   }
 
-  return out.view(input.sizes());
+  return out.view_symint(input.sym_sizes());
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
