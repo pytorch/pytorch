@@ -1,8 +1,8 @@
 #ifdef USE_C10D_UCC
 
-#include <c10d/ProcessGroupUCC.hpp>
-#include <c10d/UCCTracing.hpp>
-#include <c10d/UCCUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
+#include <torch/csrc/distributed/c10d/UCCTracing.hpp>
+#include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -761,7 +761,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
   seq_++;
   set_timeout(coll);
   auto work = c10::make_intrusive<ProcessGroupUCC::WorkUCC>(
-      opType, seq_, prof_title, logger);
+      opType, seq_, prof_title, inputTensors, logger);
 
   if (opType == OpType::RECV) {
     work->sourceRank_ = coll.root;
@@ -865,7 +865,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allgather(
         tensor.device(),
         inputTensors,
         outputTensors[0],
-        "ucc:allgatherv");
+        "ucc:all_gather");
   } else {
     WorkData* data = new WorkData();
     std::vector<at::Tensor> flat_output(outputTensors.size());
@@ -997,7 +997,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce(
       tensor.device(),
       tensors,
       tensors,
-      "ucc:allreduce");
+      "ucc:all_reduce");
 }
 
 c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce_coalesced(
