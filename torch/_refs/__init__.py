@@ -1537,20 +1537,21 @@ def _xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, Number
     # functions, which causes a runtime error in TorchRefsMode context manager
     # when strict = True
     # 2) where requires all tensors to be on the same device
-    # TODO remove scalar_tensor
     if isinstance(a, TensorLike):
         if isinstance(b, Number):
             b = scalar_tensor(b, dtype=a.dtype, device=a.device)
         elif utils.is_cpu_scalar_tensor(b):
-            b = prims.device_put(b, device=a.device)
+            b = b.to(device=a.device)
     elif isinstance(b, TensorLike):
         if isinstance(a, Number):
             a = scalar_tensor(a, dtype=b.dtype, device=b.device)
         elif utils.is_cpu_scalar_tensor(a):
-            a = prims.device_put(a, device=b.device)
+            a = a.to(device=b.device)
 
-    rhs = torch.where(eq(a, 0), 0, mul(a, log(b)))
-    return torch.where(isnan(b), float("nan"), rhs)
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
+    rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, torch.log(b)))
+    return torch.where(torch.isnan(b), float("nan"), rhs)
 
 
 # TODO: add docstring

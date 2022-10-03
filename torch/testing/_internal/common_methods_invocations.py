@@ -17481,6 +17481,7 @@ python_ref_db = [
         "_refs.xlogy",
         torch_opinfo_name="xlogy",
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
     ),
     #
     # Elementwise Binary Special OpInfos
@@ -17489,6 +17490,7 @@ python_ref_db = [
         "_refs.special.xlog1py",
         torch_opinfo_name="special.xlog1py",
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
     ),
     #
     # Data Conversion & Data Movement Opinfos
