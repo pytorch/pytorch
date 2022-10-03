@@ -114,6 +114,7 @@ def _unflatten_optim_state(
         otherwise. The final optimizer state dict will need to map these
         entries using the proper unflattened parameter IDs.
     """
+    fsdp_module._clear_grads_if_needed()
     consolidated_state = _communicate_optim_state(
         flat_param,
         flat_param_state,
