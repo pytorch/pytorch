@@ -581,6 +581,20 @@ inline PyObject* toPyObject(c10::SymInt symint) {
   }
 }
 
+inline void throw_intlist_exception(
+    const torch::PythonArgs* args,
+    size_t i,
+    PyObject* obj,
+    size_t idx) {
+  throw TypeError(
+      "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+      args->signature.name.c_str(),
+      args->signature.params[i].name.c_str(),
+      args->signature.params[i].type_name().c_str(),
+      Py_TYPE(obj)->tp_name,
+      idx + 1);
+}
+
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   if (!args[i]) {
     return c10::fmap(signature.params[i].default_intlist, [](int64_t di) {
@@ -608,47 +622,49 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   for (const auto idx : c10::irange(size2)) {
     PyObject* obj =
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
-    try {
-      if (is_symint_node(py::handle(obj))) {
-        res.push_back(py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
-      } else {
-        // Elements of torch.Size are tensors during tracing, and we need to
-        // record extra information before they are turned into an IntArrayRef
-        if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
-          auto& var = THPVariable_Unpack(obj);
-          jit::tracer::ArgumentStash::stashIntArrayRefElem(
-              signature.params[i].name, size2, idx, var);
-          res.push_back(var.item<int64_t>());
-          continue;
-        }
-        res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+
+    // Elements of torch.Size are tensors during tracing, and we need to
+    // record extra information before they are turned into an IntArrayRef
+    if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
+      auto& var = THPVariable_Unpack(obj);
+      jit::tracer::ArgumentStash::stashIntArrayRefElem(
+          signature.params[i].name, size2, idx, var);
+      try {
+        res.push_back(var.item<int64_t>());
+        continue;
+      } catch (std::exception& e) {
+        throw_intlist_exception(this, i, obj, idx);
       }
-    } catch (const std::exception& e) {
-      auto te = TypeError(
-          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          idx + 1);
+      continue;
+    } else {
+      // convert tensor to scalar outside of try / catch,
+      // so that Tensor subclass exceptions will not be caught.
+      if (THPVariable_Check(obj)) {
+        auto& var = THPVariable_Unpack(obj);
+        if (var.numel() != 1 ||
+            !at::isIntegralType(
+                var.dtype().toScalarType(), /*include_bool*/ true)) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+        // TODO: ideally, if this was a fake tensor this would
+        // result in a SymInt, but we don't have the API to do this
+        res.push_back(var.item<int64_t>());
+      } else {
+        try {
+          if (is_symint_node(py::handle(obj))) {
+            res.push_back(
+                py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
+          } else {
+            res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+          }
+        } catch (std::exception& e) {
+          throw_intlist_exception(this, i, obj, idx);
+        }
+      }
     }
   }
 
   return res;
-}
-
-inline void throw_intlist_exception(
-    const torch::PythonArgs* args,
-    size_t i,
-    PyObject* obj,
-    size_t idx) {
-  throw TypeError(
-      "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
-      args->signature.name.c_str(),
-      args->signature.params[i].name.c_str(),
-      args->signature.params[i].type_name().c_str(),
-      Py_TYPE(obj)->tp_name,
-      idx + 1);
 }
 
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(
