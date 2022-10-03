@@ -10,6 +10,8 @@
 
 namespace c10 {
 
+class SymFloat;
+
 // `SymInt` is a C++ wrapper class around int64_t data_ which  and is used to
 // represent concrete dimension values.
 //
@@ -187,6 +189,8 @@ class C10_API SymInt {
   bool operator<=(int64_t sci) const;
   bool operator>(int64_t sci) const;
   bool operator>=(int64_t sci) const;
+
+  operator SymFloat() const;
 
   int64_t as_int_unchecked() const {
     return data_;

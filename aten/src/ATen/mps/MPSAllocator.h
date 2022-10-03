@@ -1,24 +1,12 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/Tensor.h>
-#include <ATen/ATen.h>
-#include <ATen/Utils.h>
-#include <torch/library.h>
-#include <c10/util/flat_hash_map.h>
-
-#include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/MPSStream.h>
 #include <cstdio>
 #include <mutex>
 #include <set>
-#include <utility>
+#include <atomic>
 #include <mach/vm_page_size.h>
-
-#ifdef __OBJC__
-#include <Foundation/Foundation.h>
-#include <Metal/Metal.h>
-#include <Metal/MTLHeap.h>
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
+#include <c10/util/flat_hash_map.h>
 
 // this implementation is based on CUDACachingAllocator.
 // It utilizes Metal Heaps to improve the performance with buffer allocation.
@@ -53,10 +41,23 @@ static const size_t kSmallHeap     = MB(8);  // "small" allocations are packed i
 static const size_t kLargeHeap     = MB(32); // "large" allocations may be packed in 32 MiB heaps
 static const size_t kRoundLarge    = MB(2);  // round up large allocations to 2 MiB
 
-// TODO: check the caching performance of write-combined mode
-constexpr MTLResourceOptions kCPUCacheMode = MTLResourceOptionCPUCacheModeDefault;
-constexpr MTLResourceOptions kPrivateResourceOptions = kCPUCacheMode | MTLResourceStorageModePrivate;
-constexpr MTLResourceOptions kSharedResourceOptions  = kCPUCacheMode | MTLResourceStorageModeShared;
+// buffer pools could be customized with a combination of usage flags
+enum UsageFlags : uint32_t {
+  PRIVATE = 0,
+  SMALL   = (1 << 0), // small heaps have sizes of kSmallHeap, and large ones kLargeHeap
+  SHARED  = (1 << 1), // shared pools allocated on devices with unified memory; otherwise, private between host/device
+  MANAGED = (1 << 2), // managed storage mode
+  HAZARD  = (1 << 3), // enables Automatic Hazard Tracking for the resources allocated on the pool
+  SCALAR  = (1 << 4), // used to import CPU scalar values to GPU and use them in MPS Stream
+};
+// debug verbosity flags
+enum DebugVerbosity : uint32_t {
+  SILENT      = 0,
+  PROFILING   = (1 << 0), // print generic profiling data for total system memory usage
+  ALLOCATIONS = (1 << 1), // print buffer allocations
+  RECYCLES    = (1 << 2), // print buffer recycling
+  RELEASES    = (1 << 3), // print buffer releases
+};
 
 struct HeapBlock;
 
@@ -98,9 +99,23 @@ struct HeapBlock
   HeapBlock(size_t Size, const id<MTLHeap> Heap = nullptr, BufferPool *Pool = nullptr) :
             heap(Heap), size({.total = Size, .available = Size}), pool(Pool), n_buffers(0) { }
 
-  static MTLResourceOptions getOptions(bool SharedStorage = false) { return SharedStorage ? kSharedResourceOptions : kPrivateResourceOptions; }
+  static MTLResourceOptions getOptions(uint32_t usage) {
+    // TODO: check the caching performance of write-combined mode
+    MTLResourceOptions options = MTLResourceCPUCacheModeDefaultCache;
 
-  static id<MTLHeap> createMTLHeap(id<MTLDevice> device, size_t size, bool is_shared) {
+    if (usage & UsageFlags::MANAGED)
+      options |= MTLResourceStorageModeManaged;
+    else if (usage & UsageFlags::SHARED)
+      options |= MTLResourceStorageModeShared;
+    else
+      options |= MTLResourceStorageModePrivate;
+
+      options |= (usage & UsageFlags::HAZARD) ? MTLResourceHazardTrackingModeTracked : MTLResourceHazardTrackingModeUntracked;
+
+    return options;
+  }
+
+  static id<MTLHeap> createMTLHeap(id<MTLDevice> device, size_t size, uint32_t usage) {
     id<MTLHeap> heap = nil;
     MTLHeapDescriptor *d = [MTLHeapDescriptor new];
     if (d) {
@@ -111,12 +126,12 @@ struct HeapBlock
       } else {
         d.size = kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
       }
-      d.storageMode = is_shared ? MTLStorageModeShared : MTLStorageModePrivate;
+      d.storageMode = (usage & UsageFlags::SHARED) ? MTLStorageModeShared : MTLStorageModePrivate;
       d.cpuCacheMode = MTLCPUCacheModeDefaultCache;
       // this automatically handles Metal buffer access synchronizations at the
       // cost of slightly lower performance.
-      d.hazardTrackingMode = MTLHazardTrackingModeTracked;
-      d.resourceOptions = getOptions(is_shared) | (MTLHazardTrackingModeTracked << MTLResourceHazardTrackingModeShift);
+      d.hazardTrackingMode = (usage & UsageFlags::HAZARD) ? MTLHazardTrackingModeTracked : MTLHazardTrackingModeUntracked;
+      d.resourceOptions = getOptions(usage);
       d.type = MTLHeapTypeAutomatic;
       heap = [device newHeapWithDescriptor: d];
       if (heap) {
@@ -132,8 +147,8 @@ struct HeapBlock
   static NSUInteger heapAvailableSize(id<MTLHeap> heap, size_t Alignment = vm_page_size) {
       return [heap maxAvailableSizeWithAlignment:Alignment];
   }
-  id<MTLBuffer> newMTLBuffer(size_t length, bool is_shared) {
-    id<MTLBuffer> buf = [heap newBufferWithLength:length options:getOptions(is_shared)];
+  id<MTLBuffer> newMTLBuffer(size_t length, uint32_t usage) {
+    id<MTLBuffer> buf = [heap newBufferWithLength:length options:getOptions(usage)];
     if (buf) {
       size.available = heapAvailableSize(heap);
       n_buffers++;
@@ -155,15 +170,17 @@ typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
 
 struct BufferPool
 {
-  BufferPool(const id<MTLDevice> Device, bool Small, bool Shared) :
-           device(Device), is_small(Small), is_shared(Shared),
-           heaps(HeapBlock::Comparator), buffers(BufferBlock::Comparator) { }
+  BufferPool(const id<MTLDevice> Device, uint32_t Usage) :
+             device(Device), usage(Usage), n_buffers(0), allocated_size(0),
+             heaps(HeapBlock::Comparator), buffers(BufferBlock::Comparator) { }
 
   const id<MTLDevice> device;
-  // small heaps have sizes of kSmallHeap, and large ones kLargeHeap
-  const bool is_small;
-  // private pools allocated on device memory; otherwise, shared between host/device
-  const bool is_shared;
+  // usage flags to customize the pool for various purposes (see UsageFlags enum)
+  const uint32_t usage;
+  // total number of buffers in the pool
+  uint32_t n_buffers;
+  // total allocations size on this pool
+  size_t allocated_size;
   // list of heaps ordered by their "available" (not total) memory size
   std::set<HeapBlock*, HeapComparison> heaps;
   // list of only "available" buffers in the pool (i.e., buffers not in-use)
@@ -173,8 +190,8 @@ struct BufferPool
 struct AllocParams
 {
   AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool) :
-            search_key(Alloc_Size), pool(Pool),
-            buffer_block(nullptr), requested_size(Requested_Size) {}
+              search_key(Alloc_Size), pool(Pool),
+              buffer_block(nullptr), requested_size(Requested_Size) { }
   size_t size() const { return search_key.size; }
 
   BufferBlock search_key;
@@ -186,26 +203,37 @@ struct AllocParams
 class MPSHeapAllocatorImpl
 {
 public:
+  // (see m_high_watermark_ratio for description)
+  constexpr static double default_high_watermark_ratio = 0.0;
+
   explicit MPSHeapAllocatorImpl() :
-                      m_device(at::mps::MPSDevice::getInstance()->device()),
-                      m_large_pool_shared(m_device, false, true), m_large_pool_private(m_device, false, false),
-                      m_small_pool_shared(m_device, true , true), m_small_pool_private(m_device, true , false),
-                      m_total_allocated_memory(0), m_max_buffer_size([m_device maxBufferLength]),
-                      m_set_fraction(false), m_enable_debug_info(false) { }
+    m_device(at::mps::MPSDevice::getInstance()->device()),
+    m_large_pool_shared (m_device, UsageFlags::SHARED  | UsageFlags::HAZARD),
+    m_large_pool_private(m_device, UsageFlags::PRIVATE | UsageFlags::HAZARD),
+    m_small_pool_shared (m_device, UsageFlags::SMALL   | UsageFlags::SHARED  | UsageFlags::HAZARD),
+    m_small_pool_private(m_device, UsageFlags::SMALL   | UsageFlags::PRIVATE | UsageFlags::HAZARD),
+    // no Hazard Tracking required for the Scalar pool (synchronized manually)
+    m_scalar_pool(m_device, UsageFlags::SMALL | UsageFlags::SHARED | UsageFlags::SCALAR),
+    m_total_allocated_memory(0), m_max_buffer_size([m_device maxBufferLength]),
+    m_stream(getDefaultMPSStream())
+  {
+    init_allocator_params();
+  }
 
   // interface exposed to at::Allocator
-  id<MTLBuffer> Malloc(size_t size, bool sharedStorage);
-  void Free(void* ptr);
-  void EmptyCache();
+  id<MTLBuffer> malloc(size_t size, uint32_t usage);
+  void free(void* ptr);
+  void emptyCache();
+  // interface exposed to internal MPS operations
   bool isSharedBuffer(void* ptr);
   ssize_t getRequestedBufferSize(void* ptr);
   void setBufferShape(void* ptr, const IntArrayRef& shape);
   IntArrayRef getBufferShape(void* ptr);
+  id<MTLBuffer> allocScalarBufferWithValue(void* value, size_t size);
 
+  bool getDebugVerbosity() const { return m_debug_verbosity; }
+  size_t getMaxTotalAllowedSize() const { return m_max_total_allowed_size; }
   inline id<MTLDevice> Device() const { return m_device; }
-  void enable_debug_info() { m_enable_debug_info = true; }
-  bool debug_info_enabled() const { return m_enable_debug_info; }
-  void set_shared_storage_mode(bool useSharedStorage);
 
 private:
   const id<MTLDevice> m_device;
@@ -216,40 +244,59 @@ private:
   BufferPool m_large_pool_shared, m_large_pool_private;
   // unallocated cached buffers 1 MB or smaller
   BufferPool m_small_pool_shared, m_small_pool_private;
+  // small cached buffers to import scalar values into MPS stream
+  BufferPool m_scalar_pool;
   // total memory allocated by HeapAllocator
   size_t m_total_allocated_memory;
   // max buffer size allowed by Metal
   size_t m_max_buffer_size;
-  // sets a soft upper bound to limit the total allocations
-  bool m_set_fraction;
-  // use "PYTORCH_DEBUG_MPS_ALLOCATOR" env-var to enable debug info
-  bool m_enable_debug_info;
+  // maximum total size allowed to be allocated
+  size_t m_max_total_allowed_size;
+  // upper limit ratio to limit the total allocations (between 0 and 1)
+  // 0 means unlimited (would spill to disk or system failure if OOM)
+  // 1 is maximum allowed by device.recommendedMaxWorkingSetSize
+  // (e.g., value 0.95 means we allocate up to 95% of total memory; beyond that allocations fail)
+  double m_high_watermark_ratio;
+  // use "PYTORCH_DEBUG_MPS_ALLOCATOR" env-var to set debug verbosity
+  uint32_t m_debug_verbosity;
+  // default MPS stream
+  MPSStream* m_stream;
 
+  void init_allocator_params();
   HeapBlock* get_free_heap(AllocParams& p);
   bool get_free_buffer(AllocParams& p);
   BufferBlock* get_allocated_buffer_block(void* ptr);
+  BufferBlock* alloc_buffer_block(size_t size, uint32_t usage);
   bool alloc_buffer(AllocParams& p);
   void free_buffer(BufferBlock* buffer_block);
   void release_buffer(BufferBlock* buffer_block, bool remove_empty_heap = true);
   void release_buffers(BufferPool& pool);
-  bool release_available_cached_buffers(const AllocParams& p);
+  bool release_available_cached_buffers(AllocParams& p);
   bool release_cached_buffers();
-  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event);
 
-  BufferPool& get_pool(size_t Size, bool useShared) {
-      return Size <= kMaxSmallAlloc ? (useShared ? m_small_pool_shared : m_small_pool_private) :
-                                      (useShared ? m_large_pool_shared : m_large_pool_private);
+  BufferPool& get_pool(size_t Size, uint32_t usage) {
+    if (usage & UsageFlags::SCALAR)
+      return m_scalar_pool;
+    return Size <= kMaxSmallAlloc ? ((usage & UsageFlags::SHARED) ? m_small_pool_shared : m_small_pool_private) :
+                                    ((usage & UsageFlags::SHARED) ? m_large_pool_shared : m_large_pool_private);
   }
 
-  size_t get_allocation_size(size_t Length, bool useShared) {
+  size_t get_allocation_size(size_t Length, uint32_t usage) const  {
     MTLSizeAndAlign sizeAlign = [m_device heapBufferSizeAndAlignWithLength:Length
-                                                                   options:HeapBlock::getOptions(useShared)];
+                                                                   options:HeapBlock::getOptions(usage)];
     return BufferBlock::alignUp(sizeAlign.size, sizeAlign.align);
   }
-  // TODO: make this configurable
-  static size_t max_split_size() { return std::numeric_limits<size_t>::max(); }
   // maximum size of device memory available for allocation in current process
-  size_t max_available_size() const { return [m_device recommendedMaxWorkingSetSize] - [m_device currentAllocatedSize]; }
+  size_t max_device_size() const { return [m_device recommendedMaxWorkingSetSize]; }
+  // there are implicit allocations from MPS backend, so we need to query the 'device' for
+  // total allocated size instead of manually tracking in MPSAllocator
+  size_t current_allocated_size() const { return [m_device currentAllocatedSize]; }
+
+  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event) const {
+    for (const auto& name : MPSAllocatorCallbacksRegistry()->Keys()) {
+      MPSAllocatorCallbacksRegistry()->Create(name)->executeMPSAllocatorCallback(buffer_block->buffer, event);
+    }
+  }
 
   // TODO: make a common function to do size unit conversions in PyTorch.
   static std::string format_size(uint64_t size) {
@@ -265,6 +312,17 @@ private:
 };
 
 } // namespace HeapAllocator
+
+// interface exposed to internal MPS operations
+
+// get the requested non-aligned size of an MTL buffer
+ssize_t get_requested_buffer_size(void* ptr);
+// retrieve the shape of a base tensor from a view tensor
+IntArrayRef get_buffer_shape(void* ptr);
+// set the shape of a base tensor from a view tensor
+void set_buffer_shape(void* ptr, const IntArrayRef& shape);
+// allocate a buffer from a specialized pool to import CPU scalars into GPU
+DataPtr allocate_scalar_buffer(void* value, size_t size);
 
 } // namespace mps
 } // namespace at
