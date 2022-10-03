@@ -61,7 +61,7 @@ MPSGeneratorImpl* MPSGeneratorImpl::clone_impl() const {
 }
 
 void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results) {
-  mpsStream->executeMPSGraph(mpsGraph, feeds, results);
+  mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
 }
 
 MPSDataType getMPSDataType(ScalarType scalar_type) {
