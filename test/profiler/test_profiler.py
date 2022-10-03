@@ -1261,7 +1261,7 @@ class TestProfiler(TestCase):
 
 def find_node_with_name(nodes, name):
     for node in nodes:
-        if node.name() == name:
+        if node.name == name:
             return node
         result = find_node_with_name(node.children, name)
         if result is not None:
@@ -1434,8 +1434,8 @@ class TestTorchTidyProfiler(TestCase):
             node.parent.extra_fields,
             torch._C._profiler._ExtraFields_PyCCall)
 
-        self.assertEqual(node.children[0].name(), "aten::empty")
-        self.assertEqual(node.children[0].children[0].name(), "[memory]")
+        self.assertEqual(node.children[0].name, "aten::empty")
+        self.assertEqual(node.children[0].children[0].name, "[memory]")
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
             torch._C._profiler._ExtraFields_Allocation)
@@ -1466,6 +1466,8 @@ class TestTorchTidyProfiler(TestCase):
         self.assertEqual(layout_info, [torch.strided, torch.strided, None])
         device_info = [x.device if x else None for x in input_info.tensor_metadata]
         self.assertEqual(device_info, [torch.device("cpu"), torch.device("cpu"), None])
+        tensor_dtypes = [x.dtype if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(tensor_dtypes, [torch.float32, torch.float32, None])
         self.assertEqual(node.extra_fields.scope, torch.profiler.RecordScope.FUNCTION)
 
         mul_node = find_node_with_name(nodes, "aten::mul")
@@ -1647,8 +1649,7 @@ class TestTorchTidyProfiler(TestCase):
         ptr = node.extra_fields.ptr
         self.assertGreater(ptr, 0)
         self.assertEqual(node.extra_fields.alloc_size, alloc_size)
-        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
-        self.assertEqual(node.extra_fields.device_index, -1)
+        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         total_allocated = node.extra_fields.total_allocated
 
         # total_reserved is only for CUDACachingAllocator
@@ -1664,8 +1665,7 @@ class TestTorchTidyProfiler(TestCase):
 
         self.assertEqual(node.extra_fields.ptr, ptr)
         self.assertEqual(node.extra_fields.alloc_size, -alloc_size)
-        self.assertEqual(node.extra_fields.device_type, torch._C._autograd.DeviceType.CPU)
-        self.assertEqual(node.extra_fields.device_index, -1)
+        self.assertEqual(node.extra_fields.device, torch.device("cpu"))
         self.assertEqual(node.extra_fields.total_allocated, total_allocated - alloc_size)
 
 
@@ -1677,6 +1677,7 @@ class MockKinetoEvent():
     _linked_correlation_id: int
     _device_type: int
 
+    @property
     def name(self) -> str:
         return self._name
 
@@ -1707,6 +1708,7 @@ class MockProfilerEvent():
     def end_time_ns(self):
         return self.start_time_ns + self.duration_time_ns
 
+    @property
     def name(self) -> str:
         return self._name
 
@@ -1827,7 +1829,7 @@ class TestExperimentalUtils(TestCase):
 
             kineto_events = [{
                 '_name':
-                e.name(),
+                e.name,
                 '_start_us':
                 e.start_us(),
                 '_duration_us':
@@ -1848,7 +1850,7 @@ class TestExperimentalUtils(TestCase):
                         stack.append(child_event)
 
             profiler_events = [{
-                '_name': e.name(),
+                '_name': e.name,
                 'id': e.id,
                 'start_time_ns': e.start_time_ns,
                 'duration_time_ns': e.duration_time_ns,
@@ -1924,7 +1926,7 @@ class TestExperimentalUtils(TestCase):
         def format_queue_depth(queue_depth_list, events):
             res = ""
             for data, event in zip(queue_depth_list, events):
-                res += f"{data.queue_depth} [{event.name()}]\n"
+                res += f"{data.queue_depth} [{event.name}]\n"
             return res
 
         # We have to use Mock because time series data is too flaky to test
@@ -1978,7 +1980,7 @@ class TestExperimentalUtils(TestCase):
         profiler = self.generate_mock_profile()
         basic_evaluation = _utils.BasicEvaluation(profiler)
         expected_output = "\n".join([
-            f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name()}]"
+            f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name}]"
             for event_key in basic_evaluation.event_keys
         ])
         self.assertExpectedInline(
@@ -2001,7 +2003,7 @@ class TestExperimentalUtils(TestCase):
         optimizable_events = basic_evaluation.get_optimizable_events(
             2, print_enable=False)
         expected_output = "\n".join(
-            [f"{event_key.event.name()}" for event_key in optimizable_events])
+            [f"{event_key.event.name}" for event_key in optimizable_events])
         self.assertExpectedInline(
             expected_output, """\
 <built-in function _cuda_synchronize>
@@ -2014,7 +2016,7 @@ aten::copy_""")
                 x = x @ x
                 x = x + x
         matched_events = NamePattern(prof, "aten::mm").matched_events()
-        output = "\n".join([f"{event.name()}" for event in matched_events])
+        output = "\n".join([f"{event.name}" for event in matched_events])
         self.assertExpectedInline(output, """\
 aten::mm
 aten::mm
