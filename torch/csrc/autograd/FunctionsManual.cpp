@@ -2849,7 +2849,8 @@ Tensor as_strided_backward(
   auto base_size = std::max(
       _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
       _min_storage_size(out_sizes_, out_strides_, out_effective_offset));
-  auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
+  auto storage = grad.new_empty_symint(c10::SymIntArrayRef(base_size));
+  storage.zero_();
 
   // prepare indices tensor if we will do index_add_ later
   c10::optional<at::Tensor> flatten_full_indices;
