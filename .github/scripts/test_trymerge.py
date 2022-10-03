@@ -219,7 +219,7 @@ class TestGitHubPR(TestCase):
     def test_checksuites_pagination(self, mocked_gql: Any) -> None:
         "Tests that PR with lots of checksuits can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73811)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 104)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 107)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_comments_pagination(self, mocked_gql: Any) -> None:

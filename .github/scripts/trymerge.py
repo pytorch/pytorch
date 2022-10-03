@@ -152,6 +152,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            status {
+              contexts {
+                context
+                state
+                targetUrl
+              }
+            }
             pushedDate
             oid
           }
@@ -752,6 +759,13 @@ class GitHubPR:
         checksuites = orig_last_commit["checkSuites"]
 
         self.conclusions = add_workflow_conclusions(checksuites, get_pr_next_check_runs, get_pr_next_checksuites)
+
+        # Append old style statuses(like ones populated by CircleCI or EasyCLA) to conclusions
+        if orig_last_commit["status"] and orig_last_commit["status"]["contexts"]:
+            for status in orig_last_commit["status"]["contexts"]:
+                name = status["context"]
+                self.conclusions[name] = WorkflowCheckState(name=name, status=status["state"], url=status["targetUrl"])
+
         return self.conclusions
 
     def get_authors(self) -> Dict[str, str]:
