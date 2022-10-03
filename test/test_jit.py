@@ -1987,7 +1987,7 @@ graph(%Ra, %Rb):
     # should fix this and add tests here to verify functionality.
     def test_einsum(self):
         def check(fn, jitted, *args):
-            self.assertGraphContains(jitted.graph, kind='aten::einsum')
+            self.assertGraphContains(jitted.graph, kind='aten::_einsum')
             self.assertEqual(fn(*args), jitted(*args))
 
         def equation_format(x, y):

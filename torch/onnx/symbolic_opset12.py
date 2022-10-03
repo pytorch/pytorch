@@ -61,7 +61,7 @@ def _einsum_helper(g: jit_utils.GraphContext, equation, tensors):
         return g.op("Einsum", *tensors, equation_s=equation)
 
 
-@_onnx_symbolic("aten::einsum")
+@_onnx_symbolic("aten::_einsum")
 @symbolic_helper.parse_args("s", "v", "is")
 @_beartype.beartype
 def einsum(g: jit_utils.GraphContext, equation, tensor_list, path=None):

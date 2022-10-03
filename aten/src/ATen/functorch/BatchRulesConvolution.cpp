@@ -170,11 +170,11 @@ Tensor _convolution_decomp(
 //   // Copied from https://github.com/pytorch/opacus/blob/master/opacus/grad_sample/conv.py
 //   auto A = at::im2col(self_, {weight.size(2), weight.size(3)}, dilation, padding, stride);
 //   auto B = grad_output_.reshape({bdim_size, -1, A.size(-1)});
-//   auto grad_sample = at::einsum("noq,npq->nop", {B, A});
+//   auto grad_sample = at::_einsum("noq,npq->nop", {B, A});
 //   grad_sample = grad_sample.view({
 //       bdim_size, groups, -1, groups, in_channels / groups,
 //       weight.size(2) * weight.size(3) });
-//   grad_sample = at::einsum("ngrg...->ngr...", {grad_sample});
+//   grad_sample = at::_einsum("ngrg...->ngr...", {grad_sample});
 //   grad_sample = grad_sample.reshape(
 //       {bdim_size, weight.size(0), weight.size(1), weight.size(2), weight.size(3)});
 //
