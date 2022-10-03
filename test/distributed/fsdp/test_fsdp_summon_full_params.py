@@ -52,10 +52,8 @@ def _run_test_summon_full_param_writeback(
         model = wrap(nn.Sequential(lin1, lin2))
 
     # set the value
-    outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-    inner_param = model.get_parameter(
-        "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-    )
+    outer_param = model._handles[0].flat_param
+    inner_param = model.module[0]._handles[0].flat_param
     p = outer_param if modify_outer else inner_param
 
     with torch.no_grad():
@@ -176,10 +174,8 @@ class TestSummonFullParams(FSDPTest):
         shard_inner_numel = int(math.ceil(global_inner_numel / self.world_size))
         shard_outer_numel = int(math.ceil(global_outer_numel / self.world_size))
 
-        outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter(
-            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-        )
+        outer_param = model._handles[0].flat_param
+        inner_param = model.module[0]._handles[0].flat_param
         self.assertEqual(shard_outer_numel, outer_param.numel())
         self.assertEqual(shard_inner_numel, inner_param.numel())
 
@@ -259,10 +255,8 @@ class TestSummonFullParams(FSDPTest):
             **fsdp_kwargs,
         ).cuda(self.rank)
 
-        outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter(
-            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-        )
+        outer_param = model._handles[0].flat_param
+        inner_param = model.module[0]._handles[0].flat_param
         outer_full_param_size = outer_param.numel() * self.world_size
 
         # trigger lazy init
@@ -285,7 +279,7 @@ class TestSummonFullParams(FSDPTest):
     def test_summon_single_param(self):
         model = FSDP(nn.Linear(1, 1, bias=False)).cuda(self.rank)
 
-        p = model.get_parameter("_fsdp_wrapped_module.flat_param")
+        p = model._handles[0].flat_param
         self.assertEqual(1, p.numel())
 
         with torch.no_grad():
@@ -388,10 +382,8 @@ class TestSummonFullParams(FSDPTest):
             mixed_precision=mixed_precision,
         ).cuda(self.rank)
 
-        outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")
-        inner_param = model.get_parameter(
-            "_fsdp_wrapped_module._fpw_module.0._fsdp_wrapped_module.flat_param"
-        )
+        outer_param = model._handles[0].flat_param
+        inner_param = model.module[0]._handles[0].flat_param
         outer_full_param_size = outer_param.numel() * self.world_size
 
         # First lets validate our assumption about resharding
@@ -451,7 +443,7 @@ class TestSummonFullParams(FSDPTest):
         )
 
         def _get_flat_param():
-            return fsdp_model.get_parameter("_fsdp_wrapped_module.flat_param")
+            return fsdp_model._handles[0].flat_param
 
         flattened_param = _get_flat_param()
         self.assertEqual(layer_shape[0] * layer_shape[1] / 2, flattened_param.numel())
