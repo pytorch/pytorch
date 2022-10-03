@@ -6,7 +6,6 @@ from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
 import torch.utils._pytree as pytree
 from typing import Dict, List, Set, Any
-import os
 import logging
 
 __all__ = ['SubgraphMatcher', 'InternalMatch']
