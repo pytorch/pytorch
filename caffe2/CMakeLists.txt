@@ -810,7 +810,7 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(HAS_WERROR_SIGN_COMPARE AND WERROR)
+if(HAS_WERROR_SIGN_COMPARE AND WERROR AND NOT USE_PYTORCH_METAL)
   # target_compile_options(torch_cpu PRIVATE "-Werror=sign-compare")
   set_property(SOURCE ${ATen_CORE_SRCS} ${ATen_CPU_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror=sign-compare")
 endif()
@@ -1316,25 +1316,6 @@ if(BUILD_LITE_INTERPRETER)
   endif()
 endif()
 
-
-# For torch/csrc/distributed/c10d
-function(include_torch_lib_dir target)
-  target_include_directories(${target} PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
-endfunction()
-
-include_torch_lib_dir(torch_cpu)
-if(USE_ROCM)
-  include_torch_lib_dir(torch_hip)
-elseif(USE_CUDA)
-  if(BUILD_SPLIT_CUDA)
-    include_torch_lib_dir(torch_cuda_cpp)
-  else()
-    include_torch_lib_dir(torch_cuda)
-  endif()
-endif()
-if(BUILD_PYTHON)
-    include_torch_lib_dir(torch_python)
-endif()
 
 # Pass USE_DISTRIBUTED to torch_cpu, as some codes in jit/pickler.cpp and
 # jit/unpickler.cpp need to be compiled only when USE_DISTRIBUTED is set
