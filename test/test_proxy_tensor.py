@@ -895,6 +895,15 @@ def forward(self, a_1):
         meta_d = _get_node(fx_g, lambda x: x.target == operator.add)
         self.assertTrue(meta_c.meta['val'].shape[0].get_pyobj() == meta_d.meta['val'].expr)
 
+    def test_return_symint(self):
+        def f(x):
+            return x.shape[0], x.cos(), x.shape[0] / 5
+        self._test_dynamic(f, [(5,)], [[(4,)], [(12,)]])
+
+        def f(x):
+            return x.shape
+        self._test_dynamic(f, [(5, 3)], [[(4, 6)]])
+
     def _assert_no_guards(self, fx_g, free_symbols):
         assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
         assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
