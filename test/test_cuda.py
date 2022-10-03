@@ -4637,6 +4637,27 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
 
+    def test_memory_snapshot_with_cpp(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            x = torch.rand(311, 411, device='cuda')
+
+            ss = torch.cuda.memory._snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
