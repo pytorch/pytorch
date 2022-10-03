@@ -386,20 +386,22 @@ Tensor where_mps(const Tensor& condition,
 
   auto max_dim = std::max(condition.dim(), std::max(self.dim(), other.dim()));
 
-  auto sum_dims = condition.dim() + self.dim() + other.dim();
-
-  TORCH_CHECK(max_dim == 0 || !(sum_dims % max_dim), "All inputs of where should have same/compatible number of dims")
-
   std::vector<int64_t> out_arr(max_dim);
 
   // Broadcasted output shape
   for(int i = 0; i < max_dim; i++) {
 
-    int64_t cond_num = cond_zero_shape ? 0 : condition.size(i);
-    int64_t self_num = self_zero_shape ? 0 : self.size(i);
-    int64_t other_num = other_zero_shape ? 0 : other.size(i);
+    int64_t cond_idx = cond_zero_shape ? 1 : (i < condition.dim() ? condition.size(i) : 1);
+    int64_t self_idx = self_zero_shape ? 1 : (i < self.dim() ? self.size(i) : 1);
+    int64_t other_idx = other_zero_shape ? 1 : (i < other.dim() ? other.size(i) : 1);
 
-    out_arr[i] = std::max(cond_num, std::max(self_num, other_num));
+    auto max_idx = std::max({cond_idx, self_idx, other_idx});
+
+    TORCH_CHECK(cond_idx == max_idx || cond_idx == 1 || (cond_idx == 0 && max_idx == 1), i, "'th index ", cond_idx, " of condition tensor does not match the other tensors")
+    TORCH_CHECK(self_idx == max_idx || self_idx == 1 || (self_idx == 0 && max_idx == 1), i, "'th index ", self_idx, " of x tensor does not match the other tensors")
+    TORCH_CHECK(other_idx == max_idx || other_idx == 1 || (other_idx == 0 && max_idx == 1), i, "'th index ", other_idx, " of x tensor does not match the other tensors")
+
+    out_arr[i] = (cond_idx == 0 || self_idx == 0 || other_idx == 0) ? 0 : max_idx;
   }
 
   Tensor ret = empty_mps(IntArrayRef(out_arr),
