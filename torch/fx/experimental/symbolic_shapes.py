@@ -386,22 +386,6 @@ class ShapeEnv(object):
 
         return '\n'.join(f" - {format_val(guard, val)}{format_tb(tb)}" for guard, val, tb in self.guards)
 
-    def format_guards(self, verbose=False):
-        def format_val(guard, val):
-            if val is sympy.true:
-                return str(guard)
-            elif val is sympy.false:
-                return f"Not({guard})"
-            else:
-                return f"Eq({guard}, {val})"
-
-        def format_tb(tb):
-            if not verbose:
-                return ""
-            return f"\n   Guarded at:\n{textwrap.indent(tb, '   ')}"
-
-        return '\n'.join(f" - {format_val(guard, val)}{format_tb(tb)}" for guard, val, tb in self.guards)
-
     def get_shape_groups(self):
         shape_groups = collections.defaultdict(list)
         for k, v in self.replacements.items():
