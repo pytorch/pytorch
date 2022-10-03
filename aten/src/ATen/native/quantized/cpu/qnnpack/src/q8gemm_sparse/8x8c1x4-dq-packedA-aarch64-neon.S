@@ -19,11 +19,11 @@
 #endif
 
 # Macro for separating instructions. For most builds, ; can be used, but for
-# Mac ARM64, ; begins a comment, and %% is used to separate instructions instead
-#ifndef __APPLE__
-#define XX ;
-#else
+# ARM64 + Mach, ; begins a comment, and %% is used to separate instructions
+#if defined(__MACH__)
 #define XX %%
+#else
+#define XX ;
 #endif
 
 .macro TRANSPOSE_4X4_S32 vin0, vin1, vin2, vin3, temp0, temp1, temp2, temp3
