@@ -704,7 +704,7 @@ aot_autograd_failures = {
     xfail('scatter_reduce', 'prod'),
 
     # non-deterministic
-    xfail('as_strided_scatter'),
+    skip('as_strided_scatter'),
 
     # Too annoying to generate random inputs
     xfail('cholesky'),
