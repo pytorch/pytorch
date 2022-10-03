@@ -1532,9 +1532,8 @@ class FullyShardedDataParallel(nn.Module):
         if not handles:
             return
         if self.limit_all_gathers:
-            events = self._free_event_queue.flush_if_needed()
+            events = self._free_event_queue._dequeue()
             if events:
-                # As a minor optimization, only synchronize the latest event
                 events[-1].synchronize()
         any_ran_pre_unshard = False
         with torch.cuda.stream(self._streams["pre_all_gather"]):
