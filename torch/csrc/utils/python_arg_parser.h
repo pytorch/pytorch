@@ -595,7 +595,6 @@ inline void throw_intlist_exception(
       idx + 1);
 }
 
-
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
   if (!args[i]) {
     return c10::fmap(signature.params[i].default_intlist, [](int64_t di) {
@@ -653,7 +652,8 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
       } else {
         try {
           if (is_symint_node(py::handle(obj))) {
-            res.push_back(py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
+            res.push_back(
+                py::handle(obj).cast<c10::SymIntNodeImpl*>()->toSymInt());
           } else {
             res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
           }
