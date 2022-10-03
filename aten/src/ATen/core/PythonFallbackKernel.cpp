@@ -1,5 +1,6 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
+#include <c10/core/impl/PyInterpreterTLS.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <c10/core/SafePyObject.h>
 
@@ -89,8 +90,8 @@ void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 }
 
 void pythonDispatcherFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
-  auto* state = c10::impl::PythonDispatcherTLS::get_state();
-  TORCH_INTERNAL_ASSERT(state, "Hit PythonDispatcher dispatch key but PythonDispatcherTLS was not set");
+  auto* state = c10::impl::PyInterpreterTLS::get_state();
+  TORCH_INTERNAL_ASSERT(state, "Hit PythonDispatcher dispatch key but PyInterpreterTLS was not set");
   (*state)->python_dispatcher(op, dispatch_keys.remove(c10::DispatchKey::PythonDispatcher), stack);
 }
 

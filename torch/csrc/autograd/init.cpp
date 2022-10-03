@@ -55,12 +55,12 @@ struct EnableTorchFunction {
 
 struct EnablePythonDispatcher {
   EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
-    c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
+    c10::impl::PythonDispatcherTLS::set_state(true);
   }
   ~EnablePythonDispatcher() {
     c10::impl::PythonDispatcherTLS::set_state(old_);
   }
-  c10::impl::PyInterpreter* old_;
+  bool old_;
 };
 
 } // namespace

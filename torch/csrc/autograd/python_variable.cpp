@@ -333,7 +333,13 @@ class PyInterpreterHolder {
  public:
   PyInterpreterHolder()
       : impl_(new c10::impl::PyInterpreter(
-            ConcretePyInterpreterVTable::instance())) {}
+            ConcretePyInterpreterVTable::instance())) {
+#ifndef USE_DEPLOY
+    // If this is not a torchdeploy interpreter, register this as the global
+    // PyInterpreter
+    c10::impl::PyInterpreterTLS::set_global_state(impl_);
+#endif
+  }
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.

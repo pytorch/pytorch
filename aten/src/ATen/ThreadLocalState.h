@@ -11,6 +11,7 @@
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/record_function.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
+#include <c10/core/impl/PyInterpreterTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
 namespace at {
@@ -59,7 +60,10 @@ class TORCH_API ThreadLocalState {
   std::shared_ptr<SafePyObject> torch_dispatch_mode_state_;
 
   // TLS for enable_python_dispatcher
-  c10::impl::PyInterpreter* python_dispatcher_state_;
+  bool python_dispatcher_state_;
+
+  // TLS for PyInterpreter
+  const c10::impl::PyInterpreter* py_interpreter_state_;
 
   // TLS for __torch_function__ (mode and disable_torch_function)
   at::impl::PythonTorchFunctionTLS python_torch_function_state_;

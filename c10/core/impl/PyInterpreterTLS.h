@@ -8,11 +8,10 @@ namespace impl {
 
 // This TLS is set by torchdeploy ONLY and specifies what the
 // current Python interpreter for a thread is.
-//
-// TODO: maybe we should also set this TLS for non-torchdeploy
-// Python interpreters too; but in that case, it's better as
-// a global variable
 struct C10_API PyInterpreterTLS {
+  // For use by a non-torchdeploy python interpreter
+  static void set_global_state(const PyInterpreter* state);
+  // For use by a torchdeploy python interpreter
   static void set_state(const PyInterpreter* state);
   static const PyInterpreter* get_state();
   static void reset_state();
