@@ -578,7 +578,7 @@ def _get_devices_properties(device_ids):
 
 
 def is_xpu_available():
-    return torch._C.is_xpu_available()
+    return torch._C._is_xpu_available()
 
 
 def get_current_device_index() -> int:
