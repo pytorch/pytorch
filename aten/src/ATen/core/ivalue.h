@@ -713,9 +713,18 @@ public:
   IValue(std::array<T, N> v);
 
   // Manual constructors for lists of symints, which decay to int list if
-  // possible
-  IValue(at::ArrayRef<c10::SymInt> v);
-  IValue(at::OptionalArrayRef<c10::SymInt> v);
+  // possible.  To avoid ambiguous overload situations, we template them
+  // to prevent implicit conversions
+  template <class T>
+  using enable_if_symint =
+      std::enable_if_t<std::is_same<T, c10::SymInt>::value, std::nullptr_t>;
+
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::ArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(at::OptionalArrayRef<T> v);
+  template <class T, enable_if_symint<T> = nullptr>
+  IValue(const std::vector<T>& v);
 
   template <class T>
   using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
