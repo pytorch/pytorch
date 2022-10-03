@@ -15449,26 +15449,26 @@ class TestNNDeviceType(NNTestCase):
         for shape in shapes:
             dims = [0, len(shape) - 1] if len(shape) > 0 else [0]
             for dim in dims:
-                input = torch.randn(shape, requires_grad=True)
-                mask = torch.randint(0, 2, shape).bool()
-                mask_type = 1   # BxL => src_key_padding_mask
-                if (self.device_type == "cuda"):
-                    input = input.cuda().detach().requires_grad_()
-                    mask = mask.cuda()
-                self._test_masked_softmax_helper(input, dim, mask, mask_type)
+                for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
+                    input = torch.randn(shape, requires_grad=True)
+                    mask = torch.randint(0, 2, shape).bool()
+                    if (self.device_type == "cuda"):
+                        input = input.cuda().detach().requires_grad_()
+                        mask = mask.cuda()
+                    self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     # In this test, the forward pass is expected to produce nan's because when dim=0, we only have unspecified values
     def test_masked_softmax_forward_with_nans(self, device):
         dim = 0
         shapes = [(4, 5), (50, 100), (1500, 1200)]
         for (x, y) in shapes:
-            input = torch.randn((x, y), requires_grad=True)
-            mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
-            mask_type = 1   # BxL => src_key_padding_mask
-            if (self.device_type == "cuda"):
-                input = input.cuda().detach().requires_grad_()
-                mask = mask.cuda()
-            self._test_masked_softmax_helper(input, dim, mask, mask_type)
+            for mask_type in [1, 2]:  # 1 = BxL => src_key_padding_mask
+                input = torch.randn((x, y), requires_grad=True)
+                mask = torch.tensor([i % 2 for i in range(y)]).expand((x, y)).bool()
+                if (self.device_type == "cuda"):
+                    input = input.cuda().detach().requires_grad_()
+                    mask = mask.cuda()
+                self._test_masked_softmax_helper(input, dim, mask, mask_type)
 
     @onlyCUDA
     def test_masked_softmax_transformer_layout(self, device):
@@ -17884,6 +17884,39 @@ class TestNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, msg):
                 F.nll_loss(x, t, weight=weight)
 
+    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    @onlyCUDA
+    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("45GB", "cuda")
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_nll_loss_large_tensor(self, device, reduction):
+        shape = [int(2 ** 16), int(2 ** 16) + 1]
+
+        input = torch.randn(shape, device=device, dtype=torch.float32, requires_grad=True)
+        labels = torch.randint(shape[0], (shape[0],), dtype=torch.long, device=device)
+
+        out = F.nll_loss(input, labels, reduction=reduction)
+
+        with torch.no_grad():
+            input_cpu = input.cpu().float().requires_grad_()
+            labels_cpu = labels.cpu()
+        out_cpu = F.nll_loss(input_cpu, labels_cpu, reduction=reduction)
+        # workaround to reduce memory usage vs. self.assertEqual, see #84944
+        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        if reduction == "sum":
+            orig_rtol, orig_atol = rtol, atol
+            rtol, atol = 7 * rtol, 3 * atol
+        with torch.no_grad():
+            self.assertTrue(torch.allclose(out.cpu(), out_cpu, rtol=rtol, atol=atol))
+        if reduction == "sum":
+            rtol, atol = orig_rtol, orig_atol
+
+        if reduction != "none":
+            out.backward()
+            out_cpu.backward()
+            with torch.no_grad():
+                self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
+
     def _nll_loss_helper(self, input_size, reduction, expected, device):
         input = torch.rand(input_size, requires_grad=True, device=device)
         num_channels = input_size[1]
@@ -18190,6 +18223,30 @@ class TestNNDeviceType(NNTestCase):
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
+    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    @onlyCUDA
+    @largeTensorTest("45GB", "cpu")
+    @largeTensorTest("45GB", "cuda")
+    @parametrize_test("reduction", ("none", "mean", "sum"))
+    def test_cross_entropy_large_tensor(self, device, reduction):
+        logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
+        labels = torch.zeros(logits.size(0), dtype=torch.long, device='cuda')
+        loss = F.cross_entropy(logits, labels, reduction=reduction)
+        if reduction != "none":
+            loss.backward()
+
+        with torch.no_grad():
+            logits_cpu = logits.cpu().detach().requires_grad_()
+            labels_cpu = labels.cpu().detach()
+        loss_cpu = F.cross_entropy(logits_cpu, labels_cpu, reduction=reduction)
+        if reduction != "none":
+            loss_cpu.backward()
+
+        # workaround to reduce memory usage vs. self.assertEqual, see #84944
+        rtol, atol = torch.testing._comparison.get_tolerances(torch.float32, rtol=None, atol=None)
+        self.assertTrue(torch.allclose(loss.cpu(), loss_cpu, rtol=rtol, atol=atol))
+        if reduction != "none":
+            self.assertTrue(torch.allclose(logits.grad.cpu(), logits_cpu.grad, rtol=rtol, atol=atol))
 
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
