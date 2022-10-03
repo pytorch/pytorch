@@ -62,12 +62,14 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
     return false;
   }
 
-  if (!(params.query.dim() == params.key.dim() &&
-        params.query.dim() == params.value.dim() && params.query.dim() == 4)) {
+  auto query_dim = params.query.dim();
+  if (!(query_dim == params.key.dim() &&
+        query_dim == params.value.dim() &&
+        query_dim == 4)) {
     TORCH_CHECK(
         !debug,
         "Flash attention requires query, key and value to be 4 dimensional, but got ",
-        params.query.dim(),
+        query_dim,
         ", ",
         params.key.dim(),
         ", ",
@@ -91,7 +93,8 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
 
   auto query_size_last = params.query.size(-1);
   if (!(query_size_last == params.key.size(-1) &&
-        query_size_last == params.value.size(-1) && query_size_last % 8 == 0 &&
+        query_size_last == params.value.size(-1) &&
+        query_size_last % 8 == 0 &&
         query_size_last <= 128)) {
     TORCH_CHECK(
         !debug,
@@ -109,8 +112,7 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   auto query_dtype = params.query.dtype();
   if (!(query_dtype == params.key.dtype() &&
         query_dtype == params.value.dtype() &&
-        (query_dtype == at::kHalf ||
-         query_dtype == at::kBFloat16))) {
+        (query_dtype == at::kHalf || query_dtype == at::kBFloat16))) {
     TORCH_CHECK(
         !debug,
         "Expected query, key and value to be of dtype float16 or bfloat16 but got ",
