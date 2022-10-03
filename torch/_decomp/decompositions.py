@@ -2221,11 +2221,6 @@ def binary_cross_entropy_with_logits(
     return apply_loss_reduction(loss, reduction)
 
 
-@register_decomposition(aten._unsafe_view)
-def _unsafe_view(self, shape):
-    return self.view(shape)
-
-
 def should_fold(tensor1: torch.Tensor, dim_tensor2: int) -> bool:
     dim_tensor1 = tensor1.ndim
     if dim_tensor1 >= 3 and (dim_tensor2 == 1 or dim_tensor2 == 2):
