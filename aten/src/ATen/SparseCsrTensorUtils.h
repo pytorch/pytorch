@@ -129,12 +129,12 @@ using SparseCsrTensor = Tensor;
 
 inline bool is_sparse_compressed(const Layout& layout) {
   switch (layout) {
-  case kSparseCsr:
-  case kSparseCsc:
-  case kSparseBsr:
-  case kSparseBsc:
-    return true;
-  default: ;
+    case kSparseCsr:
+    case kSparseCsc:
+    case kSparseBsr:
+    case kSparseBsc:
+      return true;
+    default:;
   }
   return false;
 }
