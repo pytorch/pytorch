@@ -40,14 +40,14 @@ struct TORCH_API TensorGeometry {
   }
   c10::SymInt size(int64_t dim) const {
     dim = c10::maybe_wrap_dim(dim, this->dim());
-    return sizes_.at(dim);
+    return sizes_.at(static_cast<size_t>(dim));
   }
   c10::SymIntArrayRef sizes() const {
     return c10::SymIntArrayRef{sizes_};
   }
   c10::SymInt stride(int64_t dim) const {
     dim = c10::maybe_wrap_dim(dim, this->dim());
-    return strides_.at(dim);
+    return strides_.at(static_cast<size_t>(dim));
   }
   c10::SymIntArrayRef strides() const {
     return c10::SymIntArrayRef{strides_};
