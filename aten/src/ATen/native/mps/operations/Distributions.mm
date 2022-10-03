@@ -376,7 +376,6 @@ Tensor& multinomial_with_replacement_mps_kernel(
     MPSGraph* mpsGraph = make_mps_graph();
 
     auto prob_dtype = getMPSDataType(self_v.scalar_type());
-    auto result_dtype = getMPSDataType(result.scalar_type());
 
     // This is probability weights
     MPSGraphTensor *probTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self_v.scalar_type()), prob_shape);
