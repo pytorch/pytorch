@@ -109,7 +109,7 @@ class ProfilerTree:
 
             for node in nodes:
                 cls.validate_node(node)
-                name = cls.fmt_name(node.name())
+                name = cls.fmt_name(node.name)
                 prune_level = PRUNE_FUNCTIONS.get(name.strip(), None)
                 if prune_level is None:
                     out.append((depth, name))

@@ -6719,7 +6719,7 @@ for shape in [(1,), ()]:
         self.assertEqual(2 * 3 * 3 * b, b.grad)
 
     def test_disabling_saved_tensor_hooks(self):
-        with torch.autograd.graph._disable_saved_tensors_hooks("error message"):
+        with torch.autograd.graph.disable_saved_tensors_hooks("error message"):
             with self.assertRaisesRegex(RuntimeError, "error message"):
                 with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
                     pass
@@ -6728,15 +6728,15 @@ for shape in [(1,), ()]:
 
         with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             with self.assertRaisesRegex(RuntimeError, "error message"):
-                with torch.autograd.graph._disable_saved_tensors_hooks("error message"):
+                with torch.autograd.graph.disable_saved_tensors_hooks("error message"):
                     pass
 
         self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
 
     def test_disabling_saved_tensor_hooks_nested(self):
-        with torch.autograd.graph._disable_saved_tensors_hooks("outer"):
-            with self.assertRaisesRegex(RuntimeError, "inner"):
-                with torch.autograd.graph._disable_saved_tensors_hooks("inner"):
+        with torch.autograd.graph.disable_saved_tensors_hooks("outer"):
+            with torch.autograd.graph.disable_saved_tensors_hooks("inner"):
+                with self.assertRaisesRegex(RuntimeError, "inner"):
                     with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
                         pass
 

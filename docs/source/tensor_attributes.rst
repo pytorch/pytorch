@@ -244,11 +244,15 @@ or will be allocated.
 Possible values are:
 
 - ``torch.contiguous_format``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in decreasing order.
 
 - ``torch.channels_last``:
-  Tensor is or will be  allocated in dense non-overlapping memory. Strides represented by values in
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in
   ``strides[0] > strides[2] > strides[3] > strides[1] == 1`` aka NHWC order.
+
+- ``torch.channels_last_3d``:
+  Tensor is or will be allocated in dense non-overlapping memory. Strides represented by values in
+  ``strides[0] > strides[2] > strides[3] > strides[4] > strides[1] == 1`` aka NDHWC order.
 
 - ``torch.preserve_format``:
   Used in functions like `clone` to preserve the memory format of the input tensor. If input tensor is
