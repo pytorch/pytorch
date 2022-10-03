@@ -34,6 +34,8 @@ def register_meta(op, register_dispatcher=True):
                 )
                 _meta_lib_dont_use_me_use_register_meta.impl(name, f)
 
+            op.py_impl(torch._C.DispatchKey.Meta)(f)
+
         tree_map(add_func, op)
         return f
 
@@ -998,6 +1000,21 @@ def meta_max_pool2d_with_indices(
             size, dtype=torch.int64, device=input.device, memory_format=memory_format
         ),
     )
+
+
+@register_meta(
+    [
+        aten.randint_like.default,
+        aten.randint_like.low_dtype,
+        aten.randn_like.default,
+        aten.rand_like.default,
+        aten.full_like.default,
+        aten.zeros_like.default,
+        aten.ones_like.default,
+    ]
+)
+def meta_like(self, *args, **kwargs):
+    return aten.empty_like.default(self, **kwargs)
 
 
 # We must also trigger meta registrations from PrimTorch ref

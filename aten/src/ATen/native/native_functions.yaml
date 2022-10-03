@@ -1455,7 +1455,7 @@
     CompositeExplicitAutograd: convolution
   autogen: convolution.out
 
-- func: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- func: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, SymInt[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   dispatch:
     CompositeExplicitAutograd, CUDA: convolution_backward
   autogen: convolution_backward.out
@@ -2744,8 +2744,9 @@
   device_check: NoCheck   # TensorIterator
   variants: function
   dispatch:
-    CPU, CUDA: _index_put_impl_
+    CPU, CUDA, MPS: _index_put_impl_
     QuantizedCPU: _index_put_impl_quantized_cpu_
+    QuantizedCUDA: _index_put_impl_quantized_cuda_
   autogen: _index_put_impl, _index_put_impl.out
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
@@ -4202,7 +4203,7 @@
 
 - func: negative.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
-- func: repeat(Tensor self, int[] repeats) -> Tensor
+- func: repeat(Tensor self, SymInt[] repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
   dispatch:
     CompositeExplicitAutograd: repeat
@@ -4223,18 +4224,18 @@
 - func: repeat_interleave.self_int(Tensor self, int repeats, int? dim=None, *, int? output_size=None) -> Tensor
   variants: function, method
 
-- func: reshape(Tensor(a) self, int[] shape) -> Tensor(a)
+- func: reshape(Tensor(a) self, SymInt[] shape) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeImplicitAutograd: reshape
+    CompositeImplicitAutograd: reshape_symint
     CompositeImplicitAutogradNestedTensor: reshape_nested
 
 # NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
 # anywhere else.
-- func: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
+- func: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4318,6 +4319,7 @@
     MPS: relu_mps
     MkldnnCPU: mkldnn_relu
     QuantizedCPU: relu_quantized_cpu
+    QuantizedCUDA: relu_quantized_cuda
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu
 
 - func: relu_(Tensor(a!) self) -> Tensor(a!)
@@ -4328,6 +4330,7 @@
     MPS: relu_mps_
     MkldnnCPU: mkldnn_relu_
     QuantizedCPU: relu_quantized_cpu_
+    QuantizedCUDA: relu_quantized_cuda_
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_relu_
   autogen: relu.out
 
@@ -5447,7 +5450,7 @@
   tags: dynamic_output_shape
   autogen: _unique2.out
 
-- func: _unsafe_view(Tensor self, int[] size) -> Tensor
+- func: _unsafe_view(Tensor self, SymInt[] size) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _unsafe_view
   autogen: _unsafe_view.out
@@ -5872,7 +5875,7 @@
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
-    SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_csr_
+    SparseCsrCPU, SparseCsrCUDA: resize_as_sparse_compressed_
   autogen: resize_as_sparse, resize_as_sparse.out
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
@@ -8024,6 +8027,7 @@
   dispatch:
     CPU: masked_select_out_cpu
     CUDA: masked_select_out_cuda
+    MPS: masked_select_out_mps
   tags: dynamic_output_shape
 
 - func: masked_select(Tensor self, Tensor mask) -> Tensor
@@ -8031,6 +8035,7 @@
   dispatch:
     CPU: masked_select_cpu
     CUDA: masked_select_cuda
+    MPS: masked_select_mps
   tags: dynamic_output_shape
 
 - func: masked_select_backward(Tensor grad, Tensor input, Tensor mask) -> Tensor
@@ -11440,18 +11445,6 @@
     CPU: col2im_cpu
     CUDA: col2im_cuda
 
-- func: col2im_backward.grad_input(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: col2im_backward_out_cpu
-    CUDA: col2im_backward_out_cuda
-
-- func: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: col2im_backward_cpu
-    CUDA: col2im_backward_cuda
-
 - func: column_stack(Tensor[] tensors) -> Tensor
 
 - func: column_stack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
@@ -11467,18 +11460,6 @@
   dispatch:
     CPU: im2col_cpu
     CUDA: im2col_cuda
-
-- func: im2col_backward.grad_input(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU: im2col_backward_out_cpu
-    CUDA: im2col_backward_out_cuda
-
-- func: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  python_module: nn
-  dispatch:
-    CPU: im2col_backward_cpu
-    CUDA: im2col_backward_cuda
 
 - func: isfinite(Tensor self) -> Tensor
   variants: function, method
@@ -12715,11 +12696,11 @@
   variants: function
   python_module: nn
 
-- func: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _nested_tensor_from_tensor_list(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutograd: nested_tensor
-  autogen: nested_tensor.out
+    CompositeExplicitAutograd: _nested_tensor_from_tensor_list
+  autogen: _nested_tensor_from_tensor_list.out
 
 - func: _fw_primal_copy(Tensor self, int level) -> Tensor
   variants: function
@@ -12787,7 +12768,7 @@
     CompositeExplicitAutogradNonFunctional: permute_copy
   tags: view_copy
 
-- func: _reshape_alias_copy(Tensor self, int[] size, int[] stride) -> Tensor
+- func: _reshape_alias_copy(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: _reshape_alias_copy
@@ -12999,7 +12980,7 @@
     CompositeExplicitAutograd: permute_copy_out
 
 
-- func: _reshape_alias_copy.out(Tensor self, int[] size, int[] stride, *, Tensor(a!) out) -> Tensor(a!)
+- func: _reshape_alias_copy.out(Tensor self, SymInt[] size, SymInt[] stride, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CompositeExplicitAutograd: _reshape_alias_copy_out
