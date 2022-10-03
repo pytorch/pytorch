@@ -85,6 +85,7 @@ storageT = BaseCppType("at", "Storage")
 streamT = BaseCppType("at", "Stream")
 intArrayRefT = BaseCppType("at", "IntArrayRef")
 optionalIntArrayRefT = BaseCppType("at", "OptionalIntArrayRef")
+optionalSymIntArrayRefT = BaseCppType("at", "OptionalSymIntArrayRef")
 tensorOptionsT = BaseCppType("at", "TensorOptions")
 typeAndSizeT = BaseCppType("torch::autograd::generated", "TypeAndSize")
 tensorGeometryT = BaseCppType("at", "TensorGeometry")
@@ -526,14 +527,15 @@ class CppSignatureGroup:
         else:
             return self.signature
 
-    def signatures(self) -> Iterator[CppSignature]:
+    def signatures(self, *, symint: bool = True) -> Iterator[CppSignature]:
         yield self.signature
         if self.faithful_signature:
             yield self.faithful_signature
-        if self.symint_signature:
-            yield self.symint_signature
-        if self.symint_faithful_signature:
-            yield self.symint_faithful_signature
+        if symint:
+            if self.symint_signature:
+                yield self.symint_signature
+            if self.symint_faithful_signature:
+                yield self.symint_faithful_signature
 
     @staticmethod
     def from_native_function(
