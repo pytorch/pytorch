@@ -595,9 +595,9 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
 
-def _record_memory_history(enabled: bool, device: Union[Device, int] = None):
+def _record_memory_history(enabled: bool, device: Union[Device, int] = None, *, cpp: bool = False):
     with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(enabled)
+        _C._cuda_recordMemoryHistory(enabled, cpp)
 
 def _snapshot(device: Union[Device, int] = None):
     with torch.cuda.device(device):
