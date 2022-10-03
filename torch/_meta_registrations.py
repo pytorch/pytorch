@@ -14,6 +14,7 @@ from torch._prims_common import (
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
 from torch.utils._pytree import tree_map
+import math
 
 aten = torch.ops.aten
 
@@ -1096,10 +1097,19 @@ def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
 
 
+# hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)
 def arange(end, **kwargs):
     if isinstance(end, float):
-        end = int(end)
+        end = math.ceil(end)
+
+    def is_integral(x):
+        return isinstance(x, int) or isinstance(x, bool)
+
+    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
+    if set_to_integral_dtype:
+        kwargs["dtype"] = torch.int64
+
     return aten.empty([end], **kwargs)
 
 
