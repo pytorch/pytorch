@@ -58,6 +58,14 @@ jobs:
           python3 -m tools.stats.upload_test_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --head-branch "${HEAD_BRANCH}"
           python3 -m tools.stats.upload_sccache_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}"
 
+      - name: Rerun if failed on master
+        if: github.event.workflow_run.run_attempt == 1 && github.event.workflow_run.head_branch == 'master'
+        env:
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run rerun "${WORKFLOW_RUN_ID}" --failed
+
   check-api-rate:
     if: ${{ always() }}
     runs-on: [self-hosted, linux.2xlarge]
