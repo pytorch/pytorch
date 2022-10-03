@@ -708,7 +708,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
             for _ in range(num_lines - n):
                 print_to_stderr(next(f).rstrip())
             print_to_stderr("##[endgroup]")
-            for _ in range(n):
+            for _ in range(min(n, num_lines)):
                 print_to_stderr(next(f).rstrip())
             print_to_stderr(f"FINISHED PRINTING LOG FILE of {test} ({file_path})")
         else:
