@@ -186,7 +186,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(ravel);
   OP_DECOMPOSE2(repeat_interleave, self_int);
   OP_DECOMPOSE2(repeat_interleave, self_Tensor);
-  OP_DECOMPOSE(reshape);
+  m.impl("reshape", native::reshape_symint);
   OP_DECOMPOSE(resolve_conj);
   OP_DECOMPOSE(resolve_neg);
   OP_DECOMPOSE(row_stack);

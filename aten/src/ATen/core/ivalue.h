@@ -780,7 +780,15 @@ public:
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
-    if (s.isFloatingPoint()) {
+    // NB: do the symbolic versions first, as isFloatingPoint is true
+    // for both SymFloat and double
+    if (s.isSymInt()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymIntNodeImpl().release();
+    } else if (s.isSymFloat()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = s.toSymFloat().toSymFloatNodeImpl().release();
+    } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();
     } else if (s.isComplex()) {
@@ -788,12 +796,6 @@ public:
     } else if (s.isBoolean()) {
       tag = Tag::Bool;
       payload.u.as_bool = s.toBool();
-    } else if (s.isSymInt()) {
-      tag = Tag::SymInt;
-      payload.u.as_intrusive_ptr = s.toSymInt().toSymIntNodeImpl().release();
-    } else if (s.isSymFloat()) {
-      tag = Tag::SymFloat;
-      payload.u.as_intrusive_ptr = s.toSymFloat().toSymFloatNodeImpl().release();
     } else {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(s.isIntegral(false), "Unknown type in Scalar");
       tag  = Tag::Int;
