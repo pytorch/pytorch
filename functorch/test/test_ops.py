@@ -901,7 +901,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
-        xfail('istft'),  # col2im fallback
         xfail('polar'),  # complex fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
@@ -998,7 +997,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.max_pool3d'),
-        xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
