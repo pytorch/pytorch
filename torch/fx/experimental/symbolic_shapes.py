@@ -314,6 +314,7 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
+
 class ShapeEnv(object):
     def __init__(self):
         self.guards = []
@@ -499,8 +500,8 @@ class ShapeEnv(object):
             if expr.has(sympy.Mod):
                 mod_expr = tuple(expr.atoms(sympy.Mod))[0]
                 try:
-                    solutions = sympy.solve(lhs - rhs, mod_expr)
-                    if len(solutions) == 1 and solutions[0] == 0:
+                    solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
+                    if len(solutions) == 1 and solutions[0][mod_expr] == 0:
                         self.divisible.add(mod_expr)
                 except NotImplementedError:
                     pass
@@ -526,6 +527,5 @@ class ShapeEnv(object):
         # NB: drop two frames; evaluate_expr and the Sym* function that
         # actually called us
         stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
-        stack += ''.join(torch.utils.get_cpp_backtrace())
         self.guards.append((expr, concrete_val, stack))
         return concrete_val
