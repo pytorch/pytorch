@@ -148,43 +148,13 @@ def sample_inputs_slice(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype,
                          low=None, high=None, requires_grad=requires_grad)
 
-    yield SampleInput(
-        input=make_input(3),
-        args=(0,),
-    )
+    yield SampleInput(make_input(3), 0)
 
-    yield SampleInput(
-        input=make_input(20, 30, 40),
-        args=(),
-        kwargs={
-            'dim': 1,
-            'start': 1,
-            'end': -2,
-        }
-    )
+    yield SampleInput(make_input(20, 30, 40), dim=1, start=1, end=-2)
 
-    yield SampleInput(
-        input=make_input(20, 30, 40),
-        args=(),
-        kwargs={
-            'dim': 1,
-            'start': 1,
-            'end': -2,
-            'step': 3,
-        }
-    )
+    yield SampleInput(make_input(20, 30, 40), dim=1, start=1, end=-2, step=3)
 
-    yield SampleInput(
-        input=make_input(20, 30, 40),
-        args=(),
-        kwargs={
-            'dim': 0,
-            'start': -10,
-            'end': -2,
-            'step': 2,
-        }
-    )
-
+    yield SampleInput(make_input(20, 30, 40), dim=0, start=-10, end=-2, step=2)
 
 
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
@@ -3134,7 +3104,7 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                                      kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
                          error_regex=error_msg)
 
-        # error inputs for invalied output size
+        # error inputs for invalid output size
         # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
         error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' and not requires_grad \
             else \
@@ -4885,7 +4855,7 @@ def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwarg
     for lu_sample in sample_inputs_linalg_lu(op_info, device, dtype, requires_grad, **kwargs):
         lu_data, pivots = torch.linalg.lu_factor(lu_sample.input)
         lu_data.requires_grad_(requires_grad)
-        yield SampleInput(lu_data, args=(pivots,), output_process_fn_grad=out_fn)
+        yield SampleInput(lu_data, pivots).with_metadata(output_process_fn_grad=out_fn)
 
 
 def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -5497,8 +5467,8 @@ def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwar
 def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return (SampleInput(make_arg((S, S)), args=(), output_process_fn_grad=lambda x: x.to_dense()),
-            SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
+    return (SampleInput(make_arg((S, S))).with_metadata(output_process_fn_grad=lambda x: x.to_dense()),
+            SampleInput(make_arg((S, S)), 1).with_metadata(output_process_fn_grad=lambda x: x.to_dense()),)
 
 def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
     batch_size, num_classes = shape = (2, 3)
@@ -11160,7 +11130,6 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
-           aten_backward_name='im2col_backward',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
