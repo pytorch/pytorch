@@ -132,7 +132,7 @@ inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
   // 1. Flash Attention
   // 2. Math fallback
   auto& ctx = at::globalContext();
-  if (ctx.userEnabledMathSDP() && use_flash_attention(kernel_params, false)) {
+  if (ctx.userEnabledFlashSDP() && use_flash_attention(kernel_params, false)) {
     return SDPBackend::flash_attention;
   }
   if (ctx.userEnabledMathSDP()) {
