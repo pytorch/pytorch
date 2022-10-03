@@ -29,7 +29,6 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 
 __all__ = [
     "dequantize",
-    "div",
     "embedding_bag",
     "fake_quantize_per_tensor_affine",
     "flip",
