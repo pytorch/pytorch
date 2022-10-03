@@ -3100,7 +3100,7 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                                      kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
                          error_regex=error_msg)
 
-        # error inputs for invalied output size
+        # error inputs for invalid output size
         error_msg = 'Invalid computed output size: -2'
         yield ErrorInput(SampleInput(make_arg((2, 2, 2)),
                                      kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
