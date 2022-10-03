@@ -20,14 +20,19 @@ __all__ = ['range_push', 'range_pop', 'mark', 'range']
 
 def range_push(msg):
     """
+    Pushes a range onto a stack of nested range span.  Returns zero-based
+    depth of the range that is started.
+
     Arguments:
-        msg (string): ASCII message to associate with range
+        msg (str): ASCII message to associate with range
     """
     return _itt.rangePush(msg)
 
 
 def range_pop():
     """
+    Pops a range off of a stack of nested range spans. Returns the
+    zero-based depth of the range that is ended.
     """
     return _itt.rangePop()
 
@@ -35,8 +40,9 @@ def range_pop():
 def mark(msg):
     """
     Describe an instantaneous event that occurred at some point.
+
     Arguments:
-        msg (string): ASCII message to associate with the event.
+        msg (str): ASCII message to associate with the event.
     """
     return _itt.mark(msg)
 
@@ -49,7 +55,7 @@ def range(msg, *args, **kwargs):
     they are passed as arguments to msg.format().
 
     Args:
-        msg (string): message to associate with the range
+        msg (str): message to associate with the range
     """
     range_push(msg.format(*args, **kwargs))
     yield

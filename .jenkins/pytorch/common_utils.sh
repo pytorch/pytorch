@@ -117,6 +117,8 @@ function clone_pytorch_xla() {
     pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
     git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
+    git submodule sync
+    git submodule update --init --recursive
     popd
   fi
 }
@@ -139,16 +141,8 @@ function checkout_install_torchdynamo() {
   popd
 }
 
-function checkout_install_functorch() {
-  local commit
-  commit=$(get_pinned_commit functorch)
-  pushd ..
-  git clone https://github.com/pytorch/functorch
-  pushd functorch
-  git checkout "${commit}"
-  time python setup.py develop
-  popd
-  popd
+function test_functorch() {
+  python test/run_test.py --functorch --verbose
 }
 
 function print_sccache_stats() {

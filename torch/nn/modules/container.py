@@ -100,7 +100,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx) -> Union['Sequential', T]:
+    def __getitem__(self, idx: Union[slice, int]) -> Union['Sequential', T]:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -117,6 +117,9 @@ class Sequential(Module):
         else:
             key = self._get_item_by_idx(self._modules.keys(), idx)
             delattr(self, key)
+        # To preserve numbering
+        str_indices = [str(i) for i in range(len(self._modules))]
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -134,6 +137,53 @@ class Sequential(Module):
             raise ValueError('add operator supports only objects '
                              'of Sequential class, but {} is given.'.format(
                                  str(type(other))))
+
+    def pop(self, key: Union[int, slice]) -> Module:
+        v = self[key]
+        del self[key]
+        return v
+
+    def __iadd__(self, other) -> 'Sequential':
+        if isinstance(other, Sequential):
+            offset = len(self)
+            for i, module in enumerate(other):
+                self.add_module(str(i + offset), module)
+            return self
+        else:
+            raise ValueError('add operator supports only objects '
+                             'of Sequential class, but {} is given.'.format(
+                                 str(type(other))))
+
+    def __mul__(self, other: int) -> 'Sequential':
+        if not isinstance(other, int):
+            raise TypeError(f"unsupported operand type(s) for *: {type(self)} and {type(other)}")
+        elif (other <= 0):
+            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
+        else:
+            combined = Sequential()
+            offset = 0
+            for _ in range(other):
+                for module in self:
+                    combined.add_module(str(offset), module)
+                    offset += 1
+            return combined
+
+    def __rmul__(self, other: int) -> 'Sequential':
+        return self.__mul__(other)
+
+    def __imul__(self, other: int) -> 'Sequential':
+        if not isinstance(other, int):
+            raise TypeError(f"unsupported operand type(s) for *: {type(self)} and {type(other)}")
+        elif (other <= 0):
+            raise ValueError(f"Non-positive multiplication factor {other} for {type(self)}")
+        else:
+            len_original = len(self)
+            offset = len(self)
+            for _ in range(other - 1):
+                for i in range(len_original):
+                    self.add_module(str(i + offset), self._modules[str(i)])
+                offset += len_original
+            return self
 
     @_copy_to_script_wrapper
     def __dir__(self):
@@ -225,7 +275,7 @@ class ModuleList(Module):
         return str(idx)
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: int) -> Union[Module, 'ModuleList']:
+    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, 'ModuleList']:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -287,6 +337,11 @@ class ModuleList(Module):
         """
         self.add_module(str(len(self)), module)
         return self
+
+    def pop(self, key: Union[int, slice]) -> Module:
+        v = self[key]
+        del self[key]
+        return v
 
     def extend(self, modules: Iterable[Module]) -> 'ModuleList':
         r"""Appends modules from a Python iterable to the end of the list.
@@ -387,7 +442,7 @@ class ModuleDict(Module):
         r"""Remove key from the ModuleDict and return its module.
 
         Args:
-            key (string): key to pop from the ModuleDict
+            key (str): key to pop from the ModuleDict
         """
         v = self[key]
         del self[key]
@@ -679,7 +734,7 @@ class ParameterDict(Module):
         `default` defaults to `None`.
 
         Args:
-            key (string): key to set default for
+            key (str): key to set default for
             default (Any): the parameter set to the key
         """
 
@@ -697,7 +752,7 @@ class ParameterDict(Module):
         r"""Remove key from the ParameterDict and return its parameter.
 
         Args:
-            key (string): key to pop from the ParameterDict
+            key (str): key to pop from the ParameterDict
         """
         v = self[key]
         del self[key]
@@ -719,7 +774,7 @@ class ParameterDict(Module):
         Otherwise return default if provided, None if not.
 
         Args:
-            key (string): key to get from the ParameterDict
+            key (str): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
         return self[key] if key in self else default

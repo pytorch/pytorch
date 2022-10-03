@@ -17,7 +17,7 @@ from ..utils import (
 from .graph_module import (
     is_observed_standalone_module,
 )
-
+from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Any, Dict, List, Callable, Optional, Tuple, Type, Set
 
 
@@ -58,7 +58,7 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != 'call_module':
             return False
-        if not type(modules[node.target]) == self_match:
+        if not type_before_parametrizations(modules[node.target]) == self_match:
             return False
     elif callable(self_match):
         if node.op != 'call_function' or node.target is not self_match:

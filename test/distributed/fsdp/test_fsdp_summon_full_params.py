@@ -7,12 +7,10 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import CPUOffload, FlatParameter
+from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel,
-)
+from torch.distributed.fsdp.flat_param import FlatParamHandle
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -87,7 +85,7 @@ class TestSummonFullParamsNoShard(FSDPTest):
     def test_summon_full_param_writeback(
         self, writeback, modify_outer, mixed_precision
     ):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
@@ -120,7 +118,7 @@ class TestSummonFullParams(FSDPTest):
     def test_summon_full_param_writeback(
         self, writeback, cpu_offload, mixed_precision, modify_outer
     ):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         return _run_test_summon_full_param_writeback(
             self,
             writeback,
@@ -132,7 +130,7 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_summon_full_param_shard_value(self, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         raw_model = nn.Linear(10, 11)
         raw_model_size = self.get_model_param_count(raw_model)
         expected_shard_size = self.get_expected_sharded_size(raw_model_size)
@@ -148,7 +146,7 @@ class TestSummonFullParams(FSDPTest):
         with model.summon_full_params(model):
             self.assertEqual(raw_model_size, self.get_model_param_count(model))
             parameters = list(model.parameters())
-            all_shards = FlatParameter(parameters, requires_grad=False)
+            all_shards = FlatParamHandle.flatten_params(parameters, requires_grad=False)
             my_slice = torch.chunk(all_shards, self.world_size)[self.rank]
 
             # shards are padded but the full_param tensor is not
@@ -162,7 +160,7 @@ class TestSummonFullParams(FSDPTest):
     @parametrize("summon_outer", [True, False])
     @parametrize("mixed_precision", [True, False])
     def test_summon_full_param_recursive(self, recurse, summon_outer, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -236,7 +234,7 @@ class TestSummonFullParams(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_summon_full_params_respects_reshard_after_forward(self, mixed_precision):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -353,7 +351,7 @@ class TestSummonFullParams(FSDPTest):
         )
 
         params_to_compare = list(model_no_fsdp.parameters())
-        with FullyShardedDataParallel.summon_full_params(model_fsdp):
+        with FSDP.summon_full_params(model_fsdp):
             fsdp_params = [p.clone() for p in model_fsdp.parameters()]
 
         self.assertEqual(params_to_compare, fsdp_params)
@@ -365,7 +363,7 @@ class TestSummonFullParams(FSDPTest):
     def test_reshard_outside_forward_backward_iteration(
         self, rank0_only, offload_to_cpu, mixed_precision
     ):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         model = FSDP(
             nn.Sequential(
                 FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
@@ -431,7 +429,7 @@ class TestSummonFullParams(FSDPTest):
     def test_params_are_unflattenned(self, rank0_only, offload_to_cpu, mixed_precision):
         layer_shape = (10, 12)
         model = nn.Linear(*layer_shape, bias=False).cuda(self.rank)
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         fsdp_model = FSDP(deepcopy(model), mixed_precision=mixed_precision).cuda(
             self.rank
         )
@@ -480,7 +478,7 @@ class TestSummonFullParams(FSDPTest):
         offload_to_cpu: bool,
         mixed_precision: bool,
     ):
-        mixed_precision = MixedPrecision() if mixed_precision else None
+        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
         model = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,

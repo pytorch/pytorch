@@ -36,7 +36,7 @@ jobs:
         uses: ./.github/actions/setup-linux
 
       - name: Setup SSH (Click me for login details)
-        uses: ./.github/actions/setup-ssh
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
 
@@ -47,7 +47,7 @@ jobs:
           docker-image-name: ${{ inputs.docker-image-name }}
 
       - name: Pull docker image
-        uses: ./.github/actions/pull-docker-image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
@@ -124,10 +124,17 @@ jobs:
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
+          # sanitize the input commit message and PR body here:
+          #
           # trim all new lines from commit messages + PR_BODY to avoid issues with batch environment
           # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
-          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
-          export PR_BODY="${PR_BODY//[$'\n\r']}"
+          COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+          PR_BODY="${PR_BODY//[$'\n\r']}"
+
+          # then trim all special characters like single and double quotes to avoid unescaped inputs to
+          # wreak havoc internally
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[\'\"]}"
+          export PR_BODY="${PR_BODY//[\'\"]}"
 
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
@@ -190,5 +197,5 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown Linux
-        uses: ./.github/actions/teardown-linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()

@@ -194,8 +194,10 @@ auto ConvParams::use_cudnn(const at::Tensor& input, const at::Tensor& weight) co
   if (!input.is_cuda() || !cudnn_enabled) {
     return false;
   }
-  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16)  {
-    return at::native::cudnnv8_enabled_check_debug();
+  if (input.scalar_type() == at::kBFloat16 || weight.scalar_type() == at::kBFloat16) {
+    if (!(detail::getCUDAHooks().supportsBFloat16ConvolutionWithCuDNNv8() && at::native::cudnnv8_enabled_check_debug())) {
+      return false;
+    }
   }
   if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous) {
     // bypass dilation checks for channels_last convolution
@@ -804,6 +806,14 @@ at::Tensor conv2d(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
+  TORCH_CHECK(
+    !bias.defined() || bias.dtype() == input_.dtype(),
+    "Input type (",
+    input_.dtype().name(),
+    ") and bias type (",
+    bias.dtype().name(),
+    ") should be the same");
+
   Tensor input;
   bool is_batched;
   std::tie(input, is_batched) = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
@@ -876,7 +886,7 @@ static Tensor convolution_same(
   if (symmetric_padding) {
     // All backends handle symmetric padding natively
     DimVector output_padding(static_cast<size_t>(dim));
-    return native::convolution(input, weight, bias, stride, padding_l, dilation,
+    return at::convolution(input, weight, bias, stride, padding_l, dilation,
                                false, output_padding, groups);
   }
 
@@ -914,7 +924,7 @@ Tensor _convolution_mode(
   } else if (padding == "valid") {
     // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
     const int64_t padding_[] = {0};
-    return at::native::convolution(
+    return at::convolution(
         input, weight, bias, stride, padding_, dilation, false, padding_, groups);
   }
   TORCH_CHECK(false, "Invalid padding string: '", padding, "'");
@@ -1080,7 +1090,7 @@ ConvBackend select_conv_backend(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1305,6 +1315,7 @@ at::Tensor _convolution(
   int64_t dim = k - 2;
 
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
+  TORCH_CHECK(groups_ > 0, "non-positive groups is not supported");
 
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
@@ -1322,7 +1333,7 @@ at::Tensor _convolution(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -1493,7 +1504,7 @@ at::Tensor _convolution(
       break;
   }
 
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     output = view3d(output);
   }
 
@@ -1828,7 +1839,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
 
   // Expand 1d -> 2d.
   // This is only done for backends that don't natively support 1d spatial input.
-  if (k == 3 && !input.is_mkldnn()) {
+  if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
     // avoid accidentally going through NHWC for permuted 3d input.
     input = input.contiguous();
     params.view1d_as_2d();
@@ -2044,12 +2055,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   // Convert 2D inputs back to 1D for backends that don't natively support 1D
   // spatial inputs.
   if (output_mask[0]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_input = view3d(backend_grad_input);
     }
   }
   if (output_mask[1]) {
-    if (k == 3 && !input.is_mkldnn()) {
+    if (k == 3 && !input.is_mkldnn() && !input.is_xpu()) {
       backend_grad_weight = view3d(backend_grad_weight);
     }
   }

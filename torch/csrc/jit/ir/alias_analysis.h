@@ -314,7 +314,7 @@ class AliasDb {
 // Helper check that invariants over AliasDb are maintained.
 // Useful if you are using the AliasDb mutation API and want to check you did
 // the right thing.
-void Lint(const AliasDb* db);
+TORCH_API void Lint(const AliasDb* db);
 
 } // namespace jit
 } // namespace torch

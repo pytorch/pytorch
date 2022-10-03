@@ -44,7 +44,7 @@ struct Argument {
       c10::optional<AliasInfo> alias_info = c10::nullopt)
       : name_(std::move(name)),
         type_(fake_type ? std::move(fake_type) : TensorType::get()),
-        real_type_(real_type ? std::move(real_type) : TensorType::get()),
+        real_type_(real_type ? std::move(real_type) : type_),
         N_(std::move(N)),
         default_value_(std::move(default_value)),
         alias_info_(alias_info ? std::make_unique<AliasInfo>(std::move(*alias_info)) : nullptr),
@@ -88,6 +88,8 @@ struct Argument {
   const TypePtr& type() const {
     return type_;
   }
+  // if type() is non-null, this is guaranteed to be non-null (if no real
+  // type was provided, this takes on type()'s value)
   const TypePtr& real_type() const {
     return real_type_;
   }
@@ -214,6 +216,7 @@ enum struct TORCH_API SchemaArgType { input, output };
 struct TORCH_API SchemaArgument {
   SchemaArgType type;
   size_t index;
+  SchemaArgument(SchemaArgType tpe, size_t idx) : type(tpe), index(idx) {}
   bool operator==(const SchemaArgument& rhs) const {
     return type == rhs.type && index == rhs.index;
   }
@@ -369,6 +372,13 @@ struct TORCH_API FunctionSchema {
   bool is_varret() const {
     return is_varret_;
   }
+  bool is_aliasing(const c10::SchemaArgument &argument) const {
+    TORCH_INTERNAL_ASSERT(
+    argument.index < getCorrectList(argument.type).size(),
+    "Invalid index for schema.");
+    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
+    return aliasInfo;
+  }
   bool is_mutable() const {
     return std::any_of(
         arguments_.cbegin(), arguments_.cend(), [](const Argument& arg) {
@@ -376,11 +386,11 @@ struct TORCH_API FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
-  bool is_mutable(size_t index) const {
+  bool is_mutable(const c10::SchemaArgument &argument) const {
     TORCH_INTERNAL_ASSERT(
-        index < arguments().size(),
+        argument.index < getCorrectList(argument.type).size(),
         "Invalid index for schema.");
-    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
   }
   bool is_mutable(c10::string_view name) const {
@@ -388,7 +398,7 @@ struct TORCH_API FunctionSchema {
     TORCH_INTERNAL_ASSERT(
         index != c10::nullopt, "Schema has no argument named ", name);
 
-    return is_mutable(*index);
+    return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
 
   // Returns whether lhs and rhs may alias directly.
@@ -418,7 +428,7 @@ struct TORCH_API FunctionSchema {
 
   // Returns either arguments() or returns() depending on the SchemaArgType
   // output => returns(), input => arguments()
-  std::vector<Argument> getCorrectList(SchemaArgType type) const;
+  const std::vector<Argument>& getCorrectList(SchemaArgType type) const;
 
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
@@ -464,6 +474,8 @@ struct TORCH_API FunctionSchema {
 
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;
+
+  FunctionSchema cloneWithRealTypes(bool with_symint=true) const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.
@@ -539,19 +551,31 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
-  auto type = arg.type();
+  // real_type versus fake_type: in order to be compatible with FunctionSchema
+  // parser, printing an argument with either MemoryFormat or Layout type should
+  // give us the original schema string, hence printing out real_type.
+  auto type = arg.real_type();
   bool is_opt = type->kind() == OptionalType::Kind;
   auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 
-  if (unopt_type->kind() == ListType::Kind && arg.N()) {
+  if (unopt_type->kind() == ListType::Kind) {
     // sized lists get size N from arg, not type
     auto list = unopt_type->cast<c10::ListType>();
-    out << list->getElementType()->str() << "[" << *arg.N() << "]";
+    out << list->getElementType()->str();
+    if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
+      out << arg.alias_info()->containedTypes()[0];
+    }
+    std::string N = "";
+    if (arg.N()) {
+        N = std::to_string(*arg.N());
+    }
+    out << "[" << N << "]";
   } else {
     out << unopt_type->str();
   }
 
-  if (arg.alias_info()) {
+  // print alias info if it has beforeSets.
+  if (arg.alias_info() && !arg.alias_info()->beforeSets().empty()) {
     out << *arg.alias_info();
   }
 

@@ -11,9 +11,11 @@ These backends include:
 
 - ``torch.backends.cuda``
 - ``torch.backends.cudnn``
+- ``torch.backends.mps``
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
 - ``torch.backends.openmp``
+- ``torch.backends.xeon``
 
 
 torch.backends.cuda
@@ -101,12 +103,16 @@ torch.backends.mkl
 
 .. autofunction::  torch.backends.mkl.is_available
 
+.. autoclass::  torch.backends.mkl.verbose
+
 
 torch.backends.mkldnn
 ^^^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.mkldnn
 
 .. autofunction::  torch.backends.mkldnn.is_available
+
+.. autoclass::  torch.backends.mkldnn.verbose
 
 
 torch.backends.openmp
@@ -120,3 +126,8 @@ torch.backends.openmp
 .. add anything to the rendered page for now.
 .. py:module:: torch.backends.quantized
 .. py:module:: torch.backends.xnnpack
+
+
+torch.backends.xeon
+^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.xeon

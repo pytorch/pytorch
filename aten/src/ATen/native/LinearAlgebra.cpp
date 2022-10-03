@@ -48,6 +48,8 @@ namespace detail {
 namespace meta {
 
 #define ADDMM_META() \
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype"); \
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype"); \
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor"); \
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor"); \
   TORCH_CHECK( \
@@ -55,7 +57,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -711,24 +713,6 @@ Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
 }
 
-Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, tol, symmetric);
-}
-
-Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
-}
-
 // multi_dot helper functions
 namespace {
 
@@ -1108,24 +1092,26 @@ Tensor math_addr(const Tensor& self,
                  const Scalar& beta, const Scalar& alpha) {
   // when beta==0, values in self should be ignored,
   // nans and infs in self should not propagate.
+  Tensor out;
   if (beta.toComplexDouble() == 0.0) {
     if (alpha.toComplexDouble() == 1.0) {
-      return at::outer(vec1, vec2);
+      out = at::outer(vec1, vec2);
+    } else {
+      out = alpha * at::outer(vec1, vec2);
     }
-    return alpha * at::outer(vec1, vec2);
-  }
-
-  if (beta.toComplexDouble() == 1.0) {
+  } else if (beta.toComplexDouble() == 1.0) {
     if (alpha.toComplexDouble() == 1.0) {
-      return self + at::outer(vec1, vec2);
+      out = self + at::outer(vec1, vec2);
+    } else {
+      out = self + alpha * at::outer(vec1, vec2);
     }
-    return self + alpha * at::outer(vec1, vec2);
+  } else if (alpha.toComplexDouble() == 1.0) {
+    out = beta * self + at::outer(vec1, vec2);
+  } else {
+    out = beta * self + alpha * at::outer(vec1, vec2);
   }
-
-  if (alpha.toComplexDouble() == 1.0) {
-    return beta * self + at::outer(vec1, vec2);
-  }
-  return beta * self + alpha * at::outer(vec1, vec2);
+  auto result_type = c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  return out.to(c10::TensorOptions().dtype(result_type));
 }
 
 Tensor& math_addr_out(const Tensor& self,
@@ -1760,7 +1746,8 @@ Tensor _matmul_impl(
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
     return has_out ? at::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return has_out ? at::mv_out(out, tensor2.t(), tensor1) : tensor2.t().mv(tensor1);
+    return has_out ? at::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
     return has_out ? at::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (should_fold(tensor1, dim_tensor2) || should_fold(tensor2, dim_tensor1)) {
@@ -1880,8 +1867,8 @@ Tensor _matmul_impl(
 
 Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
   auto maybe_outnames = namedinference::compute_matmul_outnames(tensor1, tensor2);
-  at::Tensor unused;
-  auto result = at::native::_matmul_impl(unused, tensor1, tensor2);
+  at::Tensor result, unused;
+  result = at::native::_matmul_impl(unused, tensor1, tensor2);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
 }
@@ -2282,8 +2269,7 @@ void compute_T18_scale_square(
   for (const auto i : c10::irange(mexp_scaled.size(0))) {
     auto s_val = s_cpu.select(0, i).template item<int64_t>();
     auto mexp = mexp_scaled.select(0, i);
-    for (const auto p : c10::irange(s_val)) {
-      (void)p; //Suppress unused variable warning
+    for (const auto p C10_UNUSED : c10::irange(s_val)) {
       mexp = at::matmul(mexp, mexp);
     }
     mexp_out.select(0, i).copy_(mexp);
@@ -2493,14 +2479,17 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   norm_stub(iter.device_type(), iter, ord);
 }
 
-void _linalg_matrix_norm_checks(const Tensor& A, IntArrayRef dim, optional<ScalarType> opt_dtype) {
-  at::native::checkFloatingOrComplex(A, "linalg.matrix_norm");
-  TORCH_CHECK(A.dim() >= 2,
-              "linalg.matrix_norm: input tensor must be a matrix or a batch of matrices");
+void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, optional<ScalarType> opt_dtype, bool low_precision) {
+  // A
+  at::native::checkIsMatrix(A, "linalg.matrix_norm");
+  at::native::checkFloatingOrComplex(A, "linalg.matrix_norm", /*low_precision*/low_precision);
 
   // dim
-  TORCH_CHECK(dim.size() == 2, "linalg.matrix_norm: dim must be a 2-tuple of ints");
-  TORCH_CHECK(dim[0] != dim[1], "Expected dims to be different, got (", dim[0], ", ", dim[1], ") instead");
+  TORCH_CHECK(dim.size() == 2, "linalg.matrix_norm: dim must be a 2-tuple. Got ", dim);
+  // wrap first to identify weird scenarios like A.ndim = 2, dim = (1, -1)
+  // dim is modified in place while wrapping it
+  maybe_wrap_dims(dim, A.dim());
+  TORCH_CHECK(dim[0] != dim[1], "linalg.matrix_norm: dims must be different. Got (", dim[0], ", ", dim[1], ")");
 
   // dtype
   at::detail::check_linalg_norm_dtype(opt_dtype, A.scalar_type(), "linalg.matrix_norm");
@@ -2512,14 +2501,14 @@ Tensor linalg_matrix_norm(
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype) {
-  _linalg_matrix_norm_checks(A, dim, opt_dtype);
-
+  // Check ord first as it will be used in the dtype check of A
   auto ord = scalar_ord.toDouble();
   auto abs_ord = std::abs(ord);
   TORCH_CHECK(abs_ord == 2. || abs_ord == 1. || abs_ord == INFINITY, "linalg.matrix_norm: Order ", ord, " not supported.");
 
   auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, A.dim());
+  // Check A, dim, and dtype
+  _linalg_matrix_norm_checks(A, dim_, opt_dtype, /*low_precision*/abs_ord != 2.);
 
   auto max_min = [ord, keepdim](const Tensor& A, int64_t dim) { return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim); };
   if (abs_ord == 2.) {
@@ -2572,16 +2561,18 @@ Tensor linalg_matrix_norm(
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> opt_dtype) {
-  _linalg_matrix_norm_checks(A, dim, opt_dtype);
+  // Check ord first as it will be used in the dtype check of A
   TORCH_CHECK(ord == "fro" || ord == "nuc", "linalg.matrix_norm: Order ", ord, " not supported.");
 
-  auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+  auto dim_ = dim.vec();
+  // Check A, dim, and dtype
+  _linalg_matrix_norm_checks(A, dim_, opt_dtype, /*low_precision*/ord != "nuc");
 
   if (ord == "fro") {
-    return at::linalg_vector_norm(A_, 2, dim, keepdim);
+    return at::linalg_vector_norm(A, 2, dim_, keepdim, opt_dtype);
   } else {  // nuc
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, A_.dim());
+    auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
+
     // Move dims to the end
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A_.dim());
     auto result = at::linalg_svdvals(A_.permute(permutation)).sum(-1, keepdim);

@@ -34,10 +34,10 @@ Tensor do_trapezoid(const Tensor& y, double dx, int64_t dim) {
 }
 
 Tensor zeros_like_except(const Tensor& y, int64_t dim) {
-    auto sizes = y.sizes().vec();
+    auto sizes = y.sym_sizes().vec();
     dim = maybe_wrap_dim(dim, y.dim());
     sizes.erase(sizes.begin() + dim);
-    return at::zeros(sizes, y.options());
+    return at::zeros_symint(sizes, y.options());
 }
 
 Tensor do_cumulative_trapezoid(const Tensor& y, const Tensor& dx, int64_t dim) {
@@ -111,7 +111,7 @@ Tensor trapezoid(const Tensor& y, const Tensor& x, int64_t dim) {
 
 Tensor trapezoid(const Tensor& y, const Scalar& dx, int64_t dim) {
     // see above
-    if (y.size(dim) == 0) {
+    if (y.sym_size(dim) == 0) {
         return zeros_like_except(y, dim);
     }
     TORCH_CHECK(y.scalar_type() != kBool, "trapezoid: received a bool input for `y`, but bool is not supported")
