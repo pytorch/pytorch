@@ -1981,6 +1981,10 @@ graph(%Ra, %Rb):
         out = torch.empty([2, 5], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
+    # TODO: This test does NOT have full coverage--it is known that torchscript does
+    # NOT work with the newer einsum keyword arguments due to mismatch between its
+    # C++ and Python API (difference in types between 'path' and 'optimize'). We
+    # should fix this and add tests here to verify functionality.
     def test_einsum(self):
         def check(fn, jitted, *args):
             self.assertGraphContains(jitted.graph, kind='aten::einsum')

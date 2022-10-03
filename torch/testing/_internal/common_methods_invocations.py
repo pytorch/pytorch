@@ -13482,6 +13482,8 @@ op_db: List[OpInfo] = [
                # there's a test `test_einsum` in `test_jit.py` to handle this case
                # AssertionError: JIT Test does not execute any logic
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # JIT runs into errors with einsum kwargs, see test_einsum in test_jit for more details
+               DecorateInfo(unittest.skip("Skipped!"), 'TestVisionTracing'),
            )),
     OpInfo('svd',
            op=torch.svd,
