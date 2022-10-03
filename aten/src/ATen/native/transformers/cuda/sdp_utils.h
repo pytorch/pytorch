@@ -126,25 +126,4 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   }
   return true;
 }
-
-inline SDPBackend select_sdp_backend(sdp_params kernel_params) {
-  // This function defines the priority order of the different sdp backends
-  // 1. Flash Attention
-  // 2. Math fallback
-  auto& ctx = at::globalContext();
-  if (ctx.userEnabledFlashSDP() && use_flash_attention(kernel_params, false)) {
-    return SDPBackend::flash_attention;
-  }
-  if (ctx.userEnabledMathSDP()) {
-    return SDPBackend::math;
-  }
-  // If the user disabled the Math kernel, but asked to run the flash attention
-  // kernel we re-run the checks with debug enabled to print out the reason
-  // why the kernel was not selected.
-  if (ctx.userEnabledMathSDP()) {
-    use_flash_attention(kernel_params, true);
-  }
-  return SDPBackend::error;
-}
-
 } // namespace sdp

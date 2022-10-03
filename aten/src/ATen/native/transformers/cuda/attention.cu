@@ -484,19 +484,21 @@ std::tuple<Tensor, Tensor> flash_attention_helper_dense_unpacked(
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_cuda(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
-
-    // Determine which efficient kernel to use
-    sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, need_attn_weights, is_causal};
-    auto backend = select_sdp_backend(kernel_params);
-    switch(backend){
-      case sdp::SDPBackend::flash_attention:
-        return flash_attention_helper_dense_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
-      case sdp::SDPBackend::math:
-        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
-      default:
-        TORCH_CHECK(false, "No viable backend for scaled_dot_product_attention was found.");
-        return std::make_tuple(Tensor(), Tensor());
-    }
+  // Determine which efficient kernel to use
+  sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, need_attn_weights, is_causal};
+  if (ctx.userEnabledFlashSDP() && sdp::use_flash_attention(kernel_params, false)) {
+    return flash_attention_helper_dense_unpacked(query_, key, value, dropout_p, need_attn_weights, is_causal);
+  }
+  if (ctx.userEnabledMathSDP()) {
+    return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+  }
+  // If the user disabled the Math kernel, but asked to run the flash attention
+  // kernel we re-run the checks with debug enabled to print out the reason
+  // why the kernel was not selected.
+  if (ctx.userEnabledMathSDP()) {
+    use_flash_attention(kernel_params, true);
+  }
+  return std::make_tuple(Tensor(), Tensor());
 }
 
 std::tuple<Tensor, Tensor> flash_scaled_dot_product_attention(
