@@ -776,7 +776,6 @@ class FakeTensorMode(TorchDispatchMode):
         # TODO - we should be use the prim aten impl
         if (
             "prims::" in func._schema.name
-            and len(flat_arg_fake_tensors) != 0
             and hasattr(func, "prim_meta_impl")
         ):
             with self:
