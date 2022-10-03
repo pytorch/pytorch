@@ -1383,11 +1383,11 @@ Tensor renorm_backward(
 
 Tensor repeat_backward(
     Tensor grad,
-    IntArrayRef repeats,
-    IntArrayRef input_shape) {
+    c10::SymIntArrayRef repeats,
+    c10::SymIntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
-    return at::zeros(input_shape, grad.options());
+    return at::zeros_symint(input_shape, grad.options());
   }
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
@@ -1396,9 +1396,10 @@ Tensor repeat_backward(
     grad = grad.sum(0, false);
   }
 
-  at::DimVector grad_size, sum_dims;
+  at::SymDimVector grad_size;
+  at::DimVector sum_dims;
   for (const auto dim : c10::irange(input_dims)) {
-    int64_t repeat = repeats[dim + num_unsqueezed];
+    auto repeat = repeats[dim + num_unsqueezed];
     // Reshape gradient (repeat > 1)
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
     // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
@@ -1457,7 +1458,7 @@ Tensor repeat_backward(
   // reduce the whole grad tensor into a scalar rather than keeping original
   // dimensions.
   if (!sum_dims.empty()) {
-    grad = grad.reshape(grad_size);
+    grad = grad.reshape_symint(grad_size);
     grad = grad.sum(sum_dims);
   }
   return grad;

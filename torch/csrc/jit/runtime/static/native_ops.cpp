@@ -7,6 +7,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <c10/util/intrusive_ptr.h>
