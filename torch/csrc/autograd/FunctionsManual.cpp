@@ -2792,7 +2792,7 @@ Tensor as_strided_backward(
     auto size_i = sym_sizes[i];
     auto stride_i = sym_strides[i];
     if (size_i == 0) {
-      return at::zeros_symint(input_geometry.sizes(), grad.options());
+      return at::zeros_symint(input_geometry.sym_sizes(), grad.options());
     } else if (size_i == 1) {
       grad = grad.squeeze(i);
     } else if (stride_i == 0) {
@@ -2814,8 +2814,8 @@ Tensor as_strided_backward(
   // Strided Tensor ]
   //              on input geometry
   auto idim = input_geometry.dim();
-  auto inp_sizes = input_geometry.sizes(),
-       inp_strides = input_geometry.strides();
+  auto inp_sizes = input_geometry.sym_sizes(),
+       inp_strides = input_geometry.sym_strides();
   std::vector<c10::SymInt> inp_sizes_, inp_strides_;
   inp_sizes_.reserve(idim);
   inp_strides_.reserve(idim);
@@ -2823,7 +2823,7 @@ Tensor as_strided_backward(
     auto size_i = inp_sizes[i];
     auto stride_i = inp_strides[i];
     if (size_i == 0) {
-      return at::zeros_symint(input_geometry.sizes(), grad.options());
+      return at::zeros_symint(input_geometry.sym_sizes(), grad.options());
     } else if (size_i != 1) {
       inp_sizes_.insert(inp_sizes_.begin(), size_i);
       inp_strides_.insert(inp_strides_.begin(), stride_i);
@@ -2847,8 +2847,9 @@ Tensor as_strided_backward(
   // Step (1): create underlying tensor as "storage"
   auto shared_offset =
       // TODO: symint-ify. Do we need a min() and max() for SymInts?
-      std::min(input_geometry.storage_offset(), *storage_offset);
-  auto inp_effective_offset = input_geometry.storage_offset() - shared_offset;
+      std::min(input_geometry.sym_storage_offset(), *storage_offset);
+  auto inp_effective_offset =
+      input_geometry.sym_storage_offset() - shared_offset;
   auto out_effective_offset = *storage_offset - shared_offset;
   auto base_size = std::max(
       _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
@@ -2907,7 +2908,7 @@ Tensor as_strided_scatter_backward(
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
   auto result = grad_.new_empty_strided_symint(
-      input_geometry.sizes(), input_geometry.strides());
+      input_geometry.sym_sizes(), input_geometry.sym_strides());
   auto result_slice = result.as_strided_symint(sizes, strides, storage_offset);
   result_slice.copy_(grad_slice);
   return result;
