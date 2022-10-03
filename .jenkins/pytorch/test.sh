@@ -508,6 +508,11 @@ build_xla() {
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
+
+  # TODO: The torch pin #73164 is involved in the sev https://github.com/pytorch/pytorch/issues/86093
+  # so this is temporarily removed until XLA fixes the weird logic in https://github.com/pytorch/xla/blob/master/scripts/apply_patches.sh#L17-L18
+  rm "${XLA_DIR}/torch_patches/.torch_pin" || true
+
   apply_patches
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo

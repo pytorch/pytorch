@@ -111,6 +111,27 @@ function checkout_install_torchvision() {
   popd
 }
 
+function checkout_install_torchdeploy() {
+  local commit
+  pushd ..
+  git clone https://github.com/pytorch/multipy
+  pushd multipy
+  export CFLAGS="-fPIC -g"
+  pyenv install --force 3.8.6
+  virtualenv -p ~/.pyenv/versions/3.8.6/bin/python3 ~/venvs/multipy
+  source ~/venvs/multipy/bin/activate
+  pushd multipy/runtime
+  python examples/generate_examples.py
+  mkdir build
+  pushd build
+  cmake ..
+  cmake --build .
+  popd
+  popd
+  popd
+  popd
+}
+
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
     git clone --recursive --quiet https://github.com/pytorch/xla.git
