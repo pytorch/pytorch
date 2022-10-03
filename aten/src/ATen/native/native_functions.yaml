@@ -3794,11 +3794,11 @@
     CompositeExplicitAutograd: ones
   autogen: ones.names_out
 
-- func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: ones(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: ones
 
-- func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: ones.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: ones_out
 
