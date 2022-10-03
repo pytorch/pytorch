@@ -930,7 +930,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 # Import experimental masked operations support. See
 # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
 # information.
-from . import _masked
+from . import masked
 
 # Import removed ops with error message about removal
 from ._linalg_utils import (  # type: ignore[misc]
