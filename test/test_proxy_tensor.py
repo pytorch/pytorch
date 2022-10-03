@@ -875,6 +875,17 @@ def forward(self, a_1):
 
         self._test_dynamic(f, [(2, 4), (4, 5)], [[(2, 3), (5, 7)], [(3, 7), (9, 3)]], assert_eq=False)
 
+    def test_size_with_tensor(self):
+        def f(tensor):
+            max_size = torch.tensor([800, 1216], dtype=torch.int64)
+            batch_shape = [2] + list(tensor.shape[:-2]) + list(max_size)
+            return tensor.new_empty(batch_shape)
+
+        a = torch.randn(3, 800, 1199)
+        self.assertRaisesRegex(
+            RuntimeError, "data-dependent", lambda: make_fx(f, tracing_mode="symbolic")(a)
+        )
+
     def test_expand(self):
         def f(a):
             b = torch.mul(a, a)
@@ -1171,7 +1182,6 @@ symbolic_tensor_failures = {
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_avg_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.adaptive_avg_pool2d', ''),  # argument 'size' must be tuple of ints, but found element o...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d.default - couldn't find symbolic meta func...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbolic meta funct...
