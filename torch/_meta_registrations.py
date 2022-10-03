@@ -1098,7 +1098,9 @@ def meta_like(self, *args, **kwargs):
 
 @register_meta(aten.arange.default)
 def arange(end, **kwargs):
-    return aten.empty([int(end)], **kwargs)
+    if isinstance(end, float):
+        end = int(end)
+    return aten.empty([end], **kwargs)
 
 
 @register_meta(aten.arange.start)
