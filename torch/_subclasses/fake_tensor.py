@@ -488,27 +488,6 @@ class FakeTensor(torch.Tensor):
             self_repr = super().__repr__()
         return f"FakeTensor({self_repr}, {self.fake_device})"
 
-    def new(self, *args, **kwargs):
-        # TODO: This doesn't work with sparse self
-
-        # torch.Tensor.new does not go through the normal dispatcher pattern
-        # so in order to use the same pattern as normal invocation of
-        # returning meta device within the kernel we need to intercept
-        # the call here
-        # because it doesn't go through the dispatcher, we run into errors
-        # when attempting to compute an output in meta, so
-        # we compute the real tensor then convert to meta
-        out_device = self.fake_device
-        with no_dispatch(), in_kernel_invocation_manager(self.fake_mode):
-            real_out = super().new(*args, **kwargs)
-
-        assert not isinstance(real_out, FakeTensor), real_out
-        assert real_out.device.type != "meta", real_out.device
-
-        with no_dispatch():
-            meta_out = MetaConverter()(real_out)
-            return FakeTensor(self.fake_mode, meta_out, out_device)
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         # need to handle here to avoid infinite recursion
