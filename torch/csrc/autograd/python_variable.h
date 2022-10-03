@@ -4,6 +4,7 @@
 #include <torch/csrc/python_headers.h>
 #include <memory>
 
+#include <c10/core/impl/PyInterpreterTLS.h>
 #include <ATen/core/function_schema.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
@@ -69,6 +70,17 @@ inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
 }
 
 TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();
+
+// TODO: Maybe only allow if you aren't already in an interpreter
+struct SetPyInterpreterTLS {
+  SetPyInterpreterTLS() : old_(c10::impl::PyInterpreterTLS::get_state()) {
+    c10::impl::PyInterpreterTLS::set_state(getPyInterpreter());
+  }
+  ~SetPyInterpreterTLS() {
+    c10::impl::PyInterpreterTLS::set_state(old_);
+  }
+  const c10::impl::PyInterpreter* old_;
+};
 
 std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
     const c10::OperatorHandle& op,

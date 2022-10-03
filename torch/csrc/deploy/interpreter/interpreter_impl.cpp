@@ -9,6 +9,7 @@
 #include <pybind11/functional.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/deploy/Exception.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
@@ -249,20 +250,24 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
   ConcreteInterpreterSessionImpl(ConcreteInterpreterImpl* interp)
       : interp_(interp) {}
   Obj global(const char* module, const char* name) override {
+    SetPyInterpreterTLS g;
     return wrap(global_impl(module, name));
   }
 
   Obj fromIValue(IValue value) override {
+    SetPyInterpreterTLS g;
     return wrap(torch::jit::toPyObject(value));
   }
   Obj createOrGetPackageImporterFromContainerFile(
       const std::shared_ptr<caffe2::serialize::PyTorchStreamReader>&
           containerFile_) override {
+    SetPyInterpreterTLS g;
     InitLockAcquire guard(interp_->init_lock_);
     return wrap(interp_->getPackage(containerFile_));
   }
 
   PickledObject pickle(Obj container, Obj obj) override {
+    SetPyInterpreterTLS g;
     py::tuple result = interp_->saveStorage(unwrap(container), unwrap(obj));
     py::bytes bytes = py::cast<py::bytes>(result[0]);
     py::list storages = py::cast<py::list>(result[1]);
@@ -285,6 +290,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
         std::move(container_file)};
   }
   Obj unpickleOrGet(int64_t id, const PickledObject& obj) override {
+    SetPyInterpreterTLS g;
     py::dict objects = interp_->objects;
     py::object id_p = py::cast(id);
     if (objects.contains(id_p)) {
@@ -315,6 +321,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
     return wrap(result);
   }
   void unload(int64_t id) override {
+    SetPyInterpreterTLS g;
     py::dict objects = interp_->objects;
     py::object id_p = py::cast(id);
     if (objects.contains(id_p)) {
@@ -323,10 +330,12 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
   }
 
   IValue toIValue(Obj obj) const override {
+    SetPyInterpreterTLS g;
     return torch::jit::toTypeInferredIValue(unwrap(obj));
   }
 
   Obj call(Obj obj, at::ArrayRef<Obj> args) override {
+    SetPyInterpreterTLS g;
     py::tuple m_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
       m_args[i] = unwrap(args[i]);
@@ -335,6 +344,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
   }
 
   Obj call(Obj obj, at::ArrayRef<IValue> args) override {
+    SetPyInterpreterTLS g;
     py::tuple m_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
       m_args[i] = torch::jit::toPyObject(args[i]);
@@ -346,6 +356,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
       Obj obj,
       std::vector<at::IValue> args,
       std::unordered_map<std::string, c10::IValue> kwargs) override {
+    SetPyInterpreterTLS g;
     py::tuple py_args(args.size());
     for (size_t i = 0, N = args.size(); i != N; ++i) {
       py_args[i] = torch::jit::toPyObject(args[i]);
@@ -361,15 +372,18 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
 
   Obj callKwargs(Obj obj, std::unordered_map<std::string, c10::IValue> kwargs)
       override {
+    SetPyInterpreterTLS g;
     std::vector<at::IValue> args;
     return callKwargs(obj, args, kwargs);
   }
 
   bool hasattr(Obj obj, const char* attr) override {
+    SetPyInterpreterTLS g;
     return py::hasattr(unwrap(obj), attr);
   }
 
   Obj attr(Obj obj, const char* attr) override {
+    SetPyInterpreterTLS g;
     return wrap(unwrap(obj).attr(attr));
   }
 
@@ -377,6 +391,7 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
       py::handle object,
       py::handle args,
       py::handle kwargs = nullptr) {
+    SetPyInterpreterTLS g;
     PyObject* result = PyObject_Call(object.ptr(), args.ptr(), kwargs.ptr());
     if (!result) {
       throw py::error_already_set();
@@ -385,15 +400,18 @@ struct __attribute__((visibility("hidden"))) ConcreteInterpreterSessionImpl
   }
 
   py::handle unwrap(Obj obj) const {
+    SetPyInterpreterTLS g;
     return objects_.at(ID(obj));
   }
 
   Obj wrap(py::object obj) {
+    SetPyInterpreterTLS g;
     objects_.emplace_back(std::move(obj));
     return Obj(this, objects_.size() - 1);
   }
 
   ~ConcreteInterpreterSessionImpl() override {
+    SetPyInterpreterTLS g;
     objects_.clear();
   }
   ConcreteInterpreterImpl* interp_;
