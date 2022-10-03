@@ -536,13 +536,15 @@ struct Frame {
 
 struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   std::vector<Frame> frames;
+  // Empty if cpp traces weren't enabled
+  std::string cpp_frames;
   ~StackContext() {
     py::gil_scoped_acquire acquire;
     for (auto& f : frames) {
       Py_XDECREF((PyObject*)f.code);
     }
   }
-  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+  static std::unique_ptr<StackContext> _gather() {
     py::gil_scoped_acquire acquire;
     auto r = std::make_unique<StackContext>();
     PyFrameObject* f = PyEval_GetFrame();
@@ -554,6 +556,15 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
       f = f_back;
     }
     return r;
+  }
+  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+    return _gather();
+  }
+  static std::unique_ptr<c10::cuda::CUDACachingAllocator::Context>
+  gather_with_cpp() {
+    auto r = _gather();
+    r->cpp_frames = c10::get_backtrace();
+    return std::move(r);
   }
 };
 
@@ -584,6 +595,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str name_s = "name";
   py::str line_s = "line";
   py::str frames_s = "frames";
+  py::str cpp_frames_s = "cpp_frames";
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
@@ -625,6 +637,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
                   py::reinterpret_borrow<py::object>(f.code->co_name);
               frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
               frames.append(std::move(frame));
+            }
+            if (!sc->cpp_frames.empty()) {
+              history_entry[cpp_frames_s] = py::cast(sc->cpp_frames);
             }
             history_entry[frames_s] = std::move(frames);
           }
@@ -725,9 +740,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
         return stream.str();
       });
 
-  m.def("_cuda_recordMemoryHistory", [](bool enabled) {
+  m.def("_cuda_recordMemoryHistory", [](bool enabled, bool cpp) {
     c10::cuda::CUDACachingAllocator::setContextRecorder(
-        enabled ? StackContext::gather : nullptr);
+        enabled ? (cpp ? StackContext::gather_with_cpp : StackContext::gather)
+                : nullptr);
   });
 }
 
