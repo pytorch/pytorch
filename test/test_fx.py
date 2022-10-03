@@ -4144,6 +4144,8 @@ class TestVisionTracing(JitTestCase):
     UNSCRIPTABLE_MODELS = {
         "googlenet": INCONSISTENT_TYPE,
         "inception_v3": INCONSISTENT_TYPE,
+        # JIT runs into errors with einsum kwargs, see test_einsum in test_jit for more details
+        "maxvit_t": (RuntimeError, "Arguments for call are not valid."),
     }
 
     output_transform = {
