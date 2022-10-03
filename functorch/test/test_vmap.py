@@ -3252,7 +3252,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
-        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
