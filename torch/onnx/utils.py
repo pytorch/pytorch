@@ -921,12 +921,7 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> Tuple[
-    _C.Graph,
-    List[_C.IValue],
-    Optional[Any],
-    Optional[Union[_C.ScriptModule, _C.ScriptFunction]],
-]:
+) -> Tuple[_C.Graph, List[_C.IValue], Optional[Any], Optional[_C.ScriptModule]]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         _check_flatten_did_not_remove(args, flattened_args)
@@ -1252,42 +1247,68 @@ def export_to_pretty_string(
 
 @_beartype.beartype
 def unconvertible_ops(
-    model, args, training=_C_onnx.TrainingMode.EVAL, opset_version=None
-):
-    r"""
-    Converts the model with operator_export_type set to
-    torch.onnx.OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of
-    all the ops that are not supported/implemented by the exporter.
+    model,
+    args,
+    training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
+    opset_version: Optional[int] = None,
+) -> Tuple[_C.Graph, List[str]]:
+    """Returns an approximated list of all ops that are yet supported by :mod:`torch.onnx`.
+
+    The list is approximated because some ops may be removed during the conversion
+    process and don't need to be converted. Some other ops may have partial support
+    that will fail conversion with particular inputs. Please open a Github Issue
+    for op support requests.
 
     Args:
-        model: Same as corresponding arg to torch.onnx.export.
-        args: Same as corresponding arg to torch.onnx.export.
-        training: Same as corresponding arg to torch.onnx.export.
-        opset_version: Same as corresponding arg to torch.onnx.export.
+        model: Same as the `model` parameter in :func:`torch.onnx.export`.
+        args: Same as the `args` parameter in :func:`torch.onnx.export`.
+        training: Same as the `training` parameter in :func:`torch.onnx.export`.
+        opset_version: Same as the `opset_version` parameter in :func:`torch.onnx.export`.
 
     Returns:
-        Tuple[torch._C.Graph, List[str]], where the list includes the names
-        of the unconvertible ops.
+        The JIT graph and a list of unconvertible ops in the format of "domain::op".
     """
 
     opset_version = opset_version or _constants.ONNX_DEFAULT_OPSET
     GLOBALS.export_onnx_opset_version = opset_version
-    # operator_export_type is set to ONNX_FALLTHROUGH by default so that if an op is not supported
-    # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
-    with exporter_context(model, training, False):
-        args = _decide_input_format(model, args)
-        graph, params_dict, torch_out = _model_to_graph(
-            model,
-            args,
-            # So that if an op connot be converted to ONNX, it will be kept
-            # as-is rather than cause a failure.
-            operator_export_type=_C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH,
-        )
-    unsupported_ops = list()
-    supported_namespaces = {"onnx", "prim", "quantized"}
+
+    try:
+        with exporter_context(model, training, verbose=False):
+            # Create a mostly clean JIT graph that contains the plain aten and
+            # other ops we can check with the symbolic registry.
+            # NOTE: We don't want to actually convert any ops to ONNX or run any
+            # symbolic functions because there is a higher chance that a pass
+            # fails or an unconvertible op messes up the graph during ONNX conversion.
+            # This way we can always generate a list just by looking at the names
+            # of the ops in the graph.
+            args = _decide_input_format(model, args)
+            model = _pre_trace_quant_model(model, args)
+            graph, _, _, module = _create_jit_graph(model, args)
+            _C._jit_pass_inline(graph)
+            _C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
+            _C._jit_pass_erase_number_types(graph)
+            _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+    except Exception as e:
+        raise errors.OnnxExporterError(
+            "Failed to discover unconvertible ops because of errors during the JIT graph "
+            "generation process."
+        ) from e
+
+    unsupported_ops = []
     for node in graph.nodes():
-        if node.kind().split(":")[0] not in supported_namespaces:
-            unsupported_ops.append(node.kind())
+        domain_op = node.kind()
+        if domain_op.startswith("onnx::") or domain_op.startswith("prim::"):
+            # We consider onnx and prim ops as supported ops, even though some "prim"
+            # ops are not implemented as symbolic functions, because they may be
+            # eliminated in the conversion passes. Users may still see errors caused
+            # by prim ops even though they don't show up in the list.
+            continue
+        if not registration.registry.is_registered_op(domain_op, opset_version):
+            # We consider all registered ops supported, even though some of them are
+            # only partially supported, because there is not yet a good way to check
+            # if an op is fully supported.
+            # TODO(justinchuby): Create a way to check if an op is fully supported.
+            unsupported_ops.append(domain_op)
     return graph, unsupported_ops
 
 
@@ -1911,13 +1932,9 @@ def register_custom_op_symbolic(
 
     _verify_custom_op_name(symbolic_name)
 
-    versions = range(
-        max(_constants.ONNX_MIN_OPSET, opset_version), _constants.ONNX_MAX_OPSET + 1
-    )
-
     registration.custom_onnx_symbolic(
         symbolic_name,
-        versions,
+        opset_version,
         decorate=[
             _symbolic_context_handler,
         ],
@@ -1940,9 +1957,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
 
     _verify_custom_op_name(symbolic_name)
 
-    for version in range(_constants.ONNX_MIN_OPSET, _constants.ONNX_MAX_OPSET + 1):
-        if version >= opset_version:
-            registration.registry.unregister(symbolic_name, version)
+    registration.registry.unregister(symbolic_name, opset_version)
 
 
 @_beartype.beartype
