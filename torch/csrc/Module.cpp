@@ -483,7 +483,36 @@ PyObject* THPModule_float32MatmulPrecision(
   }
   return THPUtils_packString(s);
 }
-
+PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFlash(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledFlashSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseMath(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledMathSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -864,6 +893,16 @@ static PyMethodDef TorchMethods[] = {
      THPModule_setNumInteropThreads,
      METH_O,
      nullptr},
+    {"_get_flash_sdp_enabled",
+     THPModule_userEnabledFlashSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
+    {"_get_math_sdp_enabled",
+     THPModule_userEnabledMathSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
