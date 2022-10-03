@@ -5121,19 +5121,25 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     inputs.append(SampleInput([c(H)], args=("i...->...",)))
     inputs.append(SampleInput([c(C), c(x)], args=('...ik, ...j -> ij',)))
 
-    # Test path kwarg
+    # Test optimize kwarg
     z = make_tensor((3, 2), device=device, dtype=dtype, requires_grad=requires_grad)
-    inputs.append(SampleInput([c(A), z], args=('ij,jk',), kwargs={'path': [(0, 1)]}))
+    inputs.append(SampleInput([c(A), z], args=('ij,jk',), kwargs={'optimize': [(0, 1)]}))
     inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                   args=('jk,ikl,ijk,lm->mk',),
-                  kwargs={'path': [(0, 2), (0, 1), (0, 1)]}))
+                  kwargs={'optimize': [(0, 2), (0, 1), (0, 1)]}))
     if TEST_OPT_EINSUM:
         inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                       args=('jk,ikl,ijk,lm->mk',),
-                      kwargs={'path': 'use_opt_einsum'}))
+                      kwargs={'optimize': 'auto'}))
+        inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
+                      args=('jk,ikl,ijk,lm->mk',),
+                      kwargs={'optimize': 'greedy'}))
+        inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
+                      args=('jk,ikl,ijk,lm->mk',),
+                      kwargs={'optimize': 'optimal'}))
     inputs.append(SampleInput([c(A), c(D), c(C), c(E)],
                   args=('jk,ikl,ijk,lm->mk',),
-                  kwargs={'path': 'skip_path_calculation'}))
+                  kwargs={'optimize': 'skip'}))
     return inputs
 
 
@@ -13457,7 +13463,7 @@ op_db: List[OpInfo] = [
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
            # TODO(@heitorschueroff) update SampleInput to handle such cases
-           op=lambda tensors, equation, path=None: torch.einsum(equation, tensors, path=path),
+           op=lambda tensors, equation, optimize=None: torch.einsum(equation, tensors, optimize=optimize),
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
