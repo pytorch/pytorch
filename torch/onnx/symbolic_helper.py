@@ -504,6 +504,16 @@ def _is_tuple_construct(x: _C.Value) -> bool:
 
 
 @_beartype.beartype
+def is_complex_value(x: _C.Value) -> bool:
+    assert _is_value(x)
+    return _type_utils.JitScalarType.from_name(x.type().scalarType()) in {
+        _type_utils.JitScalarType.COMPLEX32,
+        _type_utils.JitScalarType.COMPLEX64,
+        _type_utils.JitScalarType.COMPLEX128,
+    }
+
+
+@_beartype.beartype
 def is_caffe2_aten_fallback() -> bool:
     return (
         GLOBALS.operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK

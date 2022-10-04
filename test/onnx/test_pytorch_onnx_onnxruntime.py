@@ -37,7 +37,8 @@ from pytorch_test_common import (
 )
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, verification
+from torch.onnx import _constants, errors, verification
+from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
@@ -12489,6 +12490,38 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
         self.run_test(LerpModel(), torch.rand(5, 4, 3))
+
+    @common_utils.parametrize("use_complex_dtypes", [True, False])
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_print_tensor_within_torch_nn_module(self, use_complex_dtypes: bool):
+        class PrintTensorOnMyModel(torch.nn.Module):
+            def forward(self, x):
+                x_firsts = x[:, 0]
+                print(f"x_firsts: {x_firsts}")
+                return x_firsts
+
+        m = PrintTensorOnMyModel().eval()
+        if use_complex_dtypes:
+            dtype = torch.cfloat
+        else:
+            dtype = torch.float
+        x = torch.randn(10, 5, dtype=dtype)
+
+        if use_complex_dtypes:
+            if GLOBALS.onnx_shape_inference:
+                exception_type = RuntimeError
+            else:
+                exception_type = errors.OnnxExporterError
+            with self.assertRaises(exception_type):
+                self.run_test(
+                    m,
+                    x,
+                )
+        else:
+            self.run_test(
+                m,
+                x,
+            )
 
     # Cannot export with older opsets because of "ConstantFill" op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime

@@ -6660,3 +6660,24 @@ def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
     env = g.env
 
     return torch._C._jit_onnx_convert_pattern_from_subblock(block, node, env)
+
+
+@_onnx_symbolic("aten::_conj")
+@_onnx_symbolic("aten::resolve_conj")
+@_onnx_symbolic("aten::resolve_neg")
+@_beartype.beartype
+def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
+    # ONNX does not have operators to manipulate real/imaginary components directly
+    # However, some torch operations use complex operations even when input is real,
+    # which results in failures due to missing operators for complex numbers
+    # e.g. `print(torch.randn(10, 5))` calls aten::resolve_conj, aten::_conj and aten::resolve_neg
+    #   although input is float
+
+    # This symbolic is a no-op for real numbers and raise a an exception when input is complex
+    if symbolic_helper.is_complex_value(input):
+        # _C._jit_pass_onnx_node_shape_type_inference raises when shape_inference is enabled,
+        # but this call make sure an  exception still raises without shape inference
+        return symbolic_helper._onnx_unsupported(
+            "aten::_conj, aten::resolve_conj, aten::resolve_neg", input
+        )
+    return input
