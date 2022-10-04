@@ -18,6 +18,13 @@
 #include <c10/util/ArrayRef.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/_empty_affine_quantized.h>
+#endif
+
 #include <unordered_map>
 
 namespace at {

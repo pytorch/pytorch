@@ -7,15 +7,27 @@ The implementations for the unpack functions can be found in /cpu/qconv_unpack_i
 and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 */
 
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <tuple>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/core/ivalue.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/from_blob.h>
+#endif
+
 
 namespace at {
 namespace native {

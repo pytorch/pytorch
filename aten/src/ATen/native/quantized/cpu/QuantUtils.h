@@ -1,9 +1,20 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
+#include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
 #include <algorithm>
 #include <cmath>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/quantize_per_tensor_native.h>
+#include <ATen/ops/quantize_per_channel_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace quant_utils {
 namespace {

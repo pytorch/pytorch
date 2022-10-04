@@ -1,13 +1,19 @@
 #pragma once
 
 #ifdef USE_PYTORCH_QNNPACK
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/Factory.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#endif
 
 #include <utility>
 

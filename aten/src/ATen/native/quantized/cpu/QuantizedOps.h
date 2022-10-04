@@ -1,7 +1,10 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
+#include <ATen/core/IListRef.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace native {
