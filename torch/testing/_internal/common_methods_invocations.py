@@ -3239,8 +3239,12 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
 
     assert fn is not None
 
-    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input}
-    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3}
+    grad_fn_map = {torch.nn.functional.conv_transpose1d: torch.nn.grad.conv1d_input,
+                   torch.nn.functional.conv_transpose2d: torch.nn.grad.conv2d_input,
+                   torch.nn.functional.conv_transpose3d: torch.nn.grad.conv3d_input}
+    batched_dim_map = {torch.nn.functional.conv_transpose1d: 3,
+                       torch.nn.functional.conv_transpose2d: 4,
+                       torch.nn.functional.conv_transpose3d: 5}
 
     # Input for `ref` is ndarray.
     input, weight = torch.from_numpy(input), torch.from_numpy(weight)
@@ -3250,7 +3254,10 @@ def conv_transpose_ref(input, weight, bias, stride=1, padding=0,
         input = input.unsqueeze(0)
 
     if bias is not None:
-        bias = torch.from_numpy(bias).unsqueeze(1)
+        bias = torch.from_numpy(bias)
+        unsqueeze_dims = input.ndim - 2
+        for _ in range(unsqueeze_dims):
+            bias = bias.unsqueeze(1)
 
     grad_output = input
     # Get the input shape for grad_fn.
@@ -3317,8 +3324,7 @@ def sample_inputs_conv_transpose2d(op_info, device, dtype, requires_grad, **kwar
         ((1, 1, 4, 3), (1, 2, 3, 4), None,
          {'stride': 2, 'padding': 1, 'output_padding': 1, 'groups': 1}),
         ((2, 8, 4, 4), (8, 1, 3, 3), None, {'groups': 4}),
-        ((1, 4, 5, 5), (4, 8, 3, 3), None,
-         {})
+        ((1, 4, 5, 5), (4, 8, 3, 3), None, {})
     )
 
     for input_shape, weight, bias, kwargs in cases:
@@ -10849,6 +10855,9 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.conv_transpose2d',
            aten_name='conv_transpose2d',
            aliases=('conv_transpose2d',),
+           # `ref` for this function is backward of
+           # corresponding `conv*d`
+           ref=partial(conv_transpose_ref, fn=torch.nn.functional.conv_transpose2d),
            dtypes=floating_and_complex_types_and(torch.int64),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.chalf,
                                                        *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []),
@@ -10871,6 +10880,9 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.complex64, torch.complex128)),
+               # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.int64,)),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose3d',
