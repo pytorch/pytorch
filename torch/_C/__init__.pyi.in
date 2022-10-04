@@ -817,6 +817,10 @@ def get_num_interop_threads() -> _int: ...  # THPModule_getNumInteropThreads
 def set_num_interop_threads(nthreads: _int) -> None: ...  # THPModule_setNumInteropThreads
 def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
 def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
+def _get_flash_sdp_enabled() -> _bool: ...  # THPModule_userEnabledFusedSDP
+def _set_sdp_use_flash(arg: _bool) -> None: ...  # THPModule_setSDPUseFlash
+def _get_math_sdp_enabled() -> _bool: ...  # THPModule_userEnabledMathSDP
+def _set_sdp_use_math(arg: _bool) -> None: ...  # THPModule_setSDPUseMath
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn
 def _set_mkldnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledMkldnn
 def _get_cudnn_benchmark() -> _bool: ...  # THPModule_benchmarkCuDNN
@@ -842,6 +846,7 @@ def _add_meta_to_tls_dispatch_include() -> None: ...
 def _meta_in_tls_dispatch_include() -> _bool: ...
 def _remove_meta_from_tls_dispatch_include() -> None: ...
 def _has_storage(x: Tensor) -> _bool: ...
+def _should_allow_numbers_as_tensors(func_name: str) -> _bool: ...
 # NB: There is no Capsule type in typing, see
 # https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
