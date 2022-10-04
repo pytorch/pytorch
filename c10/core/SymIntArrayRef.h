@@ -15,9 +15,9 @@ using SymIntArrayRef = ArrayRef<SymInt>;
 
 template <>
 class ArrayRef<SymInt> final {
- public:
   using T = SymInt;
 
+ public:
   using iterator = const T*;
   using const_iterator = const T*;
   using size_type = size_t;
@@ -46,13 +46,14 @@ class ArrayRef<SymInt> final {
   void debugCheckAnySymbolicInvariant() {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         AnySymbolic == computeSymbolic(),
-        "created SymIntArrayRef with incorrect AnySymbolic tag; real tag is ", !AnySymbolic
-    );
+        "created SymIntArrayRef with incorrect AnySymbolic tag; real tag is ",
+        !AnySymbolic);
   }
 
   bool computeSymbolic() const {
     for (const auto& s : *this) {
-      if (s.is_symbolic()) return true;
+      if (s.is_symbolic())
+        return true;
     }
     return false;
   }
@@ -62,10 +63,12 @@ class ArrayRef<SymInt> final {
   /// @{
 
   /// Construct an empty ArrayRef.
-  /* implicit */ constexpr ArrayRef() : Data(nullptr), Length(0), AnySymbolic(false) {}
+  /* implicit */ constexpr ArrayRef()
+      : Data(nullptr), Length(0), AnySymbolic(false) {}
 
   /// Construct an ArrayRef from a single element.
-  ArrayRef(const T& OneElt) : Data(&OneElt), Length(1), AnySymbolic(OneElt.is_symbolic()) {}
+  ArrayRef(const T& OneElt)
+      : Data(&OneElt), Length(1), AnySymbolic(OneElt.is_symbolic()) {}
 
   /// Construct an ArrayRef from a pointer and length.
   ArrayRef(const T* data, size_t length)
@@ -74,7 +77,9 @@ class ArrayRef<SymInt> final {
   }
 
   ArrayRef(Unchecked, const int64_t* data, size_t length)
-      : Data(reinterpret_cast<const c10::SymInt*>(data)), Length(length), AnySymbolic(false) {
+      : Data(reinterpret_cast<const c10::SymInt*>(data)),
+        Length(length),
+        AnySymbolic(false) {
     debugCheckNullptrInvariant();
     debugCheckAnySymbolicInvariant();
   }
@@ -100,7 +105,9 @@ class ArrayRef<SymInt> final {
           std::remove_const_t<decltype(std::declval<Container>().data())>,
           T*>::value>>
   /* implicit */ ArrayRef(const Container& container)
-      : Data(container.data()), Length(container.size()), AnySymbolic(computeSymbolic()) {
+      : Data(container.data()),
+        Length(container.size()),
+        AnySymbolic(computeSymbolic()) {
     debugCheckNullptrInvariant();
   }
 
@@ -123,14 +130,16 @@ class ArrayRef<SymInt> final {
 
   /// Construct an ArrayRef from a C array.
   template <size_t N>
-  /* implicit */ ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N), AnySymbolic(computeSymbolic()) {}
+  /* implicit */ ArrayRef(const T (&Arr)[N])
+      : Data(Arr), Length(N), AnySymbolic(computeSymbolic()) {}
 
   /// Construct an ArrayRef from a std::initializer_list.
   /* implicit */ ArrayRef(const std::initializer_list<T>& Vec)
       : Data(
             std::begin(Vec) == std::end(Vec) ? static_cast<T*>(nullptr)
                                              : std::begin(Vec)),
-        Length(Vec.size()), AnySymbolic(computeSymbolic()) {}
+        Length(Vec.size()),
+        AnySymbolic(computeSymbolic()) {}
 
   /// @}
   /// @name Simple Operations
@@ -192,8 +201,7 @@ class ArrayRef<SymInt> final {
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
-  ArrayRef<T> slice(size_t N, size_t M)
-      const {
+  ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
         N + M <= size(),
         "ArrayRef: invalid slice, N = ",
@@ -207,7 +215,8 @@ class ArrayRef<SymInt> final {
       return ArrayRef<T>(data() + N, M);
     } else {
       // Definitely false
-      return ArrayRef<T>(UNCHECKED, reinterpret_cast<const int64_t*>(data() + N), M);
+      return ArrayRef<T>(
+          UNCHECKED, reinterpret_cast<const int64_t*>(data() + N), M);
     }
   }
 
@@ -264,6 +273,76 @@ class ArrayRef<SymInt> final {
   /// @}
 };
 
+template <>
+class arrayref_optional_base<ArrayRef<SymInt>> {
+  using ArrayRefT = ArrayRef<SymInt>;
+
+ public:
+  union storage {
+    struct raw {
+      // ArrayRef has the invariant that if Data is nullptr then
+      // Length must be zero, so this is an unused bit pattern.
+      const void* p = nullptr;
+      size_t sz = 1;
+      bool b = false;
+    } uninitialized_{};
+    ArrayRefT value_;
+
+    constexpr storage() noexcept : uninitialized_() {
+      setUninitialized();
+    }
+
+    constexpr void setUninitialized() noexcept {
+      uninitialized_.p = nullptr;
+      uninitialized_.sz = 1;
+      uninitialized_.b = false;
+    }
+
+    explicit constexpr storage(ArrayRefT& v) : value_(v) {}
+
+    template <typename T>
+    explicit constexpr storage(const std::initializer_list<T>& v) : value_(v) {}
+
+    template <class... Args>
+    explicit constexpr storage(Args&&... args)
+        : value_(constexpr_forward<Args>(args)...) {}
+  };
+
+  storage storage_;
+
+  constexpr arrayref_optional_base() noexcept = default;
+
+  explicit constexpr arrayref_optional_base(const ArrayRefT& v) : storage_(v) {}
+
+  template <class... Args>
+  explicit constexpr arrayref_optional_base(in_place_t, Args&&... args)
+      : storage_(constexpr_forward<Args>(args)...) {}
+
+  template <typename T>
+  explicit constexpr arrayref_optional_base(
+      in_place_t,
+      const std::initializer_list<T>& v)
+      : storage_(v) {}
+
+  constexpr bool initialized() const noexcept {
+    typename storage::raw repr;
+    // Cast to void* to suppress GCC's -Wclass-memaccess.
+    memcpy(
+        static_cast<void*>(&repr),
+        static_cast<const void*>(&storage_),
+        sizeof(storage_));
+    return repr.p != nullptr || repr.sz == 0;
+  }
+
+  void setInitialized(bool init) noexcept {
+    if (!init) {
+      storage_.setUninitialized();
+    } else {
+      assert(initialized());
+    }
+  }
+};
+
 // NB: this is actually not that slow anymore
 TORCH_API at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar);
 TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
@@ -273,7 +352,8 @@ TORCH_API c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
 // Prefer using a more semantic constructor, like
 // fromIntArrayRefKnownNonNegative
 inline SymIntArrayRef fromIntArrayRefUnchecked(IntArrayRef array_ref) {
-  return SymIntArrayRef(SymIntArrayRef::UNCHECKED, array_ref.data(), array_ref.size());
+  return SymIntArrayRef(
+      SymIntArrayRef::UNCHECKED, array_ref.data(), array_ref.size());
 }
 
 inline SymIntArrayRef fromIntArrayRefKnownNonNegative(IntArrayRef array_ref) {
