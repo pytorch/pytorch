@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    IS_ARM64,
     run_tests,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -126,6 +127,24 @@ class TestProfilerCUDA(TestCase):
             s = custom_layer(z)
             q = s.sum()
             q.backward()
+
+@unittest.skipIf(IS_ARM64, "ITT is not available on ARM")
+class TestProfilerITT(TestCase):
+
+    def test_custom_module_input_op_ids(self):
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.save_for_backward(x)
+                return x
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, = ctx.saved_tensors
+                return x
+
+        def custom_layer(input_ten):
+            return MyFunc.apply(input_ten)
 
         # Only testing that emit_itt runs when
         # record_shapes option is enabled.
