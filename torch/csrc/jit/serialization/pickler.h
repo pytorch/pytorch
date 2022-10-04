@@ -130,12 +130,14 @@ class TORCH_API Pickler {
       std::vector<at::Tensor>* tensor_table,
       std::function<c10::QualifiedName(const c10::ClassTypePtr&)> type_renamer,
       std::vector<c10::ClassTypePtr>* memoized_class_types,
-      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr)
+      std::function<std::string(const at::Tensor&)> get_tensor_id = nullptr,
+      bool tag_aggregates = true)
       : writer_(std::move(writer)),
         tensor_table_(tensor_table),
         type_renamer_(std::move(type_renamer)),
         memoized_class_types_(memoized_class_types),
-        get_tensor_id_(std::move(get_tensor_id)) {}
+        get_tensor_id_(std::move(get_tensor_id)),
+        tag_aggregates_(tag_aggregates) {}
   // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Pickler();
 
@@ -274,6 +276,7 @@ class TORCH_API Pickler {
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
   std::unordered_map<std::string, uint32_t> memoized_devices_map_;
+  bool tag_aggregates_;
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
