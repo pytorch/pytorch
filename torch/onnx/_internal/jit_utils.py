@@ -5,7 +5,8 @@
 
 import dataclasses
 import re
-from typing import Any, Dict, Iterable, Sequence, Tuple, Union
+import typing
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
 
 import torch
 from torch import _C
