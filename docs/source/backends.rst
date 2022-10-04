@@ -15,6 +15,7 @@ These backends include:
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
 - ``torch.backends.openmp``
+- ``torch.backends.opteinsum``
 - ``torch.backends.xeon``
 
 
@@ -135,6 +136,29 @@ torch.backends.openmp
 .. add anything to the rendered page for now.
 .. py:module:: torch.backends.quantized
 .. py:module:: torch.backends.xnnpack
+
+
+torch.backends.opteinsum
+^^^^^^^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.opteinsum
+
+.. autofunction:: torch.backends.opteinsum.is_available
+
+.. autofunction:: torch.backends.opteinsum.get_opt_einsum
+
+.. attribute::  torch.backends.opteinsum.enabled
+
+    A :class:`bool` that controls whether opt_einsum is enabled (on by default). If so,
+    torch.einsum will use opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html)
+    to calculate an optimal path of contraction for faster performance.
+
+.. attribute::  torch.backends.opteinsum.strategy
+
+    A :class:`str` that specifies which strategies to try when `torch.backends.opteinsum.enabled` is True.
+    By default, torch.einsum will try the "auto" strategy, but the "greedy" and "optimal" strategies are
+    also supported. Note that the "optimal" strategy is factorial on the number of inputs as it tries all
+    possible paths. See more details in opt_einsum's docs
+    (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
 
 torch.backends.xeon

@@ -126,6 +126,15 @@ class TORCH_API Context {
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
 
+  // NB: This method is *purely* whether or not a user requested
+  // to use opt_einsum, it doesn't actually say anything about
+  // whether or not opt_einsum is actually usable.  Use is_available()
+  // to test this instead
+  bool userEnabledOptEinsum() const;
+  void setUserEnabledOptEinsum(bool e);
+  std::string optEinsumStrategy() const;
+  void setOptEinsumStrategy(std::string s);
+
   // Note [Disabling Fused SDP Kernels]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Flash SDP kernels are enabled by default. However, they can be disabled
@@ -271,6 +280,8 @@ class TORCH_API Context {
   bool _deterministic_algorithms_warn_only = false;
   bool enabled_flashSDP = true;
   bool enabled_mathSDP = true;
+  bool enabled_opt_einsum = true;
+  std::string opt_einsum_strategy = "auto";
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else

@@ -1,5 +1,6 @@
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <string>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -513,6 +514,35 @@ PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   else
     Py_RETURN_FALSE;
 }
+PyObject* THPModule_setUserEnabledOptEinsum(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_enabled_opt_einsum expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setUserEnabledOptEinsum(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_userEnabledOptEinsum(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledOptEinsum())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+PyObject* THPModule_optEinsumStrategy(PyObject* _unused, PyObject* noargs) {
+  return THPUtils_packString(at::globalContext().optEinsumStrategy());
+}
+PyObject* THPModule_setOptEinsumStrategy(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "set_opt_einsum_strategy expects a string, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setOptEinsumStrategy(
+      static_cast<std::string>(THPUtils_unpackString(arg)));
+  Py_RETURN_NONE;
+}
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -903,6 +933,22 @@ static PyMethodDef TorchMethods[] = {
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
+    {"_get_opt_einsum_enabled",
+     THPModule_userEnabledOptEinsum,
+     METH_NOARGS,
+     nullptr},
+    {"_set_opt_einsum_enabled",
+     THPModule_setUserEnabledOptEinsum,
+     METH_O,
+     nullptr},
+    {"_get_opt_einsum_strategy",
+     THPModule_optEinsumStrategy,
+     METH_NOARGS,
+     nullptr},
+    {"_set_opt_einsum_strategy",
+     THPModule_setOptEinsumStrategy,
+     METH_O,
+     nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
