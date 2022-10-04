@@ -736,6 +736,11 @@ class _FreeEventQueue:
                 events.append(event)
         return events
 
+    def dequeue_if_needed(self) -> Optional[torch.cuda.Event]:
+        if len(self._queue) >= self._max_num_inflight_all_gathers:
+            return self._dequeue()
+        return None
+
     def _dequeue(self) -> Optional[torch.cuda.Event]:
         """Dequeues a free event if possible."""
         if self._queue:
@@ -1532,9 +1537,9 @@ class FullyShardedDataParallel(nn.Module):
         if not handles:
             return
         if self.limit_all_gathers:
-            events = self._free_event_queue._dequeue()
-            if events:
-                events[-1].synchronize()
+            event = self._free_event_queue.dequeue_if_needed()
+            if event:
+                event.synchronize()
         any_ran_pre_unshard = False
         with torch.cuda.stream(self._streams["pre_all_gather"]):
             for handle in handles:
