@@ -38,15 +38,19 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/api/include/torch/python/init.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/autograd/python_enum_tag.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
+#include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
+#include <torch/csrc/autograd/python_nested_functions.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_return_types.h>
 #include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/functorch/init.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
@@ -388,18 +392,23 @@ static PyObject* THPModule_parallelInfo(PyObject* module, PyObject* noargs) {
 }
 
 void DLPack_Capsule_Destructor(PyObject* data) {
+  if (C10_LIKELY(!PyCapsule_IsValid(data, "dltensor"))) {
+    // early out, see DLPack spec: if a consuming library sets the capsule
+    // name to something else, they own it and we don't need to do anything
+    return;
+  }
   HANDLE_TH_ERRORS
+  // Causes overheads for validity checks again, but this case is rare
+  // since consuming libraries should rename the capsule according to spec.
+  // Note that this cannot set a python error (we checked validity above),
+  // so we don't need to handle python error state here.
   DLManagedTensor* dlMTensor =
       (DLManagedTensor*)PyCapsule_GetPointer(data, "dltensor");
-  if (dlMTensor) {
-    // the dlMTensor has not been consumed, call deleter ourselves
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-    dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
-  } else {
-    // the dlMTensor has been consumed
-    // PyCapsule_GetPointer has set an error indicator
-    PyErr_Clear();
-  }
+  // the dlMTensor has not been consumed, call deleter ourselves.
+  // DLPack spec mentions that deleter may be NULL, but deleter from
+  // `at::toDLPack` is never NULL, so no need for an additional check here.
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
   END_HANDLE_TH_ERRORS_RET()
 }
 
@@ -416,6 +425,19 @@ PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   HANDLE_TH_ERRORS
   auto tensor = torch::utils::tensor_fromDLPack(data);
   return THPVariable_Wrap(tensor);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  size_t frames_to_skip;
+  size_t maximum_number_of_frames;
+  if (!PyArg_ParseTuple(
+          args, "LL", &frames_to_skip, &maximum_number_of_frames)) {
+    return nullptr;
+  }
+  return THPUtils_packString(
+      c10::get_backtrace(frames_to_skip, maximum_number_of_frames, true));
   END_HANDLE_TH_ERRORS
 }
 
@@ -461,7 +483,36 @@ PyObject* THPModule_float32MatmulPrecision(
   }
   return THPUtils_packString(s);
 }
-
+PyObject* THPModule_setSDPUseFlash(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseFlash(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* THPModule_userEnabledFlashSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledFlashSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setSDPUseMath(arg == Py_True);
+  Py_RETURN_NONE;
+}
+PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userEnabledMathSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
 PyObject* THPModule_setUserEnabledCuDNN(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       PyBool_Check(arg),
@@ -688,6 +739,54 @@ PyObject* THPModule_isEnabledXNNPACK(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  bool isTHPFunction = THPFunction_Check(arg);
+  bool isTHPCppFunction = torch::autograd::THPCppFunction_Check(arg);
+  THPUtils_assert(
+      isTHPFunction || isTHPCppFunction,
+      "_will_engine_execute_node expects an grad_fn, "
+      "but got %s",
+      THPUtils_typename(arg));
+  const auto exec_info = torch::autograd::get_current_graph_task_exec_info();
+  THPUtils_assert(
+      exec_info,
+      "_get_should_execute_nodes should only be called during the backward pass");
+  torch::autograd::Node* node;
+  std::shared_ptr<torch::autograd::Node> node_sp;
+  if (isTHPFunction) {
+    node_sp = ((THPFunction*)arg)->cdata.lock();
+    node = node_sp.get();
+  } else {
+    node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
+  }
+  if (exec_info->empty()) {
+    // .backward() without inputs= arg
+    const auto nodes_in_graph =
+        torch::autograd::get_current_graph_task_nodes_in_graph();
+    auto it = nodes_in_graph->find(node);
+    if (it == nodes_in_graph->end()) {
+      Py_RETURN_FALSE;
+    } else {
+      Py_RETURN_TRUE;
+    }
+  } else {
+    // .grad or .backward when inputs= is passed
+    auto it = exec_info->find(node);
+    if (it == exec_info->end() || !it->second.should_execute()) {
+      Py_RETURN_FALSE;
+    } else {
+      THPUtils_assert(
+          !(node->topological_nr() == 0 && it->second.captures_),
+          "A leaf node was passed to _will_engine_execute_node but we are "
+          "currently running autograd.grad(). This is currently not supported.");
+      Py_RETURN_TRUE;
+    }
+  }
+
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setDefaultMobileCPUAllocator(
     PyObject* _unused,
     PyObject* noargs) {
@@ -794,6 +893,16 @@ static PyMethodDef TorchMethods[] = {
      THPModule_setNumInteropThreads,
      METH_O,
      nullptr},
+    {"_get_flash_sdp_enabled",
+     THPModule_userEnabledFlashSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_flash", THPModule_setSDPUseFlash, METH_O, nullptr},
+    {"_get_math_sdp_enabled",
+     THPModule_userEnabledMathSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
@@ -860,6 +969,7 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
+    {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
     {"_get_default_device", THPModule_getDefaultDevice, METH_NOARGS, nullptr},
@@ -867,6 +977,10 @@ static PyMethodDef TorchMethods[] = {
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
     {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
     {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+    {"_will_engine_execute_node",
+     THPModule_willEngineExecuteNode,
+     METH_O,
+     nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
@@ -1013,11 +1127,13 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
+  torch::functorch::impl::initFuncTorchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::autograd::initReturnTypes(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
+  torch::autograd::initNestedFunctions(module);
   torch::autograd::initSparseFunctions(module);
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
@@ -1262,6 +1378,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_dispatch_key_set", [](const at::Tensor& x) {
     return toString(x.key_set());
   });
+  py_module.def(
+      "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
   py_module.def("_add_meta_to_tls_dispatch_include", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
@@ -1277,10 +1395,25 @@ Call this whenever a new thread is created in order to propagate values from
     c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
   });
 
+  py_module.def("_meta_in_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    auto k = key_set.highestBackendKey();
+    return local_keyset.included_.has_backend(k);
+  });
+
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     std::cout << "Included: " << toString(local_keyset.included_) << "\n";
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+  });
+
+  py_module.def("_is_deploy_enabled", []() {
+#if defined(USE_DEPLOY)
+    return true;
+#else
+    return false;
+#endif
   });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();

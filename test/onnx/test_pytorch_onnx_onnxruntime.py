@@ -44,7 +44,7 @@ from torch.testing._internal.common_utils import skipIfNoLapack
 # The min onnx opset version to test for
 MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
-MAX_ONNX_OPSET_VERSION = _constants.onnx_main_opset
+MAX_ONNX_OPSET_VERSION = _constants.ONNX_MAX_OPSET
 
 
 def _init_test_generalized_rcnn_transform():
@@ -6666,8 +6666,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor(2)
         self.run_test(FullLikeModel(), (x, y))
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6676,8 +6674,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_l2_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6686,8 +6682,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6696,8 +6690,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
-    @unittest.skip("It started failing after #81761")
-    # TODO(#83661): Fix and enable the test
     def test_frobenius_norm_keepdim(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -12383,7 +12375,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @common_utils.parametrize(
         "module_class",
-        (IfNoneOutput, IfNoneInput, LoopNoneOutput),
+        (IfNoneOutput, IfNoneInput, LoopNoneOutput, LoopNoneInput),
         name_fn=lambda module_class: module_class.__name__,
     )
     @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))

@@ -9,10 +9,11 @@
 import contextlib
 from typing import Any, Dict, Generator, List
 
+import torch
 import torch.nn as nn
 from torch.distributed.utils import _replace_by_prefix
 
-from .flat_param import FlatParamHandle
+from .flat_param import FlatParamHandle, HandleConfig
 
 FLAT_PARAM = "flat_param"
 FPW_MODULE = "_fpw_module"
@@ -68,6 +69,10 @@ class FlattenParamsWrapper(nn.Module):
         module (nn.Module): Module to wrap.
         params (List[nn.Parameter]): Parameters in ``module`` 's subtree to
             flatten into a single flattened parameter.
+        device (torch.device): The compute and communication device for this
+            wrapper's handle.
+        config (HandleConfig): A config customizing this wrapper's handle based
+            on FSDP's available features.
 
     Attributes:
         flat_param (Optional[FlatParameter]): The flattened parameter.
@@ -82,6 +87,8 @@ class FlattenParamsWrapper(nn.Module):
         self,
         module: nn.Module,
         params: List[nn.Parameter],
+        device: torch.device,
+        config: HandleConfig,
     ) -> None:
         super().__init__()
         self._fpw_module = module
@@ -93,7 +100,7 @@ class FlattenParamsWrapper(nn.Module):
         self._register_load_state_dict_pre_hook(_pre_load_state_dict_hook)
         if len(params) == 0:
             return
-        self._flat_param_handle = FlatParamHandle(params, module)
+        self._flat_param_handle = FlatParamHandle(params, module, device, config)
         # Defining `self.flat_param` registers the `FlatParameter` and makes it
         # visible to `named_parameters()`
         self.flat_param = self._flat_param_handle.flat_param

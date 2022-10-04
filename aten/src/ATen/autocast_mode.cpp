@@ -344,7 +344,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addmv), "addmv", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(addr), "addr", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(matmul), "matmul", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(ADD_NS(einsum), "einsum", Tensor (c10::string_view, TensorList), lower_precision_fp)
+  KERNEL(ADD_NS(einsum), "einsum", Tensor (c10::string_view, TensorList, OptionalIntArrayRef), lower_precision_fp)
   KERNEL(ADD_NS(mm), "mm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL(ADD_NS(mv), "mv", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
   KERNEL(ADD_NS(linear), "linear", Tensor (const Tensor &, const Tensor &, const c10::optional<Tensor>&), lower_precision_fp)
@@ -411,10 +411,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
                                  std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
                                  &ADD_NS(native_layer_norm)>::type::call)));
   KERNEL(ADD_NS(group_norm), "group_norm", Tensor (const Tensor &, int64_t, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double, bool), fp32)
-  // See the note in norm for why choosing fp32_set_opt_dtype
-  KERNEL(ADD_NS(linalg_vector_norm), "linalg_vector_norm", Tensor (const Tensor &, const Scalar&, at::OptionalIntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm", Tensor (const Tensor &, const Scalar&, IntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
-  KERNEL(ADD_NS(linalg_matrix_norm), "linalg_matrix_norm.str_ord", Tensor (const Tensor &, c10::string_view, IntArrayRef, bool, c10::optional<c10::ScalarType>), fp32_set_opt_dtype)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm", Tensor (const Tensor &), fp32)
   KERNEL(ADD_NS(frobenius_norm), "frobenius_norm.dim", Tensor (const Tensor &, IntArrayRef, bool), fp32)
   KERNEL(ADD_NS(nuclear_norm), "nuclear_norm", Tensor (const Tensor &, bool), fp32)
@@ -534,7 +530,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(cholesky_solve), "cholesky_solve", Tensor(const Tensor &, const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(inverse), "inverse", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(lu_solve), "lu_solve", Tensor(const Tensor &, const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(matrix_rank), "matrix_rank", Tensor(const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(orgqr), "orgqr", Tensor(const Tensor &, const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(ormqr), "ormqr", Tensor(const Tensor &, const Tensor &, const Tensor &, bool, bool), fp32)
   KERNEL_CPU(ADD_NS(pinverse), "pinverse", Tensor(const Tensor &, double), fp32)
@@ -599,23 +594,11 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(linalg_tensorsolve), "linalg_tensorsolve", Tensor(const Tensor &, const Tensor &, at::OptionalIntArrayRef), fp32)
   KERNEL_CPU(ADD_NS(fake_quantize_per_tensor_affine), "fake_quantize_per_tensor_affine", Tensor (const Tensor &, double, int64_t, int64_t, int64_t), fp32)
 
-  m.impl(TORCH_SELECTIVE_NAME("aten::eig"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 &ADD_NS(eig)>::type::call)));
-
   m.impl(TORCH_SELECTIVE_NAME("aten::geqrf"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  &ADD_NS(geqrf)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::lstsq"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 &ADD_NS(lstsq)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::_lu_with_info"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
@@ -716,8 +699,8 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  &ADD_NS(linalg_inv_ex)>::type::call)));
 
   // promote
-  KERNEL_CPU(ADD_NS(cat), "cat", Tensor (TensorList, int64_t), promote)
   KERNEL_CPU(ADD_NS(stack), "stack", Tensor (TensorList, int64_t), promote)
+  KERNEL_CPU(ADD_NS(cat), "cat", Tensor (const ITensorListRef &, int64_t), promote)
   KERNEL_CPU(ADD_NS(index_copy), "index_copy", Tensor (const Tensor &, int64_t, const Tensor &, const Tensor &), promote)
   KERNEL_CPU(ADD_NS(index_copy), "index_copy.dimname", Tensor (const Tensor &, at::Dimname, const Tensor &, const Tensor &), promote)
 
