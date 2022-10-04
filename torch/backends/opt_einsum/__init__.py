@@ -83,11 +83,11 @@ class OptEinsumModule(PropModule):
         super(OptEinsumModule, self).__init__(m, name)
 
     global enabled
-    enabled = ContextProp(_get_enabled, _set_enabled)  # type: ignore[attr-defined]
+    enabled = ContextProp(_get_enabled, _set_enabled)
     global strategy
     strategy = None
     if is_available():
-        strategy = ContextProp(_get_strategy, _set_strategy)  # type: ignore[attr-defined]
+        strategy = ContextProp(_get_strategy, _set_strategy)
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
