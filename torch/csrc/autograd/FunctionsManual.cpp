@@ -142,6 +142,18 @@ int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim) {
   return size;
 }
 
+c10::SymInt _safe_size(c10::SymIntArrayRef sizes, c10::IntArrayRef dim) {
+  c10::SymInt size = 1;
+  if (sizes.size() == 0) {
+    return 1;
+  }
+  for (auto d : dim) {
+    d = at::maybe_wrap_dim(d, sizes.size());
+    size *= sizes[d];
+  }
+  return size;
+}
+
 Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result) {
   if (!at::isComplexType(self_st) && gradient_result.is_complex()) {
     // R -> C
@@ -592,21 +604,22 @@ Tensor unsqueeze_multiple(
 
 Tensor sum_backward(
     const Tensor& grad,
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sizes,
     OptionalIntArrayRef opt_dims,
     bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     if (opt_dims.has_value() && opt_dims.value().size() > 0) {
-      return unsqueeze_multiple(grad, opt_dims, sizes.size()).expand(sizes);
+      return unsqueeze_multiple(grad, opt_dims, sizes.size())
+          .expand_symint(sizes);
     }
   }
-  return grad.expand(sizes);
+  return grad.expand_symint(sizes);
 }
 
 Tensor sum_backward(
     const Tensor& grad,
     c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef dims,
+    c10::IntArrayRef dims,
     bool keepdim) {
   if (!keepdim && sizes.size() > 0 && dims.size() > 0) {
     // we are only using `keepdim=true` path for SymInts for now
@@ -623,15 +636,15 @@ Tensor nansum_backward(
     const Tensor& self,
     at::OptionalIntArrayRef dims,
     bool keepdim) {
-  return sum_backward(grad, self.sizes(), dims, keepdim) *
+  return sum_backward(grad, self.sym_sizes(), dims, keepdim) *
       self.isnan().logical_not();
 }
 
 Tensor mean_backward(
     const Tensor& grad,
-    IntArrayRef shape,
+    c10::SymIntArrayRef shape,
     OptionalIntArrayRef opt_dim,
-    int64_t numel,
+    c10::SymInt numel,
     bool keepdim) {
   bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().size() == 0;
   auto n = is_all_reduce ? numel : _safe_size(shape, opt_dim.value());
@@ -1383,11 +1396,11 @@ Tensor renorm_backward(
 
 Tensor repeat_backward(
     Tensor grad,
-    IntArrayRef repeats,
-    IntArrayRef input_shape) {
+    c10::SymIntArrayRef repeats,
+    c10::SymIntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
-    return at::zeros(input_shape, grad.options());
+    return at::zeros_symint(input_shape, grad.options());
   }
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
@@ -1396,9 +1409,10 @@ Tensor repeat_backward(
     grad = grad.sum(0, false);
   }
 
-  at::DimVector grad_size, sum_dims;
+  at::SymDimVector grad_size;
+  at::DimVector sum_dims;
   for (const auto dim : c10::irange(input_dims)) {
-    int64_t repeat = repeats[dim + num_unsqueezed];
+    auto repeat = repeats[dim + num_unsqueezed];
     // Reshape gradient (repeat > 1)
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
     // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
@@ -1457,7 +1471,7 @@ Tensor repeat_backward(
   // reduce the whole grad tensor into a scalar rather than keeping original
   // dimensions.
   if (!sum_dims.empty()) {
-    grad = grad.reshape(grad_size);
+    grad = grad.reshape_symint(grad_size);
     grad = grad.sum(sum_dims);
   }
   return grad;
@@ -1533,16 +1547,19 @@ Tensor var_backward(
     if (n == correction) {
       return INFINITY * grad;
     } else {
-      return (2.0 / (self.numel() - correction)) * grad * (self - self.mean());
+      return (c10::SymFloat(2.0) /
+              c10::SymFloat(self.sym_numel() - correction)) *
+          grad * (self - self.mean());
     }
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
-    grad = unsqueeze_multiple(grad, dim, self.sizes().size());
+    grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
   }
-  const int64_t dof = _safe_size(self.sizes(), dim) - correction;
+  const c10::SymInt dof = _safe_size(self.sym_sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
+  return (c10::SymFloat(2.0) / c10::SymFloat(dof)) * grad *
+      (self - self.mean(dim, /*keepdim=*/true));
 }
 
 Tensor std_backward(
@@ -1571,9 +1588,9 @@ Tensor var_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self.sym_sizes(),
         dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
+        self.sym_numel(),
         keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
@@ -1596,9 +1613,9 @@ Tensor std_mean_backward(
   if (gmean.defined()) {
     auto aux = mean_backward(
         gmean,
-        self.sizes(),
+        self.sym_sizes(),
         dim_opt.value_or(IntArrayRef({})),
-        self.numel(),
+        self.sym_numel(),
         keepdim);
     gself = gself.defined() ? gself + aux : aux;
   }
@@ -4571,7 +4588,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& gO_t,
     const Tensor& save_mean_t,
     const Tensor& save_invstd_t,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask) {
   const int normalized_ndim = normalized_shape.size();
   const auto input_shape = input_t.sizes();
@@ -4713,40 +4730,40 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
+    c10::SymInt N,
+    c10::SymInt C,
+    c10::SymInt HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask) {
   const int64_t G = group;
-  const int64_t D = C / G;
-  const double s = 1.0 / static_cast<double>(D * HxW);
+  const auto D = C / G;
+  c10::SymFloat s = c10::SymFloat(1.0) / c10::SymFloat(D * HxW);
   Tensor dX;
   Tensor dgamma;
   Tensor dbeta;
-  const Tensor X_tensor = X.reshape({N, G, D, HxW});
-  const Tensor mean_tensor = mean.reshape({N, G, 1, 1});
-  const Tensor rstd_tensor = rstd.reshape({N, G, 1, 1});
+  const Tensor X_tensor = X.reshape_symint({N, G, D, HxW});
+  const Tensor mean_tensor = mean.reshape_symint({N, G, 1, 1});
+  const Tensor rstd_tensor = rstd.reshape_symint({N, G, 1, 1});
   Tensor dY_tensor;
   Tensor ds;
   Tensor db;
   if (dY.defined()) {
-    dY_tensor = dY.reshape({N, G, D, HxW});
+    dY_tensor = dY.reshape_symint({N, G, D, HxW});
     ds = (dY_tensor * X_tensor).sum(3).unsqueeze_(-1);
     db = dY_tensor.sum(3).unsqueeze_(-1);
   }
   if (grad_input_mask[0]) {
     Tensor gamma_tensor;
     if (isDefined(gamma)) {
-      gamma_tensor = gamma->reshape({1, G, D, 1});
+      gamma_tensor = gamma->reshape_symint({1, G, D, 1});
     }
     const Tensor var =
         ((rstd_tensor * rstd_tensor).reciprocal_() - eps).clamp_min(0);
     const Tensor rstd_cube = rstd_tensor * rstd_tensor * rstd_tensor;
     Tensor dvar;
     if (drstd.defined()) {
-      dvar = -0.5 * rstd_cube * drstd.view({N, G, 1, 1});
+      dvar = -0.5 * rstd_cube * drstd.view_symint({N, G, 1, 1});
     }
     if (dY.defined()) {
       const Tensor a =
@@ -4761,7 +4778,7 @@ infinitely_differentiable_native_group_norm_backward(
       if (dmean.defined() && drstd.defined()) {
         dX += var_mean_backward(
             dvar,
-            dmean.view({N, G, 1, 1}),
+            dmean.view_symint({N, G, 1, 1}),
             X_tensor,
             IntArrayRef{2, 3},
             0,
@@ -4771,7 +4788,7 @@ infinitely_differentiable_native_group_norm_backward(
     } else if (dmean.defined() && drstd.defined()) {
       dX = var_mean_backward(
                dvar,
-               dmean.view({N, G, 1, 1}),
+               dmean.view_symint({N, G, 1, 1}),
                X_tensor,
                IntArrayRef{2, 3},
                0,
@@ -5916,7 +5933,7 @@ Tensor layer_norm_jvp(
     const Tensor& bias_t,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
-    IntArrayRef normalized_shape) {
+    c10::SymIntArrayRef normalized_shape) {
   auto dims = std::vector<int64_t>{};
   auto view_size = input_t.sizes().vec();
   auto view_size_affine = input_t.sizes().vec();
