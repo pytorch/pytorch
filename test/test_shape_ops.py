@@ -678,6 +678,13 @@ class TestShapeOps(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+    @dtypes(torch.int64, torch.float, torch.complex128)
+    def test_sparse_dense_dim(self, device, dtype):
+        for shape in [(), (2, ), (2, 3)]:
+            x = torch.randn(shape)
+            self.assertEqual(x.sparse_dim(), 0)
+            self.assertEqual(x.dense_dim(), len(shape))
+
 instantiate_device_type_tests(TestShapeOps, globals())
 
 if __name__ == '__main__':
