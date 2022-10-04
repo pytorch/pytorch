@@ -2428,10 +2428,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         yield SampleInput(nd_tensor(), norm="ortho")
         yield SampleInput(nd_tensor(), s=(8,))
         yield SampleInput(oned_tensor())
-        yield from (
-            SampleInput(nd_tensor(), dim=dim)
-            for dim in [-1, -2, -3, (0, -1)]
-        )
+        yield from (SampleInput(nd_tensor(), dim=dim) for dim in [-1, -2, -3, (0, -1)])
     elif self.ndimensional == SpectralFuncType.TwoD:
         yield SampleInput(
             nd_tensor(),
@@ -2440,9 +2437,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
             norm="ortho",
         )
         yield SampleInput(nd_tensor(), norm="ortho")
-        yield SampleInput(
-            nd_tensor(), s=(6, 8) if not is_fp16_or_chalf else (4, 8)
-        )
+        yield SampleInput(nd_tensor(), s=(6, 8) if not is_fp16_or_chalf else (4, 8))
         yield SampleInput(nd_tensor(), dim=0)
         yield SampleInput(nd_tensor(), dim=(0, -1))
         yield SampleInput(nd_tensor(), dim=(-3, -2, -1))
@@ -2456,9 +2451,7 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         yield SampleInput(nd_tensor(), norm="ortho")
         yield SampleInput(nd_tensor(), n=7 if not is_fp16_or_chalf else 8)
         yield SampleInput(oned_tensor())
-        yield from (
-            SampleInput(nd_tensor(), dim=dim) for dim in [-1, -2, -3]
-        )
+        yield from (SampleInput(nd_tensor(), dim=dim) for dim in [-1, -2, -3])
 
 
 SpectralFuncType = Enum("SpectralFuncType", ("OneD", "TwoD", "ND"))
