@@ -1903,8 +1903,8 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
 
 
-@register_decomposition(aten._reshape_alias)
-def _reshape_alias(x, shape, strides):
+@register_decomposition([aten._reshape_alias, aten._unsafe_view], disable_meta=True)
+def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
@@ -2443,7 +2443,9 @@ def register_inplace(aten_op, outplace_op):
 
 
 register_inplace(aten.add_, aten.add)
+register_inplace(aten.mul_, aten.mul)
 register_inplace(aten.relu_, aten.relu)
 register_inplace(aten.hardtanh_, aten.hardtanh)
 register_inplace(aten.hardswish_, aten.hardswish)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
+register_inplace(aten.silu_, aten.silu)
