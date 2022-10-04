@@ -572,6 +572,17 @@ class FakeTensor(torch.Tensor):
         tree_map(merge_devices, args)
         tree_map(merge_devices, kwargs)
 
+        # some functions that allow Python numbers to bind to Tensors
+        # if we have failed to find a device, and we're running one of these operators,
+        # we must have scalar only inputs
+        if (
+            torch._C._should_allow_numbers_as_tensors(
+                func.name().split("::")[-1].split(".")[0]
+            )
+            and common_device is None
+        ):
+            common_device = torch.device("cpu")
+
         assert common_device is not None, f"Could not find common device for {func}"
 
         return common_device
