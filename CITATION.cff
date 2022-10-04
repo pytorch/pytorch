@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 message: If you use this software, please cite it as below.
 title: PyTorch
-url: pytorch.org
+url: https://pytorch.org
 preferred-citation:
-  type: incollection
+  type: conference-paper
   title: "PyTorch: An Imperative Style, High-Performance Deep Learning Library"
   authors:
     - family-names: Paszke
@@ -48,7 +48,8 @@ preferred-citation:
       given-names: Junjie
     - family-names: Chintala
       given-names: Soumith
-  journal: Advances in Neural Information Processing Systems 32
+  collection-title: Advances in Neural Information Processing Systems 32
+  collection-type: proceedings
   editors:
     - family-names: Wallach
       given-names: H.
@@ -65,5 +66,6 @@ preferred-citation:
   start: 8024
   end: 8035
   year: 2019
-  publisher: Curran Associates, Inc.
+  publisher:
+    name: Curran Associates, Inc.
   url: http://papers.neurips.cc/paper/9015-pytorch-an-imperative-style-high-performance-deep-learning-library.pdf
