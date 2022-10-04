@@ -4951,6 +4951,7 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
         # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
         SampleInput(tensor_nd(), args=(True,)),
         SampleInput(tensor_nd(), args=(False,)),
+        SampleInput(tensor_nd(), dim=None, correction=None),
     ]
 
 
