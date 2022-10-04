@@ -204,21 +204,6 @@
     "get_combined_dict",
     "type_before_parametrizations"
   ],
-  "torch.ao.quantization.quantize": [
-    "DeQuantStub",
-    "QuantWrapper",
-    "activation_is_memoryless",
-    "add_module_to_qconfig_obs_ctr",
-    "get_default_dynamic_quant_module_mappings",
-    "get_default_qat_module_mappings",
-    "get_default_qconfig_propagation_list",
-    "get_default_static_quant_module_mappings",
-    "get_default_static_quant_reference_module_mappings",
-    "get_qparam_dict",
-    "has_no_children_ignoring_parametrizations",
-    "no_observer_set",
-    "type_before_parametrizations"
-  ],
   "torch.ao.quantization.quantize_jit": [
     "QConfig",
     "QuantType",
