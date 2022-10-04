@@ -528,12 +528,6 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
         tol1('prod',
              {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
-        tol1('_masked.cumprod',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-        tol1('cumprod',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
-        tol1('linalg.vander',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol2('linalg.det', 'singular',
              {torch.float32: tol(atol=2e-05, rtol=2e-05)}),
     ))
@@ -577,11 +571,13 @@ class TestOperators(TestCase):
         skip("atleast_1d"),  # Takes too long
         skip("atleast_2d"),  # Takes too long
         skip("atleast_3d"),  # Takes too long
+        xfail("_masked.cumprod"),  # calls item
         xfail("as_strided"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
         skip("bernoulli"),  # calls random op
         xfail("bfloat16"),  # rank 4 tensor for channels_last
         xfail("chalf"),  # rank 4 tensor for channels_last
+        xfail("cumprod"),  # calls item
         xfail("double"),  # rank 4 tensor for channels_last
         xfail("float"),  # rank 4 tensor for channels_last
         xfail("half"),  # rank 4 tensor for channels_last
@@ -592,6 +588,10 @@ class TestOperators(TestCase):
         xfail("linalg.eig"),  # vmap over torch.allclose
         xfail("linalg.eigvals"),  # vmap over torch.allclose
         xfail("linalg.householder_product"),  # vmap: inplace into a regular tensor
+        # It looks like you're either (1) calling .item() on a Tensor or
+        # (2) attempting to use a Tensor in some data-dependent control flow or
+        # (3) encountering this error in PyTorch internals.
+        xfail("linalg.vander"),
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
         xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
         # got a batched tensor as input while the running_mean or running_var,
@@ -1200,12 +1200,6 @@ class TestOperators(TestCase):
     @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
         tol1('_masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
-        tol1('_masked.cumprod',
-             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
-        tol1('cumprod',
-             {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
-        tol1('linalg.vander',
-             {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
     ))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1272,6 +1266,7 @@ class TestOperators(TestCase):
         skip('native_layer_norm'),
 
         # Potential bugs/errors
+        xfail('_masked.cumprod'),  # calls item()
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
         xfail('bernoulli'),  # calls random op
@@ -1279,6 +1274,7 @@ class TestOperators(TestCase):
         xfail('cdist'),  # Forward AD not implemented and no decomposition
         xfail('chalf'),  # required rank 4 tensor to use channels_last format
         xfail('cholesky'),  # Forward AD not implemented and no decomposition
+        xfail('cumprod'),  # calls item()
         xfail('double'),  # required rank 4 tensor to use channels_last format
         xfail('float'),  # required rank 4 tensor to use channels_last format
         xfail('half'),  # required rank 4 tensor to use channels_last format
@@ -1289,6 +1285,7 @@ class TestOperators(TestCase):
         # Greatest absolute difference: 0.09438323974609375
         # Greatest relative difference: 0.00115722746596277
         xfail('linalg.householder_product', device_type='cuda'),
+        xfail('linalg.vander'),  # calls item()
         xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
         xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
