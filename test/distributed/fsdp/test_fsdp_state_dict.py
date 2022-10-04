@@ -13,7 +13,12 @@ from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
 )
-from torch.distributed.fsdp import CPUOffload, FullStateDictConfig
+from torch.distributed.fsdp import (
+    CPUOffload,
+    FullStateDictConfig,
+    LocalStateDictConfig,
+    ShardedStateDictConfig,
+)
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
     LocalStateDictConfig,
@@ -73,8 +78,8 @@ BUFFER_SHAPE = [5, 5]
 
 NON_ROOT_FSDP_PREFIX = 'non_fsdp_lin'
 
-_UNFLATTENED_STATE_DICT_IMPLS = ["state_dict", "sharded_state_dict"]
-_FLATTENED_STATE_DICT_IMPLS = ["local_state_dict"]
+_UNFLATTENED_STATE_DICT_IMPLS = ["state_dict"]
+_FLATTENED_STATE_DICT_IMPLS = []
 _SUPPORTED_STATE_DICT_IMPLS = (
     _UNFLATTENED_STATE_DICT_IMPLS + _FLATTENED_STATE_DICT_IMPLS
 )
@@ -180,8 +185,16 @@ class TestFSDPStateDict(FSDPTest):
                 rank0_only=state_dict_rank0_and_offload,
                 offload_to_cpu=state_dict_rank0_and_offload,
             )
+        elif state_dict_type == "local_state_dict":
+            config = LocalStateDictConfig(
+                offload_to_cpu=state_dict_rank0_and_offload,
+            )
+        elif state_dict_type == "sharded_state_dict":
+            config = ShardedStateDictConfig(
+                offload_to_cpu=state_dict_rank0_and_offload,
+            )
         else:
-            config = None
+            raise ValueError("Unspported state_dict_type")
         return FSDP.state_dict_type(model, _state_dict_type, config)
 
     def _validate_state_dict_contents(
