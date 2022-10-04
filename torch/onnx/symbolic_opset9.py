@@ -6304,7 +6304,7 @@ def is_pinned(g: jit_utils.GraphContext, self, device=None):
 
 @_onnx_symbolic("aten::resolve_conj")
 def resolve_conj(g: jit_utils.GraphContext, self: _C.Value) -> _C.Value:
-    # Noop in ONNX. This op is materializing conjugation w.r.t conjugate bit. 
+    # Noop in ONNX. This op is materializing conjugation w.r.t conjugate bit.
     # It is only adjusting the internal representation in torch but not its "value".
     # Hence from ONNX perspective this op does nothing.
     return self
@@ -6312,7 +6312,7 @@ def resolve_conj(g: jit_utils.GraphContext, self: _C.Value) -> _C.Value:
 
 @_onnx_symbolic("aten::resolve_neg")
 def resolve_neg(g: jit_utils.GraphContext, self: _C.Value) -> _C.Value:
-    # Noop in ONNX. This op is materializing negation w.r.t negative bit. 
+    # Noop in ONNX. This op is materializing negation w.r.t negative bit.
     # It is only adjusting the internal representation in torch but not its "value".
     # Hence from ONNX perspective this op does nothing.
     return self
