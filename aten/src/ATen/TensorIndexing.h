@@ -247,16 +247,14 @@ static inline Tensor applySelect(
         "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
     auto size = (*self_sizes)[dim];
-    // TODO: this guard can be removed once we move the dim wrapping higher.
-    int64_t concrete_size = size.guard_int(__FILE__, __LINE__);
     TORCH_CHECK_INDEX(
-        index >= -concrete_size && index < concrete_size,
+        size >= -index && size > index,
         "index ",
         index,
         " is out of bounds for dimension ",
         real_dim,
         " with size ",
-        concrete_size);
+        size.guard_int(__FILE__, __LINE__));
   }
 
   // if the index is negative, do not normalize it because that would fix the
