@@ -768,10 +768,16 @@ void initPythonIRBindings(PyObject* module_) {
             return n.ty_(Symbol::attr(name), type);
           })
       .def(
+          "ty",
+          [](Node& n, const char* name) { return n.ty(Symbol::attr(name)); })
+      .def(
           "tys_",
           [](Node& n, const char* name, const std::vector<TypePtr>& types) {
             return n.tys_(Symbol::attr(name), types);
           })
+      .def(
+          "tys",
+          [](Node& n, const char* name) { return n.tys(Symbol::attr(name)); })
       .def(
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
