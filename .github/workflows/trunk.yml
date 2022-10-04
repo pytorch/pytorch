@@ -125,10 +125,10 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-py3.7-clang7-tsan
-      docker-image-name: pytorch-linux-focal-py3-clang7-tsan
+      docker-image-name: pytorch-linux-focal-py3-clang7-asan
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "tsan", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-focal-py3_7-clang7-tsan-test:
