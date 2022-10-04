@@ -12,7 +12,6 @@ namespace c10 {
 
 class SymInt;
 class SymIntNodeImpl;
-using SymIntNode = c10::intrusive_ptr<SymIntNodeImpl>;
 
 class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
  public:
@@ -59,6 +58,9 @@ class C10_API SymIntNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode ge(const SymIntNode& other) {
+    TORCH_CHECK(false, "NYI");
+  };
+  virtual SymIntNode ceil() {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode clone() {

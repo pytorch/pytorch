@@ -236,7 +236,7 @@ static void convolution_shape_check(
 
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);
-  checkSize(c, input, input_channels_dim, weight->size(1) * groups);
+  checkSize_symint(c, input, input_channels_dim, weight->size(1) * groups);
 
   // Weight
   checkSameDim(c, input, weight);

@@ -75,9 +75,25 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
     " for ", t, " (while checking arguments for ", c, ")");
 }
 
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
+  checkDim(c, t, sizes.size());
+  TORCH_CHECK(
+    t->sym_sizes().equals(sizes),
+    "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
+    " for ", t, " (while checking arguments for ", c, ")");
+}
+
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size) {
   TORCH_CHECK(
     t->size(dim) == size,
+    "Expected tensor to have size ", size, " at dimension ", dim,
+    ", but got size ", t->size(dim), " for ", t,
+    " (while checking arguments for ", c, ")");
+}
+
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c10::SymInt size) {
+  TORCH_CHECK(
+    t->sym_size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,
     ", but got size ", t->size(dim), " for ", t,
     " (while checking arguments for ", c, ")");
