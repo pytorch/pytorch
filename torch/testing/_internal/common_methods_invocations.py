@@ -3107,12 +3107,12 @@ def error_inputs_max_pool1d(op_info, device, **kwargs):
                          error_regex=error_msg)
 
         # error inputs when kernel_size=0
-        error_msg = 'kernel_size must be greater than zero' 
+        error_msg = 'kernel_size must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
                          error_regex=error_msg)
 
         # error inputs for strides > 0
-        error_msg = 'stride must be greater than zero' 
+        error_msg = 'stride must be greater than zero'
         yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
                          error_regex=error_msg)
 
