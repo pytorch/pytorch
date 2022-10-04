@@ -5,7 +5,6 @@
 
 namespace c10 {
 
-#ifndef C10_MOBILE
 static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   SymIntNode a, b;
   if (a_.is_symbolic())
@@ -37,21 +36,6 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
   auto rep = (ptr & ~MASK) | IS_SYM;
   return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
 }
-#else
-// this code should never be executed on mobile due to inlining of `is_symbolic`
-// which always returns `false` on mobile.
-// However, if we decide to strip off `SymIntNode` completely from mobile builds
-// We would need to stub these methods anyways
-c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
-  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
-}
-SymIntNode SymInt::toSymIntNodeImpl() const {
-  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
-}
-static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
-  TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
-}
-#endif
 
 int64_t SymInt::guard_int(const char* file, int64_t line) const {
   if (!is_symbolic()) {
