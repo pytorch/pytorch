@@ -646,6 +646,18 @@ python_ref_db: List[OpInfo] = [
     # Elementwise Unary Special OpInfos
     #
     ElementwiseUnaryPythonRefInfo(
+        "_refs.special.bessel_j0",
+        torch_opinfo_name="special.bessel_j0",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.bessel_j1",
+        torch_opinfo_name="special.bessel_j1",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.special.erfcx",
         torch_opinfo_name="special.erfcx",
         supports_nvfuser=False,
@@ -684,6 +696,12 @@ python_ref_db: List[OpInfo] = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtri",
         torch_opinfo_name="special.ndtri",
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.special.spherical_bessel_j0",
+        torch_opinfo_name="special.spherical_bessel_j0",
         supports_nvfuser=False,
         op_db=op_db,
     ),
