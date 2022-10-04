@@ -30,3 +30,6 @@
   desc: |
           This tag indicates if an operator doesn't guarentee bitwise equivalence
           across different runs of an operator with identical inputs.
+- tag: canonical
+  desc: |
+          canonical aten ops
