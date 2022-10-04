@@ -2248,7 +2248,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 skipIfSlowGradcheckEnv,
                 "TestGradients",
-                "test_fwgrad_bwgrad",
+                "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),
         ),
