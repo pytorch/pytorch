@@ -166,6 +166,19 @@ a performance cost) by setting ``torch.backends.cudnn.deterministic = True``. \
 See :doc:`/notes/randomness` for more information.""",
 }
 
+sparse_support_notes = {
+    "sparse_arg_support": """This operation has support for arguments with :ref:`sparse layouts<sparse-docs>` \
+the layout of all operands will determine the output layout. In the case where attr:`out` is provided it's layout will \
+used without modification. In general more layouts are supported when a single argument is sparse, if all \
+arguments have sparse layout fewer combinations will be supported. """,
+    "sparse_beta_warning": """
+.. warning::
+    Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported, 
+    or may not have autograd support. If you notice missing functionality please 
+    `open an issue <https://github.com/pytorch/pytorch/issues>`
+    """,
+}
+
 add_docstr(
     torch.abs,
     r"""
@@ -534,6 +547,10 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
+{sparse_arg_support}
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -557,7 +574,7 @@ Example::
     tensor([[-4.8716,  1.4671, -1.3746],
             [ 0.7573, -3.9555, -2.8681]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -7462,6 +7479,10 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
+{sparse_arg_support}
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7481,7 +7502,7 @@ Example::
     tensor([[ 0.4851,  0.5037, -0.3633],
             [-0.0760, -3.6705,  2.4784]])
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
@@ -7538,6 +7559,10 @@ The behavior depends on the dimensionality of the tensors as follows:
   tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
   matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
+{sparse_arg_support}
+
+{sparse_beta_warning}
+
 {tf32_note}
 
 {rocm_fp16_note}
@@ -7582,7 +7607,7 @@ Example::
     torch.Size([10, 3, 5])
 
 """.format(
-        **common_args, **tf32_notes, **rocm_fp16_notes
+        **common_args, **tf32_notes, **rocm_fp16_notes, **sparse_support_notes
     ),
 )
 
