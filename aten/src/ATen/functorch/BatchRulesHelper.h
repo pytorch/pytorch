@@ -24,6 +24,8 @@ namespace at { namespace functorch {
 TORCH_API Tensor reshape_dim_into(int64_t src, int64_t dst, const Tensor& x);
 TORCH_API Tensor reshape_dim_outof(int64_t src, int64_t size1, const Tensor& x);
 
+TORCH_API Tensor reshape_dim_outof_symint(int64_t src, c10::SymInt size1, const Tensor& x);
+
 Tensor moveBatchDimToFront(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t rankWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
 int64_t numelWithoutBatchDim(const Tensor& tensor, optional<int64_t> maybe_batch_dim);
@@ -385,7 +387,7 @@ struct ExistingBdimBatchRuleHelper<F, Func, typelist<A, T...>> {
       T... extra_args) {
     auto self_ = reshape_dim_into(*self_bdim, 0, self);
     auto out = Func(self_, std::forward<T>(extra_args)...);
-    return std::make_tuple(reshape_dim_outof(0, self.sizes()[*self_bdim], out), 0);
+    return std::make_tuple(reshape_dim_outof_symint(0, self.sym_sizes()[*self_bdim], out), 0);
   }
 };
 
