@@ -262,6 +262,8 @@ class OutputComparisonLogger(OutputLogger):
         # precalculated comparisons function
 
     def forward(self, x, x_ref):
+        """
+        """  # blank docblock to make autodoc happy
         if not self.enabled:
             return x
         assert isinstance(x, torch.Tensor), 'non-tensor inputs not yet supported'
@@ -841,19 +843,25 @@ def prepare_n_shadows_model(
     mt.recompile()
     return mt
 
-# TODO(future PR): align API signature with other similar quantization
+# TODO(future PR): consider aligning API signature with other similar quantization
 # functions (enable_fake_quant, etc)
 def loggers_set_enabled(model: torch.nn.Module, enabled: bool) -> None:
+    """
+    Sets the `enabled` setting on a `model`'s loggers
+    """
     for name, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.enabled = enabled
 
-# TODO(future PR): align API signature with other similar quantization
+# TODO(future PR): consider aligning API signature with other similar quantization
 # functions (enable_fake_quant, etc)
 def loggers_set_save_activations(
     model: torch.nn.Module,
     save_activations: bool,
 ) -> None:
+    """
+    Sets the `save_activations` setting on a `model`'s loggers
+    """
     for name, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
@@ -875,11 +883,17 @@ def convert_n_shadows_model(model: GraphModule) -> GraphModule:
     return model
 
 def extract_results_n_shadows_model(model: torch.nn.Module) -> NSResultsType:
+    """
+    Extracts logger results from `model`.
+    """
     results: NSResultsType = {}
     _extract_logger_info_one_model(model, results, OutputLogger)
     return results
 
 def print_comparisons_n_shadows_model(results: NSResultsType) -> None:
+    """
+    Prints a summary of extracted `results`.
+    """
     results_grouped = group_results_by_subgraph(results)
     results_comparison = create_results_comparison(results_grouped)
     print_n_shadows_summary(results_comparison)
