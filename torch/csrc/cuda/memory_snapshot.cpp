@@ -13,10 +13,10 @@ using c10::cuda::CUDACachingAllocator::History;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
-std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> blank_context() {
+std::shared_ptr<c10::cuda::CUDACachingAllocator::Context> blank_context() {
   // in the future the C++-only version of context gathering could include C++
   // or torchscript frames.
-  return std::make_unique<c10::cuda::CUDACachingAllocator::Context>();
+  return std::make_shared<c10::cuda::CUDACachingAllocator::Context>();
 }
 std::string write_pickle(const IValue& v) {
   std::vector<char> result;
@@ -111,14 +111,53 @@ std::string _memory_snapshot_pickled() {
     return segmentDict;
   };
 
-  const std::vector<SegmentInfo>& snapshot =
-      c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
 
-  auto result = new_list();
-  for (const auto& segmentInfo : snapshot) {
-    result.push_back(segmentInfoToDict(segmentInfo));
+  auto segments = new_list();
+  for (const auto& segmentInfo : snapshot.segments) {
+    segments.push_back(segmentInfoToDict(segmentInfo));
   }
 
+  auto traces = new_list();
+  IValue action_s = "action";
+  IValue alloc_s = "alloc";
+  IValue free_s = "free";
+  IValue segment_alloc_s = "segment_alloc";
+  IValue segment_free_s = "segment_free";
+  IValue snapshot_s = "snapshot";
+  IValue oom_s = "oom";
+  IValue device_free_s = "device_free";
+
+  using namespace c10::cuda::CUDACachingAllocator;
+
+  auto action_to_str = [&](TraceEntry::Action action) {
+    switch(action) {
+      case TraceEntry::ALLOC: return alloc_s;
+      case TraceEntry::FREE: return free_s;
+      case TraceEntry::SEGMENT_ALLOC: return segment_alloc_s;
+      case TraceEntry::SEGMENT_FREE: return segment_free_s;
+      case TraceEntry::OOM: return oom_s;
+      case TraceEntry::SNAPSHOT: return snapshot_s;
+    }
+    throw std::runtime_error("unreachable");
+  };
+
+  for (const auto& traceInfo : snapshot.device_traces) {
+    auto trace = new_list();
+    for (const auto& te : traceInfo) {
+      auto trace_entry = new_dict();
+      trace_entry.insert(action_s, action_to_str(te.action()));
+      trace_entry.insert(TraceEntry::OOM == te.action() ? device_free_s : addr_s, te.addr_);
+      trace_entry.insert(size_s, (int64_t) te.size());
+      trace_entry.insert(stream_s, int64_t(te.stream_));
+      trace.push_back(trace_entry);
+    }
+    traces.push_back(trace);
+  }
+
+  auto result = new_dict();
+  result.insert("segments", segments);
+  result.insert("device_traces", traces);
   return write_pickle(result);
 }
 } // namespace cuda

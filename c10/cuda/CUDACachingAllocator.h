@@ -98,12 +98,12 @@ struct Context {
   virtual ~Context() {}
 };
 
-typedef std::unique_ptr<Context> (*CreateContextFn)(void);
+typedef std::shared_ptr<Context> (*CreateContextFn)(void);
 
 struct History {
   void* addr;
   size_t real_size; // unrounded, actually requested size
-  std::unique_ptr<Context> context; // per-watcher context
+  std::shared_ptr<Context> context; // per-watcher context
   std::unique_ptr<History> next; // when blocks are merged we keep records of
                                  // what used to be in the block
 };
@@ -131,6 +131,31 @@ struct SegmentInfo {
   std::vector<BlockInfo> blocks;
 };
 
+struct TraceEntry {
+  enum Action {ALLOC, FREE, SEGMENT_ALLOC, SEGMENT_FREE, SNAPSHOT, OOM};
+  TraceEntry(Action action, int64_t addr, size_t size, cudaStream_t stream, std::shared_ptr<Context> context=nullptr)
+  : addr_(addr), context_(context), stream_(stream) {
+    action_size_ = size | (size_t(action) << 48);
+  }
+  int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
+  std::shared_ptr<Context> context_;
+  cudaStream_t stream_;
+  Action action() const {
+    return Action(action_size_ >> 48);
+  }
+  size_t size() const {
+    return ((0x1ULL << 48) - 1) & action_size_;
+  }
+private:
+  size_t action_size_;
+};
+
+struct SnapshotInfo {
+  std::vector<SegmentInfo> segments;
+  std::vector<std::vector<TraceEntry>> device_traces;
+};
+
+
 C10_CUDA_API void* raw_alloc(size_t nbytes);
 C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
 C10_CUDA_API void raw_delete(void* ptr);
@@ -149,7 +174,7 @@ C10_CUDA_API void recordStream(const DataPtr&, CUDAStream stream);
 C10_CUDA_API DeviceStats getDeviceStats(int device);
 C10_CUDA_API void resetAccumulatedStats(int device);
 C10_CUDA_API void resetPeakStats(int device);
-C10_CUDA_API std::vector<SegmentInfo> snapshot();
+C10_CUDA_API SnapshotInfo snapshot();
 
 // CUDAGraph interactions
 C10_CUDA_API void notifyCaptureBegin(
@@ -162,6 +187,8 @@ C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 C10_CUDA_API std::mutex* getFreeMutex();
 
 C10_CUDA_API void setContextRecorder(CreateContextFn recorder);
+using OutOfMemoryObserver = std::function<void(int64_t device, int64_t allocated, int64_t device_total, int64_t device_free)>;
+C10_CUDA_API void attachOutOfMemoryObserver(OutOfMemoryObserver observer);
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 } // namespace CUDACachingAllocator
