@@ -5681,7 +5681,7 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(_tensor((M, S)), 0, _gather((M, S // 2), 1, M), _tensor((M, S // 2)))
     yield SampleInput(_tensor((M, S)), 1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
     yield SampleInput(_tensor((M, S)), -1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
-    yield SampleInput(_tensor(()),0, zero.clone().detach(), _tensor(()))
+    yield SampleInput(_tensor(()), 0, zero.clone().detach(), _tensor(()))
 
 def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
