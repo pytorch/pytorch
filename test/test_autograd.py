@@ -8087,7 +8087,7 @@ class TestAutogradDeviceType(TestCase):
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
-    @onlyCPU
+    @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
     def test_profiler_emit_itt(self, device):
         # This test is not intended to ensure correctness of itt ranges.
         # That would require something a great deal more complex (you'd have to create a

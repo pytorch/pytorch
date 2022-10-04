@@ -1,12 +1,14 @@
 # Owner(s): ["module: intel"]
 
 import torch
+import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
+@unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestItt(TestCase):
     def setUp(self):
         super(TestItt, self).setUp()
