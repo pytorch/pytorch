@@ -330,8 +330,13 @@ void multiReductionInliner(
     }
   }
 
+  // Find iter domains that are mapped to a trivial reduction, these should
+  // never be inlined.
+  std::unordered_set<IterDomain*> mapped_to_trivial_reduction =
+      scheduler_utils::getTrivialReductionMap(fusion);
+
   // Inline the schedule
-  inlineMost();
+  inlineMost(mapped_to_trivial_reduction);
 }
 
 namespace {

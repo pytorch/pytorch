@@ -153,25 +153,29 @@ size_t MaxPosCalculator::getMaxPosAll(
   return max_pos;
 }
 
-void inlineMost() {
-  inlineMost(ir_utils::allTvs(FusionGuard::getCurFusion()));
+void inlineMost(const std::unordered_set<IterDomain*>& uninlinable_ids) {
+  inlineMost(ir_utils::allTvs(FusionGuard::getCurFusion()), uninlinable_ids);
 }
 
-void inlineMost(const std::vector<TensorView*>& tvs) {
+void inlineMost(
+    const std::vector<TensorView*>& tvs,
+    const std::unordered_set<IterDomain*>& uninlinable_ids) {
   if (tvs.empty()) {
     return;
   }
-  MaxPosCalculator calc;
+  MaxPosCalculator calc(uninlinable_ids);
   for (auto tv : tvs) {
     tv->inlineAt(-1, true, &calc);
   }
 }
 
-void inlineMost(const std::unordered_set<TensorView*>& tvs) {
+void inlineMost(
+    const std::unordered_set<TensorView*>& tvs,
+    const std::unordered_set<IterDomain*>& uninlinable_ids) {
   if (tvs.empty()) {
     return;
   }
-  MaxPosCalculator calc;
+  MaxPosCalculator calc(uninlinable_ids);
   for (auto tv : tvs) {
     tv->inlineAt(-1, true, &calc);
   }
@@ -272,9 +276,10 @@ std::unordered_map<TensorView*, size_t> getPositionsMappedTo(
 void inlineAllAt(
     TensorView* reference_tv,
     int64_t reference_pos,
-    bool best_effort) {
+    bool best_effort,
+    const std::unordered_set<IterDomain*>& uninlinable_ids) {
   auto mapped_positions = getPositionsMappedTo(reference_tv, reference_pos);
-  MaxPosCalculator calc;
+  MaxPosCalculator calc(uninlinable_ids);
   for (auto pair : mapped_positions) {
     pair.first->inlineAt(pair.second, best_effort, &calc);
   }
@@ -284,9 +289,10 @@ void inlineSelectedAt(
     const std::unordered_set<TensorView*>& selected,
     TensorView* reference_tv,
     int64_t reference_pos,
-    bool best_effort) {
+    bool best_effort,
+    const std::unordered_set<IterDomain*>& uninlinable_ids) {
   auto mapped_positions = getPositionsMappedTo(reference_tv, reference_pos);
-  MaxPosCalculator calc;
+  MaxPosCalculator calc(uninlinable_ids);
   for (auto pair : mapped_positions) {
     if (selected.count(pair.first) > 0) {
       pair.first->inlineAt(pair.second, best_effort, &calc);
