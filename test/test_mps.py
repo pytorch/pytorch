@@ -3974,6 +3974,7 @@ class TestNLLLoss(TestCase):
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             gelu_result = torch.nn.GELU()(x)
+            # GELU is not supported on CPU, so cast it to float
             gelu_result_cpu = torch.nn.GELU()(cpu_x.to(torch.float))
 
             cpu_grad = torch.ones_like(gelu_result_cpu)
@@ -3989,11 +3990,11 @@ class TestNLLLoss(TestCase):
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-          for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
-              helper(shape, dtype)
+            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
+                helper(shape, dtype)
         # Test that gelu would raise an assert for integral types
         for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
-          self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
+            self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
 
     def test_gelu(self):
         def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
