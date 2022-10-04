@@ -38,7 +38,9 @@ def layerwise_sandbox(module: nn.Sequential, device: torch.device,) -> Generator
 def detach(batch: Batch) -> None:
     """Detaches from autograd graph."""
     for i, x in enumerate(batch):
-        batch[i] = x.detach().requires_grad_(x.requires_grad)
+        if torch.is_tensor(x):
+            batch[i] = x.detach().requires_grad_(x.requires_grad)
+
 
 
 def profile_times(module: nn.Sequential, sample: Union[List[Any], Tensor], timeout: float, device: torch.device,) -> List[int]:
