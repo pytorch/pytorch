@@ -204,11 +204,6 @@
     "get_combined_dict",
     "type_before_parametrizations"
   ],
-  "torch.ao.quantization.quantize_jit": [
-    "QConfig",
-    "QuantType",
-    "wrap_cpp_module"
-  ],
   "torch.autograd": [
     "NestedIOFunction",
     "detect_anomaly",
