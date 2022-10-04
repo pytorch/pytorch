@@ -568,13 +568,24 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real"):
+OpOverload = torch._ops.OpOverload
+DispatchKey = torch._C.DispatchKey
+
+def make_fx(f,
+            decomposition_table: Optional[Dict[Union[OpOverload, Tuple[OpOverload, DispatchKey]], Callable]] = None,
+            tracing_mode="real"):
+    """
+    decomposition_table: The key of decomposition_table can be either an OpOverload or
+        a tuple of (OpOverload, DispatchKey). For the entries with tuple key, the decomposition function
+        will be dynamically registered as the python dispatch function for the op under the given DispatchKey.
+    """
+
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
         decomposition_table = {}
 
-
+    python_dispatch_table = {key: value for key, value in decomposition_table.items() if type(key) is tuple}
 
     @functools.wraps(f)
     def wrapped(*args):
@@ -590,7 +601,6 @@ def make_fx(f, decomposition_table=None, tracing_mode="real"):
         else:
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
-        python_dispatch_table = {key: value for key, value in decomposition_table.items() if type(key) is tuple}
         python_dispatcher_mode: Any = nullcontext()
         current_python_dispatch: Any = nullcontext()
 
