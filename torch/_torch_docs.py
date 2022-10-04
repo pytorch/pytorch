@@ -173,8 +173,8 @@ used without modification. In general more layouts are supported when a single a
 arguments have sparse layout fewer combinations will be supported. """,
     "sparse_beta_warning": """
 .. warning::
-    Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported, 
-    or may not have autograd support. If you notice missing functionality please 
+    Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported,
+    or may not have autograd support. If you notice missing functionality please
     `open an issue <https://github.com/pytorch/pytorch/issues>`
     """,
 }
