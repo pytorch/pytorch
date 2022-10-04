@@ -83,6 +83,36 @@ void printOpsYAML(
   }
 }
 
+void printDTypeYAML(
+    std::ostream& out,
+    int indent,
+    const std::string& kernel_tag_name,
+    const std::set<std::string> dtypes) {
+  std::string indent_str = std::string(indent, ' ');
+  out << indent_str << kernel_tag_name << ":" << std::endl;
+  for (auto& dtype : dtypes) {
+    out << indent_str << "- " << dtype << std::endl;
+  }
+}
+
+void printDTypesYAML(
+    std::ostream& out,
+    const torch::jit::mobile::KernelDTypeTracer::kernel_tags_type&
+        kernel_tags) {
+  for (auto& it : kernel_tags) {
+    printDTypeYAML(out, 2, it.first, it.second);
+  }
+}
+
+void printCustomClassesYAML(
+    std::ostream& out,
+    const torch::jit::mobile::CustomClassTracer::custom_classes_type&
+        loaded_classes) {
+  for (auto& class_name : loaded_classes) {
+    out << "- " << class_name << std::endl;
+  }
+}
+
 /**
  * Runs multiple PyTorch lite interpreter models, and additionally writes
  * out a list of root and called operators, kernel dtypes, and loaded/used
@@ -142,7 +172,8 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  yaml_out << "include_all_non_op_selectives: true" << std::endl;
+  yaml_out << "include_all_non_op_selectives: false" << std::endl;
+  yaml_out << "build_features: []" << std::endl;
   yaml_out << "operators:" << std::endl;
   printOpsYAML(
       yaml_out,
@@ -156,5 +187,20 @@ int main(int argc, char* argv[]) {
       false /* is_used_for_training */,
       false /* is_root_operator */,
       false /* include_all_overloads */);
+
+  yaml_out << "kernel_metadata:";
+  if (tracer_result.called_kernel_tags.empty()) {
+    yaml_out << " []";
+  }
+  yaml_out << std::endl;
+  printDTypesYAML(yaml_out, tracer_result.called_kernel_tags);
+
+  yaml_out << "custom_classes:";
+  if (tracer_result.loaded_classes.empty()) {
+    yaml_out << " []";
+  }
+  yaml_out << std::endl;
+  printCustomClassesYAML(yaml_out, tracer_result.loaded_classes);
+
   return 0;
 }

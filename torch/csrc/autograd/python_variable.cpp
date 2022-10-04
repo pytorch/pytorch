@@ -251,6 +251,7 @@ struct ConcretePyInterpreterVTable final
   c10::Layout layout(const TensorImpl* self) const override;
   c10::SymInt sym_numel(const TensorImpl* self) const override;
   c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override;
+  c10::SymInt sym_storage_offset(const TensorImpl* self) const override;
 
   void trace_gpu_event_creation(uintptr_t event) const override {
     concrete_trace_cuda<trace_cuda_event_creation_fn_name>(event);
@@ -722,14 +723,14 @@ static PyObject* THPVariable_make_subclass(
   data.set_requires_grad(r.toBool(2));
   const auto sizes_strides_policy = r.stringViewOptional(3);
   if (sizes_strides_policy.has_value()) {
-    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
+    data.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
         parseSizesStridesPolicyArgument(*sizes_strides_policy));
   }
   if (r.toBool(4)) {
-    data.unsafeGetTensorImpl()->set_custom_device(true);
+    data.unsafeGetTensorImpl()->set_python_custom_device(true);
   }
   if (r.toBool(5)) {
-    data.unsafeGetTensorImpl()->set_custom_layout(true);
+    data.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
   if (!r.isNone(6)) {
     data.unsafeGetTensorImpl()->_change_backend_component_keys(r.device(6));
@@ -811,7 +812,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
-      tensor.unsafeGetTensorImpl()->set_sizes_strides_policy(
+      tensor.unsafeGetTensorImpl()->set_python_custom_sizes_strides(
           parseSizesStridesPolicyArgument(*sizes_strides_policy));
     }
   } else {
@@ -826,17 +827,12 @@ static PyObject* THPVariable_make_wrapper_subclass(
 
     auto sym_sizes = r.symintlist(1);
     auto sym_strides = r.symintlist(2);
+    auto sym_storage_offset = r.toSymIntOptional(3);
 
     TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
 
-    // TODO: this should probably be sym_sizes, sym_strides AND offset
-    tensor_impl->set_sym_sizes_and_strides(sym_sizes, sym_strides);
-
-    // TODO: this may need to be symbolic as well
-    auto storage_offset = r.toInt64Optional(3);
-    if (storage_offset) {
-      tensor_impl->set_storage_offset(*storage_offset);
-    }
+    tensor_impl->set_sizes_and_strides(
+        sym_sizes, sym_strides, sym_storage_offset.value_or(0));
 
     const auto sizes_strides_policy = r.stringViewOptional(10);
     if (sizes_strides_policy.has_value()) {
@@ -849,10 +845,10 @@ static PyObject* THPVariable_make_wrapper_subclass(
   tensor.set_requires_grad(r.toBool(9));
 
   if (r.toBool(11)) {
-    tensor.unsafeGetTensorImpl()->set_custom_device(true);
+    tensor.unsafeGetTensorImpl()->set_python_custom_device(true);
   }
   if (r.toBool(12)) {
-    tensor.unsafeGetTensorImpl()->set_custom_layout(true);
+    tensor.unsafeGetTensorImpl()->set_python_custom_layout(true);
   }
 
   return THPVariable_NewWithVar(

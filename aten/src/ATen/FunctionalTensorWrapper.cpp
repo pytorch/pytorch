@@ -50,6 +50,9 @@ void FunctionalTensorWrapper::set_constructor_metadata() {
   // Instead, it's sufficient to remove the `Dense` dispatch key,
   // which prevents us from accidentally trying to directly run a CPU/CUDA kernel.
   key_set_ = key_set_.remove(c10::DispatchKey::Dense);
+  // We override a bunch of _custom(), so make sure they get called
+  // TODO: metadata copying may not actually be necessary then
+  set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
 }
 
 FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& value)
@@ -338,9 +341,6 @@ int64_t FunctionalTensorWrapper::numel_custom() const {
 }
 bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
   return value_.unsafeGetTensorImpl()->is_contiguous();
-}
-c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes() const {
-  return value_.unsafeGetTensorImpl()->sym_sizes();
 }
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();

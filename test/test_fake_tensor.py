@@ -623,6 +623,17 @@ class FakeTensorOperatorInvariants(TestCase):
                 has_kwarg_device or op == torch.ops.aten._list_to_tensor.default
             )
 
+    @unittest.expectedFailure
+    def test_sparse_new(self):
+        with FakeTensorMode():
+            indices = torch.randn(1, 1, dtype=torch.int64)
+            values = torch.randn(1)
+            extra = (2,)
+            sparse = torch.randn(1).to_sparse()
+            # This used to segfault, now it does not, but it still raises an
+            # error
+            sparse2 = sparse.new(indices, values, extra)
+
     def test_like_ops(self):
         for schema in self.get_all_aten_schemas():
             if "_like" == schema.name[-5:]:

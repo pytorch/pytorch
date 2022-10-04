@@ -388,7 +388,7 @@ TensorBase empty_symint_meta(
       TORCH_CHECK(0, "other memory format not implemented yet");
   }
 
-  tensor.unsafeGetTensorImpl()->set_sym_sizes_and_strides(size, strides);
+  tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, strides);
 
   return tensor;
 }

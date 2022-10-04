@@ -160,6 +160,7 @@ struct C10_API PyInterpreterVTable {
   virtual c10::Layout layout(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_numel(const TensorImpl* self) const = 0;
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
+  virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;
 
   virtual void trace_gpu_event_creation(uintptr_t event) const = 0;
   virtual void trace_gpu_event_deletion(uintptr_t event) const = 0;

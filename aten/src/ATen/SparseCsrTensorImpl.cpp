@@ -61,7 +61,7 @@ SparseCsrTensorImpl::SparseCsrTensorImpl(
 
   set_storage_access_should_throw();
   is_non_overlapping_and_dense_ = false;
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
   // TODO: If this check ever shows up as a bottleneck, which is unlikely given that
   // comparing devices only involves comparing the type and index (two integers), we
   // can move this to a DEBUG only assert. Until then this confirms and maintains a
@@ -231,6 +231,9 @@ void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 }
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
+}
+bool SparseCsrTensorImpl::is_contiguous_custom(MemoryFormat) const {
+  TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have is_contiguous");
 }
 
 } // namespace at

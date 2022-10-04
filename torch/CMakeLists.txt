@@ -441,6 +441,11 @@ target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
+if(USE_UCC)
+  target_link_libraries(torch_python PRIVATE __caffe2_ucc)
+  target_compile_definitions(torch_python PRIVATE USE_UCC)
+endif()
+
 if(BUILD_ONEDNN_GRAPH)
   target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
   target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")

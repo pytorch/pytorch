@@ -85,14 +85,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
           c10::scalarTypeToTypeMeta(tensor.dtype()),
           backendDeviceToAtenDevice(tensor.GetDevice())),
       tensor_(c10::make_intrusive<LazyTensor>(std::move(tensor))) {
-<<<<<<< HEAD
-  // This is a temporary fix for a PyTorch core issue,
-  // according to https://github.com/pytorch/xla/pull/2682.
-  is_non_overlapping_and_dense_ = false;
-  set_sizes_strides_policy(SizesStridesPolicy::CustomSizes);
-=======
   set_custom_sizes_strides(SizesStridesPolicy::CustomSizes);
->>>>>>> 3b6588ab745 (Consistent compute numel/contiguous strategy with SymInts (#85858))
 }
 
 void LTCTensorImpl::set_tensor(const LazyTensorPtr& lazy_tensor) {
@@ -143,10 +136,6 @@ c10::SymIntArrayRef LTCTensorImpl::sym_strides_custom() const {
 
 c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
   return c10::fromIntArrayRef(sizes_custom());
-}
-
-c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
-  return sym_sizes_custom();
 }
 
 void LTCTensorImpl::setup_size_properties() {

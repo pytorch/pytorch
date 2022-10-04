@@ -1,7 +1,6 @@
 ## @package app
 # Module caffe2.python.mint.app
 import argparse
-# pyre-fixme[21]: Could not find module `flask`.
 import flask
 import glob
 import numpy as np

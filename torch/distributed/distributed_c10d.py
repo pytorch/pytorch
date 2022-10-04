@@ -412,11 +412,15 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
 
 # TODO: remove this once the ecosystem moves away from it.
 def _get_global_rank(group, rank):
+    """
+    This method is deprecated, please use get_global_rank.
+    """
     warnings.warn(
         "torch.distributed.distributed_c10d._get_global_rank is deprecated "
         "please use torch.distributed.distributed_c10d.get_global_rank instead"
     )
     return get_global_rank(group, rank)
+
 
 def get_process_group_ranks(group: ProcessGroup):
     """

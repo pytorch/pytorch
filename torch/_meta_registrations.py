@@ -87,6 +87,11 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
 
 
+@register_meta(aten.copy_.default, register_dispatcher=False)
+def meta_copy_(self, src, non_blocking=False):
+    return self
+
+
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @register_meta(aten.index_select.default)
 def meta_index_select(self, dim, index):
@@ -346,7 +351,7 @@ def meta_conv(
 
     else:
         out_channels = weight.shape[0]
-        if weight.shape[1] != input_tensor.shape[1] / groups:
+        if weight.shape[1] * groups != input_tensor.shape[1]:
             raise RuntimeError("Invalid channel dimensions")
         shape_out = calc_conv_nd_return_shape(
             dims, kernel_size, stride, padding, dilation

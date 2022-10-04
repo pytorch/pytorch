@@ -182,7 +182,7 @@ NestedTensorImpl::NestedTensorImpl(
       storage_device);
   validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_);
   refresh_dim();
-  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
+  set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 NestedTensorImpl::NestedTensorImpl(
@@ -230,7 +230,7 @@ NestedTensorImpl::NestedTensorImpl(
       opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
   validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_);
   refresh_dim();
-  set_sizes_strides_policy(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
+  set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 void NestedTensorImpl::refresh_dim() {
@@ -283,9 +283,6 @@ c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
 
-c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
-  return sym_sizes_custom();
-}
 c10::SymIntArrayRef NestedTensorImpl::sym_strides_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
 }

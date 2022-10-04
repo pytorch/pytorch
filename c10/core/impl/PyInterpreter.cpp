@@ -68,6 +68,9 @@ struct NoopPyInterpreterVTable final : public PyInterpreterVTable {
   c10::SymIntArrayRef sym_strides(const TensorImpl* self) const override {
     PANIC(sym_strides);
   }
+  c10::SymInt sym_storage_offset(const TensorImpl* self) const override {
+    PANIC(sym_storage_offset);
+  }
 
   // Just swallow the event, don't do anything
   void trace_gpu_event_creation(uintptr_t event) const override {}

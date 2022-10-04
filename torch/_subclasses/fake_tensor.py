@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import itertools
+import sys
 import warnings
 import weakref
 from dataclasses import dataclass
@@ -493,6 +494,8 @@ class FakeTensor(torch.Tensor):
         return f"FakeTensor({self_repr}, {self.fake_device})"
 
     def new(self, *args, **kwargs):
+        # TODO: This doesn't work with sparse self
+
         # torch.Tensor.new does not go through the normal dispatcher pattern
         # so in order to use the same pattern as normal invocation of
         # returning meta device within the kernel we need to intercept
@@ -501,7 +504,7 @@ class FakeTensor(torch.Tensor):
         # when attempting to compute an output in meta, so
         # we compute the real tensor then convert to meta
         out_device = self.fake_device
-        with no_dispatch():
+        with no_dispatch(), in_kernel_invocation_manager(self.fake_mode):
             real_out = super().new(*args, **kwargs)
 
         assert not isinstance(real_out, FakeTensor), real_out
@@ -747,10 +750,12 @@ class FakeTensorMode(TorchDispatchMode):
 
             with no_dispatch():
                 if func == aten.size.default:
-                    raise RuntimeError(
+                    sys.stderr.write(
                         "Trying to call aten.size on a tensor with symbolic shapes. "
                         "It's likely that this is from calling tensor.shape in C++"
                     )
+                    # We do this to allow for better error localization with `TORCH_SHOW_CPP_STACKTRACES=1`
+                    return None
 
             with self:
                 if func in meta_table:

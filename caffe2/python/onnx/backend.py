@@ -656,7 +656,6 @@ class Caffe2Backend(Backend):
         except AttributeError:
             warnings.warn("OptimizerWarning: optimizer module not found in ONNX version {}".format(onnx.__version__))
             # ONNX does no ship onnx.optimizer since version 1.9+
-            # pyre-fixme[21]: Could not find module `onnxoptimizer`.
             import onnxoptimizer
             out = onnxoptimizer.optimize(input, passes)
         return out
