@@ -226,7 +226,7 @@ def clone_if_tensor(x):
 def compute_quantities_for_vmap_test(
         op, orig_batched_args, orig_kwarg_values, in_dims,
         out_dim=0, batch_size=2, compute_loop_out=True,
-        clone_inputs=False):
+        clone_inputs=False, unbatched_expected=None):
 
     def maybe_clone_inputs():
         if clone_inputs:
@@ -236,10 +236,24 @@ def compute_quantities_for_vmap_test(
         return orig_batched_args, orig_kwarg_values
 
     batched_args, kwarg_values = maybe_clone_inputs()
+
+    if unbatched_expected is not None:
+        assert not compute_loop_out, "With `unbatched_expected`, there is no need to compute with loop."
+
     if compute_loop_out:
         loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)
     else:
         loop_out = None
+
+    if unbatched_expected is not None:
+        def make_batched(t):
+            if isinstance(t, torch.Tensor):
+                shape = list(t.shape)
+                shape.insert(out_dim, batch_size)
+                return t.expand(*shape)
+            return t
+        loop_out = pytree.tree_map(make_batched, unbatched_expected)
+
     # Used for debugging the resulting operations
     # from functorch import make_fx
     # def f(a):
@@ -274,11 +288,12 @@ def compute_quantities_for_vmap_test(
 def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm_and_training=False, compute_loop_out=True):
     out_dim = 0
     batch_size = 2
-
+    unbatched_expected = op(*arg_values, **kwarg_values)
     generator = generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training)
     for batched_args, in_dims, kwarg_values in generator:
         for quantities in compute_quantities_for_vmap_test(
-                op, batched_args, kwarg_values, in_dims, out_dim, batch_size, compute_loop_out):
+                op, batched_args, kwarg_values, in_dims, out_dim, batch_size,
+                compute_loop_out=False, unbatched_expected=unbatched_expected):
             yield quantities
 
 
