@@ -624,16 +624,6 @@ class TestUnaryUfuncs(TestCase):
                 ):
                     torch.frexp(input, out=(mantissa, exponent))
 
-    def test_mvlgamma_argcheck(self, device):
-        def run_test(d):
-            input = torch.linspace((d - 2) / 2, 10, 10, device=device)
-            torch.mvlgamma(input, d)
-
-        with self.assertRaisesRegex(
-            RuntimeError, r"All elements must be greater than \(p-1\)/2"
-        ):
-            run_test(3)
-
     def test_polygamma_neg(self, device):
         with self.assertRaisesRegex(
             RuntimeError, r"polygamma\(n, x\) does not support negative n\."
@@ -686,12 +676,9 @@ class TestUnaryUfuncs(TestCase):
                     torch.float32 if dtype is torch.complex64 else torch.float64
                 )
                 np_float_out = np_fn(a).astype(torch_to_numpy_dtype_dict[float_dtype])
-                float_out = torch.empty_like(t).float()
+                float_out = torch.empty_like(t, dtype=float_dtype)
                 torch_fn(t, out=float_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
-                    torch.from_numpy(np_float_out), float_out.cpu()
-                )
+                self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
 
                 # Tests float out (resized out)
                 float_out = torch.empty(1, device=device, dtype=float_dtype)
@@ -699,21 +686,15 @@ class TestUnaryUfuncs(TestCase):
                 self.assertEqual(torch.from_numpy(np_float_out), float_out.cpu())
 
                 # Tests complex out
-                np_complex_out = np_fn(a)
+                np_complex_out = np_fn(a).astype(torch_to_numpy_dtype_dict[dtype])
                 complex_out = torch.empty_like(t)
                 torch_fn(t, out=complex_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
-                    torch.from_numpy(np_complex_out), complex_out.cpu()
-                )
+                self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests complex out (resized out)
                 complex_out = torch.empty(0, device=device, dtype=dtype)
                 torch_fn(t, out=complex_out)
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(
-                    torch.from_numpy(np_complex_out), complex_out.cpu()
-                )
+                self.assertEqual(torch.from_numpy(np_complex_out), complex_out.cpu())
 
                 # Tests long out behavior (expected failure)
                 long_out = torch.empty(0, device=device, dtype=torch.long)

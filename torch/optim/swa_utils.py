@@ -34,6 +34,7 @@ class AveragedModel(Module):
             both the parameters and the buffers of the model. (default: ``False``)
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> loader, optimizer, model, loss_fn = ...
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model)
         >>> scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer,
@@ -59,9 +60,10 @@ class AveragedModel(Module):
     equally-weighted average of the weights.
 
     Example:
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> # Compute exponential moving averages of the weights and buffers
-        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
-                            0.1 * averaged_model_parameter + 0.9 * model_parameter
+        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged: (
+        ...                 0.1 * averaged_model_parameter + 0.9 * model_parameter)
         >>> swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg, use_buffers=True)
 
     .. note::
@@ -150,6 +152,7 @@ def update_bn(loader, model, device=None):
             :attr:`device` before being passed into :attr:`model`.
 
     Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> loader, model = ...
         >>> torch.optim.swa_utils.update_bn(loader, model)
 
@@ -210,6 +213,7 @@ class SWALR(_LRScheduler):
     as in the example below.
 
     Example:
+        >>> # xdoctest: +SKIP("Undefined variables")
         >>> loader, optimizer, model = ...
         >>> lr_lambda = lambda epoch: 0.9
         >>> scheduler = torch.optim.lr_scheduler.MultiplicativeLR(optimizer,

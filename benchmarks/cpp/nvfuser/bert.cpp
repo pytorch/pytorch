@@ -140,7 +140,7 @@ static void MagicScheduler_DivMaxSoftDropFwd(
   fe.compileFusion(&fusion);
   fe.setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     cg_outputs = fe.runFusion({t0, t1}, norm_params->lparams);
@@ -148,7 +148,7 @@ static void MagicScheduler_DivMaxSoftDropFwd(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   int64_t bytes = 0;
   for (auto tensor : std::vector<at::Tensor>({t0, t1})) {
@@ -200,7 +200,7 @@ static void MagicScheduler_DivMaxSoftDropBwd(
   fe.compileFusion(&fusion);
   fe.setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     cg_outputs = fe.runFusion({t0, t1, t2, t3}, norm_params->lparams);
@@ -208,7 +208,7 @@ static void MagicScheduler_DivMaxSoftDropBwd(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   int64_t bytes = 0;
   // Some reason t1 isn't used, ignore it.
@@ -316,7 +316,7 @@ static void MagicScheduler_BiasDropoutAddLayernormFwd(
   fe.setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
@@ -324,7 +324,7 @@ static void MagicScheduler_BiasDropoutAddLayernormFwd(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   int64_t bytes = 0;
   for (auto inp : at_inputs) {
@@ -340,11 +340,6 @@ static void MagicScheduler_BiasDropoutAddLayernormFwd(
 
   benchmark_state.SetBytesProcessed(
       bytes * int64_t(benchmark_state.iterations()));
-}
-
-static void MagicScheduler_fp32_BiasDropoutAddLayernormFwd(
-    benchmark::State& benchmark_state) {
-  MagicScheduler_BiasDropoutAddLayernormFwd(benchmark_state, DataType::Float);
 }
 
 static void setupBiasDropoutAddLayernormBwd1(Fusion* fusion, DataType dtype) {
@@ -431,7 +426,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
   fe.setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     clearL2Cache();
     cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
@@ -439,7 +434,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd1(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   int64_t bytes = 0;
   for (auto inp : at_inputs) {
@@ -542,7 +537,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd2(
   fe.setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
@@ -550,7 +545,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd2(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   int64_t bytes = 0;
   for (auto inp : at_inputs) {
@@ -633,7 +628,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd3(
   fe.setMeasureKernelTimeFlag(true);
   // Sync everything up before we start
 
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
     cg_outputs = fe.runFusion(at_inputs, norm_params->lparams);
@@ -641,7 +636,7 @@ static void MagicScheduler_BiasDropoutAddLayernormBwd3(
   }
   // Sync everything up before we're finished, don't want to run ahead on the
   // cpu while benchmarking.
-  cudaDeviceSynchronize();
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
 
   int64_t bytes = 0;
   for (auto inp : at_inputs) {
@@ -675,6 +670,16 @@ static void DivMaxSoftDropFwd_fp16(benchmark::State& benchmark_state) {
 
 static void DivMaxSoftDropBwd_fp16(benchmark::State& benchmark_state) {
   MagicScheduler_DivMaxSoftDropBwd(benchmark_state, DataType::Half);
+}
+
+static void BiasDropoutAddLayernormFwd_fp32(
+    benchmark::State& benchmark_state) {
+  MagicScheduler_BiasDropoutAddLayernormFwd(benchmark_state, DataType::Float);
+}
+
+static void BiasDropoutAddLayernormFwd_tf32(
+    benchmark::State& benchmark_state) {
+  MagicScheduler_BiasDropoutAddLayernormFwd(benchmark_state, DataType::Float);
 }
 
 static void BiasDropoutAddLayernormBwd1_fp32(
@@ -721,6 +726,19 @@ BENCHMARK(DivMaxSoftDropFwd_fp16)
 BENCHMARK(DivMaxSoftDropBwd_fp16)
     // ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {16, 16}, {128, 128}, {128, 128}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(BiasDropoutAddLayernormFwd_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32, 1024}, {128, 128}, {1024, 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+// Use full ampere wave here
+BENCHMARK(BiasDropoutAddLayernormFwd_tf32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32, 1024}, {128, 128}, {864, 864}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 

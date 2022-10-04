@@ -295,6 +295,7 @@ def checkpoint_sequential(functions, segments, input, **kwargs):
         Output of running :attr:`functions` sequentially on :attr:`*inputs`
 
     Example:
+        >>> # xdoctest: +SKIP("stub")
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """

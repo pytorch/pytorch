@@ -264,11 +264,13 @@ class DistributedDataParallel(Module, Joinable):
     GPU from 0 to N-1. This can be done by either setting
     ``CUDA_VISIBLE_DEVICES`` for every process or by calling:
 
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.cuda.set_device(i)
 
     where i is from 0 to N-1. In each process, you should refer the following
     to construct this module:
 
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.distributed.init_process_group(
         >>>     backend='nccl', world_size=N, init_method='...'
         >>> )
@@ -339,6 +341,7 @@ class DistributedDataParallel(Module, Joinable):
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> import torch.distributed.autograd as dist_autograd
             >>> from torch.nn.parallel import DistributedDataParallel as DDP
             >>> import torch
@@ -505,9 +508,10 @@ class DistributedDataParallel(Module, Joinable):
                      can set ``static_graph = True`` as well.
 
                      Example::
+                         >>> # xdoctest: +SKIP("undefined variables")
                          >>> model_DDP = torch.nn.parallel.DistributedDataParallel(model)
                          >>> # Training loop
-                         >>> .....
+                         >>> ...
                          >>> ddp_logging_data = model_DDP._get_ddp_logging_data()
                          >>> static_graph = ddp_logging_data.get("can_set_static_graph")
 
@@ -517,9 +521,13 @@ class DistributedDataParallel(Module, Joinable):
 
     Example::
 
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = torch.nn.parallel.DistributedDataParallel(model)
     """
+
+    # used to track whether the given thread is inside ddp forward for torchdynamo purposes
+    _active_ddp_module = None
 
     def __init__(
         self,
@@ -944,6 +952,7 @@ class DistributedDataParallel(Module, Joinable):
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined variables")
             >>> ddp = torch.nn.parallel.DistributedDataParallel(model, pg)
             >>> with ddp.no_sync():
             >>>   for input in inputs:
@@ -957,6 +966,26 @@ class DistributedDataParallel(Module, Joinable):
         finally:
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
+    @classmethod
+    def _get_active_ddp_module(cls):
+        """
+        TorchDynamo needs to know whether DDP is currently active, and access the DDP module in order to cooperatively optimize it.
+        """
+        return cls._active_ddp_module
+
+    # note, this ctxmgr function is marked 'skip' in torchdynamo, so dynamo only kicks in
+    # for the 'module_to_run' underneath
+    # see torchdynamo/eval_frame.py TorchPatcher.patch for more details
+    @contextmanager
+    def _inside_ddp_forward(self):
+        DistributedDataParallel._active_ddp_module = self
+        try:
+            yield
+        except Exception:
+            raise
+        finally:
+            DistributedDataParallel._active_ddp_module = None
+
     def _run_ddp_forward(self, *inputs, **kwargs):
         module_to_run = self._replicated_tensor_module if self._use_replicated_tensor_module else self.module
 
@@ -967,9 +996,11 @@ class DistributedDataParallel(Module, Joinable):
                 self.device_ids[0],
                 self.use_side_stream_for_tensor_copies
             )
-            return module_to_run(*inputs[0], **kwargs[0])
+            with self._inside_ddp_forward():
+                return module_to_run(*inputs[0], **kwargs[0])
         else:
-            return module_to_run(*inputs, **kwargs)
+            with self._inside_ddp_forward():
+                return module_to_run(*inputs, **kwargs)
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
@@ -1401,18 +1432,19 @@ class DistributedDataParallel(Module, Joinable):
         Example::
             Below is an example of a noop hook that returns the same tensor.
 
-            >>> def noop(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
+            >>> def noop(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
             >>>     fut = torch.futures.Future()
             >>>     fut.set_result(bucket.buffer())
             >>>     return fut
 
+            >>> # xdoctest: +SKIP('undefined name')
             >>> ddp.register_comm_hook(state=None, hook=noop)
 
         Example::
             Below is an example of a Parallel SGD algorithm where gradients are encoded before
             allreduce, and then decoded after allreduce.
 
-            >>> def encode_and_decode(state: object, bucket: dist.GradBucket): -> torch.futures.Future[torch.Tensor]
+            >>> def encode_and_decode(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
             >>>     encoded_tensor = encode(bucket.buffer()) # encode gradients
             >>>     fut = torch.distributed.all_reduce(encoded_tensor).get_future()
             >>>     # Define the then callback to decode.
@@ -1421,6 +1453,7 @@ class DistributedDataParallel(Module, Joinable):
             >>>         return decoded_tensor
             >>>     return fut.then(decode)
 
+            >>> # xdoctest: +SKIP('undefined name')
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
@@ -1446,6 +1479,7 @@ class DistributedDataParallel(Module, Joinable):
             compressed into 16-bit floating-point numbers before allreduce, and
             then decompressed after allreduce.
 
+            >>> # xdoctest: +SKIP('undefined name')
             >>> ddp._register_builtin_comm_hook(dist.BuiltinCommHookType.FP16_COMPRESS)
 
         """
@@ -1497,6 +1531,7 @@ class DistributedDataParallel(Module, Joinable):
 
     Example::
 
+        >>> # xdoctest: +SKIP("No rendezvous handler")
         >>> torch.distributed.init_process_group(backend='nccl', world_size=4, init_method='...')
         >>> net = torch.nn.parallel.DistributedDataParallel(model, pg)
         >>> lr = 1e-2
@@ -1506,8 +1541,8 @@ class DistributedDataParallel(Module, Joinable):
         >>> # Example with subset of parameters
         >>> params_to_opt = [list(net.parameters())[0]]
         >>> net._register_fused_optim(
-            torch.optim.Adam, lr, optim_params=params_to_opt,  betas=betas, eps=eps
-        )
+        ...   torch.optim.Adam, lr, optim_params=params_to_opt,  betas=betas, eps=eps
+        ... )
         """
         # Note: importing in function, otherwise this will cause a circular
         # import as optimizer_overlap module needs to import DistributedDataParallel.
@@ -1649,8 +1684,8 @@ class DistributedDataParallel(Module, Joinable):
             hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"]
             and
             (
-                torch.version.cuda is None
-                or int(torch.version.cuda.split('.')[0]) < 11
+                (torch.version.cuda is None and torch.version.hip is None)
+                or (torch.version.cuda is not None and int(torch.version.cuda.split('.')[0]) < 11)
                 or not dist.is_available()
                 or not dist.is_nccl_available()
                 or torch.cuda.nccl.version() < (2, 10)

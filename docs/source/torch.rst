@@ -86,6 +86,7 @@ Indexing, Slicing, Joining, Mutating Ops
     argwhere
     cat
     concat
+    concatenate
     conj
     chunk
     dsplit
@@ -558,7 +559,6 @@ BLAS and LAPACK Operations
     cholesky_inverse
     cholesky_solve
     dot
-    eig
     geqrf
     ger
     inner
@@ -566,13 +566,11 @@ BLAS and LAPACK Operations
     det
     logdet
     slogdet
-    lstsq
     lu
     lu_solve
     lu_unpack
     matmul
     matrix_power
-    matrix_rank
     matrix_exp
     mm
     mv

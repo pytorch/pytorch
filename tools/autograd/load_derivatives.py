@@ -42,6 +42,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsViewGroup,
     OperatorName,
+    SchemaKind,
     Type,
     Variant,
 )
@@ -64,12 +65,12 @@ def add_view_copy_derivatives(
         g.view.func.name: g for g in view_groups
     }
 
-    view_infos = dict()
+    view_infos = {}
 
     for _, info_dispatch_dict in infos.items():
         # maybe_view_group only needs to be calculated once per info_dispatch_dict
         maybe_view_group = None
-        view_copy_differentiability_infos = dict()
+        view_copy_differentiability_infos = {}
         for dispatch_key, info in info_dispatch_dict.items():
             maybe_view_group = view_name_to_group.get(info.func.func.name, None)
             if maybe_view_group is not None and maybe_view_group.view_copy is not None:
@@ -123,7 +124,7 @@ def load_derivatives(
         functions_by_signature: Dict[
             FunctionSchema, List[NativeFunction]
         ] = defaultdict(list)
-        functions_by_schema: Dict[str, NativeFunction] = dict()
+        functions_by_schema: Dict[str, NativeFunction] = {}
         for function in native_functions_without_view_copies:
             functions_by_signature[function.func.signature()].append(function)
             assert str(function.func) not in functions_by_schema
@@ -136,7 +137,7 @@ def load_derivatives(
         # infos is a dict that maps FunctionSchema -> a dict of per dispatch key DifferentiabilityInfos
         # this is useful because in tools/autograd/gen_autograd.py:match_differentiability_info
         # we ultimately need to categorize the DifferentiabilityInfos by FunctionSchema
-        infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]] = dict()
+        infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]] = {}
         used_dispatch_keys: Set[str] = set()
         for defn_dict in definitions:
             # Ensure that the old derivatives.yaml schema with no dispatch key can be loaded.
@@ -167,9 +168,14 @@ def load_derivatives(
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 
+# TODO: Why is this going through CppSignatureGroup, that doesn't make sense...
 @with_native_function
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
+    sigs = CppSignatureGroup.from_native_function(f, method=False)
+    if sigs.symint_signature is not None:
+        return sigs.symint_signature.arguments()
+    else:
+        return sigs.signature.arguments()
 
 
 def create_derivative(
@@ -184,7 +190,9 @@ def create_derivative(
     ]
 
     return_names = tuple(n if n != "self" else "result" for n in cpp.return_names(f))
-    return_types = tuple(cpp.return_type(r).remove_const_ref() for r in f.func.returns)
+    return_types = tuple(
+        cpp.return_type(r, symint=True).remove_const_ref() for r in f.func.returns
+    )
 
     named_returns = [
         NamedCType(name, type) for name, type in zip(return_names, return_types)
@@ -265,7 +273,7 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == "at::TensorList":
+            if arg.type in ("at::TensorList", "const at::ITensorListRef &"):
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -290,6 +298,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
+            assert (
+                f.func.kind() != SchemaKind.inplace
+            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
@@ -375,7 +386,7 @@ def postprocess_forward_derivatives(
                 new_args.append(arg_name)
 
             # TODO we are trolling
-            if f.func.is_symint_fn():
+            if f.func.has_symint():
                 defn_name += "_symint"
 
             # Call into the forward again. We need two cases here to handle both Tensor methods and at:: functions.
@@ -664,7 +675,7 @@ def create_differentiability_info(
             "Please use a different name in native_functions.yaml."
         )
 
-    diffinfo_dict = dict()
+    diffinfo_dict = {}
     for key, defn in defn_dict["dispatch"].items():
         if key != "Default" and key not in _VALID_AUTOGRAD_KEYS:
             raise RuntimeError(
@@ -771,6 +782,17 @@ def saved_variables(
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
             },
         ),
+        # replace self->sym_sizes() with self_sym_sizes_opt
+        (
+            r"{}->sym_sizes\(\)",
+            {
+                "suffix": "_sym_sizes_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+            },
+        ),
         # replace self.options() with self_options
         (
             r"{}.options\(\)",
@@ -854,6 +876,15 @@ def saved_variables(
             {
                 "suffix": "_strides",
                 "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
+                "expr": stride_expr,
+            },
+        ),
+        # replace self.sym_strides() with self_sym_strides
+        (
+            r"{}.sym_strides\(\)",
+            {
+                "suffix": "_sym_strides",
+                "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
                 "expr": stride_expr,
             },
         ),
