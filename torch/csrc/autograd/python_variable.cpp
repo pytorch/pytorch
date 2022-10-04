@@ -132,8 +132,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
       return py::reinterpret_borrow<py::object>(
           reinterpret_cast<PyObject*>(obj));
     } else if (match(c10::MemoryFormatType::Kind)) {
-      return torch::utils::getTHPMemoryFormat(
-          static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
+      return py::cast(static_cast<c10::MemoryFormat>(arguments[idx].toInt()));
     } else {
       return torch::jit::toPyObject(arguments[idx]);
     }
@@ -241,7 +240,9 @@ struct ConcretePyInterpreterVTable final
       c10::DispatchKeySet,
       torch::jit::Stack* stack) const override;
 
-  bool is_contiguous(const TensorImpl* self) const override;
+  bool is_contiguous(const TensorImpl* self, at::MemoryFormat) const override;
+  bool is_strides_like(const TensorImpl* self, at::MemoryFormat) const override;
+  bool is_non_overlapping_and_dense(const TensorImpl* self) const override;
   c10::Device device(const TensorImpl* self) const override;
   int64_t dim(const TensorImpl* self) const override;
   c10::IntArrayRef strides(const TensorImpl* self) const override;
@@ -755,7 +756,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
-      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False)",
   });
@@ -1053,7 +1054,7 @@ int THPVariable_set_grad(THPVariable* self, PyObject* py_grad, void* unused) {
   }
   THPUtils_assertRet(
       -1,
-      grad.sizes().equals(var.sizes()),
+      grad.sym_sizes().equals(var.sym_sizes()),
       "assigned grad has data of a different size");
 
   var.mutable_grad() = grad;
@@ -1458,6 +1459,16 @@ PyObject* THPVariable_is_nested(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPVariable_has_symbolic_sizes_strides(
+    THPVariable* self,
+    void* unused) {
+  HANDLE_TH_ERRORS
+  auto& self_ = THPVariable_Unpack(self);
+  return torch::autograd::utils::wrap(
+      self_.unsafeGetTensorImpl()->has_symbolic_sizes_strides());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
@@ -1596,6 +1607,11 @@ static struct PyGetSetDef THPVariable_properties[] = {
      nullptr},
     {"is_meta", (getter)THPVariable_is_meta, nullptr, nullptr, nullptr},
     {"is_nested", (getter)THPVariable_is_nested, nullptr, nullptr, nullptr},
+    {"_has_symbolic_sizes_strides",
+     (getter)THPVariable_has_symbolic_sizes_strides,
+     nullptr,
+     nullptr,
+     nullptr},
     {"dtype", (getter)THPVariable_dtype, nullptr, nullptr, nullptr},
     {"layout", (getter)THPVariable_layout, nullptr, nullptr, nullptr},
     {"device", (getter)THPVariable_device, nullptr, nullptr, nullptr},
@@ -2164,7 +2180,12 @@ py::object torchDispatchFromTensorImpl(
     const c10::TensorImpl* self,
     const char* func_name,
     PyObject* torch_api_function,
-    const char* module_name) {
+    const char* module_name,
+    // WARNING: MUST NOT BE TENSOR ARGS
+    c10::SmallVector<py::object, 1> extra_args = {}) {
+  if (torch_api_function == nullptr) {
+    throw python_error();
+  }
   TORCH_CHECK(
       PyGILState_Check(),
       "GIL must be held before you call parseIValuesToPyArgsKwargs");
@@ -2179,8 +2200,16 @@ py::object torchDispatchFromTensorImpl(
   // NB: this may not be a python tensor if you got here from a mode!
   // TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
-  auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
+  auto args =
+      py::reinterpret_steal<py::object>(PyTuple_New(1 + extra_args.size()));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());
+  int64_t i = 1;
+  for (auto& a : extra_args) {
+    if (a.ptr() == nullptr)
+      throw python_error();
+    PyTuple_SET_ITEM(args.ptr(), i, std::move(a).release().ptr());
+    i++;
+  }
 
   py::dict kwargs;
 
@@ -2305,7 +2334,7 @@ void ConcretePyInterpreterVTable::python_dispatcher(
   py::object obj = py::reinterpret_steal<py::object>(
       PyObject_Call(handler.ptr(), args.ptr(), kwargs.ptr()));
 
-  if (obj == nullptr) {
+  if (obj.ptr() == nullptr) {
     throw python_error();
   }
 
@@ -2338,24 +2367,107 @@ c10::intrusive_ptr<TensorImpl> ConcretePyInterpreterVTable::detach(
 }
 
 bool ConcretePyInterpreterVTable::is_contiguous(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  py::object out;
+  if (memory_format == at::MemoryFormat::Contiguous) {
+    // For backwards compatibility
+    out = torchDispatchFromTensorImpl(
+        self,
+        "is_contiguous",
+        py::module::import("torch")
+            .attr("ops")
+            .attr("aten")
+            .attr("is_contiguous")
+            .attr("default")
+            .ptr(),
+        "torch.ops.aten");
+  } else {
+    out = torchDispatchFromTensorImpl(
+        self,
+        "is_contiguous",
+        py::module::import("torch")
+            .attr("ops")
+            .attr("aten")
+            .attr("is_contiguous")
+            .attr("memory_format")
+            .ptr(),
+        "torch.ops.aten",
+        {py::cast(memory_format)});
+  }
+
+  if (out.is(py::none())) {
+    return self->is_contiguous_default(memory_format);
+  }
+
+  TORCH_CHECK(
+      PyBool_Check(out.ptr()),
+      "is_contiguous returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected bool");
+
+  return PyObject_IsTrue(out.ptr());
+}
+
+bool ConcretePyInterpreterVTable::is_strides_like(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "is_strides_like",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          // NB: intentionally suffixed with _format to avoid
+          // triggering matches against "_like" suffix
+          .attr("is_strides_like_format")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten",
+      {py::cast(memory_format)});
+
+  if (out.is(py::none())) {
+    return self->is_strides_like_default(memory_format);
+  }
+
+  TORCH_CHECK(
+      PyBool_Check(out.ptr()),
+      "is_strides_like_format returned invalid type ",
+      py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
+      ", expected bool");
+
+  return PyObject_IsTrue(out.ptr());
+}
+
+bool ConcretePyInterpreterVTable::is_non_overlapping_and_dense(
     const c10::TensorImpl* self) const {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
   auto out = torchDispatchFromTensorImpl(
       self,
-      "is_contiguous",
+      "is_non_overlapping_and_dense",
       py::module::import("torch")
           .attr("ops")
           .attr("aten")
-          .attr("is_contiguous")
+          .attr("is_non_overlapping_and_dense")
           .attr("default")
           .ptr(),
       "torch.ops.aten");
 
+  if (out.is(py::none())) {
+    return self->is_non_overlapping_and_dense_default();
+  }
+
   TORCH_CHECK(
       PyBool_Check(out.ptr()),
-      "is_contiguous returned invalid type ",
+      "is_non_overlapping_and_dense returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected bool");
 
@@ -2421,7 +2533,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call strides on a tensor with symbolic shapes/strides");
@@ -2480,7 +2592,7 @@ c10::IntArrayRef ConcretePyInterpreterVTable::sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call sizes on a tensor with symbolic shapes/strides");
@@ -2511,7 +2623,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_sizes(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_sizes_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`
@@ -2574,7 +2686,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_numel(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     TORCH_CHECK(
         !self->has_symbolic_sizes_strides(),
         "Cannot call numel on a tensor with symbolic shapes/strides");
@@ -2600,7 +2712,7 @@ c10::SymInt ConcretePyInterpreterVTable::sym_storage_offset(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_storage_offset_default();
   }
   return torch::is_symint_node(out)
@@ -2624,7 +2736,7 @@ c10::SymIntArrayRef ConcretePyInterpreterVTable::sym_strides(
           .ptr(),
       "torch.ops.aten");
 
-  if (out == Py_None) {
+  if (out.is(py::none())) {
     return self->sym_strides_default();
   }
   // We need to squeeze SymIntNodes and ints into `SymInts`
