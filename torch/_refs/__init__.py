@@ -906,13 +906,14 @@ def add(
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
-        if not utils.is_weakly_lesser_type(type(alpha), python_type):
-            msg = (
-                "alpha argument of type {0} cannot be safely cast to type {1}!".format(
-                    type(alpha), python_type
-                )
-            )
-            raise ValueError(msg)
+        # TODO: this check is too restrictive. torch.add(bool_tensor, bool_tensor, 0) should work.
+        # if not utils.is_weakly_lesser_type(type(alpha), python_type):
+            # msg = (
+                # "alpha argument of type {0} cannot be safely cast to type {1}!".format(
+                    # type(alpha), python_type
+                # )
+            # )
+            # raise ValueError(msg)
         b = prims.mul(b, alpha)
 
     return prims.add(a, b)
