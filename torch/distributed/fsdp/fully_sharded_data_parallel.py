@@ -356,12 +356,6 @@ class LocalStateDictConfig(StateDictConfig):
 class ShardedStateDictConfig(StateDictConfig):
     pass
 
-_state_dict_type_to_config = {
-    StateDictType.FULL_STATE_DICT: FullStateDictConfig,
-    StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
-    StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
-}
-
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
     PARAM_ID = auto()
@@ -2060,6 +2054,46 @@ class FullyShardedDataParallel(nn.Module):
         return next(iter(training_states))
 
     @staticmethod
+    def set_state_dict_type(
+        module: nn.Module,
+        state_dict_type: StateDictType,
+        state_dict_config: Optional[StateDictConfig] = None,
+    ) -> Tuple[StateDictType, StateDictConfig]:
+        _state_dict_type_to_config = {
+            StateDictType.FULL_STATE_DICT: FullStateDictConfig,
+            StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
+            StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
+        }
+
+        prev_state_dict_type = None
+        prev_state_dict_config = None
+        # Use default config a state_dict config is not set.
+        if state_dict_config is None:
+            state_dict_config = _state_dict_type_to_config[state_dict_type]()
+        for submodule in FullyShardedDataParallel.fsdp_modules(module):
+            if prev_state_dict_type is None:
+                prev_state_dict_type = submodule._state_dict_type
+            if prev_state_dict_config is None:
+                prev_state_dict_config = submodule._state_dict_config
+            if prev_state_dict_type != submodule._state_dict_type:
+                raise RuntimeError("All FSDP module should the same state_dict_type.")
+            if type(prev_state_dict_config) != type(submodule._state_dict_config):
+                raise RuntimeError(
+                    "All FSDP modules should have the same type of state_dict_config."
+                )
+
+            expected_state_dict_config_type = _state_dict_type_to_config[state_dict_type]
+            if expected_state_dict_config_type != type(state_dict_config):
+                raise RuntimeError(
+                    f"Expected state_dict_config of type {expected_state_dict_config_type} "
+                    f"but got {type(state_dict_config)}"
+                )
+            submodule._state_dict_type = state_dict_type
+            submodule._state_dict_config = state_dict_config
+
+        return prev_state_dict_type, prev_state_dict_config
+
+    @staticmethod
     @contextlib.contextmanager
     def state_dict_type(
         module: nn.Module,
@@ -2095,36 +2129,23 @@ class FullyShardedDataParallel(nn.Module):
         """
         prev_state_dict_type = None
         prev_state_dict_config = None
-        # Use default config a state_dict config is not set.
-        if state_dict_config is None:
-            state_dict_config = _state_dict_type_to_config[state_dict_type]()
-        for submodule in FullyShardedDataParallel.fsdp_modules(module):
-            if prev_state_dict_type is None:
-                prev_state_dict_type = submodule._state_dict_type
-            if prev_state_dict_config is None:
-                prev_state_dict_config = submodule._state_dict_config
-            if prev_state_dict_type != submodule._state_dict_type:
-                raise RuntimeError("All FSDP module should the same state_dict_type.")
-            if type(prev_state_dict_config) != type(submodule._state_dict_config):
-                raise RuntimeError(
-                    "All FSDP modules should have the same type of state_dict_config."
-                )
-
-            expected_state_dict_config_type = _state_dict_type_to_config[state_dict_type]
-            if expected_state_dict_config_type != type(state_dict_config):
-                raise RuntimeError(
-                    f"Expected state_dict_config of type {expected_state_dict_config_type} but got {type(state_dict_config)}"
-                )
-            submodule._state_dict_type = state_dict_type
-            submodule._state_dict_config = state_dict_config
         try:
+            prev_state_dict_type, prev_state_dict_config = (
+                FullyShardedDataParallel.set_state_dict_type(
+                    module, state_dict_type, state_dict_config
+                )
+            )
             yield
+        except Exception as e:
+            raise e
+        else:
+            assert prev_state_dict_type is not None
+            assert prev_state_dict_config is not None
         finally:
-            assert prev_state_dict_type is not None  # Avoid mypy warning
-            assert prev_state_dict_config is not None  # Avoid mypy warning
-            for submodule in FullyShardedDataParallel.fsdp_modules(module):
-                submodule._state_dict_type = prev_state_dict_type
-                submodule._state_dict_config = prev_state_dict_config
+            if prev_state_dict_type is not None and prev_state_dict_config is not None:
+                FullyShardedDataParallel.set_state_dict_type(
+                    module, prev_state_dict_type, prev_state_dict_config
+                )
 
     def _convert_to_wrapped_module_name(self, module_name: str) -> str:
         module_name = module_name.replace(f"{FPW_MODULE}.", "")
@@ -2440,7 +2461,7 @@ class FullyShardedDataParallel(nn.Module):
         (e.g., DPP, model parallelism, and single trainer) after a valid
         resharding.
         """
-        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+        with self.state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.state_dict(self, *args, **kwargs)
 
     def _full_pre_load_state_dict_hook(
@@ -2671,7 +2692,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         Load states from a unflattened, sharded state dictionary.
         """
-        with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
+        with self.state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.load_state_dict(state_dict, strict)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
