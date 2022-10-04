@@ -183,14 +183,14 @@ class ArrayRef<SymInt> final {
   }
 
   /// front - Get the first element.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& front() const {
+  const T& front() const {
     TORCH_CHECK(
         !empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
   /// back - Get the last element.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& back() const {
+  const T& back() const {
     TORCH_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
     return Data[Length - 1];
   }
@@ -233,7 +233,7 @@ class ArrayRef<SymInt> final {
   }
 
   /// Vector compatibility
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& at(size_t Index) const {
+  const T& at(size_t Index) const {
     TORCH_CHECK(
         Index < Length,
         "ArrayRef: invalid index Index = ",
