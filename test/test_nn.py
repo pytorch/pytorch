@@ -10343,16 +10343,23 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = m(inp.view(6, 5)).view(2, 3, 8)
         self.assertEqual(expected, m(inp))
 
+    @utils_parametrize('bias', [
+        subtest(False, name='nobias'), subtest(True, name='bias')])
     @utils_parametrize('weight_layout', [
+        subtest(torch.strided, name='weightStrided'),
+        # TODO: NotImplementedError: Could not run 'aten::sparse_dim' with arguments from the 'CPU' backend
+        # subtest(torch.sparse_coo, name='weightCOO'),
         subtest(torch.sparse_csr, name='weightCSR'),
         subtest(torch.sparse_csc, name='weightCSC'),
         # TODO: addmm: computation on CPU is not implemented for Strided + Strided @ SparseBsr
         # subtest(torch.sparse_bsr, name='weightBSR'),
         # subtest(torch.sparse_bsc, name='weightBSC'),
     ])
-    def test_linear_autograd(self, weight_layout):
-        module = nn.Linear(4, 4, bias=False)
-        if weight_layout == torch.sparse_csr:
+    def test_linear_autograd(self, bias, weight_layout):
+        module = nn.Linear(4, 4, bias=bias)
+        if weight_layout == torch.strided:
+            pass
+        elif weight_layout == torch.sparse_csr:
             module.weight = nn.Parameter(module.weight.to_sparse_csr())
         elif weight_layout == torch.sparse_csc:
             module.weight = nn.Parameter(module.weight.to_sparse_csc())
@@ -10360,12 +10367,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             module.weight = nn.Parameter(module.weight.to_sparse_bsr(2, 2))
         elif weight_layout == torch.sparse_bsc:
             module.weight = nn.Parameter(module.weight.to_sparse_bsc(2, 2))
+        elif weight_layout == torch.sparse_coo:
+            module.weight = nn.Parameter(module.weight.to_sparse_coo())
         else:
             assert(0)
 
         inp = torch.randn(4, requires_grad=True)
         res = module(inp)
-        expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense()))
+        if bias:
+            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense())) + module.bias
+        else:
+            expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense()))
         self.assertEqual(res, expected)
 
         grad_output = torch.randn(4)
