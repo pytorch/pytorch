@@ -3365,7 +3365,7 @@ as the input tensor excluding its innermost dimension'):
             expected = op.ref(to_numpy(t), *sample_input.args,
                               **dict(
                                   # `identity` is mapped to numpy reduction `initial` argument
-                                  identity=torch.masked._reduction_identity(op.name, t),
+                                  identity=torch._masked._reduction_identity(op.name, t),
                                   **sample_input.kwargs))
 
             # Workaround https://github.com/pytorch/pytorch/issues/66556

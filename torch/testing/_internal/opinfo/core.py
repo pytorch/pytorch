@@ -2652,7 +2652,7 @@ def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
     output = op(input, *args, **kwargs)
     mask = kwargs.get("mask")
     if mask is not None:
-        output_mask = torch.masked._output_mask(op, input, *args, **kwargs)
+        output_mask = torch._masked._output_mask(op, input, *args, **kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 
@@ -2672,7 +2672,7 @@ def gradcheck_wrapper_masked_pointwise_operation(op, input, *args, **kwargs):
     if input_mask is not None and other_mask is not None:
         combined_mask = torch.logical_and(input_mask, other_mask)
         new_kwargs = dict(mask=combined_mask, **kwargs)
-        output_mask = torch.masked._input_mask(input, *args, **new_kwargs)
+        output_mask = torch._masked._input_mask(input, *args, **new_kwargs)
         output = torch.where(output_mask, output, output.new_zeros([]))
     return output
 

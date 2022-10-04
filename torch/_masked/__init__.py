@@ -50,8 +50,8 @@ def _apply_docstring_templates(func):
 
 
 def _generate_docstring(func):
-    """A utility function called from tools/update_masked_docs.py
-    script to update the module torch.masked._docs.py
+    """An utility function called from tools/update_masked_docs.py
+    script to update the module torch._masked._docs.py
     """
     docstring_templates = dict(
         reduction_signature="""\
@@ -1536,7 +1536,7 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
         )
 
 
-def _std_var(
+def std_var(
     input: Union[Tensor, MaskedTensor],
     dim: DimOrDims = None,
     unbiased: Optional[bool] = False,
@@ -1615,7 +1615,7 @@ elements of output tensor with strided layout, that correspond to
 fully masked-out elements, have ``nan`` values.
 {reduction_args}
 {reduction_example}"""
-    return _std_var(
+    return std_var(
         input=input,
         dim=dim,
         unbiased=unbiased,
@@ -1644,7 +1644,7 @@ elements of output tensor with strided layout, that correspond to
 fully masked-out elements, have ``nan`` values.
 {reduction_args}
 {reduction_example}"""
-    return _std_var(
+    return std_var(
         input=input,
         dim=dim,
         unbiased=unbiased,

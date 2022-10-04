@@ -138,7 +138,7 @@ def sample_inputs_sparse_coo_masked_reduction(
     with sparse coo layouts.
     """
     if op_info.supports_sparse:
-        op_name = op_info.name.replace("masked.", "")
+        op_name = op_info.name.replace("_masked.", "")
         for sample_input in sample_inputs_masked_reduction(
             op_info, device, dtype, requires_grad, **kwargs
         ):
@@ -155,7 +155,7 @@ def sample_inputs_sparse_coo_masked_reduction(
                 if op_name in {"prod", "amax", "amin"}:
                     # FIXME: for now reductions with non-zero reduction identity and
                     # unspecified mask are not supported for sparse COO
-                    # tensors, see torch.masked.prod implementation
+                    # tensors, see torch._masked.prod implementation
                     # for details.
                     continue
                 yield SampleInput(
@@ -172,7 +172,7 @@ def sample_inputs_sparse_csr_masked_reduction(
     with sparse csr layouts.
     """
     if op_info.supports_sparse_csr:
-        op_name = op_info.name.replace("masked.", "")
+        op_name = op_info.name.replace("_masked.", "")
         for sample_input in sample_inputs_masked_reduction(
             op_info, device, dtype, requires_grad, **kwargs
         ):
@@ -195,7 +195,7 @@ def sample_inputs_sparse_csr_masked_reduction(
                 if op_name in ["prod", "amax", "amin", "mean"]:
                     # reductions with non-zero reduction identity and
                     # unspecified mask is not supported for sparse CSR
-                    # tensors, see torch.masked.prod implementation
+                    # tensors, see torch._masked.prod implementation
                     # for details.
                     continue
                 new_sample = SampleInput(
@@ -255,16 +255,16 @@ def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs
                 sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
             if requires_grad:
                 if sample_input_kwargs.get("mask") is None:
-                    orig_count = torch.masked.sum(
+                    orig_count = torch._masked.sum(
                         torch.ones(sample_input.input.shape, dtype=torch.int64),
                         dim,
                         keepdim=True,
                     )
                 else:
-                    inmask = torch.masked._input_mask(
+                    inmask = torch._masked._input_mask(
                         sample_input.input, *sample_input_args, **sample_input_kwargs
                     )
-                    orig_count = torch.masked.sum(
+                    orig_count = torch._masked.sum(
                         inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
                         dim,
                         keepdim=True,
@@ -402,7 +402,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
 
 op_db: List[OpInfo] = [
     ReductionOpInfo(
-        "masked.sum",
+        "_masked.sum",
         ref=reference_reduction_numpy(np.sum),
         method_variant=None,
         identity=0,
@@ -458,7 +458,7 @@ op_db: List[OpInfo] = [
         sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
     ReductionOpInfo(
-        "masked.prod",
+        "_masked.prod",
         ref=reference_reduction_numpy(np.prod),
         method_variant=None,
         identity=1,
@@ -491,13 +491,6 @@ op_db: List[OpInfo] = [
                 "test_reference_masked",
                 dtypes=(torch.bool, torch.int8, torch.int16, torch.int32),
             ),
-            # integer overflow
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestReductions",
-                "test_ref_small_input",
-                dtypes=(torch.int8, torch.int16, torch.int32),
-            ),
             # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -524,7 +517,7 @@ op_db: List[OpInfo] = [
         sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
     ),
     OpInfo(
-        "masked.cumsum",
+        "_masked.cumsum",
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
@@ -549,7 +542,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     OpInfo(
-        "masked.cumprod",
+        "_masked.cumprod",
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
@@ -583,7 +576,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "masked.amax",
+        "_masked.amax",
         nan_policy="propagate",
         supports_out=False,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
@@ -622,7 +615,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "masked.amin",
+        "_masked.amin",
         nan_policy="propagate",
         supports_out=False,
         supports_forward_ad=True,
@@ -661,7 +654,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "masked.argmax",
+        "_masked.argmax",
         supports_out=False,
         supports_multiple_dims=False,
         supports_autograd=False,
@@ -686,7 +679,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "masked.argmin",
+        "_masked.argmin",
         supports_out=False,
         supports_multiple_dims=False,
         supports_autograd=False,
@@ -711,7 +704,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "masked.mean",
+        "_masked.mean",
         ref=reference_reduction_numpy(np.mean)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
@@ -776,7 +769,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     OpInfo(
-        "masked.median",
+        "_masked.median",
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16),
         method_variant=None,
@@ -798,7 +791,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "masked.norm",
+        "_masked.norm",
         identity=0,
         method_variant=None,
         nan_policy="propagate",
@@ -829,7 +822,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
-        "masked.var",
+        "_masked.var",
         ref=reference_reduction_numpy(np.var)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
@@ -897,7 +890,7 @@ op_db: List[OpInfo] = [
         check_batched_grad=True,
     ),
     ReductionOpInfo(
-        "masked.std",
+        "_masked.std",
         ref=reference_reduction_numpy(np.std)
         if np.lib.NumpyVersion(np.__version__) >= "1.20.2"
         else None,
@@ -964,7 +957,7 @@ op_db: List[OpInfo] = [
         check_batched_grad=True,
     ),
     OpInfo(
-        "masked.softmax",
+        "_masked.softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -985,7 +978,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "masked.log_softmax",
+        "_masked.log_softmax",
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -1013,7 +1006,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "masked.softmin",
+        "_masked.softmin",
         method_variant=None,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
@@ -1034,7 +1027,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "masked.normalize",
+        "_masked.normalize",
         method_variant=None,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_normalize,
@@ -1064,7 +1057,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
     ),
     OpInfo(
-        "masked.logaddexp",
+        "_masked.logaddexp",
         dtypes=floating_types_and(torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
@@ -1088,7 +1081,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_pointwise_operation,
     ),
     ReductionOpInfo(
-        "masked.logsumexp",
+        "_masked.logsumexp",
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         method_variant=None,
