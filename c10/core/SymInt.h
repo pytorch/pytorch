@@ -187,7 +187,7 @@ class C10_API SymInt {
 
   // Return whether the integer is representable as a SymInt.
   static bool check_range(int64_t i) {
-    return (static_cast<uint64_t>(i) & ~MASK) != IS_SYM;
+    return (static_cast<uint64_t>(i) & MASK) != IS_SYM;
   }
 
  private:
