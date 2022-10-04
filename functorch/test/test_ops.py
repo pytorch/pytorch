@@ -516,18 +516,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.ctc_loss'),  # Not Implemented
         xfail('native_layer_norm', ''),  # Expected a proper Tensor but got None for argument #1 'other'
         xfail('sparse.sampled_addmm', ''),  # sparse tensors have no strides
-        # AssertionError: Tensor-likes are not close!
-        # Mismatched elements: 1 / 15 (6.7%)
-        # Greatest absolute difference: 24.0 at index (2, 4) (up to 1e-05 allowed)
-        # Greatest relative difference: 1.7933241714393998e-06 at index (2, 4) (up to 1.3e-06 allowed)
-        # The failure occurred for item [0]
-        xfail('_masked.prod')
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=5e-05, rtol=9e-05)}, device_type='cuda'),
-        tol1('prod',
-             {torch.float32: tol(atol=2e-05, rtol=1e-04)}),
         tol2('linalg.det', 'singular',
              {torch.float32: tol(atol=2e-05, rtol=2e-05)}),
     ))
@@ -571,6 +563,7 @@ class TestOperators(TestCase):
         skip("atleast_1d"),  # Takes too long
         skip("atleast_2d"),  # Takes too long
         skip("atleast_3d"),  # Takes too long
+        xfail("_masked.prod"),  # calls item
         xfail("_masked.cumprod"),  # calls item
         xfail("as_strided"),  # incorrect output
         xfail("as_strided_scatter"),  # incorrect output
@@ -629,6 +622,8 @@ class TestOperators(TestCase):
         xfail("normal"),  # calls random op
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
+        # (calls nonzero): vmap: We do not support batching operators that can output dynamic shape.
+        xfail("prod"),
         xfail("put"),  # vmap: inplace into a regular tensor
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
@@ -729,11 +724,13 @@ class TestOperators(TestCase):
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
         skip("native_batch_norm"),
         xfail('__getitem__', ''),  # dynamic error
+        xfail('_masked.prod'),  # calls aten::item
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('nanquantile', device_type='cpu'),  # checks q via a .item() call
         xfail('nn.functional.gaussian_nll_loss'),  # checks var for if any value < 0
         xfail('narrow'),  # .item() call
+        xfail('prod'),  # calls nonzero
         xfail('quantile', device_type='cpu'),  # checks q via a .item() call
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
 
@@ -813,6 +810,7 @@ class TestOperators(TestCase):
         decorate('nn.functional.conv2d', decorator=unittest.skipIf(IS_ARM64, "Fails on M1")),
         skip('nn.functional.max_pool1d'),  # fails on cpu, runs on cuda
         xfail('_masked.mean'),  # silent incorrectness (nan difference)
+        xfail('_masked.prod'),  # .item or data-dependent control flow
 
         xfail('nn.functional.soft_margin_loss', ''),  # soft_margin_loss_backward does not support forward-ad
         xfail('tensor_split'),  # data_ptr composite compliance
@@ -822,6 +820,7 @@ class TestOperators(TestCase):
         xfail('scatter'),  # forward-mode AD does not support at::scatter
         xfail('nanquantile'),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         xfail('view_as_complex'),  # Tensor must have a last dimension with stride 1
+        xfail('prod'),  # .item or data-dependent control flow
 
         skip('pca_lowrank', ''),  # randomness
         skip('svd_lowrank', ''),  # randomness
@@ -976,6 +975,7 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
+        xfail('prod'),
         xfail('put'),
         xfail('scatter_reduce', "sum"),   # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
@@ -989,6 +989,7 @@ class TestOperators(TestCase):
         xfail('unfold'),
         xfail('vdot'),
         xfail('nn.functional.dropout'),
+        xfail('_masked.prod'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('nn.functional.gaussian_nll_loss'),
@@ -1197,10 +1198,6 @@ class TestOperators(TestCase):
         xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('segment_reduce', 'lengths'),  # NYI: forward-AD for segment_reduce
     }))
-    @opsToleranceOverride('TestOperators', 'test_jvpvjp', (
-        tol1('_masked.prod',
-             {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
-    ))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -1267,6 +1264,7 @@ class TestOperators(TestCase):
 
         # Potential bugs/errors
         xfail('_masked.cumprod'),  # calls item()
+        xfail('_masked.prod'),  # calls item()
         xfail('as_strided'),  # AssertionError: Tensor-likes are not close!
         xfail('as_strided_scatter'),  # AssertionError: Tensor-likes are not close!
         xfail('bernoulli'),  # calls random op
@@ -1329,6 +1327,7 @@ class TestOperators(TestCase):
         xfail('normal'),  # calls random op
         xfail('normal', 'number_mean'),  # calls random op
         xfail('pca_lowrank'),  # calls random op
+        xfail('prod'),  # Dynamic shape due to aten::nonzero call
         xfail('quantile'),  # Batching rule not implemented for aten::equal
         xfail('renorm'),  # Forward AD not implemented and no decomposition
         xfail('scatter_reduce', 'prod'),  # Forward AD not implemented and no decomposition

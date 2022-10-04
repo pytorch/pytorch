@@ -670,13 +670,6 @@ Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
     int64_t dim) {
-  if (inp.numel() == 0) {
-    // When input has a zero sized dimension (empty tensor),
-    // we don't need to actually compute the grads.
-    // So we just reshape `grad` as `input`.
-    return grad.expand_as(inp);
-  }
-
   if (inp.size(dim) == 1) {
     return grad;
   }
@@ -711,7 +704,7 @@ Tensor prod_backward(
   if (input.dim() == 0) {
     return grad;
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
+  if (input.is_meta()) {
     // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0)
         .view_as(input);
@@ -737,13 +730,11 @@ Tensor prod_backward(
     return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
-  if (!keepdim) {
-    // `prod` reduces the dimension at `dim`,
-    // so, unsqueeze `grad` and `result` at dim.
+  if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
     result = result.unsqueeze(dim);
   }
-  if (input.is_meta() || isTensorSubclassLike(input)) {
+  if (input.is_meta()) {
     // For Composite Compliance, always take the safer (and slower) path
     return prod_safe_zeros_backward(grad, input, dim);
   }

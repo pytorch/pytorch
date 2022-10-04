@@ -477,6 +477,14 @@ op_db: List[OpInfo] = [
             torch.bool, torch.float16, torch.bfloat16
         ),
         skips=(
+            # Pre-existing condition (calls .item); needs to be fixed
+            DecorateInfo(
+                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
+            ),
+            # Pre-existing condition (calls .item); needs to be fixed
+            DecorateInfo(
+                unittest.skip("Skipped!"), "TestCompositeCompliance", "test_forward_ad"
+            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestNormalizeOperators",
