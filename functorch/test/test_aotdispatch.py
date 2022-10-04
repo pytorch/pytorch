@@ -848,11 +848,11 @@ symbolic_aot_autograd_failures = {
     xfail('lu', ''),  # aten.linalg_lu_factor_ex.default - couldn't find symbolic meta function/decomposition
     xfail('lu_solve', ''),  # aten.linalg_lu_solve.default - couldn't find symbolic meta function/decomposition
     xfail('lu_unpack', ''),  # aten.lu_unpack.default - couldn't find symbolic meta function/decomposition
-    xfail('masked.amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('_masked.amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('_masked.amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_masked.cumprod', ''),  # aten.cumprod.default - couldn't find symbolic meta function/decomposition
     xfail('_masked.cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
-    xfail('_masked_fill', ''),  # could not find kernel
+    xfail('masked_fill', ''),  # could not find kernel
     xfail('_masked.log_softmax', ''),  # argument 'size' (position 2) must be tuple of ints, not ...
     xfail('_masked.logaddexp', ''),  # aten.logaddexp.default - couldn't find symbolic meta function/decomposi...
     xfail('_masked.logsumexp', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -861,8 +861,8 @@ symbolic_aot_autograd_failures = {
     xfail('_masked.norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_masked.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('_masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('_masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
+    xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
     xfail('_masked.softmax', ''),  # argument 'size' (position 2) must be tuple of ints, not torc...
     xfail('_masked.softmin', ''),  # argument 'size' (position 2) must be tuple of ints, not torc...
     xfail('_masked.std', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=to...
