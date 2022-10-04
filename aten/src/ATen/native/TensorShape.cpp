@@ -1096,7 +1096,7 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
-  return self.expand(other.sizes());
+  return self.expand_symint(other.sym_sizes());
 }
 
 Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
@@ -1506,6 +1506,47 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+  if (self.is_sparse()) {
+    AT_ERROR("reshape is not implemented for sparse tensors");
+  }
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+
+  if (self.is_mkldnn()) {
+    return at::_mkldnn_reshape(self, c10::asIntArrayRefSlow(shape));
+  }
+
+  // `computeStride` returns the proper strides to use if this
+  // `reshape` can be just a view.
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+
+  // NB: Even though we have viewable geometry and the target strides here,
+  //     we do not just call `as_strided` on `self` because the backward
+  //     for `as_strided` is not as efficient as that of `view` (since the
+  //     former is meant to handle general cases).
+  //
+  //     Similarly we don't call `view` because it duplicates some of the work
+  //     we've already done, and instead call our internal/private operator
+  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `as_strided` without any of the extra overhead.
+  if (stride.has_value()) {
+    // Temporary check to revert to the old behavior/view in cases where the
+    // device is not supported (e.g. for XLA the operation is not supported
+    // so we use `view` instead).
+    //
+    // We need to do the checks here instead of in `native_functions.yaml`
+    // to preserve backwards compatibility.
+    if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
+      return self._reshape_alias_symint(shape, stride.value());
+    } else {
+      return self.view_symint(shape);
+    }
+  }
+  return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to
+// minimize breakages.
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
@@ -2907,11 +2948,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return self.alias();
   }
 
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-  DimVector strides(self.strides().begin(), self.strides().end());
+  SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
   std::swap(strides[dim0], strides[dim1]);
-  auto result = self.as_strided(sizes, strides);
+  auto result = self.as_strided_symint(sizes, strides);
   propagate_transposed_names(result, self, dim0, dim1);
   return result;
 }
@@ -3179,18 +3220,18 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // of freedom we don't want; for example, consider shape [0, 1, 3, 0], with start_dim=1, end_dim=2.
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
-  auto slice_numel = c10::multiply_integers(self.sizes().slice(start_dim, end_dim - start_dim + 1));
-  std::vector<int64_t> shape;
+  auto slice_numel = c10::multiply_integers(self.sym_sizes().slice(start_dim, end_dim - start_dim + 1));
+  std::vector<c10::SymInt> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (const auto i : c10::irange(start_dim)) {
-    shape.push_back(self.sizes()[i]);
+    shape.push_back(self.sym_sizes()[i]);
   }
   shape.push_back(slice_numel);
   for (const auto i : c10::irange(end_dim + 1, self.dim())) {
-    shape.push_back(self.sizes()[i]);
+    shape.push_back(self.sym_sizes()[i]);
   }
 
-  return native::reshape(self, shape);
+  return native::reshape_symint(self, shape);
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
@@ -3564,7 +3605,7 @@ Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
   return result;
 }
 
-Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+Tensor diag_backward_symint(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
   AT_ASSERT(ndimension == 1 || ndimension == 2);
 
@@ -3573,11 +3614,11 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
+  return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
-Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
+Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
   auto diag = grad_input.diagonal(offset, dim1, dim2);
   diag.copy_(grad);
   return grad_input;
