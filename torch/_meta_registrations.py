@@ -14,9 +14,9 @@ from torch._prims_common import (
 
 from torch._prims_common.wrappers import out_wrapper
 from torch._refs import _broadcast_shapes
-from torch.utils._pytree import tree_map
 
 from torch._subclasses.fake_tensor import check_no_bool_index_tensors
+from torch.utils._pytree import tree_map
 
 aten = torch.ops.aten
 
@@ -1209,16 +1209,18 @@ def arange_start(start, end, **kwargs):
 
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
-    ndim = self.dim();
-    if ndim == 0:
-        raise IndexError("select() cannot be applied to a 0-dim tensor.")
+    ndim = self.dim()
+    check(ndim == 0,
+          lambda: "select() cannot be applied to a 0-dim tensor.",
+          IndexError)
 
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
 
-    if (-index > size) or index >= size:
-        raise IndexError(f"select(): index {index} out of range for tensor of size "
-                         f"{self.size()} at dimension {dim}")
+    check(-index > size or index >= size,
+          lambda: f"select(): index {index} out of range for tensor of size "
+                  f"{self.size()} at dimension {dim}",
+          IndexError)
 
     index = index if index >= 0 else index + size
 

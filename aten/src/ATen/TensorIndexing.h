@@ -4,9 +4,9 @@
 #include <ATen/Functions.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/core/TensorBody.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <c10/core/SymInt.h>
 
 // TODO: try to remove this
 // There is some back story, see https://github.com/pytorch/pytorch/issues/48684
