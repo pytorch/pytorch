@@ -6302,6 +6302,18 @@ def is_pinned(g: jit_utils.GraphContext, self, device=None):
     return None
 
 
+@_onnx_symbolic("aten::resolve_conj")
+def resolve_conj(g: jit_utils.GraphContext, self: _C.Value):
+    # Noop in ONNX.
+    return self
+
+
+@_onnx_symbolic("aten::resolve_neg")
+def resolve_neg(g: jit_utils.GraphContext, self: _C.Value):
+    # Noop in ONNX.
+    return self
+
+
 @_onnx_symbolic("prim::ConstantSplit")
 @_beartype.beartype
 def prim_constant_split(g: jit_utils.GraphContext, self, split_size, dim):

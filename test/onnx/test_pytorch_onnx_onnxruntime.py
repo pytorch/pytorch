@@ -7182,6 +7182,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"embedding_matrix": [0, 1], "x": [0, 1], "w": [0, 1]},
         )
 
+    def test_export_succeed_with_resolve_conj_resolve_neg_side_effect(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                # 'print' has side effect calling 'resolve_conj' and 'resolve_neg'.
+                print(x)
+                # 'tolist' has side effect calling 'resolve_conj' and 'resolve_neg'.
+                # Annotation added to pass torch script.
+                _: List[float] = x.tolist()
+                return x
+
+        x = torch.randn(3, requires_grad=True)
+        self.run_test(Model(), x)
+
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):
