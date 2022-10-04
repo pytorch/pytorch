@@ -147,13 +147,13 @@ def adadelta(params: List[Tensor],
              # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
              # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
              foreach: bool = None,
+             differentiable: bool = False,
              *,
              lr: float,
              rho: float,
              eps: float,
              weight_decay: float,
-             maximize: bool,
-             differentiable: bool):
+             maximize: bool):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.

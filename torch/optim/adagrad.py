@@ -181,13 +181,13 @@ def adagrad(
     # setting these as kwargs for now as functional API is compiled by torch/distributed/optim
     has_sparse_grad: bool = None,
     foreach: bool = None,
+    differentiable: bool = False,
     *,
     lr: float,
     weight_decay: float,
     lr_decay: float,
     eps: float,
     maximize: bool,
-    differentiable: bool
 ):
     r"""Functional API that performs Adagrad algorithm computation.
 
