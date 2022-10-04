@@ -13,6 +13,16 @@ complex_to_corresponding_float_type_map = {torch.complex32: torch.float16,
                                            torch.complex128: torch.float64}
 float_to_corresponding_complex_type_map = {v: k for k, v in complex_to_corresponding_float_type_map.items()}
 
+
+def _uniform_random(t: torch.Tensor, low: float, high: float):
+    # uniform_ requires to-from <= std::numeric_limits<scalar_t>::max()
+    # Work around this by scaling the range before and after the PRNG
+    if high - low >= torch.finfo(t.dtype).max:
+        return t.uniform_(low / 2, high / 2).mul_(2)
+    else:
+        return t.uniform_(low, high)
+
+
 def make_tensor(
     *shape: Union[int, torch.Size, List[int], Tuple[int, ...]],
     dtype: torch.dtype,
@@ -128,18 +138,16 @@ def make_tensor(
         result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype in _floating_types:
         ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        rand_val = torch.rand(shape, device=device, dtype=dtype)
-        result = high * rand_val + low * (1 - rand_val)
+        m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        result = torch.empty(shape, device=device, dtype=dtype)
+        _uniform_random(result, m_low, m_high)
     elif dtype in _complex_types:
         float_dtype = complex_to_corresponding_float_type_map[dtype]
         ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
-        low, high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
-        real_rand_val = torch.rand(shape, device=device, dtype=float_dtype)
-        imag_rand_val = torch.rand(shape, device=device, dtype=float_dtype)
-        real = high * real_rand_val + low * (1 - real_rand_val)
-        imag = high * imag_rand_val + low * (1 - imag_rand_val)
-        result = torch.complex(real, imag)
+        m_low, m_high = _modify_low_high(low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype)
+        result = torch.empty(shape, device=device, dtype=dtype)
+        result_real = torch.view_as_real(result)
+        _uniform_random(result_real, m_low, m_high)
     else:
         raise TypeError(f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
                         " To request support, file an issue at: https://github.com/pytorch/pytorch/issues")
