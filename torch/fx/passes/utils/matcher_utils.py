@@ -4,10 +4,13 @@ import copy
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx._compatibility import compatibility
-from typing import Dict, List, Set
+import torch.utils._pytree as pytree
+from typing import Dict, List, Set, Any
+import logging
 
 __all__ = ['SubgraphMatcher', 'InternalMatch']
 
+logger = logging.getLogger(__name__)
 
 @compatibility(is_backward_compatible=False)
 @dataclass
@@ -74,8 +77,6 @@ class SubgraphMatcher:
             self.pattern_anchors = [n for n in output_node.all_input_nodes if len(n.users) == 1]
 
     def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
-        # TODO: match args and kwargs
-
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
             return True
@@ -124,7 +125,29 @@ class SubgraphMatcher:
                         nodes_matched.add(gn)
         return non_overlapping_matches
 
+    def _match_args(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
+        assert not(isinstance(pn, Node) and isinstance(gn, Node)), "pn and gn cannot both be Node"
+
+        if isinstance(pn, Node) and not isinstance(gn, Node):
+            if pn.op == "placeholder":
+                # Check if we've already matched these nodes in the current
+                # traversal
+                if pn in match.nodes_map:
+                    return match.nodes_map[pn] == gn
+
+                match.nodes_map[pn] = gn
+                return True
+            else:
+                return False
+        elif not isinstance(pn, Node) and isinstance(gn, Node):
+            return False
+        else:
+            return type(gn) == type(pn) and gn == pn
+
     def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
+        logger.info(f"  matching {pn} to {gn}")
+
+        assert isinstance(pn, Node) and isinstance(gn, Node), str(f"pn and gn must be Node, pn: {pn}, gn: {gn}")
 
         # Check if we've already matched these nodes in the current
         # traversal
@@ -138,7 +161,8 @@ class SubgraphMatcher:
         if not self._nodes_are_equal(pn, gn):
             return False
 
-        # Optimistically mark `pn` as a match for `gn`
+        # Optimistically mark `pn` as a match for `gn`, and save a local copy of match
+        saved_match = copy.copy(match)
         match.nodes_map[pn] = gn
 
         if pn.op == "placeholder":
@@ -146,12 +170,34 @@ class SubgraphMatcher:
 
         # Recursively traverse upwards to check if `pn` is a true
         # match for `gn`
-        match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes) and
-                       all(self._match_nodes(pn_, gn_, match) for pn_, gn_
-                           in zip(pn.all_input_nodes, gn.all_input_nodes)))
+        match_found = True
+
+        pn_flatten_args, _ = pytree.tree_flatten(pn.args)
+        gn_flatten_args, _ = pytree.tree_flatten(gn.args)
+
+        if pn.kwargs.keys() == gn.kwargs.keys():
+            for key in pn.kwargs.keys():
+                pn_flatten_args.append(pn.kwargs[key])
+                gn_flatten_args.append(gn.kwargs[key])
+        else:
+            match_found = False
+
+        if match_found and len(pn_flatten_args) == len(gn_flatten_args):
+            for pn_, gn_ in zip(pn_flatten_args, gn_flatten_args):
+                if isinstance(gn_, Node) and isinstance(pn_, Node):
+                    matched = self._match_nodes(pn_, gn_, match)
+                else:
+                    matched = self._match_args(pn_, gn_, match)
+
+                if not matched:
+                    match_found = False
+                    break
+        else:
+            match_found = False
 
         if not match_found:
-            match.nodes_map.pop(pn)
+            # revert to saved_match before matching with current node
+            match = copy.copy(saved_match)
             return False
 
         return True
@@ -208,25 +254,35 @@ class SubgraphMatcher:
                 match.placeholder_nodes = [match.nodes_map[pn] for pn in self.pattern_placeholder_nodes]
                 match.returning_nodes = [match.nodes_map[pn] for pn in self.pattern_returning_nodes]
                 matches.append(match)
+
+                logger.info(f"Found a match: {match}\n")
                 return
 
             pattern_anchor, candidate_nodes = match_candidates_list[anchor_index]
             saved_match = copy.copy(match)
 
             for node in candidate_nodes:
+                logger.info(f"Trying to match anchor {pattern_anchor} to {node}")
+
                 match_found = self._match_nodes(pattern_anchor, node, match)
                 if match_found:
                     # match next anchor
                     backtracking(anchor_index + 1, match)
+                else:
+                    logger.info(f"Failed to match anchor {pattern_anchor} to {node}\n")
 
-                    # revert to saved_match before matching with current anchor
-                    match = copy.copy(saved_match)
+                # revert to saved_match before matching with current anchor
+                match = copy.copy(saved_match)
 
         match = InternalMatch(anchors=self.pattern_anchors)
         backtracking(0, match)
 
         # filter out the matches where the subgraph is not fully_contained
+        before = len(matches)
         matches = [match for match in matches if self._is_contained(match.nodes_map)]
+        after = len(matches)
+        if before != after:
+            logger.info(f"Filtered out {before - after} matches because they are not fully contained")
 
         # filter out the matches that that forms a cycle if the subgraph is fused
         valid_matches = []
@@ -235,8 +291,15 @@ class SubgraphMatcher:
                 [gn for pn, gn in match.nodes_map.items() if pn.op not in {"placeholder", "output"}]
             if validate_partition(matched_compute_nodes):
                 valid_matches.append(match)
+        if len(valid_matches) != len(matches):
+            logger.info(f"Filtered out {len(matches) - len(valid_matches)} matches because \
+                          matched subgraph would form a cycle if fused")
 
         if self.remove_overlapping_matches:
+            before = len(valid_matches)
             matches = self._remove_overlapping_matches(valid_matches)
+            after = len(matches)
+            if before != after:
+                logger.info(f"Filtered out {before - after} matches because matched subgraphs are overlapping")
 
         return matches

@@ -148,43 +148,13 @@ def sample_inputs_slice(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype,
                          low=None, high=None, requires_grad=requires_grad)
 
-    yield SampleInput(
-        input=make_input(3),
-        args=(0,),
-    )
+    yield SampleInput(make_input(3), 0)
 
-    yield SampleInput(
-        input=make_input(20, 30, 40),
-        args=(),
-        kwargs={
-            'dim': 1,
-            'start': 1,
-            'end': -2,
-        }
-    )
+    yield SampleInput(make_input(20, 30, 40), dim=1, start=1, end=-2)
 
-    yield SampleInput(
-        input=make_input(20, 30, 40),
-        args=(),
-        kwargs={
-            'dim': 1,
-            'start': 1,
-            'end': -2,
-            'step': 3,
-        }
-    )
+    yield SampleInput(make_input(20, 30, 40), dim=1, start=1, end=-2, step=3)
 
-    yield SampleInput(
-        input=make_input(20, 30, 40),
-        args=(),
-        kwargs={
-            'dim': 0,
-            'start': -10,
-            'end': -2,
-            'step': 2,
-        }
-    )
-
+    yield SampleInput(make_input(20, 30, 40), dim=0, start=-10, end=-2, step=2)
 
 
 def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
@@ -476,7 +446,22 @@ def sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
 
     # Test case for no optional kwargs
     # running_mean and running_var are required in evaluation mode (training: False) but not in training mode
-    yield SampleInput(make_arg((1, 2, 3)), args=(None, None), kwargs={'training': True})
+    yield SampleInput(make_arg((1, 2, 3)), args=(None, None, None, None), kwargs={'training': True})
+
+
+def sample_inputs_native_batch_norm(op_info, device, dtype, requires_grad, **kwargs):
+    samples = sample_inputs_batch_norm(op_info, device, dtype, requires_grad, **kwargs)
+    for sample in samples:
+        # torch.native_batch_norm does not support 0 numel tensors
+        # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got 1)
+        if sample.input.numel() == 0:
+            continue
+        args = sample.args
+        training = sample.kwargs.get('training', True)
+        momentum = sample.kwargs.get('momentum', 0.5)
+        eps = sample.kwargs.get('eps', 1e-5)
+        yield SampleInput(sample.input, args=(args[2], args[3], args[0], args[1], training, momentum, eps))
+
 
 def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -820,6 +805,8 @@ def sample_inputs_uniform(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=(hi, lo))
 
 def sample_inputs_ones_zeros(op, device, dtype, requires_grad, **kwargs):
+    # this is a bit messy, as we want the args to be tuples
+    # so if we pass size as a tuple, we have a tuple containing a tuple
     sizes = (
         (M,),
         (S, S),
@@ -3082,75 +3069,141 @@ def sample_inputs_max_pool(op_info, device, dtype, requires_grad, **kwargs):
         arg = make_arg(shape).to(memory_format=memory_format).requires_grad_(requires_grad)
         yield SampleInput(arg, kwargs=kwargs)
 
+
 def error_inputs_max_pool1d(op_info, device, **kwargs):
-    # error inputs when pad is negative
-    x = torch.rand([0, 1, 49], dtype=torch.float32)
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
-                     error_regex='pad must be non-negative')
+    # Toggle requires_grad because `max_pool1d` has different path
+    # based on whether `requires_grad` is set or not.
+    for requires_grad in (True, False):
+        make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=requires_grad)
+        # error inputs when pad is negative
+        x = make_arg((0, 1, 49))
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
+                         error_regex='pad must be non-negative')
 
-    # error inputs when pad > kernel_size / 2
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
-                     error_regex='pad should be at most half of kernel size')
+        # error inputs when pad > kernel_size / 2
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
+                         error_regex='pad should be at most half of kernel size')
 
-    # error inputs for input tensor
-    yield ErrorInput(SampleInput(torch.tensor(0), kwargs={'kernel_size': 1}),
-                     error_regex='Expected 2D or 3D input tensor, but got')
+        # error inputs for input tensor
+        error_msg = r'Expected 2D or 3D \(batch mode\) tensor with optional 0 dim batch size for input'
+        yield ErrorInput(SampleInput(make_arg((), requires_grad=requires_grad), kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for empty input
-    yield ErrorInput(SampleInput(torch.tensor([]), kwargs={'kernel_size': 1}),
-                     error_regex='Expected 2D or 3D input tensor, but got')
+        # error inputs for empty input
+        yield ErrorInput(SampleInput(torch.tensor([], device=device, requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for empty input with stride=0
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 0}),
-                     error_regex='stride must be greater than zero, but got 0')
+        # error: unbatched input with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((0, 10), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for empty input with dilation=0
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
-                     error_regex='dilation must be greater than zero, but got 0')
+        # error: batched input with 0 sized non-batch dims.
+        yield ErrorInput(SampleInput(make_arg((1, 10, 0), requires_grad=requires_grad),
+                                     kwargs={'kernel_size': 1}),
+                         error_regex=error_msg)
 
-    # error inputs for invalied output size
-    yield ErrorInput(SampleInput(torch.tensor([[]]), kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
-                     error_regex='Invalid computed output size: -4')
+        # error inputs for empty input with stride=0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'stride must be greater than zero, but got 0' if torch.device(
+            device).type == 'cpu' and not requires_grad else 'stride should not be zero'
+        yield ErrorInput(SampleInput(make_arg((3, 3, 3)), kwargs={'kernel_size': 1, 'stride': 0}),
+                         error_regex=error_msg)
 
-    # error inputs when kernel_size=0
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
-                     error_regex='kernel_size must be greater than zero')
+        # error inputs for empty input with dilation=0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'dilation must be greater than zero, but got 0' if torch.device(
+            device).type == 'cpu' and not requires_grad else 'dilation should be greater than zero, but got dilation'
+        yield ErrorInput(SampleInput(make_arg((3, 3, 3)),
+                                     kwargs={'kernel_size': 1, 'stride': 1, 'padding': 0, 'dilation': 0}),
+                         error_regex=error_msg)
 
-    # error inputs for strides > 0
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
-                     error_regex='stride must be greater than zero')
+        # error inputs for invalid output size
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'Invalid computed output size: -2' if torch.device(device).type == 'cpu' and not requires_grad \
+            else \
+            r'Given input size: \(2x1x2\). Calculated output size: \(2x1x-2\). Output size is too small'
+        yield ErrorInput(SampleInput(make_arg((2, 2, 2)),
+                                     kwargs={'kernel_size': 5, 'stride': 1, 'padding': 0, 'dilation': 1}),
+                         error_regex=error_msg)
+
+        # error inputs when kernel_size=0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'kernel_size must be greater than zero' if torch.device(
+            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 0}),
+                         error_regex=error_msg)
+
+        # error inputs for strides > 0
+        # NOTE: CPU vs (CPU with requires_grad and CUDA) error messages are different.
+        error_msg = 'stride must be greater than zero' if torch.device(
+            device).type == 'cpu' and not requires_grad else r'stride should not be zero'
+        yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 0}),
+                         error_regex=error_msg)
+
 
 def error_inputs_max_pool2d(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     # error inputs when pad is negative
-    x = torch.rand([0, 1, 49], dtype=torch.float32)
+    x = make_arg((0, 1, 49))
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
     # 2-dimensional kernel
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
 
-    # error inputs when pad > kernel_size / 2
+    # error inputs when pad > kernel_size / 2 (kernel_size : int)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
-    # 2-dimensional kernel
+
+    # error inputs when pad > kernel_size / 2 (kernel_size : tuple)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
 
+    # error: unbatched input with 0 sized non-batch dims.
+    err_msg = r'Expected 3D or 4D \(batch mode\) tensor with optional 0 dim batch size for input'
+    yield ErrorInput(SampleInput(make_arg((1, 0, 10)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
+    # error: batched input with 0 sized non-batch dims.
+    yield ErrorInput(SampleInput(make_arg((2, 1, 10, 0)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
+
 def error_inputs_max_pool3d(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
     # error inputs when pad is negative
-    x = torch.rand([0, 1, 49, 50], dtype=torch.float32)
+    x = make_arg((0, 1, 49, 50))
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
     # 3-dimensional kernel
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': -1, 'return_indices': True}),
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50,
+                                            'padding': -1, 'return_indices': True}),
                      error_regex='pad must be non-negative')
 
-    # error inputs when pad > kernel_size / 2
+    # error inputs when pad > kernel_size / 2 (kernel_size: int)
     yield ErrorInput(SampleInput(x, kwargs={'kernel_size': 2, 'stride': 50, 'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
-    # 3-dimensional kernel
-    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50, 'padding': 4, 'return_indices': True}),
+
+    # error inputs when pad > kernel_size / 2 (kernel_size: tuple)
+    yield ErrorInput(SampleInput(x, kwargs={'kernel_size': (3, 2, 2), 'stride': 50,
+                                            'padding': 4, 'return_indices': True}),
                      error_regex='pad should be at most half of kernel size')
+
+    # error: unbatched input with 0 sized non-batch dims.
+    err_msg = r'Expected input\'s non-batch dimensions to have positive length'
+    yield ErrorInput(SampleInput(make_arg((0, 1, 2, 10)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
+    # error: batched inputs with 0 sized non-batch dims.
+    yield ErrorInput(SampleInput(make_arg((2, 1, 0, 1, 2)),
+                                 kwargs={'kernel_size': 1}),
+                     error_regex=err_msg)
+
 
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4817,7 +4870,7 @@ def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwarg
     for lu_sample in sample_inputs_linalg_lu(op_info, device, dtype, requires_grad, **kwargs):
         lu_data, pivots = torch.linalg.lu_factor(lu_sample.input)
         lu_data.requires_grad_(requires_grad)
-        yield SampleInput(lu_data, args=(pivots,), output_process_fn_grad=out_fn)
+        yield SampleInput(lu_data, pivots).with_metadata(output_process_fn_grad=out_fn)
 
 
 def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -5429,8 +5482,8 @@ def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwar
 def sample_inputs_to_sparse(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    return (SampleInput(make_arg((S, S)), args=(), output_process_fn_grad=lambda x: x.to_dense()),
-            SampleInput(make_arg((S, S)), args=(1,), output_process_fn_grad=lambda x: x.to_dense()),)
+    return (SampleInput(make_arg((S, S))).with_metadata(output_process_fn_grad=lambda x: x.to_dense()),
+            SampleInput(make_arg((S, S)), 1).with_metadata(output_process_fn_grad=lambda x: x.to_dense()),)
 
 def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs):
     batch_size, num_classes = shape = (2, 3)
@@ -7225,6 +7278,18 @@ def sample_inputs_huber_loss(op_info, device, dtype, requires_grad, **kwargs):
     for input, target, d in _generate_sample_inputs_nn_loss(op_info, device, dtype, requires_grad, **kwargs):
         d['delta'] = random.uniform(1e-3, 9)
         yield SampleInput(input, args=(target, ), kwargs=d)
+
+def error_inputs_huber_loss(op, device, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=torch.float32)
+    # invalid reduction value
+    err = 'is not a valid value for reduction'
+    yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'reduction': 'abc'}),
+                     error_type=ValueError, error_regex=err)
+    # delta <= 0
+    for delta in (0, -1):
+        err = 'huber_loss does not support non-positive values for delta.'
+        yield ErrorInput(SampleInput(make_input(5, 4), args=(make_input(5, 4),), kwargs={'delta': delta}),
+                         error_type=RuntimeError, error_regex=err)
 
 def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -9476,6 +9541,9 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.uint8,)),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo',
+                                     'test_nnc_correctness',
+                                     dtypes=(torch.bfloat16,)),
                         # Fails on XLA
                         # False is not true : Tensors failed to compare as equal!
                         # Attempted to compare equality of tensors with different dtypes
@@ -9493,7 +9561,7 @@ op_db: List[OpInfo] = [
                                     dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64)),
                        # 76047
                        DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
-                                    dtypes=(torch.float32, torch.float64)),
+                                    dtypes=(torch.bfloat16, torch.float32, torch.float64)),
                    )),
     OpInfo('stft',
            decorators=[
@@ -10592,6 +10660,30 @@ op_db: List[OpInfo] = [
                # possibly because of the welford implementation.
                DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
            )),
+    OpInfo('native_batch_norm',
+           aten_name='native_batch_norm',
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           sample_inputs_func=sample_inputs_native_batch_norm,
+           skips=(
+               # NotImplementedError: Could not run
+               # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cpu"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
+               # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
+               # RuntimeError: deepEquals(input.iValue, deepCopiedInput) INTERNAL ASSERT FAILED
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # AssertionError: Booleans mismatch: True is not False
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
+           )
+           ),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
@@ -11082,7 +11174,6 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=["aten::hardswish"]),
     OpInfo('nn.functional.unfold',
            aten_name='im2col',
-           aten_backward_name='im2col_backward',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
@@ -11269,6 +11360,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_leaky_relu,
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           inplace_variant=lambda x, negative_slope=0.01:
+               torch.nn.functional.leaky_relu(x, negative_slope, inplace=True),
            supports_autograd=True,
            assert_autodiffed=True,
            supports_gradgrad=True,
@@ -11468,7 +11561,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_forward_mode_AD'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -11721,7 +11814,7 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
-        supports_forward_ad=True,
+        supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
         decorators=[DecorateInfo(toleranceOverride(
@@ -11738,6 +11831,9 @@ op_db: List[OpInfo] = [
                          device_type='cuda', dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo',
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
+            # Doesn't support autocasting
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast', device_type='cpu'),
             # No meta function
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -11941,14 +12037,16 @@ op_db: List[OpInfo] = [
         ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        inplace_variant=lambda x, threshold, value:
+            torch.nn.functional.threshold(x, threshold, value, inplace=True),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'threshold': 0.123,
+        sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9},
-                                                    {'threshold': 0.123,
+                                                    {'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9}),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
@@ -12407,6 +12505,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
     BinaryUfuncInfo('pow',
@@ -12570,13 +12669,18 @@ op_db: List[OpInfo] = [
                                     'test_nvfuser_correctness',
                                     dtypes=(torch.int32, torch.int64),
                                     active_if=not TEST_WITH_ROCM),
+                       DecorateInfo(unittest.skip("Skipped!"),
+                                    'TestNNCOpInfo',
+                                    'test_nnc_correctness',
+                                    dtypes=(torch.bfloat16,)),
                    ),
                    supports_sparse=True,
                    supports_sparse_csr=True,
                    supports_sparse_csc=True,
                    supports_sparse_bsr=True,
                    supports_sparse_bsc=True,
-                   assert_autodiffed=True,),
+                   assert_autodiffed=True,
+                   ),
     UnaryUfuncInfo('round',
                    ref=np.round,
                    variant_test_name='decimals_0',
@@ -13269,7 +13373,7 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.bfloat16]),
                    ),),
     OpInfo('lerp',
-           dtypes=floating_and_complex_types(),
+           dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfROCM=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_lerp,
@@ -14169,6 +14273,7 @@ op_db: List[OpInfo] = [
     OpInfo('ones',
            op=torch.ones,
            supports_autograd=False,
+           supports_varargs=True,
            is_factory_function=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            supports_out=True,
@@ -16116,6 +16221,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         sample_inputs_func=sample_inputs_huber_loss,
+        error_inputs_func=error_inputs_huber_loss,
         skips=(
             # JIT does not support variadic tensors.
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
@@ -16376,11 +16482,7 @@ python_ref_db = [
             # than the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
-                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
                          dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
@@ -16460,8 +16562,6 @@ python_ref_db = [
                          dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                         dtypes=(torch.int16, torch.int32, torch.int64), device_type="cpu"),
 
             # cuda implementation is off-by-one on some inputs due to precision issues
             # https://github.com/pytorch/pytorch/issues/82230
@@ -16469,9 +16569,6 @@ python_ref_db = [
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
@@ -16496,9 +16593,6 @@ python_ref_db = [
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
@@ -16644,6 +16738,10 @@ python_ref_db = [
         torch_opinfo_name="fill",
         supports_out=True,
         supports_nvfuser=False,
+        skips=(
+            # Listed in get_ignored_functions(), which don't use __torch_function__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
@@ -16803,9 +16901,6 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
                 dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,),),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
-                dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,),),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -16908,9 +17003,6 @@ python_ref_db = [
                          'test_python_ref'),
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
-                         'test_python_ref_mode_op_op'),
-            DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
-                         'TestCommon',
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestCommon',
@@ -16953,11 +17045,7 @@ python_ref_db = [
             # than the torch result was (2.5068410824946596e-07)!
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.float32,), device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_mode_op_op',
-                         dtypes=(torch.float32,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
-                         dtypes=(torch.float32,), device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_mode_op_aliases',
                          dtypes=(torch.float32,), device_type='cpu'),
         ),
     ),
@@ -16980,8 +17068,6 @@ python_ref_db = [
         skips=(
             # RuntimeError: no _refs support for torch.Tensor.index_select
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # RuntimeError: no _refs support for torch.Tensor.T.__get__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),
         )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
@@ -17034,8 +17120,8 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.margin_ranking_loss",
         supports_nvfuser=False,
         skips=(
-            # TypeError: margin_ranking_loss() got an unexpected keyword argument 'size_average'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),
+            # TODO: TypeError: margin_ranking_loss() got an unexpected keyword argument 'size_average'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
         )
     ),
     PythonRefInfo(
@@ -17048,9 +17134,16 @@ python_ref_db = [
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
         supports_nvfuser=False,
         skips=(
-            # TypeError: hinge_embedding_loss() got an unexpected keyword argument 'size_average'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),
+            # TODO: TypeError: hinge_embedding_loss() got an unexpected keyword argument 'size_average'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
         )
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.huber_loss",
+        torch_opinfo_name="nn.functional.huber_loss",
+        # The corresponding PyTorch op doesn't support out.  But the ref is
+        # registered as a decomp and ATen has an out variant.
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
@@ -17129,15 +17222,7 @@ python_ref_db = [
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                dtypes=(torch.complex32,), device_type="cuda"
-            ),
-            DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
-                dtypes=(torch.complex32,), device_type="cuda"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
             DecorateInfo(
@@ -17191,8 +17276,6 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_mode_op_op',
-                         dtypes=(torch.bfloat16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,)),
         ),
@@ -17218,8 +17301,6 @@ python_ref_db = [
             # Reference result was farther (nan) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.bfloat16,), device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_mode_op_op',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
@@ -17339,15 +17420,7 @@ python_ref_db = [
                 dtypes=(torch.complex32,), device_type='cuda'
             ),
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                dtypes=(torch.complex32,), device_type='cuda'
-            ),
-            DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
-                dtypes=(torch.complex32,), device_type='cuda'
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
                 dtypes=(torch.complex32,), device_type='cuda'
             ),
             DecorateInfo(
@@ -17382,10 +17455,6 @@ python_ref_db = [
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                dtypes=(torch.complex32,), device_type="cuda"
-            ),
-            DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
@@ -17396,8 +17465,6 @@ python_ref_db = [
         torch_opinfo_name="remainder",
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.bfloat16,), device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_mode_op_op',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
@@ -17412,11 +17479,7 @@ python_ref_db = [
             # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.chalf,), device_type='cpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                         dtypes=(torch.chalf,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
-                         dtypes=(torch.chalf,), device_type='cpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
                          dtypes=(torch.chalf,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.chalf,), device_type='cpu'),
@@ -17434,11 +17497,7 @@ python_ref_db = [
             # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.chalf,), device_type='cpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
-                         dtypes=(torch.chalf,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_ref_op_aliases',
-                         dtypes=(torch.chalf,), device_type='cpu'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_aliases',
                          dtypes=(torch.chalf,), device_type='cpu'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.chalf,), device_type='cpu'),
@@ -17459,10 +17518,6 @@ python_ref_db = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op',
                 dtypes=(torch.complex32,), device_type="cuda"
             ),
             DecorateInfo(
@@ -17551,6 +17606,10 @@ python_ref_db = [
         "_refs.broadcast_shapes",
         torch_opinfo_name="broadcast_shapes",
         supports_nvfuser=False,
+        skips=(
+            # Listed in get_ignored_functions(), which don't use __torch_function__
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
+        )
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
@@ -17723,7 +17782,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # RuntimeError: no _refs support for torch.Tensor.tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),
         ),
         supports_nvfuser=False,
     ),
@@ -17751,8 +17809,8 @@ python_ref_db = [
         torch_opinfo_name="unfold",
         supports_nvfuser=False,
         skips=(
-            # RuntimeError: no _refs support for torch.Tensor.unfold
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),
+            # TODO: RuntimeError: no _refs support for torch.Tensor.unfold
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mock_mode_op_op'),
         )
     ),
     PythonRefInfo(
@@ -17860,6 +17918,20 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
         ),
     ),
+    PythonRefInfo(
+        "ops.nvprims.native_batch_norm",
+        torch_opinfo_name="native_batch_norm",
+        # Complex types are currently disabled
+        dtypes=floating_types(),
+        supports_out=False,
+        # This function is expected not to work with TorchRefsMode(strict=True)
+        decorators=(
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+            # There's a discrepancy in returned shape between CPU and other devices
+            # AssertionError: Shapes torch.Size([0]) and torch.Size([2]) are not equal!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type="cpu"),
+        ),
+    ),
     #
     # Linear Algebra Operators
     #
@@ -17869,8 +17941,6 @@ python_ref_db = [
         supports_nvfuser=False,
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-            # RuntimeError: no _refs support for torch.outer
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op')
         ),
     ),
     PythonRefInfo(
@@ -17879,7 +17949,6 @@ python_ref_db = [
         decorators=(
             # TODO: torch.diag is currently not supported by either refs, meta funcs, or NVFuser
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),
             DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
             DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
@@ -17904,9 +17973,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_python_ref'),
-            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                         'TestCommon',
-                         'test_python_ref_mode_op_op'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
@@ -17937,9 +18003,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_python_ref'),
-            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                         'TestCommon',
-                         'test_python_ref_mode_op_op'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
@@ -18000,9 +18063,6 @@ python_ref_db = [
                          'test_python_ref'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
-                         'test_python_ref_mode_op_op'),
-            DecorateInfo(unittest.skip("Expected: empty is not comparable"),
-                         'TestCommon',
                          'test_python_ref_torch_fallback'),
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
@@ -18030,9 +18090,6 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
                          'TestCommon',
                          'test_python_ref'),
-            DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
-                         'TestCommon',
-                         'test_python_ref_mode_op_op'),
             DecorateInfo(unittest.skip("Expected: empty_strided is not comparable"),
                          'TestCommon',
                          'test_python_ref_torch_fallback'),
@@ -18087,8 +18144,6 @@ python_ref_db = [
         skips=(
             # RuntimeError: no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # RuntimeError: no _refs support for torch.Tensor.__getitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),
             # Sample out= with a stride of zero. This _out operation checks that the input has no
             # inner overlap
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),)
@@ -18101,7 +18156,7 @@ python_ref_db = [
         skips=(
             # RuntimeError: no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),)
+        )
     ),
     PythonRefInfo(
         "_refs.index_add",
@@ -18111,8 +18166,7 @@ python_ref_db = [
         skips=(
             # RuntimeError: no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # RuntimeError: no _refs support for torch.Tensor.add_
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),)
+        )
     ),
     PythonRefInfo(
         "_refs.index_fill",
@@ -18122,7 +18176,7 @@ python_ref_db = [
         skips=(
             # RuntimeError: no _refs support for Tensor.__setitem__
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_mode_op_op'),)
+        )
     ),
     #
     # Test-related functions
@@ -18147,8 +18201,8 @@ sparse_reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo) an
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref is not None]
-reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('_masked.')]
-sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('_masked.')]
+reference_masked_ops = [op for op in reference_filtered_ops if op.name.startswith('masked.')]
+sparse_masked_reduction_ops = [op for op in sparse_reduction_ops if op.name.startswith('masked.')]
 
 # TODO: review porting these to make_tensor
 def index_variable(shape, max_indices, device=torch.device('cpu')):

@@ -1,6 +1,7 @@
 import functools
+import unittest
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, Sequence, Union
+from typing import Any, Callable, Dict, Sequence
 from warnings import warn
 
 import torch
@@ -17,6 +18,9 @@ from torch._prims.nvfuser_executor import NvfuserPrimOperatorSupport
 
 from torch._prims_common import torch_function_passthrough
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
+
+
+MOCK_REF_RESULT = unittest.mock.sentinel.some_object
 
 
 @functools.lru_cache(None)
@@ -69,25 +73,6 @@ def torch_to_refs_map():
 
 
 @functools.lru_cache(None)
-def nvfuser_decomp_table():
-    """
-    decomposition table needed for nvfuser
-    """
-    aten = torch.ops.aten
-    nvfuser_decompositions: Sequence[
-        Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
-    ] = {  # type: ignore[assignment]
-        # AMP calls `to` in C++, which is not handled by torch mapping
-        aten._to_copy,
-    }
-
-    from torch._decomp import get_decompositions
-
-    decomp_table = get_decompositions(nvfuser_decompositions)
-    return decomp_table
-
-
-@functools.lru_cache(None)
 def all_prims():
     """
     Set of all prim functions, e.g., torch._prims.add in all_prims()
@@ -106,7 +91,18 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
 
     By default, this context manager will fall back on the torch.ops.prims* if the
     nvprim does not exist.
+    It's possible to skip certain prims by passing their names to the skip_ops
+    argument. skip_ops is expected to be a sequence of strings, e.g.,
+    ["prims.add.default"] In order to check the expected name of a prim, one can
+    use the `torch.overrides.resolve_name`.
+
+    >>> # xdoctest: +SKIP("undefined vars")
+    >>> with NvfuserPrimsMode(skips_ops=("prims.add.default")):
+    ...     torch.ops.prims.add.default(x, y)  # does not call torch.ops.nvprims.add.default(x, y)
     """
+
+    def __init__(self, *, skip_ops=()):
+        self.skip_ops = skip_ops
 
     def __torch_function__(
         self,
@@ -117,6 +113,12 @@ class NvfuserPrimsMode(torch.overrides.TorchFunctionMode):
     ):
         if kwargs is None:
             kwargs = {}
+
+        # If the function is in the skip list, then we don't want to
+        # remap it to the nvprims.
+        if torch.overrides.resolve_name(orig_func) in self.skip_ops:
+            return orig_func(*args, **kwargs)
+
         if isinstance(orig_func, torch._ops.OpOverload) or isinstance(
             orig_func, torch._ops.OpOverloadPacket
         ):
@@ -147,10 +149,12 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
     def __init__(
         self,
         strict=False,
+        mock=False,
         should_fallback_fn=lambda *_: False,
         prims_mode_cls=nullcontext,
     ):
         self.strict = strict
+        self.mock = mock
         self.should_fallback_fn = should_fallback_fn
         self.prims_mode_cls = prims_mode_cls
 
@@ -182,10 +186,30 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
 
         if func is not None:
             # If the ref exists query whether we should use it or not
-            if self.should_fallback_fn(self, func, args, kwargs):
+            if self.should_fallback_fn(self, orig_func, func, args, kwargs):
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
-            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
+            with self:
+                if self.mock:
+                    # Replace the original func body with one that returns the
+                    # mock sentinel value.
+                    #
+                    # This will still dispatch to the original torch function
+                    # first before hitting the ref (via handle_torch_function).
+                    #
+                    # Regular PyTorch contains a mix of Python and C++
+                    # implementations (the latter are exposed as builtins).  For
+                    # some of those, signature information is not available.
+                    # However, all primTorch refs are written in Python, which
+                    # means that signature information is always there, and the
+                    # mock will have it as well.
+                    #
+                    # The above two things is exactly what we need to enable API
+                    # compatibility checking between torch ops and refs without
+                    # much computational overhead.
+                    func = unittest.mock.create_autospec(
+                        func, return_value=MOCK_REF_RESULT
+                    )
                 return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
@@ -201,11 +225,44 @@ def _is_node_supported_nvfuser(node):
     )
 
 
-def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
-    with torch.overrides.enable_torch_function_mode(
-        torch_function_mode, replace=torch_function_mode.inner
-    ):
-        gm = get_isolated_graphmodule(func, args, kwargs)
+def _is_func_unsupported_nvfuser(
+    torch_function_mode, orig_func, func, args, kwargs, *, skip_ops=()
+):
+    """
+    This function traces the `func` under `torch_function_mode` and checks if
+    any of the traced nodes are not supported by nvFuser. If so, we should
+    fallback to the original function.
+
+    `skip_ops` argument is expected to be a list of strings of function names
+    that would match with `torch.overrides.resolve_name`.
+
+    Args:
+        torch_function_mode: The torch_function_mode context manager. orig_func:
+        The original function, its name will be used to check if
+                   it should be skipped.
+        func: The function to be traced. args: The args to be passed to the
+        function. kwargs: The kwargs to be passed to the function.
+    Keyword args:
+        skip_ops: A list of ops to skip when checking if the function is
+        supported.
+    """
+    # One supported case is easy to check: if the resolved name of the original
+    # function in the skip list, skip it.
+    if torch.overrides.resolve_name(orig_func) in skip_ops:
+        return True
+
+    with torch_function_mode:
+        try:
+            gm = get_isolated_graphmodule(func, args, kwargs)
+        except Exception as e:
+            warn(
+                "get_isolated_graphmodule failed on decomposition: "
+                + func.__name__
+                + " with error message: "
+                + str(e)
+            )
+            # returns unsupported when tracing fails.
+            return True
 
     supported_ops = NvfuserPrimOperatorSupport()
     call_function_nodes = filter(lambda n: n.op == "call_function", gm.graph.nodes)
@@ -216,11 +273,13 @@ def _is_func_unsupported_nvfuser(torch_function_mode, func, args, kwargs):
 
 
 class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
-    def __init__(self):
+    def __init__(self, *, skip_ops=()):
         super().__init__(
             strict=False,
-            should_fallback_fn=_is_func_unsupported_nvfuser,
-            prims_mode_cls=NvfuserPrimsMode,
+            should_fallback_fn=functools.partial(
+                _is_func_unsupported_nvfuser, skip_ops=skip_ops
+            ),
+            prims_mode_cls=functools.partial(NvfuserPrimsMode, skip_ops=skip_ops),
         )
 
     def _is_var_mean(self, func):
@@ -230,6 +289,12 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
                 or isinstance(func, torch._ops.OpOverloadPacket)
             )
             and "aten.var_mean" in str(func)
+        )
+
+    def _is_native_batch_norm(self, func):
+        return "torch.native_batch_norm" == torch.overrides.resolve_name(func) or (
+            func == torch.ops.aten.native_batch_norm.default
+            or func == torch.ops.aten.native_batch_norm
         )
 
     def _is_rand_like(self, func):
@@ -250,9 +315,14 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
         # First we intercept calls for nvfuser-specific prims bypassing generic torch._refs
         if self._is_var_mean(orig_func):
             return torch.ops.nvprims.var_mean(*args, **kwargs)
+
+        if self._is_native_batch_norm(orig_func):
+            return torch.ops.nvprims.native_batch_norm(*args, **kwargs)
+
         if self._is_rand_like(orig_func):
             if len(kwargs) > 0:
                 warn("rand_like has ignored kwars!")
             return torch.ops.nvprims.rand_like(*args)
+
         # Then we use TorchRefsMode to interpret the rest
         return super().__torch_function__(orig_func, types, args, kwargs)
