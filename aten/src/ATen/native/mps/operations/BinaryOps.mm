@@ -115,22 +115,29 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     Placeholder selfPlaceholder;
     Placeholder otherPlaceholder;
+    MPSScalar self_scalar;
+    MPSScalar other_scalar;
+    MPSScalar alpha_scalar;
 
     if (is_self_scalar && !self.is_mps()) {
-      feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), getMPSScalarType(self.scalar_type()));
+      self_scalar = getMPSScalar(self.item(), self.scalar_type());
+      feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self_scalar);
     } else {
       selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
     if (is_other_scalar && !other.is_mps()) {
-      feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), getMPSScalarType(other.scalar_type()));
+      other_scalar = getMPSScalar(other.item(), other.scalar_type());
+      feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other_scalar);
     } else {
       otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
+
     // 'cachedGraph->alphaTensor' is not nil only if add_sub_template() was called with an alpha value != 1.0
     if (cachedGraph->alphaTensor) {
-      feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha, getMPSScalarType(other.scalar_type()));
+      alpha_scalar = getMPSScalar(alpha, other.scalar_type());
+      feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha_scalar);
     }
 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, needsCopyToOutput ? output : output_);
@@ -229,6 +236,9 @@ Tensor& func_out (const Tensor& self, const other_type& other, Tensor& output) {
 
 #define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                   \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
+  TORCH_CHECK(!(self.scalar_type() == ScalarType::Long &&                                       \
+               (std::string(#func_stub) == "power" || std::string(#func_stub) == "atan2")),     \
+               "MPS does not support ", #func_stub, " op with int64 input")                     \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
       MPSGraph* mpsGraph = cachedGraph->graph();                                                \
