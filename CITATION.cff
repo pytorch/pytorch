@@ -1,8 +1,11 @@
 cff-version: 1.2.0
 message: If you use this software, please cite it as below.
 title: PyTorch
+authors:
+  - family-names: PyTorch Team
 url: https://pytorch.org
 preferred-citation:
+  abbreviation: NEURIPS2019_9015
   type: conference-paper
   title: "PyTorch: An Imperative Style, High-Performance Deep Learning Library"
   authors:
