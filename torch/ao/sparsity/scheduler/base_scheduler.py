@@ -150,3 +150,15 @@ class BaseScheduler(object):
 
         self._last_sl = [group['sparsity_level'] for group in self.sparsifier.groups]
         self.sparsifier.enable_mask_update = True
+
+    def _make_sure_a_list(self, var):
+        r"""Utility that extends it to the same length as the .groups, ensuring it is a list"""
+        n = len(self.sparsifier.groups)
+        if not isinstance(var, (list, tuple)):
+            return [var] * n
+        else:
+            if len(var) != n:
+                raise ValueError("Expected variable of length {n}, but got {got}".format(
+                    n=n, got=len(var)
+                ))
+            return list(var)  # We want the result to be in a list, not tuple

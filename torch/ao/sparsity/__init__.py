@@ -10,6 +10,7 @@ from .sparsifier.nearly_diagonal_sparsifier import NearlyDiagonalSparsifier
 # Scheduler
 from .scheduler.base_scheduler import BaseScheduler
 from .scheduler.lambda_scheduler import LambdaSL
+from .scheduler.cubic_scheduler import CubicSL
 
 # Parametrizations
 from .sparsifier.utils import FakeSparsity
