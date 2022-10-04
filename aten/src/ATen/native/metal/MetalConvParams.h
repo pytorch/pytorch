@@ -22,7 +22,7 @@ struct Conv2DParams final {
   }
 
   bool isDepthwise() const {
-    // Currently, only channel multipler of 1 is supported
+    // Currently, only channel multiplier of 1 is supported
     // i.e. inputFeatureChannels == outputFeatureChannels
     return G > 1 && IC == 1 && OC == G && OC == C;
   }

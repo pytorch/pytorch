@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ATen_fwd.h>
 #include <ATen/core/boxing/BoxedKernel.h>
 #include <ATen/core/stack.h>
 #include <c10/core/DispatchKeySet.h>
@@ -19,6 +20,7 @@ using has_symint =
   guts::disjunction<
     std::is_same<c10::SymInt, std::decay_t<T>>,
     std::is_same<c10::SymIntArrayRef, std::decay_t<T>>,
+    std::is_same<at::OptionalSymIntArrayRef, std::decay_t<T>>,
     std::is_same<c10::optional<c10::SymInt>, std::decay_t<T>>
   >;
 
@@ -30,6 +32,11 @@ struct remove_symint {
 template <>
 struct remove_symint<c10::SymInt> {
   using type = int64_t;
+};
+
+template <>
+struct remove_symint<at::OptionalSymIntArrayRef> {
+  using type = OptionalIntArrayRef;
 };
 
 template <>
