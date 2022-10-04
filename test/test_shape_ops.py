@@ -681,7 +681,10 @@ class TestShapeOps(TestCase):
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_sparse_dense_dim(self, device, dtype):
         for shape in [(), (2, ), (2, 3)]:
-            x = torch.randn(shape)
+            if dtype.is_complex or dtype.is_floating_point:
+                x = torch.rand(shape, device=device, dtype=dtype)
+            else:
+                x = torch.randint(-9, 9, shape, device=device, dtype=dtype)
             self.assertEqual(x.sparse_dim(), 0)
             self.assertEqual(x.dense_dim(), len(shape))
 
