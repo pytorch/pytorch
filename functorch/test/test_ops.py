@@ -395,6 +395,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
+        xfail("native_batch_norm"),
 
         xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
     }))
@@ -643,6 +644,7 @@ class TestOperators(TestCase):
         xfail("nn.functional.batch_norm", 'without_cudnn'),
         # view doesn't work on sparse
         xfail("to_sparse"),
+        xfail("native_batch_norm"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -725,6 +727,7 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
+        skip("native_batch_norm"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
@@ -833,6 +836,7 @@ class TestOperators(TestCase):
         # erroring because running_mean and running_var aren't differentiable
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
+        xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
     }
 
@@ -901,7 +905,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
-        xfail('istft'),  # col2im fallback
         xfail('polar'),  # complex fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
@@ -998,7 +1001,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.max_pool3d'),
-        xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
@@ -1032,6 +1034,7 @@ class TestOperators(TestCase):
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
+        xfail("native_batch_norm"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1097,6 +1100,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
+        xfail("native_batch_norm"),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1340,6 +1344,10 @@ class TestOperators(TestCase):
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition
         xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
+        # RuntimeError: Batch norm got a batched tensor as
+        # input while the running_mean or running_var, which will be updated in
+        # place, were not batched.
+        xfail("native_batch_norm"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
