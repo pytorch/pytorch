@@ -643,6 +643,14 @@ def _try_get_scalar_type(*args) -> Optional[str]:
 
 
 @_beartype.beartype
+def _try_get_device_from_value(value: _C.Value) -> Optional[torch.device]:
+    if not _is_tensor(value):
+        return None
+    tensor_type = typing.cast(_C.TensorType, value.type())
+    return tensor_type.device()
+
+
+@_beartype.beartype
 def _select_helper(g: jit_utils.GraphContext, self, dim, index, apply_reshape=True):
     index_const = _maybe_get_scalar(index)
     index_dim = _get_tensor_rank(index)
