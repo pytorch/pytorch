@@ -4877,6 +4877,26 @@ class TestNLLLoss(TestCase):
         helper(10000)
         helper((10000, 40))
 
+    def test_multinomial(self):
+        # Test with num_dist = 1
+        def helper(probs, compare_mean, compare_var, num_samples=5, replacement=True):
+            cpu_prob_tensor = torch.tensor(probs, device='cpu', dtype=torch.float, requires_grad=False)
+            prob_tensor = cpu_prob_tensor.detach().clone().to('mps')
+
+            mps_out = torch.multinomial(prob_tensor, num_samples, replacement=replacement)
+            if(not replacement):
+                print(mps_out.to('cpu'))
+            else:
+                # Compare "real" with theoretical values
+                print(mps_out.to('cpu').float().mean(), compare_mean)
+                print(mps_out.to('cpu').float().std() ** 2, compare_var)
+
+        # TODO: Add tests for data types
+        helper(np.array([[0., 0., 0., 0.5, 0.5]]), (3 + 4) / 2, (12.5 - 3.5 ** 2), 100000)
+        helper(np.array([[.2, .2, .2, .2, .2]]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
+        helper(np.array([[1, 1, 1, 1, 1]]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
+        helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
+        helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
 class TestNNMPS(NNTestCase):
 
