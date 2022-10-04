@@ -6,10 +6,8 @@
 namespace c10 {
 
 namespace detail {
-C10_API int64_t
-maybe_wrap_dim_slow(int64_t dim, int64_t dim_post_expr, bool wrap_scalar);
-C10_API SymInt
-maybe_wrap_dim_slow_symint(SymInt dim, SymInt dim_post_expr, bool wrap_scalar);
+template <typename T>
+C10_API T maybe_wrap_dim_slow(T dim, T dim_post_expr, bool wrap_scalar);
 } // namespace detail
 
 static inline int64_t maybe_wrap_dim(
@@ -17,25 +15,30 @@ static inline int64_t maybe_wrap_dim(
     int64_t dim_post_expr,
     bool wrap_scalar = true) {
   // Inline the fast paths
-  if (C10_LIKELY(-dim_post_expr <= dim && dim < dim_post_expr)) {
-    // Branch-less version of dim + (dim < 0 ? dim_post_expr : 0)
-    return dim + dim_post_expr * (dim < 0);
-  }
-  // Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
-  return c10::detail::maybe_wrap_dim_slow(dim, dim_post_expr, wrap_scalar);
-}
-
-static inline SymInt maybe_wrap_dim_symint(
-    SymInt dim,
-    SymInt dim_post_expr,
-    bool wrap_scalar = true) {
-  // Inline the fast paths
   if (C10_LIKELY(dim_post_expr * -1 <= dim && dim < dim_post_expr)) {
     // Branch-less version of dim + (dim < 0 ? dim_post_expr : 0)
     return dim + dim_post_expr * (dim < 0);
   }
   // Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
-  return c10::detail::maybe_wrap_dim_slow_symint(
+  return c10::detail::maybe_wrap_dim_slow<int64_t>(
+      dim, dim_post_expr, wrap_scalar);
+}
+
+static inline SymInt maybe_wrap_dim(
+    SymInt dim,
+    SymInt dim_post_expr,
+    bool wrap_scalar = true) {
+  // Inline the fast paths
+  if (C10_LIKELY(dim_post_expr * -1 <= dim && dim < dim_post_expr)) {
+    // For SymInts, we want an explicit control flow to trigger a guard, so we
+    // may as well branch too.
+    if (dim < 0) {
+      return dim + dim_post_expr;
+    }
+    return dim;
+  }
+  // Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
+  return c10::detail::maybe_wrap_dim_slow<SymInt>(
       dim, dim_post_expr, wrap_scalar);
 }
 

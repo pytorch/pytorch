@@ -1136,11 +1136,26 @@ Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt lengt
   return at::slice_symint(self, dim, start, start + length, 1);
 }
 
-Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start, SymInt length) {
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
-  int64_t st = start.item<int64_t>();
-  return at::narrow(self, dim, st, length);
+  SymInt st = start.item<int64_t>();
+
+  /*
+    Why do we need this explicit guard on the exact value of start?
+
+    This SymInt will get passed into narrow_symint and have other guards created on it as
+    various conditions/checks are evaluated, and those would be less constraining which is
+    typically what we'd want.
+
+    But since we're constructing the SymInt from a raw int inside a tensor, we have no way
+    to trace its origin back to some other traceable quantity such as a SymInt from a .size call.
+
+    Until we support passing a SymInt through a singleton tensor, we're stuck fully-specializing
+    this overload.
+  */
+  st.guard_int(__FILE__, __LINE__);
+  return at::narrow_symint(self, dim, st, length);
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
