@@ -85,7 +85,7 @@ def _download_onnx_model(model_name, opset_version):
                         if not is_within_directory(path, member_path):
                             raise Exception("Attempted Path Traversal in Tar File")
                 
-                    tar.extractall(path, members, numeric_owner) 
+                    tar.extractall(path, members, numeric_owner=numeric_owner) 
                     
                 
                 safe_extract(t, models_dir)
