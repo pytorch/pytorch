@@ -12,6 +12,7 @@ using c10::cuda::CUDACachingAllocator::BlockInfo;
 using c10::cuda::CUDACachingAllocator::History;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
+
 namespace {
   std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> blank_context() {
     // in the future the C++-only version of context gathering could include C++ or torchscript frames.
