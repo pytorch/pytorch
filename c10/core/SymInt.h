@@ -196,7 +196,8 @@ class C10_API SymInt {
   // - Should represent positive and small negative ints
   // - No conversion necessary for operations on ints
   // - Must represent valid 64-bit pointers
-  // - Is symbolic test should be FAST (two arithmetic instructions is too much).
+  // - Is symbolic test should be FAST (two arithmetic instructions is too
+  // much).
   //   This code being a hotpath is based on Strobelight profiles of
   //   is_symbolic().  FB only: https://fburl.com/strobelight/5l50ncxd
   //   (you will need to change the time window).
@@ -215,7 +216,8 @@ class C10_API SymInt {
   // We must manually translate the bit pattern test into a greater
   // than test because compiler doesn't figure it out:
   // https://godbolt.org/z/356aferaW
-  static constexpr int64_t MAX_UNREPRESENTABLE_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
+  static constexpr int64_t MAX_UNREPRESENTABLE_INT =
+      -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
 
