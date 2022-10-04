@@ -2064,6 +2064,7 @@ class FullyShardedDataParallel(nn.Module):
                 target_handles_key for target_handles_key in
                 eod.get_handles_to_backward_prefetch(current_handles_key)
                 if self._needs_pre_backward_unshard.get(target_handles_key, False)
+                and not self._handles_prefetched.get(target_handles_key, False)
             ]
         elif (
             training_state == HandleTrainingState.FORWARD
@@ -2073,6 +2074,7 @@ class FullyShardedDataParallel(nn.Module):
                 target_handles_key for target_handles_key in
                 eod.get_handles_to_forward_prefetch(current_handles_key)
                 if self._needs_pre_forward_unshard.get(target_handles_key, False)
+                and not self._handles_prefetched.get(target_handles_key, False)
             ]
         return target_handles_keys
 
