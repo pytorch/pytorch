@@ -1183,7 +1183,7 @@ void initJitScriptBindings(PyObject* module) {
             m.register_attribute(name, type, toIValue(value, type));
           })
       .def(
-          "_create_method_from_trace_with_tuple",
+          "_create_method_from_trace",
           [](Module& self,
              const std::string& name,
              const py::function& func,

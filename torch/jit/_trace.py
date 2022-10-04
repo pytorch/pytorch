@@ -992,7 +992,7 @@ def trace_module(
                 )
             else:
                 example_inputs = make_tuple(example_inputs)
-                module._c._create_method_from_trace_with_tuple(
+                module._c._create_method_from_trace(
                     method_name,
                     func,
                     example_inputs,
