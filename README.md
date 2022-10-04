@@ -445,3 +445,7 @@ Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 ## License
 
 PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+
+## Thank you!
+
+Thank you for signing the CLA 🎉
