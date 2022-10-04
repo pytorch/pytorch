@@ -46,7 +46,7 @@ class C10_API SymFloat {
     return ptr_;
   }
 
-  int64_t as_float_unchecked() const {
+  double as_float_unchecked() const {
     return data_;
   }
 
