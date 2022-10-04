@@ -13,7 +13,8 @@ at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar) {
 }
 
 c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(c10::SymIntArrayRef ar) {
-  if (ar.any_symbolic()) return c10::nullopt;
+  if (ar.any_symbolic())
+    return c10::nullopt;
   return {asIntArrayRefUnchecked(ar)};
 }
 
