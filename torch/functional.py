@@ -4,7 +4,7 @@ from typing import (
 
 import torch
 from torch._C import _add_docstr
-import torch.backends.opteinsum as opteinsum
+import torch.backends.opt_einsum as opt_einsum
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
@@ -246,10 +246,10 @@ def einsum(*args: Any) -> Tensor:
         the default order is to contract from left to right.
 
         To bypass this default behavior, add the following line to disable the usage of opt_einsum and skip path
-        calculation: `torch.backends.opteinsum.enabled = False`
+        calculation: `torch.backends.opt_einsum.enabled = False`
 
         To specify which strategy you'd like for opt_einsum to compute the contraction path, add the following line:
-        `torch.backends.opteinsum.strategy = 'auto'`. The default strategy is 'auto', and we also support 'greedy' and
+        `torch.backends.opt_einsum.strategy = 'auto'`. The default strategy is 'auto', and we also support 'greedy' and
         'optimal'. Disclaimer that the runtime of 'optimal' is factorial in the number of inputs! See more details in
         the opt_einsum documentation (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
@@ -372,15 +372,15 @@ def einsum(*args: Any) -> Tensor:
         # in the original implementation this line is omitted
         return einsum(equation, *_operands)
 
-    if len(operands) <= 2 or not opteinsum.enabled:
+    if len(operands) <= 2 or not opt_einsum.enabled:
         # the path for contracting 0 or 1 time(s) is already optimized
         # or the user has disabled using opt_einsum
         return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
     path = None
-    if opteinsum.is_available():
-        _opt_einsum = opteinsum.get_opt_einsum()
-        tupled_path = _opt_einsum.contract_path(equation, *operands, optimize=opteinsum.strategy)[0]
+    if opt_einsum.is_available():
+        _opt_einsum = opt_einsum.get_opt_einsum()
+        tupled_path = _opt_einsum.contract_path(equation, *operands, optimize=opt_einsum.strategy)[0]
         # flatten path for dispatching to C++
         path = [item for pair in tupled_path for item in pair]
     return _VF.einsum(equation, operands, path=path)  # type: ignore[attr-defined]

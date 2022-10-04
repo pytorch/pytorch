@@ -120,25 +120,6 @@ void Context::setSDPUseMath(bool e) {
   enabled_mathSDP = e;
 }
 
-// NB: This method is *purely* whether or not a user requested
-// to use opt_einsum, it doesn't actually say anything about
-// whether or not opt_einsum is actually usable.
-bool Context::userEnabledOptEinsum() const {
-  return enabled_opt_einsum;
-}
-
-void Context::setUserEnabledOptEinsum(bool e) {
-  enabled_opt_einsum = e;
-}
-
-std::string Context::optEinsumStrategy() const {
-  return opt_einsum_strategy;
-}
-
-void Context::setOptEinsumStrategy(std::string s) {
-  opt_einsum_strategy = s;
-}
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)

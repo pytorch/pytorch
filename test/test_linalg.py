@@ -33,7 +33,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9, _get_magma_version, \
     _get_torch_cuda_version
 from torch.distributions.binomial import Binomial
-import torch.backends.opteinsum as opteinsum
+import torch.backends.opt_einsum as opt_einsum
 
 # Protects against includes accidentally setting the default dtype
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
@@ -3675,15 +3675,15 @@ class TestLinalg(TestCase):
 
         # Check that the other variations for opt_einsum work too
         if TEST_OPT_EINSUM:
-            with opteinsum.flags(enabled=False):
+            with opt_einsum.flags(enabled=False):
                 res = torch.einsum(*args)
                 self.assertEqual(ref, res)
 
-            with opteinsum.flags(enabled=True, strategy='greedy'):
+            with opt_einsum.flags(enabled=True, strategy='greedy'):
                 res = torch.einsum(*args)
                 self.assertEqual(ref, res)
 
-            with opteinsum.flags(enabled=True, strategy='optimal'):
+            with opt_einsum.flags(enabled=True, strategy='optimal'):
                 res = torch.einsum(*args)
                 self.assertEqual(ref, res)
 

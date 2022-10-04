@@ -15,7 +15,7 @@ These backends include:
 - ``torch.backends.mkl``
 - ``torch.backends.mkldnn``
 - ``torch.backends.openmp``
-- ``torch.backends.opteinsum``
+- ``torch.backends.opt_einsum``
 - ``torch.backends.xeon``
 
 
@@ -138,23 +138,25 @@ torch.backends.openmp
 .. py:module:: torch.backends.xnnpack
 
 
-torch.backends.opteinsum
+torch.backends.opt_einsum
 ^^^^^^^^^^^^^^^^^^^^^^^^
-.. automodule:: torch.backends.opteinsum
+.. automodule:: torch.backends.opt_einsum
 
-.. autofunction:: torch.backends.opteinsum.is_available
+.. autofunction:: torch.backends.opt_einsum.is_available
 
-.. autofunction:: torch.backends.opteinsum.get_opt_einsum
+.. autofunction:: torch.backends.opt_einsum.get_opt_einsum
 
-.. attribute::  torch.backends.opteinsum.enabled
+.. attribute::  torch.backends.opt_einsum.enabled
 
-    A :class:`bool` that controls whether opt_einsum is enabled (on by default). If so,
+    A :class:`bool` that controls whether opt_einsum is enabled (`True` by default). If so,
     torch.einsum will use opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html)
-    to calculate an optimal path of contraction for faster performance.
+    if available to calculate an optimal path of contraction for faster performance.
 
-.. attribute::  torch.backends.opteinsum.strategy
+    If opt_einsum is not available, torch.einsum will fall back to the default contraction path of left to right.
 
-    A :class:`str` that specifies which strategies to try when `torch.backends.opteinsum.enabled` is True.
+.. attribute::  torch.backends.opt_einsum.strategy
+
+    A :class:`str` that specifies which strategies to try when `torch.backends.opt_einsum.enabled` is True.
     By default, torch.einsum will try the "auto" strategy, but the "greedy" and "optimal" strategies are
     also supported. Note that the "optimal" strategy is factorial on the number of inputs as it tries all
     possible paths. See more details in opt_einsum's docs
