@@ -406,7 +406,8 @@ class _ExecOrderData:
         self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
         self.is_first_iter = True
 
-        # Gives the max number of backward/forward prefetched all-gathers
+        # Gives the max number of backward/forward prefetched all-gathers by a
+        # single module
         self._backward_prefetch_limit = backward_prefetch_limit
         self._forward_prefetch_limit = forward_prefetch_limit
 
