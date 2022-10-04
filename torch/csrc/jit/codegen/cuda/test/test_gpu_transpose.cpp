@@ -1023,6 +1023,122 @@ TEST_F(NVFuserTest, FusionScheduleTranspose2DSmallInnerSize_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionTransposeBankConflict1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{32, 0};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{0, 32};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32}, DataType::Bool);
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect{8, 0};
+    TORCH_CHECK(info.second == expect);
+  }
+}
+
+TEST_F(NVFuserTest, FusionTransposeBankConflict4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({32, 32});
+  fusion.addInput(tv0);
+  auto tv1 = set(tv0);
+  auto tv2 = transpose(tv1, 0, 1);
+  auto tv3 = set(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Shared);
+  tv1->merge(0);
+  tv1->split(0, 4);
+  tv1->split(0, 8);
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  // T1 [TIDx(32), 8, V(4)]
+
+  tv2->setMemoryType(MemoryType::Shared);
+  tv2->merge(0);
+  tv2->split(0, 4);
+  tv2->split(0, 32);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+  // T2 [8, TIDx(32), 4]
+
+  tv3->merge(0);
+  tv3->split(0, 2);
+  tv3->split(0, 32);
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  // T3 [16, TIDx(32), 2]
+
+  auto bank_conflict_info = fusion.bankConflictInfo();
+
+  for (auto info : bank_conflict_info) {
+    std::pair<int, int> expect1{0, 8};
+    std::pair<int, int> expect2{8, 4};
+    std::pair<int, int> expect3{2, 0};
+    TORCH_CHECK(
+        info.second == expect1 || info.second == expect2 ||
+        info.second == expect3);
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

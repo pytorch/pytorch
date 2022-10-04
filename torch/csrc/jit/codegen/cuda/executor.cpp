@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_bank_conflict.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <ATen/core/LegacyTypeDispatch.h>
@@ -249,6 +250,27 @@ void FusionExecutor::compileFusion(
 
   if (isDebugDumpEnabled(DebugDumpOption::KernelIr)) {
     kernel->print();
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::BankConflictInfo)) {
+    auto bank_conflict_info = getBankConflictInfo(kernel);
+    if (bank_conflict_info.empty()) {
+      std::cout << "===== No bank confliction =====" << std::endl;
+    } else {
+      std::cout << "======= Bank confliction =======" << std::endl;
+      for (auto info : bank_conflict_info) {
+        std::cout << "Expr: " << info.first->toString() << std::endl;
+        auto conflict = info.second;
+        if (conflict.first > 1) {
+          std::cout << "input conflict: " << conflict.first << " way, ";
+        }
+        if (conflict.second > 1) {
+          std::cout << "output conflict: " << conflict.second << " way";
+        }
+        std::cout << std::endl;
+      }
+      std::cout << "================================" << std::endl;
+    }
   }
 
   kernel_code_ = codegen::generateCudaKernel(kernel, kernelName());
