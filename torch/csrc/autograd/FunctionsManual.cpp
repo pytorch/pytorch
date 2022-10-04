@@ -2770,7 +2770,6 @@ Tensor as_strided_backward(
     c10::SymIntArrayRef sym_sizes,
     c10::SymIntArrayRef sym_strides,
     optional<c10::SymInt> sym_storage_offset_) {
-
   // For output geometry,
   //   check for size 0 dimensions,
   //   skip size 1 dimensions,

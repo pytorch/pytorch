@@ -101,7 +101,7 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const c10::optional<at::Tensor>& bias) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
@@ -144,6 +144,15 @@ enum class ConvBackend {
 // NB: The forward pass provides a bias tensor while the backward pass provides
 // a bool indicating whether the bias is defined. This is done to save memory by
 // avoiding saving the full bias tensor for backward.
+TORCH_API ConvBackend _select_conv_backend(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
+    const bool need_backward,
+    const ConvParams& params);
+
+// For BC reasons, have a copy that does not require bias_opt
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
