@@ -8,8 +8,12 @@ import torch.nn.qat as nnqat
 import torch.nn.quantized._reference as nnqr
 from collections import namedtuple
 from typing import List
-from .observation_type import ObservationType
-from .backend_config import BackendPatternConfig, DTypeConfig
+from .backend_config import (
+    BackendPatternConfig,
+    DTypeConfig,
+    ObservationType,
+)
+from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
     reverse2,
@@ -19,6 +23,7 @@ from ..fuser_method_mappings import (
     fuse_linear_bn,
     fuse_convtranspose_bn,
 )
+from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 # TODO: rename to be more explict, e.g. qat_conv_relu
 _ConvMetadata = namedtuple(
@@ -65,6 +70,11 @@ def _get_binary_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatt
                 BackendPatternConfig(bop_pattern)
                     .set_dtype_configs(dtype_configs)  # noqa: E131
                     ._set_num_tensor_args_to_observation_type(num_tensor_args_to_observation_type_mapping))
+    # matmul
+    binary_op_configs.append(
+        BackendPatternConfig(torch.matmul)
+        .set_dtype_configs(dtype_configs)  # noqa: E131
+    )
     return binary_op_configs
 
 def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
@@ -95,7 +105,8 @@ def _get_linear_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPattern
     linear_configs.append(
         BackendPatternConfig(torch.nn.functional.linear)
             .set_observation_type(observation_type)  # noqa: E131
-            .set_dtype_configs(dtype_configs))
+            .set_dtype_configs(dtype_configs)
+            ._set_input_type_to_index({"weight": 1, "bias": 2}))
 
     # (2) Linear + relu
     # -------------------
@@ -197,7 +208,8 @@ def _get_conv_configs(dtype_configs):
         conv_configs.append(
             BackendPatternConfig(convs.func)
                 .set_observation_type(observation_type)  # noqa: E131
-                .set_dtype_configs(dtype_configs))
+                .set_dtype_configs(dtype_configs)
+                ._set_input_type_to_index({"weight": 1, "bias": 2}))
 
         # (2) Conv + relu
         # -----------------
@@ -324,6 +336,80 @@ def _get_conv_configs(dtype_configs):
 
     return conv_configs
 
+def _get_cat_config(dtype_configs: List[DTypeConfig]) -> BackendPatternConfig:
+    return BackendPatternConfig(torch.cat) \
+        .set_observation_type(ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT) \
+        .set_dtype_configs(dtype_configs)
+
+def _get_ln_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+    ln_configs = []
+    ln_configs.append(
+        BackendPatternConfig(torch.nn.LayerNorm)
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+    )
+    ln_configs.append(
+        BackendPatternConfig(torch.nn.functional.layer_norm)
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        ._set_input_type_to_index({"weight": 2, "bias": 3})
+    )
+    return ln_configs
+
+def _get_default_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+    configs = []
+    default_ops = [
+        torch.nn.ELU,
+        torch.nn.LeakyReLU,
+        torch.nn.Hardswish,
+        torch.nn.InstanceNorm1d,
+        torch.nn.InstanceNorm2d,
+        torch.nn.InstanceNorm3d,
+        torch.nn.Dropout,
+        torch.nn.PReLU,
+        torch.nn.functional.elu,
+        torch.nn.functional.hardswish,
+        torch.nn.functional.leaky_relu,
+        torch.nn.functional.dropout,
+    ]
+    for op in default_ops:
+        configs.append(
+            BackendPatternConfig(op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs))
+
+    configs.append(
+        BackendPatternConfig(torch.nn.functional.group_norm)
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        ._set_input_type_to_index({"weight": 2, "bias": 3})
+    )
+
+    configs.append(
+        BackendPatternConfig(torch.nn.functional.instance_norm)
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        ._set_input_type_to_index({"weight": 3, "bias": 4})
+    )
+    return configs
+
+def _get_fixed_qparams_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+    fixed_qparams_op_configs = []
+    for fixed_qparam_op, output_observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
+        fixed_qparams_op_configs.append(
+            # TODO: The _overwrite_output keys are temporary, since we don't want to put observer
+            # in the configs we expect that it's provided by user
+            # What we want to put here is the requirement on observers, in this case dtype,
+            # quant_min, quant_max etc., but we need to first move all configs to
+            # backend_config_dict to do that, we'll remove these keys after we fully migrated
+            # everything to use backend_config_dict
+            BackendPatternConfig(fixed_qparam_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                ._set_overwrite_output_fake_quantize(FixedQParamsFakeQuantize.with_args(observer=output_observer))
+                ._set_overwrite_output_observer(output_observer))
+    return fixed_qparams_op_configs
+
 def _get_share_qparams_op_configs(dtype_configs):
     """ Get the operator config for the operators that works for both float and quantized input
     if input is quantized, the output Tensor shares the same quantization parameter
@@ -397,6 +483,80 @@ def _get_share_qparams_op_configs(dtype_configs):
         "view"
     ]
     return [_get_share_qprams_op_backend_config(op) for op in share_qparams_ops]
+
+def _get_bn_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+    """ Get configs related to batchnorm. """
+    bn_configs = []
+    bn_to_fused_bn = {
+        torch.nn.BatchNorm2d: nni.BNReLU2d,
+        torch.nn.BatchNorm3d: nni.BNReLU3d,
+    }
+    for bn in bn_to_fused_bn.keys():
+        fused_bn = bn_to_fused_bn[bn]
+        # bn module + relu module fusion config
+        bn_configs.append(
+            BackendPatternConfig((torch.nn.ReLU, bn))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_fuser_method(reverse_sequential_wrapper2(fused_bn))
+                .set_fused_module(fused_bn))
+        # bn module + F.relu fusion config
+        bn_configs.append(
+            BackendPatternConfig((torch.nn.functional.relu, bn))
+                .set_dtype_configs(dtype_configs)  # noqa: E131
+                .set_fuser_method(reverse_sequential_wrapper2(bn_to_fused_bn[bn]))
+                .set_fused_module(fused_bn))
+        bn_configs.append(
+            BackendPatternConfig(bn)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs))
+
+    # fused bn configs
+    for fused_bn in bn_to_fused_bn.values():
+        bn_configs.append(
+            BackendPatternConfig(fused_bn)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs))
+    return bn_configs
+
+def _get_rnn_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+    rnn_op_configs = []
+    for rnn_op, ref_rnn_op in [
+            (nn.GRUCell, nnqr.GRUCell),
+            (nn.LSTMCell, nnqr.LSTMCell),
+            (nn.RNNCell, nnqr.RNNCell),
+            (nn.LSTM, nnqr.LSTM)
+    ]:
+        rnn_op_configs.append(
+            BackendPatternConfig(rnn_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_root_module(rnn_op)
+                .set_reference_quantized_module(ref_rnn_op))
+    return rnn_op_configs
+
+def _get_embedding_op_configs(dtype_configs: List[DTypeConfig]) -> List[BackendPatternConfig]:
+    embedding_op_configs = []
+    for embedding_op, qat_embedding_op, ref_embedding_op in [
+            (nn.Embedding, nnqat.Embedding, nnqr.Embedding),
+            (nn.EmbeddingBag, nnqat.EmbeddingBag, nnqr.EmbeddingBag),
+    ]:
+        embedding_op_configs.append(
+            BackendPatternConfig(embedding_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_qat_module(qat_embedding_op)
+                .set_root_module(embedding_op)
+                .set_reference_quantized_module(ref_embedding_op)
+                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+        # config for qat op
+        embedding_op_configs.append(
+            BackendPatternConfig(qat_embedding_op)
+                .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
+                .set_dtype_configs(dtype_configs)
+                .set_root_module(embedding_op)
+                .set_reference_quantized_module(ref_embedding_op)
+                ._set_input_output_observed(False))  # This is temporary, and will be removed soon
+    return embedding_op_configs
 
 __all__ = [
     "_get_binary_op_configs",

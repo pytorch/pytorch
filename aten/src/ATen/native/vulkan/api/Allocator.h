@@ -22,7 +22,7 @@
 
 #define VMA_STATS_STRING_ENABLED 0
 
-#ifdef DEBUG
+#ifdef VULKAN_DEBUG
 #define VMA_DEBUG_ALIGNMENT 4096
 #define VMA_DEBUG_ALWAYS_DEDICATED_MEMORY 0
 #define VMA_DEBUG_DETECT_CORRUPTION 1
@@ -39,7 +39,7 @@
     printf("\n"); \
 } while(false)
 */
-#endif /* DEBUG */
+#endif /* VULKAN_DEBUG */
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -47,7 +47,7 @@
 #pragma clang diagnostic ignored "-Wunused-variable"
 #endif /* __clang__ */
 
-#include <ATen/native/vulkan/api/vk_mem_alloc.h>
+#include <include/vk_mem_alloc.h>
 
 #ifdef __clang__
 #pragma clang diagnostic pop

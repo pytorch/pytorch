@@ -6,8 +6,23 @@ import torch.nn.functional as F
 from .backend_config import BackendConfig, DTypeConfig
 from ..quantization_types import Pattern
 
+__all__ = [
+    "get_pattern_to_dtype_configs",
+    "get_qat_module_classes",
+    "get_fused_module_classes",
+    "get_pattern_to_input_type_to_index",
+    "get_root_module_to_quantized_reference_module",
+    "get_fuser_method_mapping",
+    "get_module_to_qat_module",
+    "get_fusion_pattern_to_root_node_getter",
+    "get_fusion_pattern_to_extra_inputs_getter",
+    "remove_boolean_dispatch_from_name",
+    "pattern_to_human_readable",
+    "entry_to_pretty_str",
+]
+
 def get_pattern_to_dtype_configs(backend_config: BackendConfig) -> Dict[Pattern, List[DTypeConfig]]:
-    pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = dict()
+    pattern_to_dtype_configs: Dict[Pattern, List[DTypeConfig]] = {}
     for pattern, config in backend_config.configs.items():
         pattern_to_dtype_configs[pattern] = config.dtype_configs
     return pattern_to_dtype_configs
@@ -27,28 +42,28 @@ def get_fused_module_classes(backend_config: BackendConfig) -> Tuple[type, ...]:
     return tuple(set(fused_module_classes))
 
 def get_pattern_to_input_type_to_index(backend_config: BackendConfig) -> Dict[Pattern, Dict[str, int]]:
-    pattern_to_input_type_to_index: Dict[Pattern, Dict[str, int]] = dict()
+    pattern_to_input_type_to_index: Dict[Pattern, Dict[str, int]] = {}
     for pattern, config in backend_config.configs.items():
         pattern_to_input_type_to_index[pattern] = config._input_type_to_index
     return pattern_to_input_type_to_index
 
 def get_root_module_to_quantized_reference_module(
         backend_config: BackendConfig) -> Dict[Type[torch.nn.Module], Type[torch.nn.Module]]:
-    mapping: Dict[Type[torch.nn.Module], Type[torch.nn.Module]] = dict()
+    mapping: Dict[Type[torch.nn.Module], Type[torch.nn.Module]] = {}
     for config in backend_config.configs.values():
         if config.root_module is not None and config.reference_quantized_module is not None:
             mapping[config.root_module] = config.reference_quantized_module
     return mapping
 
 def get_fuser_method_mapping(backend_config: BackendConfig) -> Dict[Pattern, Union[nn.Sequential, Callable]]:
-    fuser_method_mapping : Dict[Pattern, Union[nn.Sequential, Callable]] = dict()
+    fuser_method_mapping : Dict[Pattern, Union[nn.Sequential, Callable]] = {}
     for pattern, config in backend_config.configs.items():
         if config.fuser_method is not None:
             fuser_method_mapping[pattern] = config.fuser_method
     return fuser_method_mapping
 
 def get_module_to_qat_module(backend_config: BackendConfig) -> Dict[Pattern, Type[torch.nn.Module]]:
-    module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]] = dict()
+    module_to_qat_module: Dict[Pattern, Type[torch.nn.Module]] = {}
     for pattern, config in backend_config.configs.items():
         if config.qat_module is not None:
             module_to_qat_module[pattern] = config.qat_module
@@ -64,7 +79,7 @@ def get_fusion_pattern_to_root_node_getter(backend_config: BackendConfig) -> Dic
     This can work for all patterns whose root node is the "last node" in the pattern,
     e.g. (torch.add, MatchAllNode, (torch.ReLU, torch.Conv2d))
     """
-    root_node_getter_mapping: Dict[Pattern, Callable] = dict()
+    root_node_getter_mapping: Dict[Pattern, Callable] = {}
     for pattern, config in backend_config.configs.items():
         if config._root_node_getter is not None:
             root_node_getter_mapping[pattern] = config._root_node_getter
@@ -84,7 +99,7 @@ def get_fusion_pattern_to_extra_inputs_getter(backend_config: BackendConfig) -> 
         add, extra_input, conv_pattern = pattern
         return [extra_input]
     """
-    extra_inputs_getter_mapping: Dict[Pattern, Callable] = dict()
+    extra_inputs_getter_mapping: Dict[Pattern, Callable] = {}
     for pattern, config in backend_config.configs.items():
         if config._extra_inputs_getter is not None:
             extra_inputs_getter_mapping[pattern] = config._extra_inputs_getter

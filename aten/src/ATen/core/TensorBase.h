@@ -48,6 +48,7 @@ inline bool variable_excluded_from_dispatch() {
   return c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
 #endif
 }
+
 }
 
 // NOTE: [Tensor vs. TensorBase]
@@ -161,6 +162,14 @@ class TORCH_API TensorBase {
     return impl_->sym_size(dim);
   }
 
+  c10::SymInt sym_stride(int64_t dim) const {
+    const auto sizes = this->sym_strides();
+    const auto ndim = static_cast<int64_t>(sizes.size());
+    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
+    return sizes[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
+
+  }
+
   int64_t size(int64_t dim) const {
     return impl_->size(dim);
   }
@@ -225,6 +234,9 @@ class TORCH_API TensorBase {
   c10::SymIntArrayRef sym_sizes() const {
     return impl_->sym_sizes();
   }
+  c10::SymIntArrayRef sym_strides() const {
+    return impl_->sym_strides();
+  }
   IntArrayRef strides() const {
     return impl_->strides();
   }
@@ -288,6 +300,10 @@ class TORCH_API TensorBase {
 
   c10::SymInt sym_numel() const {
     return impl_->sym_numel();
+  }
+
+  c10::SymInt sym_storage_offset() const {
+    return impl_->sym_storage_offset();
   }
 
   // Length of one array element in bytes.  This is the traditional
@@ -553,6 +569,10 @@ class TORCH_API TensorBase {
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
   PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    TORCH_CHECK(
+        impl_->numel() <=
+            static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+        "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
     return generic_packed_accessor<T,N,PtrTraits,int32_t>();
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>

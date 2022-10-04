@@ -78,6 +78,7 @@ class DispatchKey(Enum):
     SparseCsrCPU = auto()
     SparseCsrCUDA = auto()
 
+    Python = auto()
     ZeroTensor = auto()
     BackendSelect = auto()
     Named = auto()
@@ -93,6 +94,7 @@ class DispatchKey(Enum):
 
     Autograd = auto()
     CompositeImplicitAutograd = auto()
+    CompositeImplicitAutogradNestedTensor = auto()
     CompositeExplicitAutograd = auto()
     CompositeExplicitAutogradNonFunctional = auto()
 
@@ -217,6 +219,7 @@ dispatch_keys = [
     DispatchKey.QuantizedCPU,
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
+    DispatchKey.CompositeImplicitAutogradNestedTensor,
     DispatchKey.CompositeExplicitAutograd,
     DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
@@ -237,6 +240,7 @@ def is_generic_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeImplicitAutogradNestedTensor,
     }
 
 
@@ -485,6 +489,7 @@ class NativeFunction:
 
     # Whether or not the NativeFunction contains a backend-agnostic kernel
     has_composite_implicit_autograd_kernel: bool
+    has_composite_implicit_autograd_nested_tensor_kernel: bool
     has_composite_explicit_autograd_kernel: bool
     has_composite_explicit_autograd_non_functional_kernel: bool
 
@@ -666,9 +671,11 @@ class NativeFunction:
             )
             # if a function is a structured delegate, deleting the dispatch
             # table is NOT semantics preserving
-            assert structured_delegate or dispatch.keys() != {
-                DispatchKey.CompositeImplicitAutograd
-            }, (
+            assert (
+                structured_delegate
+                or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+                or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
+            ), (
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
                 "name, then delete the dispatch table"
@@ -699,9 +706,20 @@ class NativeFunction:
             if d == DispatchKey.CompositeExplicitAutograd
             or d == DispatchKey.CompositeExplicitAutogradNonFunctional
             or d == DispatchKey.CompositeImplicitAutograd
+            or d == DispatchKey.CompositeImplicitAutogradNestedTensor
         ]
 
-        assert len(composites_in_dispatch) <= 1, (
+        assert len(composites_in_dispatch) <= 1 or (
+            len(composites_in_dispatch) == 2
+            and (
+                DispatchKey.CompositeExplicitAutogradNonFunctional
+                not in composites_in_dispatch
+            )
+            and (
+                DispatchKey.CompositeImplicitAutogradNestedTensor
+                in composites_in_dispatch
+            )
+        ), (
             "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
             "or CompositeImplicitAutograd on a single kernel; each "
             "strictly subsumes the other.  If you wanted to provide an explicit autograd "
@@ -756,10 +774,22 @@ class NativeFunction:
             # Structured functions MUST have a dispatch table
             is_abstract = True
         else:
-            is_abstract = dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+            is_abstract = (
+                dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
+                and dispatch.keys()
+                != {DispatchKey.CompositeImplicitAutogradNestedTensor}
+                and dispatch.keys()
+                != {
+                    DispatchKey.CompositeImplicitAutograd,
+                    DispatchKey.CompositeImplicitAutogradNestedTensor,
+                }
+            )
 
         has_composite_implicit_autograd_kernel = (
             DispatchKey.CompositeImplicitAutograd in dispatch.keys()
+        )
+        has_composite_implicit_autograd_nested_tensor_kernel = (
+            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch.keys()
         )
         has_composite_explicit_autograd_kernel = (
             DispatchKey.CompositeExplicitAutograd in dispatch.keys()
@@ -808,6 +838,7 @@ class NativeFunction:
                 cpp_no_default_args=cpp_no_default_args,
                 is_abstract=is_abstract,
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
+                has_composite_implicit_autograd_nested_tensor_kernel=has_composite_implicit_autograd_nested_tensor_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
                 has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
@@ -815,9 +846,6 @@ class NativeFunction:
             ),
             backend_metadata,
         )
-
-    def symints_to_ints(self) -> "NativeFunction":
-        return dataclasses.replace(self, func=self.func.symints_to_ints())
 
     def validate_unstructured(self) -> None:
         # TODO: probably better to accumulate these errors and report them all
@@ -882,12 +910,29 @@ class NativeFunction:
                 "device_check not allowed to be enabled"
             )
 
+        # NB: if your function accidentally has rand/dropout/... in its name
+        # but is not actually random, feel free to amend this to special case
+        if (
+            "rand" in str(self.func.name)
+            or (
+                "dropout" in str(self.func.name)
+                # Backwards of dropout is typically deterministic
+                and "backward" not in str(self.func.name)
+                and str(self.func.name.name) not in ["_cudnn_init_dropout_state"]
+            )
+            or self.func.arguments.has_generator_arg()
+        ):
+            assert "nondeterministic_seeded" in self.tags, str(self.func.name)
+
     @property
     def has_composite_kernel(self) -> bool:
         return (
             self.has_composite_implicit_autograd_kernel
             or self.has_composite_explicit_autograd_kernel
             or self.has_composite_explicit_autograd_non_functional_kernel
+        ) or (
+            self.has_composite_implicit_autograd_kernel
+            and self.has_composite_implicit_autograd_nested_tensor_kernel
         )
 
     @property
@@ -901,7 +946,7 @@ class NativeFunction:
             "inplace_view" in self.tags and str(self.func.name) != "resize_"
         )
         is_wildcard_view = any(
-            inp.annotation is not None and inp.annotation.alias_set_after != ""
+            inp.annotation is not None and "*" in inp.annotation.alias_set_after
             for inp in self.func.schema_order_arguments()
         )
         return is_non_mutating_view or is_inplace_view or is_wildcard_view
@@ -919,6 +964,10 @@ class NativeFunction:
     @property
     def root_name(self) -> str:
         return self.func.name.name.base
+
+    @property
+    def part_of_structured_group(self) -> bool:
+        return self.structured or self.structured_delegate is not None
 
 
 SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
@@ -949,6 +998,12 @@ class NativeFunctionsGroup:
                     "NativeFunctionsGroup constructed from two NativeFunctions "
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
+
+            if self.structured != f.part_of_structured_group:
+                raise AssertionError(
+                    "NativeFunctionsGroup constructed from structured and unstructured "
+                    f"functions: {self.out.func.name} and {f.func.name}"
+                )
         assert self.functional.func.kind() == SchemaKind.functional
         assert self.out.func.kind() == SchemaKind.out
         assert self.functional.namespace == self.out.namespace
@@ -965,7 +1020,10 @@ class NativeFunctionsGroup:
         if self.structured:
             # For now, structured composite kernels are not supported (need some
             # design work to figure out how to make the composite case work)
-            assert not self.out.has_composite_implicit_autograd_kernel
+            assert (
+                not self.out.has_composite_implicit_autograd_kernel
+                and not self.out.has_composite_implicit_autograd_nested_tensor_kernel
+            )
 
             assert self.functional.structured_delegate == self.out.func.name, (
                 f"{self.functional.func.name} delegates to {self.functional.structured_delegate} "
@@ -974,12 +1032,16 @@ class NativeFunctionsGroup:
             if self.inplace is not None:
                 assert self.inplace.structured_delegate == self.out.func.name
 
-        generated_fns = [
-            str(f.func.name) for f in self.functions() if "generated" in f.tags
-        ]
+        generated_fns = sorted(
+            [str(f.func.name) for f in self.functions() if "generated" in f.tags]
+        )
         generated_fns_str = ", ".join(str(x) for x in generated_fns)
-        expected_generated_fns = f.autogen
-        expected_generated_fns_str = ", ".join(str(x) for x in expected_generated_fns)
+        expected_generated_fns: Set[str] = set()
+        for f in self.functions():
+            expected_generated_fns.update(str(op) for op in f.autogen)
+        expected_generated_fns_str = ", ".join(
+            str(x) for x in sorted(list(expected_generated_fns))
+        )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(
                 f"The codegen expects to be able to generate '{generated_fns_str}'."
@@ -1054,6 +1116,9 @@ class BackendMetadata:
     # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
     cpp_namespace: str
 
+    def supports_symint(self) -> bool:
+        return "_symint" in self.kernel
+
 
 @dataclass(frozen=True)
 class UfuncInnerLoop:
@@ -1082,7 +1147,7 @@ class UfuncInnerLoop:
 # (the 'dispatch' entry in native_functions.yaml).
 # However, there can be other examples of different backends having different information.
 # External backends can choose to opt their kernels to be structured independently from in-tree backends,
-# which means that this information isn't inherentely tied to a NativeFunction- it's different per backend.
+# which means that this information isn't inherently tied to a NativeFunction- it's different per backend.
 @dataclass(frozen=True)
 class BackendIndex:
     dispatch_key: DispatchKey
@@ -1215,9 +1280,6 @@ class FunctionSchema:
 
     decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
 
-    def symints_to_ints(self) -> "FunctionSchema":
-        return dataclasses.replace(self, arguments=self.arguments.symints_to_ints())
-
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
         # We should probably get a proper parser here
@@ -1326,7 +1388,7 @@ class FunctionSchema:
 
         if self.arguments.tensor_options is not None:
             assert self.kind() == SchemaKind.functional, (
-                "Found an operator that is not functional, but has tensor options arguments."
+                "Found an operator that is not functional or out varuabt, but has tensor options arguments."
                 "This is not allowed- tensor options arguments are only allowed for factory functions."
                 f"schema: {str(self)}"
             )
@@ -1339,10 +1401,6 @@ class FunctionSchema:
 
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
-
-    def is_symint_fn(self) -> bool:
-        # TODO: make this more robust
-        return "SymInt" in self.name.overload_name
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -1551,6 +1609,11 @@ class FunctionSchema:
     def modifies_arguments(self) -> bool:
         return self.kind() in [SchemaKind.inplace, SchemaKind.out, SchemaKind.mutable]
 
+    def has_symint(self) -> bool:
+        return self.arguments.has_symint_arg() or any(
+            r.type.is_symint_like() for r in self.returns
+        )
+
     def __str__(self) -> str:
         all_arguments_str = str(self.arguments)
         if len(self.returns) == 1:
@@ -1573,26 +1636,37 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
-    alias_set_after: str
+    alias_set_after: Tuple[str, ...]
 
     @staticmethod
     def parse(ann: str) -> "Annotation":
-        # Only handling afterSet == Wildcard for now
-        becomes_wildcard_index = ann.find(" -> *")
-        if becomes_wildcard_index != -1:
-            after_set = "*"
-            # TODO: im not good enough with regexes to ignore -> *
-            m = re.match(
-                r"^([a-z])(!?)(!?)$",
-                ann[:becomes_wildcard_index]
-                + ann[becomes_wildcard_index + len(" -> *") :],
-            )
-        else:
-            after_set = ""
-            m = re.match(r"^([a-z])(!?)(!?)$", ann)
+        # TODO: implement a proper parser if this gets more ugly
+        # Regex Explanation:
+        # Example: "a! -> a|b"
+        # Group #1: alias before optional '|', required. Matches the first
+        #   character 'a' in the example
+        # Group #2: optional alias set after optional '|', matches empty string
+        #   in the example
+        # Group #3: optional "is write" flag, matches '!' in the example.
+        # Group #4: optional section containing arrow, matches " -> a|b" in the
+        #   example.
+        # Group #5: optional alias after set, supports wildcard, matches "a|b"
+        #   in the example.
+        # Group #6: optional sub-section of alias after set, matches "|b" in the
+        #   example.
+        m = re.match(r"^([a-z])(\|[a-z])*(!?)( -> (\*|[a-z](\|[a-z])*))?$", ann)
+
         assert m is not None, f"unrecognized alias annotation {ann}"
-        alias_set = (m.group(1),)
-        is_write = m.group(2) == "!"
+        before_alias = m.group(1) + (m.group(2) if m.group(2) else "")
+        alias_set = tuple(before_alias.split("|"))
+        is_write = m.group(3) == "!"
+        assert not (
+            is_write and len(alias_set) > 1
+        ), f"alias set larger than 1 is not mutable, got {ann} instead."
+        after_set = tuple(m.group(5).split("|")) if m.group(5) else tuple()
+        assert not (
+            len(before_alias) > 1 and len(after_set) > 1
+        ), f"before alias set and after alias set cannot be larger than 1 at the same time, got {ann} instead."
         r = Annotation(
             alias_set=alias_set, is_write=is_write, alias_set_after=after_set
         )
@@ -1601,10 +1675,12 @@ class Annotation:
 
     def __str__(self) -> str:
         alias_set = "|".join(self.alias_set)
-        if self.alias_set_after:
-            alias_set = f'{alias_set}{" -> "}{self.alias_set_after}'
-        is_write = "!" if self.is_write else ""
-        return f"{alias_set}{is_write}"
+        if self.is_write:
+            alias_set = f"{alias_set}!"
+        alias_set_after = "|".join(self.alias_set_after)
+        if alias_set_after:
+            alias_set = f'{alias_set}{" -> "}{alias_set_after}'
+        return alias_set
 
 
 # The base class for the type system.  This is also loosely modeled
@@ -1648,16 +1724,22 @@ class Type:
     # so we can conveniently generate legacy Declarations.yaml but
     # really we should probably just remove these at some point
 
-    def is_tensor_like(self) -> bool:
+    def is_base_ty_like(self, base_ty: "BaseTy") -> bool:
         raise NotImplementedError
+
+    def is_tensor_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.Tensor)
+
+    def is_generator_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.Generator)
+
+    def is_symint_like(self) -> bool:
+        return self.is_base_ty_like(BaseTy.SymInt)
 
     def is_nullable(self) -> bool:
         raise NotImplementedError
 
     def is_list_like(self) -> Optional["ListType"]:
-        raise NotImplementedError
-
-    def symint_to_int(self) -> "Type":
         raise NotImplementedError
 
 
@@ -1694,19 +1776,17 @@ class BaseType(Type):
     def __str__(self) -> str:
         return f"{self.name.name}"
 
-    def is_tensor_like(self) -> bool:
-        return self.name == BaseTy.Tensor
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.name == base_ty
 
     def is_nullable(self) -> bool:
         return False
 
-    def symint_to_int(self) -> "BaseType":
-        if self.name == BaseTy.SymInt:
-            return BaseType(BaseTy.int)
-        return self
-
     def is_list_like(self) -> Optional["ListType"]:
         return None
+
+    def is_symint_like(self) -> bool:
+        return self.name == BaseTy.SymInt
 
 
 # Optional types may be specified, or may also be validly given None
@@ -1717,14 +1797,14 @@ class OptionalType(Type):
     def __str__(self) -> str:
         return f"{self.elem}?"
 
-    def is_tensor_like(self) -> bool:
-        return self.elem.is_tensor_like()
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.elem.is_base_ty_like(base_ty)
+
+    def is_symint_like(self) -> bool:
+        return self.elem.is_symint_like()
 
     def is_nullable(self) -> bool:
         return True
-
-    def symint_to_int(self) -> "Type":
-        return dataclasses.replace(self, elem=self.elem.symint_to_int())
 
     def is_list_like(self) -> Optional["ListType"]:
         return self.elem.is_list_like()
@@ -1741,10 +1821,10 @@ class CustomClassType(Type):
         """
         return f"__torch__.torch.classes.{self.class_name}"
 
-    def is_tensor_like(self) -> bool:
-        """
-        Assume a custom class is not a tensor.
-        """
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return False
+
+    def is_symint_like(self) -> bool:
         return False
 
     def is_nullable(self) -> bool:
@@ -1752,9 +1832,6 @@ class CustomClassType(Type):
         Assume a custom class is not nullable.
         """
         return False
-
-    def symint_to_int(self) -> "Type":
-        return self
 
     def is_list_like(self) -> Optional["ListType"]:
         return None
@@ -1776,14 +1853,14 @@ class ListType(Type):
         size = f"{self.size}" if self.size else ""
         return f"{self.elem}[{size}]"
 
-    def is_tensor_like(self) -> bool:
-        return self.elem.is_tensor_like()
+    def is_base_ty_like(self, base_ty: BaseTy) -> bool:
+        return self.elem.is_base_ty_like(base_ty)
+
+    def is_symint_like(self) -> bool:
+        return self.elem.is_symint_like()
 
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
-
-    def symint_to_int(self) -> "ListType":
-        return ListType(self.elem.symint_to_int(), self.size)
 
     def is_list_like(self) -> Optional["ListType"]:
         return self
@@ -1857,9 +1934,6 @@ class Argument:
     @property
     def is_write(self) -> bool:
         return self.annotation is not None and self.annotation.is_write
-
-    def symint_to_int(self) -> "Argument":
-        return dataclasses.replace(self, type=self.type.symint_to_int())
 
     def __str__(self) -> str:
         type = f"{self.type}"
@@ -2050,39 +2124,14 @@ class Arguments:
             if a.annotation is not None and a.annotation.is_write
         ]
 
-    def symints_to_ints(self) -> "Arguments":
-        arguments = self
-
-        if arguments.self_arg:
-            arguments = dataclasses.replace(
-                arguments,
-                pre_self_positional=[
-                    x.symint_to_int() for x in arguments.pre_self_positional
-                ],
-            )
-
-        if self.tensor_options:
-            arguments = dataclasses.replace(
-                arguments,
-                post_tensor_options_kwarg_only=[
-                    x.symint_to_int() for x in arguments.post_tensor_options_kwarg_only
-                ],
-            )
-
-        arguments = dataclasses.replace(
-            arguments,
-            post_self_positional=[
-                x.symint_to_int() for x in arguments.post_self_positional
-            ],
-            pre_tensor_options_kwarg_only=[
-                x.symint_to_int() for x in arguments.pre_tensor_options_kwarg_only
-            ],
-        )
-
-        return arguments
-
     def has_tensor_arg(self) -> bool:
         return any(a.type.is_tensor_like() for a in self.flat_non_out)
+
+    def has_symint_arg(self) -> bool:
+        return any(a.type.is_symint_like() for a in self.flat_non_out)
+
+    def has_generator_arg(self) -> bool:
+        return any(a.type.is_generator_like() for a in self.flat_non_out)
 
     def signature(self, *, strip_default: bool = False) -> "Arguments":
         # dataclasses.replace could be used here, but it is less
@@ -2508,6 +2557,14 @@ class NativeFunctionsViewGroup:
                 assert self.view_inplace.has_composite_implicit_autograd_kernel, (
                     f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
                     " both have CompositeImplicitAutograd kernels, or both not have composite kernels."
+                )
+        if self.view.has_composite_implicit_autograd_nested_tensor_kernel:
+            if self.view_inplace is not None:
+                assert (
+                    self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel
+                ), (
+                    f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
+                    " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
                 )
 
     def functions(self, *, include_copy: bool = True) -> Iterator[NativeFunction]:

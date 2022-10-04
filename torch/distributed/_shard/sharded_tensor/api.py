@@ -455,7 +455,7 @@ class ShardedTensor(ShardedTensorBase):
         world_size = dist.get_world_size(self._process_group)
         rank_sizes = [0 for _ in range(world_size)]
         max_rank_size = 0
-        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = dict()
+        shard_placement: Dict[ShardMetadata, Tuple[int, int]] = {}
         # collect sizes
         for shard_md in self.metadata().shards_metadata:
             shard_rank = cast(_remote_device, shard_md.placement).rank()
@@ -801,6 +801,7 @@ class ShardedTensor(ShardedTensorBase):
         Examples:
             >>> # All tensors below are of torch.int64 type.
             >>> # We have 2 process groups, 2 ranks.
+            >>> # xdoctest: +SKIP
             >>> tensor = torch.arange(2, dtype=torch.int64) + 1 + 2 * rank
             >>> local_tensor = torch.unsqueeze(torch.cat([tensor, tensor + 2]))
             >>> local_tensor
@@ -949,6 +950,7 @@ class ShardedTensor(ShardedTensorBase):
 
         Examples:
             >>> # We have 2 process groups, 2 ranks.
+            >>> # xdoctest: +SKIP
             >>> tensor = torch.arange(4, dtype=torch.int64) + 1 + 2 * rank
             >>> tensor = torch.stack([tensor, tensor])
             >>> tensor

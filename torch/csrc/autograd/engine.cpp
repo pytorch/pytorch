@@ -13,6 +13,12 @@
 #include <ATen/Parallel.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/isnan.h>
+#endif
+
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
@@ -366,6 +372,25 @@ GraphTaskGuard::~GraphTaskGuard() {
 
 void GraphTaskGuard::restore_current_graph_task() {
   current_graph_task = std::move(last_graph_task_);
+}
+
+// The current graph task's exec_info is being used to trim unnecessary edegs
+// during node evaluation, see `Node.task_should_compute_output()` function.
+const std::unordered_map<Node*, GraphTask::ExecInfo>*
+get_current_graph_task_exec_info() {
+  return current_graph_task ? &current_graph_task->exec_info_ : nullptr;
+}
+
+const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
+  return current_graph_task ? &current_graph_task->nodes_in_graph_ : nullptr;
+}
+
+bool get_current_graph_task_keep_graph() {
+  return current_graph_task ? current_graph_task->keep_graph_ : true;
+}
+
+void add_node_to_current_graph_task_exec_info(Node* fn) {
+  current_graph_task->exec_info_[fn].needed_ = true;
 }
 
 // NOTE: graph_tasks do not necessarily form a stack. Imagine this
@@ -887,7 +912,7 @@ void Engine::evaluate_function(
     return;
   }
 
-  if (AnomalyMode::is_enabled()) {
+  if (AnomalyMode::is_enabled() && AnomalyMode::should_check_nan()) {
     AutoGradMode grad_mode(false);
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
@@ -985,7 +1010,6 @@ auto Engine::compute_dependencies(
     GraphTask& task,
     uint64_t min_topo_nr) -> void {
   // Computes the number of dependencies for each function which requires grad
-  std::unordered_set<Node*> seen;
   std::vector<Node*> queue{root};
   bool might_use_cuda = at::globalContext().hasCUDA();
   bool will_use_cuda = false;
@@ -1005,7 +1029,7 @@ auto Engine::compute_dependencies(
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
-        const bool was_inserted = seen.insert(next_ptr).second;
+        const bool was_inserted = task.nodes_in_graph_.insert(next_ptr).second;
         if (was_inserted)
           queue.push_back(next_ptr);
       }

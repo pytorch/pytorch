@@ -325,6 +325,10 @@ def match_differentiability_info(
     def find_info(
         f: NativeFunction,
     ) -> Tuple[Optional[Dict[str, DifferentiabilityInfo]], bool]:
+        # Don't bother matching info to generated out= variants
+        if "generated" in f.tags and f.func.kind() == SchemaKind.out:
+            return None, False
+
         # (1) Check for an exact match
         if f.func in differentiability_infos:
             return differentiability_infos[f.func], True
@@ -379,7 +383,7 @@ Attempted to convert a derivative formula for a mutable operator
             )
             continue
 
-        fw_derivative_dict: Dict[str, Sequence[ForwardDerivative]] = dict()
+        fw_derivative_dict: Dict[str, Sequence[ForwardDerivative]] = {}
         for key, info in info_dict.items():
             if not info.forward_derivatives:
                 fw_derivative_dict[key] = []
@@ -534,7 +538,9 @@ def gen_differentiable_outputs(
     info = fn.info[key] if fn.info else None
     outputs: List[DifferentiableOutput] = [
         DifferentiableOutput(
-            name=name, type=ret.type, cpp_type=cpp.return_type(ret).cpp_type()
+            name=name,
+            type=ret.type,
+            cpp_type=cpp.return_type(ret, symint=True).cpp_type(),
         )
         for name, ret in zip(cpp.return_names(f), f.func.returns)
     ]
