@@ -28,6 +28,8 @@ template <class Key, class Value>
 class Dict;
 template <class T>
 class List;
+template <class T>
+class IListRef;
 struct IValue;
 struct ClassType;
 struct Type;
@@ -697,6 +699,15 @@ public:
   template <class T, size_t N>
   IValue(std::array<T, N> v);
 
+  template <class T>
+  using enable_if_ilist_is_ivalue_constructible = std::enable_if_t<
+      std::is_constructible<IValue, T>::value &&
+          std::is_constructible<IValue, typename IListRef<T>::boxed_type>::value,
+      std::nullptr_t>;
+
+  template <class T, enable_if_ilist_is_ivalue_constructible<T> = nullptr>
+  IValue(c10::IListRef<T> v);
+
   // GenericDict
   IValue(c10::Dict<IValue, IValue> v);
   bool isGenericDict() const {
@@ -769,7 +780,15 @@ public:
 
   // Scalar, which gets encoded as either an Int, a Double or a ComplexDouble
   IValue(const at::Scalar& s) : IValue() {
-    if (s.isFloatingPoint()) {
+    // NB: do the symbolic versions first, as isFloatingPoint is true
+    // for both SymFloat and double
+    if (s.isSymInt()) {
+      tag = Tag::SymInt;
+      payload.u.as_intrusive_ptr = s.toSymInt().toSymIntNodeImpl().release();
+    } else if (s.isSymFloat()) {
+      tag = Tag::SymFloat;
+      payload.u.as_intrusive_ptr = s.toSymFloat().toSymFloatNodeImpl().release();
+    } else if (s.isFloatingPoint()) {
       tag = Tag::Double;
       payload.u.as_double = s.toDouble();
     } else if (s.isComplex()) {
@@ -777,12 +796,6 @@ public:
     } else if (s.isBoolean()) {
       tag = Tag::Bool;
       payload.u.as_bool = s.toBool();
-    } else if (s.isSymInt()) {
-      tag = Tag::SymInt;
-      payload.u.as_intrusive_ptr = s.toSymInt().toSymIntNodeImpl().release();
-    } else if (s.isSymFloat()) {
-      tag = Tag::SymFloat;
-      payload.u.as_intrusive_ptr = s.toSymFloat().toSymFloatNodeImpl().release();
     } else {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(s.isIntegral(false), "Unknown type in Scalar");
       tag  = Tag::Int;

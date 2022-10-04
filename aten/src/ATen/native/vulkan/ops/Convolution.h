@@ -10,14 +10,13 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
+Tensor rearrange_weights_dw(const Tensor& weight_in);
+Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv);
+
 enum Conv2dMethod {
   Conv2dDepthwise,
   Conv2dPointwise,
   Conv2dSlidingWindow,
-  TConv2dSlidingWindow,
-  QConv2dDepthwise,
-  QConv2dPointwise,
-  QConv2dSlidingWindow,
 };
 
 class Conv2dPackedContext final : virtual public VulkanPackedContext,

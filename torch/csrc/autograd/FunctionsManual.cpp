@@ -1199,7 +1199,7 @@ Tensor convolution_backward_jvp_grad_bias(
 // Args:
 //  input              Tensor to call .strides() on
 //  input_name         Name of `input` tensor, from derivative formula
-at::IntArrayRef strides_or_error(
+at::SymIntArrayRef strides_or_error(
     const Tensor& input,
     c10::string_view const& input_name) {
   // TODO: Ideally, this function would never be called if requires_grad is
@@ -1215,20 +1215,20 @@ at::IntArrayRef strides_or_error(
         input_name,
         "'");
     if (input.is_mkldnn())
-      return IntArrayRef({});
+      return {};
     if (input.is_sparse_csr())
-      return IntArrayRef({});
-    return input.strides();
+      return {};
+    return input.sym_strides();
   } else {
-    return IntArrayRef({});
+    return {};
   }
 }
 
 Tensor mm_mat1_backward(
     const Tensor& grad,
     const Tensor& mat2,
-    at::IntArrayRef mat1_sizes,
-    at::IntArrayRef mat1_strides,
+    at::SymIntArrayRef mat1_sizes,
+    at::SymIntArrayRef mat1_strides,
     c10::Layout mat1_layout,
     const Scalar& alpha) {
   if (grad.layout() == c10::kStrided && mat2.layout() == c10::kStrided &&
@@ -1246,8 +1246,8 @@ Tensor mm_mat1_backward(
 Tensor mm_mat2_backward(
     const Tensor& grad,
     const Tensor& mat1,
-    IntArrayRef mat2_sizes,
-    IntArrayRef mat2_strides,
+    at::SymIntArrayRef mat2_sizes,
+    at::SymIntArrayRef mat2_strides,
     c10::Layout mat2_layout,
     const Scalar& alpha) {
   if (grad.layout() == c10::kStrided && mat1.layout() == c10::kStrided &&
@@ -1383,11 +1383,11 @@ Tensor renorm_backward(
 
 Tensor repeat_backward(
     Tensor grad,
-    IntArrayRef repeats,
-    IntArrayRef input_shape) {
+    c10::SymIntArrayRef repeats,
+    c10::SymIntArrayRef input_shape) {
   auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
-    return at::zeros(input_shape, grad.options());
+    return at::zeros_symint(input_shape, grad.options());
   }
   const auto input_dims = input_shape.size();
   int64_t num_unsqueezed = grad.dim() - input_dims;
@@ -1396,9 +1396,10 @@ Tensor repeat_backward(
     grad = grad.sum(0, false);
   }
 
-  at::DimVector grad_size, sum_dims;
+  at::SymDimVector grad_size;
+  at::DimVector sum_dims;
   for (const auto dim : c10::irange(input_dims)) {
-    int64_t repeat = repeats[dim + num_unsqueezed];
+    auto repeat = repeats[dim + num_unsqueezed];
     // Reshape gradient (repeat > 1)
     // Index:      [..., dim    , ...]    [..., dim   ,  dim+1        , ...]
     // Shape: From [..., dimsize, ...] to [..., repeat, dimsize/repeat, ...]
@@ -1457,7 +1458,7 @@ Tensor repeat_backward(
   // reduce the whole grad tensor into a scalar rather than keeping original
   // dimensions.
   if (!sum_dims.empty()) {
-    grad = grad.reshape(grad_size);
+    grad = grad.reshape_symint(grad_size);
     grad = grad.sum(sum_dims);
   }
   return grad;
@@ -5660,18 +5661,19 @@ Tensor lu_unpack_backward(
   }
 }
 
-Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
+Tensor cat_jvp(at::ITensorListRef tensors, int64_t dim) {
   Tensor out_fw_grad;
 
+  auto materialized = tensors.materialize();
   auto any_defined = false;
-  for (const auto& t : tensors) {
+  for (const Tensor& t : materialized) {
     any_defined |= isFwGradDefined(t);
   }
 
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
-    for (auto& t : tensors) {
+    for (const Tensor& t : materialized) {
       fw_grads.push_back(
           isFwGradDefined(t)
               ? t._fw_grad(/*level*/ 0)
