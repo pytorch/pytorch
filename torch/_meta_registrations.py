@@ -1211,14 +1211,14 @@ def arange_start(start, end, **kwargs):
 def meta_select(self, dim, index):
     ndim = self.dim()
     check(
-        ndim == 0, lambda: "select() cannot be applied to a 0-dim tensor.", IndexError
+        ndim != 0, lambda: "select() cannot be applied to a 0-dim tensor.", IndexError
     )
 
     dim = dim if dim >= 0 else dim + ndim
     size = self.size(dim)
 
     check(
-        -index > size or index >= size,
+        not (-index > size or index >= size),
         lambda: f"select(): index {index} out of range for tensor of size "
         f"{self.size()} at dimension {dim}",
         IndexError,
