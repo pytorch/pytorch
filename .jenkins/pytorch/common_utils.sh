@@ -113,32 +113,12 @@ function checkout_install_torchvision() {
 
 function checkout_install_torchdeploy() {
   local commit
-
-  mkdir ~/.pyenv
-  git clone https://github.com/pyenv/pyenv ~/.pyenv
-  echo 'export PYENV_ROOT="$HOME/.pyenv"'>>~/.bashrc
-  echo 'export PATH="$PYENV_ROOT/bin:$PATH"'>>~/.bashrc
-  echo 'eval "$(pyenv init -)"'>>~/.bashrc
-  exec $SHELL -l
-  pip install virtualenv
-
-
   pushd ..
   git clone https://github.com/pytorch/multipy
   pushd multipy
-  export CFLAGS="-fPIC -g"
-  pyenv install --force 3.8.6
-  virtualenv -p ~/.pyenv/versions/3.8.6/bin/python3 ~/venvs/multipy
-  python setup.py install
-  source ~/venvs/multipy/bin/activate
-  pushd multipy/runtime
-  python examples/generate_examples.py
-  mkdir build
-  pushd build
-  cmake ..
-  cmake --build .
-  popd
-  popd
+  mkdir temp
+  cp -r ../pytorch/dist temp/
+  DOCKER_BUILDKIT=1 docker build -t multipy --progress=plain
   popd
   popd
 }
