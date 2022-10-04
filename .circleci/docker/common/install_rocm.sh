@@ -71,6 +71,10 @@ install_ubuntu() {
         ROCM_REPO="xenial"
     fi
 
+    if [[ $(ver $ROCM_VERSION) -ge $(ver 5.3) ]]; then
+        ROCM_REPO="${UBUNTU_VERSION_NAME}"
+    fi
+
     # Add rocm repository
     wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
     local rocm_baseurl="http://repo.radeon.com/rocm/apt/${ROCM_VERSION}"
