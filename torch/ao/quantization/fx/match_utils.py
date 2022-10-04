@@ -27,7 +27,8 @@ __all__ = [
     "find_matches",
 ]
 
-
+# TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
+# would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
 
 _MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
