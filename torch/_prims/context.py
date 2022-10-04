@@ -262,7 +262,7 @@ class TorchRefsNvfuserCapabilityMode(TorchRefsMode):
             strict=False,
             should_fallback_fn=functools.partial(
                 _is_func_unsupported_nvfuser,
-                skip_ops=skip_ops + aten_ops_to_skip,
+                skip_ops=tuple(skip_ops) + aten_ops_to_skip,
             ),
             prims_mode_cls=functools.partial(NvfuserPrimsMode, skip_ops=skip_ops),
         )
