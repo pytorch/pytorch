@@ -113,9 +113,7 @@ def skipScriptTest(min_opset_version=float("inf"), reason=""):
         def wrapper(self, *args, **kwargs):
             self.is_script_test_enabled = self.opset_version >= min_opset_version
             if not self.is_script_test_enabled and self.is_script:
-                raise unittest.SkipTest(
-                    ": ".join(["Skip verify test for TorchScript", reason])
-                )
+                raise unittest.SkipTest(f"Skip verify test for TorchScript. {reason}")
             return func(self, *args, **kwargs)
 
         return wrapper
