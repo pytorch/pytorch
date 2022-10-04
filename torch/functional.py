@@ -199,7 +199,7 @@ def split(
 
 def einsum(*args: Any,
            optimize: Optional[Union[str, Sequence[int], Sequence[Tuple[int, int]]]] = None) -> Tensor:
-    r"""einsum(equation, *operands) -> Tensor
+    r"""einsum(equation, *operands, optimize=None) -> Tensor
 
     Sums the product of the elements of the input :attr:`operands` along dimensions specified using a notation
     based on the Einstein summation convention.
@@ -435,12 +435,12 @@ def einsum(*args: Any,
                         raise RuntimeError("einsum(): contractions in the optimize path must be 2-tuple of ints")
                     flattened_path.extend(contraction)
                 optimize = flattened_path
-        return _VF._einsum(equation, operands, path=optimize)  # type: ignore[attr-defined]
+        return _VF.einsum(str(equation), operands, path=optimize)  # type: ignore[attr-defined, arg-type]
 
     if len(operands) <= 2 or optimize == 'skip':
         # the path for contracting 0 or 1 time(s) is already optimized
         # or the user intentionally opts out of path calculation
-        return _VF._einsum(equation, operands)  # type: ignore[attr-defined]
+        return _VF.einsum(str(equation), operands)  # type: ignore[attr-defined]
 
     if _opt_einsum is None and optimize in possible_heuristics:
         raise RuntimeError(f"einsum(): optimize is set to {optimize}, but opt_einsum is not available to calculate "
@@ -452,7 +452,7 @@ def einsum(*args: Any,
         tupled_path = _opt_einsum.contract_path(equation, *operands, optimize=heuristic)[0]
         # flatten path for dispatching to C++
         path = [item for pair in tupled_path for item in pair]
-    return _VF._einsum(equation, operands, path=path)  # type: ignore[attr-defined]
+    return _VF.einsum(str(equation), operands, path=path)  # type: ignore[attr-defined]
 
 
 # This wrapper exists to support variadic args.

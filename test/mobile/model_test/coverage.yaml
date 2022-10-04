@@ -193,7 +193,7 @@ all_generated_ops:
 - aten::dropout_
 - aten::dsplit.array
 - aten::dstack
-- aten::_einsum
+- aten::einsum
 - aten::element_size
 - aten::elu
 - aten::embedding

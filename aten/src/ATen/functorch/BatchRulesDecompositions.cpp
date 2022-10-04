@@ -84,7 +84,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("diag_backward", native::diag_backward_symint);
   OP_DECOMPOSE(diff);
   OP_DECOMPOSE(dstack);
-  OP_DECOMPOSE(_einsum);
+  OP_DECOMPOSE(einsum);
   m.impl("embedding_backward", native::embedding_backward_symint);
   OP_DECOMPOSE(expand_as);
   OP_DECOMPOSE(fft_fft);

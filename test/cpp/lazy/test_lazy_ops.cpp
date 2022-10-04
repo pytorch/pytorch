@@ -3881,11 +3881,11 @@ TEST_F(LazyOpsTest, TestEinsumOuter) {
   torch::Tensor b = torch::rand(
       {5}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   std::string equation = "i,j->ij";
-  torch::Tensor c = torch::_einsum(equation, {a, b});
+  torch::Tensor c = torch::einsum(equation, {a, b});
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_b = CopyToDevice(b, device);
-    torch::Tensor lazy_c = torch::_einsum(equation, {lazy_a, lazy_b});
+    torch::Tensor lazy_c = torch::einsum(equation, {lazy_a, lazy_b});
     AllClose(c, lazy_c);
   });
 }
@@ -3903,7 +3903,7 @@ TEST_F(LazyOpsTest, TestEinsumOuterBackward) {
           .requires_grad(true));
   std::string equation = "i,j->ij";
   auto testfn = [&](const std::vector<torch::Tensor>& inputs) -> torch::Tensor {
-    return torch::_einsum(equation, inputs);
+    return torch::einsum(equation, inputs);
   };
   ForEachDevice([&](const torch::Device& device) {
     TestBackward({a, b}, device, testfn, /*rtol=*/1e-3, /*atol=*/1e-4);
@@ -3916,11 +3916,11 @@ TEST_F(LazyOpsTest, TestEinsumBatchMatMul) {
   torch::Tensor b = torch::rand(
       {3, 5, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   std::string equation = "bij,bjk->bik";
-  torch::Tensor c = torch::_einsum(equation, {a, b});
+  torch::Tensor c = torch::einsum(equation, {a, b});
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_b = CopyToDevice(b, device);
-    torch::Tensor lazy_c = torch::_einsum(equation, {lazy_a, lazy_b});
+    torch::Tensor lazy_c = torch::einsum(equation, {lazy_a, lazy_b});
     AllClose(c, lazy_c);
   });
 }
@@ -3933,12 +3933,12 @@ TEST_F(LazyOpsTest, TestEinsumPyTorchLowerBilinear) {
   torch::Tensor r = torch::rand(
       {2, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   std::string equation = "bn,anm,bm->ba";
-  torch::Tensor c = torch::_einsum(equation, {l, a, r});
+  torch::Tensor c = torch::einsum(equation, {l, a, r});
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_l = CopyToDevice(l, device);
     torch::Tensor lazy_a = CopyToDevice(a, device);
     torch::Tensor lazy_r = CopyToDevice(r, device);
-    torch::Tensor lazy_c = torch::_einsum(equation, {lazy_l, lazy_a, lazy_r});
+    torch::Tensor lazy_c = torch::einsum(equation, {lazy_l, lazy_a, lazy_r});
     AllClose(c, lazy_c);
   });
 }
@@ -3947,10 +3947,10 @@ TEST_F(LazyOpsTest, TestEinsumPyTorchLowerDiagonal) {
   torch::Tensor input = torch::rand(
       {3, 3}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   std::string equation = "ii->i";
-  torch::Tensor result = torch::_einsum(equation, {input});
+  torch::Tensor result = torch::einsum(equation, {input});
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
-    torch::Tensor lazy_result = torch::_einsum(equation, {lazy_input});
+    torch::Tensor lazy_result = torch::einsum(equation, {lazy_input});
     AllClose(result, lazy_result);
   });
 }
@@ -3959,10 +3959,10 @@ TEST_F(LazyOpsTest, TestEinsumPyTorchLowerBatchDiagonal) {
   torch::Tensor input = torch::rand(
       {4, 3, 3}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   std::string equation = "...ii->...i";
-  torch::Tensor result = torch::_einsum(equation, {input});
+  torch::Tensor result = torch::einsum(equation, {input});
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
-    torch::Tensor lazy_result = torch::_einsum(equation, {lazy_input});
+    torch::Tensor lazy_result = torch::einsum(equation, {lazy_input});
     AllClose(result, lazy_result);
   });
 }
@@ -3972,10 +3972,10 @@ TEST_F(LazyOpsTest, TestEinsumPyTorchLowerBatchPermute) {
       {2, 3, 4, 5},
       torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   std::string equation = "...ij->...ji";
-  torch::Tensor result = torch::_einsum(equation, {input});
+  torch::Tensor result = torch::einsum(equation, {input});
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_input = CopyToDevice(input, device);
-    torch::Tensor lazy_result = torch::_einsum(equation, {lazy_input});
+    torch::Tensor lazy_result = torch::einsum(equation, {lazy_input});
     AllClose(result, lazy_result);
   });
 }
@@ -3986,11 +3986,11 @@ TEST_F(LazyOpsTest, TestEinsumPyTorchLowerRepeatedAxis) {
   torch::Tensor y = torch::rand(
       {4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   std::string equation = "ijj,k->ik";
-  torch::Tensor result = torch::_einsum(equation, {x, y});
+  torch::Tensor result = torch::einsum(equation, {x, y});
   ForEachDevice([&](const torch::Device& device) {
     torch::Tensor lazy_x = CopyToDevice(x, device);
     torch::Tensor lazy_y = CopyToDevice(y, device);
-    torch::Tensor lazy_result = torch::_einsum(equation, {lazy_x, lazy_y});
+    torch::Tensor lazy_result = torch::einsum(equation, {lazy_x, lazy_y});
     AllClose(result, lazy_result);
   });
 }

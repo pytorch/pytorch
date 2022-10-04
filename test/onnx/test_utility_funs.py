@@ -83,8 +83,8 @@ class TestUnconvertibleOps(common_utils.TestCase):
         self.assertEqual(next(nodes).kind(), "prim::Constant")
         self.assertEqual(next(nodes).kind(), "prim::ListConstruct")
         self.assertEqual(next(nodes).kind(), "prim::Constant")
-        self.assertEqual(next(nodes).kind(), "aten::_einsum")
-        self.assertEqual(unconvertible_ops, ["aten::_einsum"])
+        self.assertEqual(next(nodes).kind(), "aten::einsum")
+        self.assertEqual(unconvertible_ops, ["aten::einsum"])
 
     @common_utils.parametrize(
         "jit_function",
@@ -104,7 +104,7 @@ class TestUnconvertibleOps(common_utils.TestCase):
 
         # Einsum is supported since opset 12. It should be unconvertible at opset 9.
         _, unconvertible_ops = utils.unconvertible_ops(module, (x,), opset_version=9)
-        self.assertEqual(unconvertible_ops, ["aten::_einsum"])
+        self.assertEqual(unconvertible_ops, ["aten::einsum"])
 
     @common_utils.parametrize(
         "jit_function",

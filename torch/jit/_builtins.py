@@ -105,6 +105,7 @@ _builtin_ops = [
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
     (torch._VF.tensordot, "aten::tensordot"),  # type: ignore[attr-defined]
+    (torch._VF.einsum, "aten::einsum"),  # type: ignore[attr-defined]
 ]
 
 # ops in torch.functional are bound to torch
@@ -116,7 +117,7 @@ def _gen_torch_functional_registered_ops():
     # but we are currently only able to compile some of the functions. additionally,
     # some functions directly map to their aten:: implementations.
     # TODO: add support for more ops
-    ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive", "tensordot"]
+    ops = ["stft", "istft", "lu", "cdist", "norm", "unique", "unique_consecutive", "tensordot", "einsum"]
     return set(getattr(torch.functional, name) for name in ops)
 
 _functional_registered_ops = _gen_torch_functional_registered_ops()
