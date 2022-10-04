@@ -1669,7 +1669,7 @@ def where(
 #
 # Data Movement References
 #
-@register_decomposition(torch.ops.aten.clone.default)
+@register_decomposition(torch.ops.aten.clone)
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
@@ -2750,8 +2750,10 @@ def native_layer_norm(
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
 # test/test_eager_transforms.py::TestFunctionalizeCPU::test_functionalize_fx_transpose_simple_cpu
 @register_decomposition(torch.ops.aten.permute, disable_meta=True)
-def permute(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
-    _permutation = utils.canonicalize_dims(a.ndim, dims)
+def permute(a: TensorLikeType, *dims) -> TensorLikeType:
+    _permutation = utils.canonicalize_dims(
+        a.ndim, utils.extract_dims_from_varargs(dims)
+    )
     return prims.transpose(a, _permutation)
 
 
@@ -3605,8 +3607,8 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
 def empty(
     *shape,
     dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
-    layout: Optional[torch.layout] = None,
     requires_grad: bool = False,
     pin_memory: bool = False,
     memory_format: torch.memory_format = torch.contiguous_format,
@@ -3652,6 +3654,7 @@ def new_empty(
 ) -> TensorLikeType:
 
     dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
     return torch.empty(
@@ -3679,6 +3682,7 @@ def new_empty_strided(
     """
 
     dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
     return torch.empty_strided(
@@ -3696,7 +3700,7 @@ def new_empty_strided(
 def zeros(
     *size,
     dtype: Optional[torch.dtype] = None,
-    layout: Optional[torch.layout] = None,
+    layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -3748,7 +3752,7 @@ def new_zeros(
 def ones(
     *size,
     dtype: Optional[torch.dtype] = None,
-    layout: Optional[torch.layout] = None,
+    layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -3827,12 +3831,13 @@ def empty_like(
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
     layout: Optional[torch.layout] = None,
-    requires_grad: bool = False,
     pin_memory: bool = False,
+    requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
 
     dtype = a.dtype if dtype is None else dtype
+    layout = a.layout if layout is None else layout
     device = a.device if device is None else device
 
     strides: Tuple[int, ...]
@@ -3875,13 +3880,13 @@ def arange(
     step: NumberType = 1,
     *,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
     layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
 ) -> TensorLikeType:
-    assert not pin_memory
-    assert layout == torch.strided
+    utils.check_layout(layout)
+    utils.check_pin_memory(pin_memory)
     # Case: torch.arange(5)
     if end is None:
         end = start
@@ -3891,8 +3896,8 @@ def arange(
         end,
         step,
         dtype=dtype,
-        device=device,
         # layout=layout,
+        device=device,
         # pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
@@ -3936,9 +3941,9 @@ def linspace(
     check(steps >= 0, lambda: "number of steps must be non-negative")
 
     factory_kwargs = {
+        "layout": layout,
         "device": device,
-        # "layout":layout,
-        # "pin_memory":pin_memory,
+        "pin_memory": pin_memory,
         "requires_grad": requires_grad,
     }
     if steps == 0:
@@ -4011,8 +4016,8 @@ def logspace(
         end,
         steps,
         dtype=torch.float64,
-        device=device,
         layout=layout,
+        device=device,
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
@@ -4163,15 +4168,13 @@ def empty_strided(
     *,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
-    layout: Optional[torch.layout] = None,
+    layout: torch.layout = torch.strided,
     requires_grad: bool = False,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-
-    if pin_memory:
-        raise NotImplementedError("PrimTorch doesn't support pinned memory")
-    if layout is not None and layout is not torch.strided:
-        raise NotImplementedError(f"PrimTorch doesn't support layout={layout}")
+    # Layout == strided, pin_memory is False
+    utils.check_layout(layout)
+    utils.check_pin_memory(pin_memory)
 
     shape = utils.extract_shape_from_varargs(shape)
     dtype = torch.get_default_dtype() if dtype is None else dtype
@@ -4201,10 +4204,6 @@ def eye(
     """
     Reference implementation of torch.eye
     """
-    # TODO: no support for layout, pin_memory
-    assert layout == torch.strided
-    assert pin_memory is False
-
     if m is None:
         m = n
 
@@ -4238,7 +4237,7 @@ def full(
     fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
-    layout: Optional[torch.layout] = None,
+    layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
     requires_grad: bool = False,
@@ -4259,11 +4258,25 @@ def full_like(
     fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
+    layout: Optional[torch.layout] = None,
     device: Optional[torch.device] = None,
+    pin_memory: bool = False,
     requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-    e = empty_like(a, dtype=dtype, device=device, requires_grad=requires_grad)
+    e = torch.empty_like(
+        a,
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+        memory_format=memory_format,
+    )
     return fill(e, fill_value)
+
+
+zeros_like = partial(full_like, fill_value=False)
 
 
 ones_like = partial(full_like, fill_value=True)
@@ -4298,19 +4311,20 @@ def randn(
     )
 
 
-# TODO: missing kwargs (e.g. layout)
 def scalar_tensor(
     a: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
     device: Optional[torch.device] = None,
+    pin_memory: bool = False,
 ) -> TensorLikeType:
+    utils.check_layout(layout)
+    utils.check_pin_memory(pin_memory)
     dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
     device = device if device is not None else torch.device("cpu")
     return prims.scalar_tensor(a, dtype=dtype, device=device)
 
-
-zeros_like = partial(full_like, fill_value=False)
 
 #
 # Randomness References
@@ -4530,14 +4544,8 @@ def _trilu_checks(
     layout: torch.layout,
     pin_memory: bool,
 ):
-    if pin_memory:
-        raise NotImplementedError("PrimTorch doesn't support pinned memory")
     check(row >= 0, lambda: f"row must be non-negative, got {row}")
     check(col >= 0, lambda: f"col must be non-negative, got {col}")
-    check(
-        layout == torch.strided,
-        lambda: f"only support layout=torch.strided, got {layout}",
-    )
     check(
         dtype in (torch.int32, torch.int64),
         lambda: f"\"{name}\" not implemented for '{dtype}'",
@@ -4561,8 +4569,12 @@ def tril_indices(
     trapezoid_size, rectangle_size, m_first_row = _get_tril_sizes(row, col, offset)
     row_offset = max(0, -offset)
 
+    arange_kw = partial(
+        torch.arange, layout=layout, device=device, pin_memory=pin_memory
+    )
+
     # first we do the indices for top trapezoid
-    xs1 = torch.arange(0, trapezoid_size, dtype=torch.float64, device=device)
+    xs1 = arange_kw(0, trapezoid_size, dtype=torch.float64)
     b = m_first_row - 0.5
     row_inds1 = torch.floor(-b + torch.sqrt(b * b + 2 * xs1))
     col_inds1 = torch.floor(xs1 - (2 * m_first_row - 1 + row_inds1) * row_inds1 * 0.5)
@@ -4570,11 +4582,9 @@ def tril_indices(
     col_inds1 = prims.to_dtype(col_inds1, dtype)
 
     # then bottom rectangle
-    xs2 = torch.arange(0, rectangle_size, device=device)
+    xs2 = arange_kw(0, rectangle_size, dtype=dtype)
     row_inds2 = xs2 // col + (col - m_first_row + 1 + row_offset)
     col_inds2 = xs2 % col
-    row_inds2 = prims.to_dtype(row_inds2, dtype)
-    col_inds2 = prims.to_dtype(col_inds2, dtype)
 
     return torch.stack(
         (torch.cat((row_inds1, row_inds2)), torch.cat((col_inds1, col_inds2)))
@@ -4618,15 +4628,17 @@ def triu_indices(
     trapezoid_size, rectangle_size, m_first_row = _get_triu_sizes(row, col, offset)
     col_offset = max(0, offset)
 
+    arange_kw = partial(
+        torch.arange, layout=layout, device=device, pin_memory=pin_memory
+    )
+
     # indices for top rectangle
-    xs2 = torch.arange(0, rectangle_size, device=device)
+    xs2 = arange_kw(0, rectangle_size, dtype=dtype)
     row_inds2 = xs2 // col
     col_inds2 = xs2 % col
-    row_inds2 = prims.to_dtype(row_inds2 + col_offset, dtype)
-    col_inds2 = prims.to_dtype(col_inds2, dtype)
 
     # bottom trapezoid
-    xs1 = torch.arange(0, trapezoid_size, dtype=torch.float64, device=device)
+    xs1 = arange_kw(0, trapezoid_size, dtype=torch.float64)
     b = -0.5 - m_first_row
     row_inds1 = torch.floor(-b - torch.sqrt(b * b - 2 * xs1))
     col_inds1 = torch.floor(xs1 - ((2 * m_first_row - 1 - row_inds1) * row_inds1) * 0.5)
