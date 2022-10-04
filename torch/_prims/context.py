@@ -175,11 +175,8 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # implementations.
         # There're other ways to implement this functionality,
         # see https://github.com/pytorch/pytorch/pull/82657#discussion_r939776417
-        decomp = False
         if func is None and isinstance(orig_func, torch._ops.OpOverload):
             func = torch._decomp.decomposition_table.get(orig_func, None)
-            if func is not None:
-                decomp = True
 
         if func is not None:
             # If the ref exists query whether we should use it or not
@@ -187,8 +184,6 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
             with self:
-                #if decomp :
-                #    print("Fuse!", orig_func)
                 return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
