@@ -4699,8 +4699,8 @@ class TestCudaComm(TestCase):
         source = """
         #include <torch/csrc/cuda/memory_snapshot.h>
         py::object do_snapshot() {
-            std::vector<char> data = torch::cuda::_memory_snapshot_pickled();
-            return py::bytes(&data[0], data.size());
+            std::string data = torch::cuda::_memory_snapshot_pickled();
+            return py::bytes(data);
         }
         void record(bool e) {
             torch::cuda::_record_memory_history(e);

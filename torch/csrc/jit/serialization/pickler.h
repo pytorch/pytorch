@@ -276,6 +276,10 @@ class TORCH_API Pickler {
   std::unordered_map<std::string, uint32_t> memoized_globals_map_;
   std::unordered_map<std::string, uint32_t> memoized_strings_map_;
   std::unordered_map<std::string, uint32_t> memoized_devices_map_;
+  // when true, List and Dict objects will be wrapped in a
+  // torch.jit._pickle.restore_type_tag call to correctly set the dynamic
+  // TorchScript type for the object. When true the thing unpickling must have
+  // torch installed.
   bool tag_aggregates_;
 };
 

@@ -18,7 +18,7 @@ std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> blank_context() {
   // or torchscript frames.
   return std::make_unique<c10::cuda::CUDACachingAllocator::Context>();
 }
-std::vector<char> write_pickle(const IValue& v) {
+std::string write_pickle(const IValue& v) {
   std::vector<char> result;
   {
     auto writer = [&](const char* data, size_t size) {
@@ -29,7 +29,7 @@ std::vector<char> write_pickle(const IValue& v) {
     pickler.pushIValue(v);
     pickler.stop();
   }
-  return result;
+  return std::string(result.begin(), result.end());
 }
 Dict<IValue, IValue> new_dict() {
   return Dict<IValue, IValue>(c10::AnyType::get(), c10::AnyType::get());
@@ -43,7 +43,7 @@ void _record_memory_history(bool enabled) {
       enabled ? blank_context : nullptr);
 }
 
-std::vector<char> _memory_snapshot_pickled() {
+std::string _memory_snapshot_pickled() {
   IValue device_s = "device";
   IValue address_s = "address";
   IValue total_size_s = "total_size";
