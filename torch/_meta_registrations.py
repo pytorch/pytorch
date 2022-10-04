@@ -867,6 +867,11 @@ def meta_zero_(self):
     return self
 
 
+@register_meta([aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar], register_dispatcher=False)
+def meta_fill_(self, val):
+    return self
+
+
 @register_meta(aten.relu_.default, register_dispatcher=False)
 def meta_relu_(self):
     return self
