@@ -115,7 +115,7 @@ function checkout_install_torchdeploy() {
   local commit
 
   mkdir ~/.pyenv
-  git clone git://github.com/yyuu/pyenv.git ~/.pyenv
+  git clone https://github.com/pyenv/pyenv ~/.pyenv
   echo 'export PYENV_ROOT="$HOME/.pyenv"'>>~/.bashrc
   echo 'export PATH="$PYENV_ROOT/bin:$PATH"'>>~/.bashrc
   echo 'eval "$(pyenv init -)"'>>~/.bashrc
