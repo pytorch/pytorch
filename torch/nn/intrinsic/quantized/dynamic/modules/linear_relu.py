@@ -1,6 +1,6 @@
 import torch
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 
 class LinearReLU(nnqd.Linear):
     r"""
