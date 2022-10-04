@@ -891,6 +891,7 @@ def print_n_shadows_summary(
         print("`print_tabular` relies on the library `tabulate`, "
               "which could not be found on this machine. Run `pip "
               "install tabulate` to install the library.")
+        return
 
     results = []
     for subgraph_name, subgraph_data in results_comparison.items():
