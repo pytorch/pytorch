@@ -44,8 +44,8 @@ class BatchBoxCoxOp final : public Operator<Context> {
   void BoxCoxNonzeroLambda(
       int64_t D,
       const T* data_ptr,
-      const T* lambda1,
-      const T* lambda2,
+      const T* __restrict lambda1,
+      const T* __restrict lambda2,
       T k_eps,
       T* output_ptr);
 
@@ -53,7 +53,7 @@ class BatchBoxCoxOp final : public Operator<Context> {
   void BoxCoxZeroLambda(
       int64_t D,
       const T* data_ptr,
-      const T* lambda2,
+      const T* __restrict lambda2,
       T k_eps,
       T* output_ptr);
 

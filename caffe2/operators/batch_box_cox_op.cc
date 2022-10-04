@@ -7,6 +7,27 @@
 #include <mkl.h>
 #endif // CAFFE2_USE_MKL
 
+#if (ENABLE_VECTORIZATION > 0) && !defined(_DEBUG) && !defined(DEBUG)
+#if defined(__clang__) && (__clang_major__ > 7)
+#define IS_SANITIZER                          \
+  ((__has_feature(address_sanitizer) == 1) || \
+   (__has_feature(memory_sanitizer) == 1) ||  \
+   (__has_feature(thread_sanitizer) == 1) ||  \
+   (__has_feature(undefined_sanitizer) == 1))
+
+#if IS_SANITIZER == 0
+#define VECTOR_LOOP _Pragma("clang loop vectorize(enable)")
+#define FAST_MATH _Pragma("clang fp contract(fast)")
+#define VECTORIZED_KERNEL 1
+#endif
+#elif defined(_OPENMP) && (_OPENMP >= 201511)
+// Support with OpenMP4.5 and above
+#define VECTOR_LOOP _Pragma("omp for simd")
+#define FAST_MATH
+#define VECTORIZED_KERNEL 1
+#endif
+#endif
+
 namespace caffe2 {
 
 #ifdef CAFFE2_USE_MKL
@@ -221,8 +242,8 @@ void BatchBoxCoxOp<CPUContext>::BoxCoxNaive(
     int64_t N,
     int64_t D,
     const T* data_ptr,
-    const T* lambda1_ptr,
-    const T* lambda2_ptr,
+    const T* __restrict lambda1_ptr,
+    const T* __restrict lambda2_ptr,
     T k_eps,
     T* output_ptr) {
   for (int64_t i = 0; i < N; i++) {
@@ -233,7 +254,9 @@ void BatchBoxCoxOp<CPUContext>::BoxCoxNaive(
       if (lambda1_v == 0) {
         *output_ptr = std::log(tmp);
       } else {
-        *output_ptr = (std::pow(tmp, lambda1_v) - 1) / lambda1_v;
+        T lambda_1 = 1 / lambda1_v;
+        T pow = std::pow(tmp, lambda1_v);
+        *output_ptr = lambda_1 * pow - lambda_1;
       }
     }
   }
@@ -246,19 +269,30 @@ template <typename T>
 void BatchBoxCoxOp<CPUContext>::BoxCoxNonzeroLambda(
     int64_t D,
     const T* data_ptr,
-    const T* lambda1,
-    const T* lambda2,
+    const T* __restrict lambda1,
+    const T* __restrict lambda2,
     T k_eps,
     T* out) {
-  caffe2::math::Add(D, data_ptr, lambda2, out, &context_);
+#if defined(VECTOR_LOOP)
+  VECTOR_LOOP for(auto i=0; i < D; ++i) {
+    FAST_MATH
+    auto sum = data_ptr[i] + lambda2[i];
+    auto max = std::max(sum, k_eps);
+    auto lam1 = lambda1[i];
+    auto lambda_over_1 = 1 / lam1;
+    auto pow = std::pow(max, lam1);
+    out[i] = pow * lambda_over_1 - lambda_over_1;
+  }
+#else
   for (int64_t j = 0; j < D; j++) {
-    out[j] = std::max(out[j], k_eps);
+    out[j] = std::max(data_ptr[j] + lambda2[j], k_eps);
   }
   Pow(D, out, lambda1, out);
   for (int64_t j = 0; j < D; j++) {
-    out[j] -= 1.0;
+    out[j] -= 1;
   }
   caffe2::math::Div(D, out, lambda1, out, &context_);
+#endif
 }
 
 template <>
@@ -266,14 +300,22 @@ template <typename T>
 void BatchBoxCoxOp<CPUContext>::BoxCoxZeroLambda(
     int64_t D,
     const T* data_ptr,
-    const T* lambda2,
+    const T* __restrict lambda2,
     T k_eps,
     T* output_ptr) {
-  caffe2::math::Add(D, data_ptr, lambda2, output_ptr, &context_);
+#if defined(VECTOR_LOOP)
+  VECTOR_LOOP for(auto i=0; i < D; ++i) {
+    FAST_MATH
+    auto sum = data_ptr[i] + lambda2[i];
+    auto max = std::max(sum, k_eps);
+    output_ptr[i] = std::log(max);
+  }
+#else
   for (int64_t j = 0; j < D; j++) {
-    output_ptr[j] = std::max(output_ptr[j], k_eps);
+    output_ptr[j] = std::max(data_ptr[j]+lambda2[j], k_eps);
   }
   caffe2::math::Log(D, output_ptr, output_ptr, &context_);
+#endif
 }
 
 template <>
