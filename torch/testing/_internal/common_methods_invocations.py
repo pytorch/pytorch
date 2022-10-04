@@ -17798,6 +17798,12 @@ python_ref_db = [
         supports_out=True,
     ),
     PythonRefInfo(
+        "_refs.cumsum",
+        torch_opinfo_name="cumsum",
+        supports_out=True,
+        supports_nvfuser=False,  # arange not supported
+    ),
+    PythonRefInfo(
         "_refs.sum_to_size",
         torch_opinfo_name="sum_to_size",
         validate_view_consistency=False,
