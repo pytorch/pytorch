@@ -521,6 +521,28 @@ static PyObject* is_grad_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_multithreading_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  AutogradState::get_tls_state().set_multithreading_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_multithreading_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  const auto multithreading_enabled =
+      AutogradState::get_tls_state().get_multithreading_enabled();
+  if (multithreading_enabled) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_inference_mode_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (c10::InferenceMode::is_enabled()) {
@@ -742,6 +764,15 @@ static PyMethodDef methods[] = { // NOLINT
      is_inference_mode_enabled,
      METH_NOARGS,
      nullptr},
+    {"_set_multithreading_enabled",
+     set_multithreading_enabled,
+     METH_O,
+     nullptr},
+    {"_get_multithreading_enabled",
+     get_multithreading_enabled,
+     METH_NOARGS,
+     nullptr},
+    {"_set_", set_grad_enabled, METH_O, nullptr},
     {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
     {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
