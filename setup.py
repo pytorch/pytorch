@@ -970,6 +970,10 @@ def main():
         'typing_extensions',
     ]
 
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
+
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1168,6 +1172,7 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,
