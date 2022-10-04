@@ -187,33 +187,35 @@ class C10_API SymInt {
 
   // Return whether the integer is representable as a SymInt.
   static bool check_range(int64_t i) {
-    return (static_cast<uint64_t>(i) & MASK) != IS_SYM;
+    return i > MAX_UNREPRESENTABLE_INT;
   }
 
  private:
   // Constraints on the internal representation:
   //
   // - Should represent positive and small negative ints
-  // - Should represent INT64_MIN (because this is sometimes used
-  //   C++ code to represent the smallest possible integer)
   // - No conversion necessary for operations on ints
   // - Must represent valid 64-bit pointers
+  // - Is symbolic test should be FAST (two arithmetic instructions is too much).
+  //   This code being a hotpath is based on Strobelight profiles of
+  //   is_symbolic().  FB only: https://fburl.com/strobelight/5l50ncxd
+  //   (you will need to change the time window).
   //
   // So, the scheme is to reserve large negative numbers (asssuming
   // two's complement):
   //
   // - 0b0.... means we are a positive int
   // - 0b11... means we are a small negative int
-  // - 0b100... means we are a big negative int
-  // - 0b101... means we are are a pointer. This means that
-  //           [-6917529027641081856, -4611686018427387905]
-  //           are not representable as ints.  For reference,
-  //            -9223372036854775808 is INT64_MIN.
-  //
-  // We don't actually need all of this space as on x86_64
-  // as the top 16bits aren't used for anything
+  // - 0b10... means we are are a pointer. This means that
+  //           [-2^63, -2^62-1] are not representable as ints.
+  //           We don't actually need all of this space as on x86_64
+  //           as the top 16bits aren't used for anything
   static constexpr uint64_t MASK = 1ULL << 63 | 1ULL << 62 | 1ULL << 61;
   static constexpr uint64_t IS_SYM = 1ULL << 63 | 1ULL << 61;
+  // We must manually translate the bit pattern test into a greater
+  // than test because compiler doesn't figure it out:
+  // https://godbolt.org/z/356aferaW
+  static constexpr int64_t MAX_UNREPRESENTABLE_INT = -1LL & static_cast<int64_t>(~(1ULL << 62));
   int64_t data_;
 };
 
