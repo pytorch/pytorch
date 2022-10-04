@@ -6647,7 +6647,7 @@ def prim_type(g: jit_utils.GraphContext, device_value: _C.Value, *args, **kwargs
     return symbolic_helper._unimplemented(
         "prim::type",
         "Device type cannot be statically determined.",
-        device,
+        device_value,
     )
 
 
