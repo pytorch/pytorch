@@ -5,7 +5,6 @@ authors:
   - family-names: PyTorch Team
 url: https://pytorch.org
 preferred-citation:
-  abbreviation: NEURIPS2019_9015
   type: conference-paper
   title: "PyTorch: An Imperative Style, High-Performance Deep Learning Library"
   authors:
