@@ -64,7 +64,6 @@ import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
     GRADCHECK_NONDET_TOL
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
-from torch.testing._internal.common_utils import parametrize as utils_parametrize
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
 
@@ -10343,9 +10342,10 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         expected = m(inp.view(6, 5)).view(2, 3, 8)
         self.assertEqual(expected, m(inp))
 
-    @utils_parametrize('bias', [
+    @parametrize_test('device', ['cpu'] + (['cuda'] if TEST_CUDA else []))
+    @parametrize_test('bias', [
         subtest(False, name='nobias'), subtest(True, name='bias')])
-    @utils_parametrize('weight_layout', [
+    @parametrize_test('weight_layout', [
         subtest(torch.strided, name='weightStrided'),
         # TODO: NotImplementedError: Could not run 'aten::sparse_dim' with arguments from the 'CPU' backend
         # subtest(torch.sparse_coo, name='weightCOO'),
@@ -10355,8 +10355,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         # subtest(torch.sparse_bsr, name='weightBSR'),
         # subtest(torch.sparse_bsc, name='weightBSC'),
     ])
-    def test_linear_autograd(self, bias, weight_layout):
-        module = nn.Linear(4, 4, bias=bias)
+    def test_linear_autograd(self, device, bias, weight_layout):
+        module = nn.Linear(4, 4, bias=bias, device=device)
         if weight_layout == torch.strided:
             pass
         elif weight_layout == torch.sparse_csr:
@@ -10372,7 +10372,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         else:
             assert(0)
 
-        inp = torch.randn(4, requires_grad=True)
+        inp = torch.randn(4, requires_grad=True, device=device)
         res = module(inp)
         if bias:
             expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense())) + module.bias
@@ -10380,7 +10380,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             expected = (torch.einsum("i,ji->j", inp, module.weight.to_dense()))
         self.assertEqual(res, expected)
 
-        grad_output = torch.randn(4)
+        grad_output = torch.randn(4, device=device)
         grads = torch.autograd.grad(res, [module.weight, inp], grad_output)
         grads_expected = torch.autograd.grad(expected, [module.weight, inp], grad_output)
 
