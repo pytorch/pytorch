@@ -359,8 +359,6 @@ class TestAOTAutograd(AOTTestCase):
             return torch.nn.functional.interpolate(x, scale_factor=2., mode='bilinear') + 1
 
         def assert_compiler(gm, args):
-            gm.print_readable()
-
             for node in gm.graph.nodes:
                 assert node.target is not torch.ops.aten.upsample_bilinear2d.vec
                 assert node.target is not torch.ops.aten.upsample_bilinear2d_backward.vec
@@ -384,7 +382,6 @@ class TestAOTAutograd(AOTTestCase):
         del decomposition_table[key]
 
         def assert_forward_compiler(gm, args):
-            gm.print_readable()
             found_forward = False
             for node in gm.graph.nodes:
                 if node.target == torch.ops.aten.upsample_bilinear2d.vec:
@@ -394,7 +391,6 @@ class TestAOTAutograd(AOTTestCase):
             return gm
 
         def assert_backward_compiler(gm, args):
-            gm.print_readable()
             found_backward = False
             for node in gm.graph.nodes:
                 if node.target == torch.ops.aten.upsample_bilinear2d_backward.vec:
