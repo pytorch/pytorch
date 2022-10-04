@@ -7,6 +7,7 @@ from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from torch._subclasses.meta_utils import MetaConverter
 import torch.utils._python_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -378,7 +379,7 @@ def run_meta_crossref(
                     # to the python dispatcher instead of the regular dispatcher.
                     # This should be the same set of kernels
                     # that fake tensor runs in dynamic shapes mode.
-                    with torch._dispatch.enable_python_dispatcher():
+                    with enable_python_dispatcher():
                         meta_rs = func(*meta_args, **meta_kwargs)
                 else:
                     meta_rs = func(*meta_args, **meta_kwargs)

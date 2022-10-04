@@ -930,7 +930,7 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
         return (input, torch.ones_like(input, dtype=torch.bool))
 
 
-@register_decomposition(aten._softmax)
+@register_decomposition(aten._softmax.default)
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
@@ -970,7 +970,7 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
-@register_decomposition(aten.addcmul)
+@register_decomposition(aten.addcmul.default)
 @pw_cast_for_opmath
 def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
     if self.is_floating_point() or self.is_complex():
@@ -1074,7 +1074,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
 
 
 # TODO: this doesn't appear to have enough precision in bfloat16
-@register_decomposition(aten.addmm)
+@register_decomposition(aten.addmm.default)
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
@@ -2166,7 +2166,7 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot, disable_meta=True)
+@register_decomposition(aten.dot.default, disable_meta=True)
 @pw_cast_for_opmath
 def dot(self, other):
     if self.is_complex():
