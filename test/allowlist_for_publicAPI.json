@@ -188,22 +188,6 @@
     "per_channel_weight_observer_range_neg_127_to_127",
     "weight_observer_range_neg_127_to_127"
   ],
-  "torch.ao.quantization.quantization_mappings": [
-    "Any",
-    "Callable",
-    "DeQuantStub",
-    "Dict",
-    "Optional",
-    "QuantStub",
-    "Set",
-    "Union",
-    "default_fixed_qparams_range_0to1_fake_quant",
-    "default_fixed_qparams_range_neg1to1_fake_quant",
-    "default_affine_fixed_qparams_fake_quant",
-    "default_symmetric_fixed_qparams_fake_quant",
-    "get_combined_dict",
-    "type_before_parametrizations"
-  ],
   "torch.autograd": [
     "NestedIOFunction",
     "detect_anomaly",
