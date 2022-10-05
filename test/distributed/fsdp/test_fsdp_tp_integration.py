@@ -120,7 +120,7 @@ class ShardedTensorExtensions(FSDPExtensions):
     def pre_load_state_dict_transform(
         self,
         tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, List[Shard]]:
         shards = tensor.local_shards()
         if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
             tensor = shards[0].tensor
