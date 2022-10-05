@@ -4551,7 +4551,6 @@ def triplet_margin_loss(
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap, reduction_enum)
 
 
-# TODO: Pure Python impl - don't add a primTorch ref
 def triplet_margin_with_distance_loss(
     anchor: Tensor,
     positive: Tensor,

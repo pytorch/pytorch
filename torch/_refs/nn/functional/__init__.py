@@ -524,6 +524,8 @@ def triplet_margin_loss(
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average=size_average, reduce=reduce)
 
+    # torch.nn.functional.triplet_margin_with_distance_loss has no ref defined
+    # since it's a pure Python implementation.  Use this helper instead.
     return _triplet_margin_with_distance_loss(
         anchor=anchor,
         positive=positive,
@@ -535,9 +537,8 @@ def triplet_margin_loss(
     )
 
 
-# TODO: Pure Python impl - don't register decomp and don't add a ref
-# Defined as a helper here because triplet_margin_loss can be nicely implemented
-# with it.
+# Pure Python impl - don't register decomp and don't add a ref.  Defined as a
+# helper here since triplet_margin_loss can be nicely implemented with it.
 def _triplet_margin_with_distance_loss(
     anchor: TensorLikeType,
     positive: TensorLikeType,

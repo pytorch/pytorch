@@ -893,32 +893,6 @@ def col2im(
     return output
 
 
-# TODO: the type annotations on arguments are not quite right
-
-
-@register_decomposition(aten.im2col_backward)
-def im2col_backward(
-    grad_output: Tensor,
-    input_size: List[int],
-    kernel_size: List[int],
-    dilation: List[int],
-    padding: List[int],
-    stride: List[int],
-) -> Tensor:
-    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
-
-
-@register_decomposition(aten.col2im_backward)
-def col2im_backward(
-    grad_output: Tensor,
-    kernel_size: List[int],
-    dilation: List[int],
-    padding: List[int],
-    stride: List[int],
-) -> Tensor:
-    return aten.im2col(grad_output, kernel_size, dilation, padding, stride)
-
-
 @register_decomposition(aten.native_dropout_backward)
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
@@ -1453,12 +1427,11 @@ def xlogy(self: Tensor, other: Tensor) -> Tensor:
 @reduction_complex_to_real
 def var_correction(
     x: Tensor,
-    dims: Optional[List[int]],
+    dim: Optional[List[int]],
     correction: Optional[int] = None,
     keepdim: bool = False,
 ):
-    if dims is None:
-        dims = []
+    dims: List[int] = [] if dim is None else dim
 
     if x.is_complex():
         # For complex, calculate variance of real and imaginary components
@@ -1470,14 +1443,14 @@ def var_correction(
         return var_real + var_imag
 
     if correction is None:
-        correction = 0
+        correction = 1
 
     if len(dims) == 0:
         n = prod(x.shape)  # type: ignore[arg-type]
     else:
         n = 1
-        for dim in dims:
-            n *= x.shape[dim]
+        for d in dims:
+            n *= x.shape[d]
 
     mean = torch.mean(x, dims, True)
     sub = x - mean
@@ -1493,9 +1466,12 @@ def var_correction(
 @register_decomposition(aten.std.correction)
 @reduction_complex_to_real
 def std_decomposition(
-    x: Tensor, dims: List[int], correction: int = 0, keepdim: bool = False
+    x: Tensor,
+    dim: Optional[List[int]],
+    correction: Optional[int] = None,
+    keepdim: bool = False,
 ):
-    return torch.sqrt(torch.var(x, dims, correction=correction, keepdim=keepdim))
+    return torch.sqrt(torch.var(x, dim, correction=correction, keepdim=keepdim))
 
 
 # Questionable decompositions
@@ -1927,8 +1903,8 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
 
 
-@register_decomposition(aten._reshape_alias)
-def _reshape_alias(x, shape, strides):
+@register_decomposition([aten._reshape_alias, aten._unsafe_view], disable_meta=True)
+def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
@@ -2455,3 +2431,22 @@ def upsample_bicubic2d_vec(
         )
     scale_h, scale_w = scale_factors if scale_factors else (None, None)
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
+
+
+def register_inplace(aten_op, outplace_op):
+    @register_decomposition(aten_op)
+    def inplace_op(*args, **kwargs):
+        out = outplace_op(*args, **kwargs)
+        return args[0].copy_(out)
+
+    return inplace_op
+
+
+register_inplace(aten.add_, aten.add)
+register_inplace(aten.sub_, aten.sub)
+register_inplace(aten.mul_, aten.mul)
+register_inplace(aten.relu_, aten.relu)
+register_inplace(aten.hardtanh_, aten.hardtanh)
+register_inplace(aten.hardswish_, aten.hardswish)
+register_inplace(aten.leaky_relu_, aten.leaky_relu)
+register_inplace(aten.silu_, aten.silu)
