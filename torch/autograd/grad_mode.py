@@ -5,7 +5,7 @@ import inspect
 from typing import Any, Callable, TypeVar, cast
 
 __all__ = ['no_grad', 'enable_grad', 'set_grad_enabled',
-           'inference_mode']
+           'inference_mode', 'set_multithreading_enabled']
 
 
 # Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
@@ -184,7 +184,7 @@ class enable_grad(_DecoratorContextManager):
 
 
 class set_grad_enabled(_DecoratorContextManager):
-    r"""Context-manager that sets gradient calculation to on or off.
+    r"""Context-manager that sets gradient calculation on or off.
 
     ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
@@ -301,7 +301,7 @@ class inference_mode(_DecoratorContextManager):
 
 
 class set_multithreading_enabled(_DecoratorContextManager):
-    r"""Context-manager that sets multithreaded backwards to on or off.
+    r"""Context-manager that sets multithreaded backwards on or off.
 
     ``set_multithreading_enabled`` will enable or disable multithreaded backwards based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
@@ -316,21 +316,17 @@ class set_multithreading_enabled(_DecoratorContextManager):
     .. note::
         This API does not apply to :ref:`forward-mode AD <forward-mode-ad>`.
 
-    Example::
-        >>> # xdoctest: +SKIP
-        >>> TODO - not sure what python short example would be useful here
     """
 
     def __init__(self, mode: bool) -> None:
-        self.prev = torch._C._get_multithreading_enabled()
-        torch._C._set_multithreading_enabled(mode)
         self.mode = mode
+        self.multithreadeding_enabled_guard = torch._C._MultithreadingEnabled(mode)
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, *args) -> None:
-        torch._C._set_multithreading_enabled(self.prev)
+        del self.multithreadeding_enabled_guard
 
     def clone(self):
         return self.__class__(self.mode)

@@ -268,7 +268,7 @@ Examples::
     set_grad_enabled
     is_grad_enabled
     inference_mode
-    is_inference_mode_enabled
+    set_multithreading_enabled
 
 Math operations
 ---------------
@@ -630,3 +630,14 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+
+.. automodule:: torch.autograd
+.. currentmodule:: torch.autograd
+
+Engine Configuration
+----------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    get_num_threads

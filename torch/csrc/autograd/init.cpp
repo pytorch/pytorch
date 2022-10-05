@@ -43,6 +43,17 @@ struct DisableFuncTorch {
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
 };
 
+struct MultithreadingEnabled {
+  MultithreadingEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
+  }
+  ~MultithreadingEnabled() {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
+  }
+  bool old_;
+};
+
 struct EnableTorchFunction {
   EnableTorchFunction()
       : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
@@ -354,6 +365,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_DisablePythonDispatcher")
       .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
+  py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
+      .def(py::init<bool>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
@@ -514,28 +527,6 @@ static PyObject* set_grad_enabled(PyObject* _unused, PyObject* arg) {
 static PyObject* is_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (GradMode::is_enabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_multithreading_enabled(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  AutogradState::get_tls_state().set_multithreading_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* get_multithreading_enabled(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  const auto multithreading_enabled =
-      AutogradState::get_tls_state().get_multithreading_enabled();
-  if (multithreading_enabled) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -764,15 +755,6 @@ static PyMethodDef methods[] = { // NOLINT
      is_inference_mode_enabled,
      METH_NOARGS,
      nullptr},
-    {"_set_multithreading_enabled",
-     set_multithreading_enabled,
-     METH_O,
-     nullptr},
-    {"_get_multithreading_enabled",
-     get_multithreading_enabled,
-     METH_NOARGS,
-     nullptr},
-    {"_set_", set_grad_enabled, METH_O, nullptr},
     {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
     {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
