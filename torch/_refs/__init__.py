@@ -71,7 +71,6 @@ __all__ = [
     "floor",
     "frac",
     "index_add",
-    "index_add_",
     "index_copy",
     "index_copy_",
     "index_select",
@@ -3183,36 +3182,6 @@ def index_add(
     alpha: NumberType = 1,
 ):
     return x.clone().index_add_(dim, index, tensor, alpha=alpha)  # type: ignore[arg-type]
-
-
-# The decomposition of this function dispatches to aten.index_put_ for efficiency
-# We cannot do that in Python, as torch.index_put_ does not support slice(None)s See
-# https://github.com/pytorch/pytorch/pull/85002#issuecomment-1248524492
-def index_add_(
-    x: TensorLike,
-    dim: int,
-    index: TensorLike,
-    tensor: TensorLike,
-    *,
-    alpha: NumberType = 1,
-):
-    dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
-    if alpha != 1:
-        python_type = utils.dtype_to_type(x.dtype)
-        utils.check(
-            utils.is_weakly_lesser_type(type(alpha), python_type),
-            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
-        )
-        tensor = prims.mul(tensor, alpha)
-    # Treat scalars as elements of \R^1
-    y = x.unsqueeze(0) if x.ndim == 0 else x
-    idx = (slice(None),) * dim + (index,)
-    y[idx] += tensor
-    return x
 
 
 @register_decomposition(torch.ops.aten.index_select, disable_meta=True)
