@@ -7,6 +7,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from unittest.mock import patch
+from torch._subclasses.fake_tensor import DynamicOutputShapeException
 from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
 import torch
 import torch.nn as nn
@@ -710,6 +711,11 @@ aot_autograd_failures = {
     xfail('cholesky'),
     xfail('linalg.cholesky'),
 
+    # fake tensor fallback doesn't work
+    xfail('cholesky_inverse'),
+    xfail('nn.functional.embedding_bag'),
+    xfail('segment_reduce', 'lengths'),
+
     # Misc
     xfail('to_sparse'),
     xfail('corrcoef'),
@@ -1093,7 +1099,11 @@ def _test_aot_autograd_helper(self, device, dtype, op):
         compiled_f = compiled_function(f, nop, nop)
 
         reset_grads()
-        call_forwards_backwards(compiled_f)
+        try:
+            call_forwards_backwards(compiled_f)
+        except DynamicOutputShapeException:
+            self.skipTest("Data dependent output")
+            return
         compiled_grad = get_grads(args)
 
         reset_grads()

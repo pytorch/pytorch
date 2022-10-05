@@ -363,7 +363,7 @@ def mse_loss_backward(
     return norm * (input - target) * grad_output
 
 
-@register_decomposition(aten.huber_loss_backward)
+@register_decomposition(aten.huber_loss_backward.default)
 @pw_cast_for_opmath
 def huber_loss_backward(
     grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, delta: float
@@ -1377,6 +1377,11 @@ def _fused_dropout_decomposition(input, p, generator=None):
     mask = (torch.rand_like(input) < p).to(dtype=torch.uint8)
     res = mask.type_as(input) * input * (1.0 / p)
     return (res, mask)
+
+
+@register_decomposition(aten._efficientzerotensor.default)
+def efficient_zero(*args, **kwargs):
+    return torch.zeros(*args, **kwargs)
 
 
 @register_decomposition(aten._to_copy)

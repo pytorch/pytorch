@@ -777,7 +777,6 @@ class FakeTensorMode(TorchDispatchMode):
                 raise RuntimeError(
                     f"{func} - couldn't find symbolic meta function/decomposition"
                 )
-
         with no_dispatch():
             # special handling for funcs registered through `register_op_impl`,
             # e.g., manipulating args on constructor calls to construct meta tensors
