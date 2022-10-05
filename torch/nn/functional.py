@@ -3861,7 +3861,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             if len(size) != dim:
                 raise ValueError(
                     "Input and output must have the same number of spatial dimensions, but got "
-                    f"input with with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
+                    f"input with spatial dimensions of {list(input.shape[2:])} and output size of {size}. "
                     "Please provide input tensor in (N, C, d1, d2, ...,dK) format and "
                     "output size in (o1, o2, ...,oK) format."
 
@@ -4662,16 +4662,7 @@ def unfold(
         return handle_torch_function(
             unfold, (input,), input, kernel_size, dilation=dilation, padding=padding, stride=stride
         )
-    if input.dim() == 4:
-        msg = "{} must be int or 2-tuple for 4D input"
-        assert_int_or_pair(kernel_size, "kernel_size", msg)
-        assert_int_or_pair(dilation, "dilation", msg)
-        assert_int_or_pair(padding, "padding", msg)
-        assert_int_or_pair(stride, "stride", msg)
-
-        return torch._C._nn.im2col(input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride))
-    else:
-        raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
+    return torch._C._nn.im2col(input, _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride))
 
 
 def fold(
@@ -4693,20 +4684,9 @@ def fold(
         return handle_torch_function(
             fold, (input,), input, output_size, kernel_size, dilation=dilation, padding=padding, stride=stride
         )
-    if input.dim() == 3 or input.dim() == 2:
-        msg = "{} must be int or 2-tuple for 3D input"
-        assert_int_or_pair(output_size, "output_size", msg)
-        assert_int_or_pair(kernel_size, "kernel_size", msg)
-        assert_int_or_pair(dilation, "dilation", msg)
-        assert_int_or_pair(padding, "padding", msg)
-        assert_int_or_pair(stride, "stride", msg)
-
-        return torch._C._nn.col2im(
-            input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
-        )
-    else:
-        raise NotImplementedError("Input Error: Only unbatched (2D) or batched (3D) input Tensors"
-                                  f"are supported (got {input.dim()}D)")
+    return torch._C._nn.col2im(
+        input, _pair(output_size), _pair(kernel_size), _pair(dilation), _pair(padding), _pair(stride)
+    )
 
 #
 # multihead attention
@@ -4821,52 +4801,35 @@ def _in_projection(
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
-def _scaled_dot_product_attention(
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    attn_mask: Optional[Tensor] = None,
-    dropout_p: float = 0.0,
-) -> Tuple[Tensor, Tensor]:
-    r"""
-    Computes scaled dot product attention on query, key and value tensors, using
-    an optional attention mask if passed, and applying dropout if a probability
-    greater than 0.0 is specified.
-    Returns a tensor pair containing attended values and attention weights.
+_scaled_dot_product_attention = _add_docstr(
+    torch._C._nn._scaled_dot_product_attention, r"""
+Computes scaled dot product attention on query, key and value tensors, using
+an optional attention mask if passed, and applying dropout if a probability
+greater than 0.0 is specified.
 
-    Args:
-        q, k, v: query, key and value tensors. See Shape section for shape details.
-        attn_mask: optional tensor containing mask values to be added to calculated
-            attention. May be 2D or 3D; see Shape section for details.
-        dropout_p: dropout probability. If greater than 0.0, dropout is applied.
+Args:
+     query (Tensor): Query tensor; shape (N, ..., L, E)
+     key (Tensor): Key tensor; shape (N, ..., S, E)
+     value (Tensor): Value tensor; shape (N, ..., S, E)
+     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
+         is supported, where a value of True indicates that the element *should* take part in attention.
+     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+     need_attn_weights (bool): If true, the second return value will contain the attention weights used;
+         otherwise, the second return value is unspecified
+     is_causal (bool): If true, assumes causal attention masking; for this case, attn_mask should not be set.
 
-    Shape:
-        - q: :math:`(B, Nt, E)` where B is batch size, Nt is the target sequence length,
-            and E is embedding dimension.
-        - key: :math:`(B, Ns, E)` where B is batch size, Ns is the source sequence length,
-            and E is embedding dimension.
-        - value: :math:`(B, Ns, E)` where B is batch size, Ns is the source sequence length,
-            and E is embedding dimension.
-        - attn_mask: either a 3D tensor of shape :math:`(B, Nt, Ns)` or a 2D tensor of
-            shape :math:`(Nt, Ns)`.
 
-        - Output: attention values have shape :math:`(B, Nt, E)`; attention weights
-            have shape :math:`(B, Nt, Ns)`
-    """
-    B, Nt, E = q.shape
-    q = q / math.sqrt(E)
-    # (B, Nt, E) x (B, E, Ns) -> (B, Nt, Ns)
-    if attn_mask is not None:
-        attn = torch.baddbmm(attn_mask, q, k.transpose(-2, -1))
-    else:
-        attn = torch.bmm(q, k.transpose(-2, -1))
+Returns a tuple containing:
+    output (Tensor): Attention output; shape (N, ..., L, E)
+    attn_weights (Tensor): Attention weighting; shape (N, ..., L, S)
 
-    attn = softmax(attn, dim=-1)
-    if dropout_p > 0.0:
-        attn = dropout(attn, p=dropout_p)
-    # (B, Nt, Ns) x (B, Ns, E) -> (B, Nt, E)
-    output = torch.bmm(attn, v)
-    return output, attn
+Shape legend:
+    N: Batch size
+    ...: Any number of other batch dimensions (optional)
+    S: Source sequence length
+    L: Target sequence lengthE: Embedding dimension
+
+""")
 
 
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
@@ -5184,7 +5147,19 @@ def multi_head_attention_forward(
     #
     # (deep breath) calculate attention and out projection
     #
-    attn_output, attn_output_weights = _scaled_dot_product_attention(q, k, v, attn_mask, dropout_p)
+
+    B, Nt, E = q.shape
+    q_scaled = q / math.sqrt(E)
+    if attn_mask is not None:
+        attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
+    else:
+        attn_output_weights = torch.bmm(q_scaled, k.transpose(-2, -1))
+    attn_output_weights = softmax(attn_output_weights, dim=-1)
+    if dropout_p > 0.0:
+        attn_output_weights = dropout(attn_output_weights, p=dropout_p)
+
+    attn_output = torch.bmm(attn_output_weights, v)
+
     attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
     attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
     attn_output = attn_output.view(tgt_len, bsz, attn_output.size(1))

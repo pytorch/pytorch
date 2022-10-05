@@ -11,10 +11,15 @@ import os
 
 use_functionalize = True
 
-use_fake_tensor = True
+# TODO Benchmark
+use_fake_tensor = False
+
+debug_fake_cross_ref = os.environ.get('AOT_FAKE_CROSSREF', False)
 
 debug_partitioner = os.environ.get('AOT_PARTITIONER_DEBUG', False)
 # Prints out forward + backwards FX graphs
 debug_graphs = os.environ.get('AOT_FX_GRAPHS', False)
 # Prints out joint graph traced, before partitioning
 debug_joint = os.environ.get('AOT_FX_GRAPHS_JOINT', False)
+
+use_dynamic_shapes = os.getenv('AOT_DYNAMIC_SHAPES', False)

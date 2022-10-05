@@ -9,6 +9,7 @@
 
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/record_function.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -56,16 +57,16 @@ class TORCH_API ThreadLocalState {
   AutogradState autograd_tls_;
 
   // TLS for enable_torch_dispatch_mode
-  std::shared_ptr<SafePyObject> torch_dispatch_mode_state_;
+  c10::impl::TorchDispatchModeTLS torch_dispatch_mode_state_;
 
   // TLS for enable_python_dispatcher
-  SafePyHandle python_dispatcher_state_;
+  c10::impl::PyInterpreter* python_dispatcher_state_;
 
   // TLS for __torch_function__ (mode and disable_torch_function)
   at::impl::PythonTorchFunctionTLS python_torch_function_state_;
 
   // TLS for saved tensors default hooks
-  std::stack<std::pair<PyObject*, PyObject*>> saved_tensors_default_hooks_;
+  at::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
 
   friend class ThreadLocalStateGuard;
 };
