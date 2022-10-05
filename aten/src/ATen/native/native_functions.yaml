@@ -1779,10 +1779,12 @@
     CPU: ctc_loss_cpu
     CUDA: ctc_loss_gpu
   autogen: _ctc_loss.out
+  tags: dynamic_output_shape  # the shape of second output is data dependent
 
 - func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: ctc_loss_tensor
+  tags: dynamic_output_shape  # the shape of second output is data dependent
 
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
