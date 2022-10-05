@@ -1175,7 +1175,6 @@ symbolic_tensor_failures = {
     xfail('fft.rfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.rfft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('fill', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
@@ -1376,7 +1375,6 @@ symbolic_tensor_failures = {
     xfail('trapz', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('trapezoid', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/decomposition
-    xfail('unfold', ''),  # aten.unfold.default - couldn't find symbolic meta function/decomposition
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/decomposition
     xfail('view_as', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('vsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition

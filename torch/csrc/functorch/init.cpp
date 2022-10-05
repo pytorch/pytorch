@@ -83,7 +83,8 @@ void _propagate_functional_input_mutation(
     // If the input tensor's metadata was mutated, then use as_strided_()
     // to propagate the metadata change.
     if (unwrapped.sym_sizes() != wrapped_inner.sym_sizes()) {
-      unwrapped.as_strided__symint(wrapped_inner.sym_sizes(), wrapped_inner.sym_strides());
+      unwrapped.as_strided__symint(
+          wrapped_inner.sym_sizes(), wrapped_inner.sym_strides());
     }
     unwrapped.copy_(wrapped_inner);
   }

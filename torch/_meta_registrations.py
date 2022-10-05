@@ -616,6 +616,133 @@ def meta_avg_pool2d(self, kernel_size, stride, padding, ceil_mode, count_include
         # TODO: should new_empty() get a memory_format kwarg?
         return self.new_empty((nbatch, nInputPlane, outputHeight, outputWidth)).to(memory_format=mem_format)
 
+# from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
+def check_dim_size(tensor, dim, dim_size, size):
+    check(
+        tensor.dim() == dim and tensor.shape[dim_size] == size,
+        lambda: f"Expected a tensor of dimension {dim} and tensor.size[{dim_size}] == {size}, "
+        + f"but got : dimension {tensor.dim()} and tensor.size[{dim_size}] = {tensor.shape[dim_size]}",
+    )
+
+
+@register_meta(aten.avg_pool2d.default, register_dispatcher=False)
+def meta_avg_pool2d(
+    input,
+    kernel_size,
+    stride=(),
+    padding=(0,),
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    def unpack(name, val):
+        check(
+            len(val) in [1, 2],
+            lambda: f"avg_pool2d: {name} must either be a single int, or a tuple of two ints",
+        )
+        H = val[0]
+        W = H if len(val) == 1 else val[1]
+        return H, W
+
+    kH, kW = unpack("kernel_size", kernel_size)
+    check(
+        len(stride) in [0, 1, 2],
+        lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
+    )
+    if len(stride) == 0:
+        dH, dW = kH, kW
+    elif len(stride) == 1:
+        dH, dW = stride[0], stride[0]
+    else:
+        dH, dW = unpack("stride", stride)
+
+    padH, padW = unpack("padding", padding)
+
+    check(
+        divisor_override is None or divisor_override != 0,
+        lambda: "divisor must be not zero",
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
+
+    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
+    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
+
+    memory_format = utils.suggest_memory_format(input)
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        1,
+        1,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        memory_format,
+    )
+
+    if input.dim() == 3:
+        size = [nInputPlane, outputHeight, outputWidth]
+    else:
+        size = [nbatch, nInputPlane, outputHeight, outputWidth]
+    return torch.empty(
+        size, dtype=input.dtype, device=input.device, memory_format=memory_format
+    )
+
+
+# from avg_pool2d_backward_shape_check() in aten/src/ATen/native/Pool.h.
+def avg_pool2d_backward_shape_check(
+    input,
+    gradOutput,
+    nbatch,
+    kH,
+    kW,
+    dH,
+    dW,
+    padH,
+    padW,
+    nInputPlane,
+    inputHeight,
+    inputWidth,
+    outputHeight,
+    outputWidth,
+    mem_format,
+):
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        1,
+        1,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        mem_format,
+    )
+
+    ndim = input.dim()
+    nOutputPlane = nInputPlane
+
+    check_dim_size(gradOutput, ndim, ndim - 3, nOutputPlane)
+    check_dim_size(gradOutput, ndim, ndim - 2, outputHeight)
+    check_dim_size(gradOutput, ndim, ndim - 1, outputWidth)
+
+
 @register_meta(aten._adaptive_avg_pool2d.default)
 def meta_adaptive_avg_pool2d(self, output_size):
     check(
@@ -1098,7 +1225,10 @@ def meta_zero_(self):
     return self
 
 
-@register_meta([aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar], register_dispatcher=False)
+@register_meta(
+    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar],
+    register_dispatcher=False,
+)
 def meta_fill_(self, val):
     return self
 
@@ -1374,80 +1504,6 @@ def meta_max_pool2d_with_indices(
         torch.empty(
             size, dtype=torch.int64, device=input.device, memory_format=memory_format
         ),
-    )
-
-
-@register_meta(aten.avg_pool2d.default, register_dispatcher=False)
-def meta_avg_pool2d(
-    input,
-    kernel_size,
-    stride=(),
-    padding=(0,),
-    ceil_mode=False,
-    count_include_pad=True,
-    divisor_override=None,
-):
-    def unpack(name, val):
-        check(
-            len(val) in [1, 2],
-            lambda: f"avg_pool2d: {name} must either be a single int, or a tuple of two ints",
-        )
-        H = val[0]
-        W = H if len(val) == 1 else val[1]
-        return H, W
-
-    kH, kW = unpack("kernel_size", kernel_size)
-    check(
-        len(stride) in [0, 1, 2],
-        lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
-    )
-    if len(stride) == 0:
-        dH, dW = kH, kW
-    elif len(stride) == 1:
-        dH, dW = stride[0], stride[0]
-    else:
-        dH, dW = unpack("stride", stride)
-
-    padH, padW = unpack("padding", padding)
-
-    check(
-        divisor_override is None or divisor_override != 0,
-        lambda: "divisor must be not zero",
-    )
-
-    nbatch = input.size(-4) if input.dim() == 4 else 1
-    nInputPlane = input.size(-3)
-    inputHeight = input.size(-2)
-    inputWidth = input.size(-1)
-
-    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
-    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
-
-    memory_format = utils.suggest_memory_format(input)
-    pool2d_shape_check(
-        input,
-        kH,
-        kW,
-        dH,
-        dW,
-        padH,
-        padW,
-        1,
-        1,
-        nInputPlane,
-        inputHeight,
-        inputWidth,
-        outputHeight,
-        outputWidth,
-        memory_format,
-    )
-
-    if input.dim() == 3:
-        size = [nInputPlane, outputHeight, outputWidth]
-    else:
-        size = [nbatch, nInputPlane, outputHeight, outputWidth]
-    return torch.empty(
-        size, dtype=input.dtype, device=input.device, memory_format=memory_format
     )
 
 

@@ -733,7 +733,6 @@ symbolic_aot_autograd_failures = {
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('as_strided', ''),  # Tensor-likes are not close!
-    xfail('atanh', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -747,7 +746,6 @@ symbolic_aot_autograd_failures = {
     xfail('combinations', ''),  # aten.masked_select.default
     xfail('complex', ''),  # aten.view_as_real.default - couldn't find symbolic meta function/decomposition
     xfail('constant_pad_nd', ''),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
-    xfail('copysign', ''),  # aten.masked_fill_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
     xfail('cummin', ''),  # aten.cummin.default - couldn't find symbolic meta function/decomposition
@@ -783,7 +781,6 @@ symbolic_aot_autograd_failures = {
     xfail('fft.rfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.rfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.rfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('fill', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('fmax', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('fmin', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
@@ -855,7 +852,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked.mean', ''),  # ones() received an invalid combination of arguments - got (torch.Size, device=t...
     xfail('masked.median', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('masked.normalize', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked.prod', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
@@ -935,7 +931,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.max_unpool2d', 'grad'),  # aten.max_unpool2d.default - couldn't find symbolic meta ...
     xfail('nn.functional.max_unpool3d', ''),  # aten.max_unpool3d.default - couldn't find symbolic meta funct...
     xfail('nn.functional.max_unpool3d', 'grad'),  # aten.max_unpool3d.default - couldn't find symbolic meta ...
-    xfail('nn.functional.mish', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.mse_loss', ''),  # Unable to cast Python instance to C++ type (#define PYBIND11_DETA...
     xfail('nn.functional.multi_margin_loss', ''),  # could not find kernel
     xfail('nn.functional.multilabel_margin_loss', ''),  # could not find kernel
@@ -953,7 +948,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.poisson_nll_loss', ''),  # aten.add_.Tensor - couldn't find symbolic meta function/d...
     xfail('nn.functional.prelu', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.rrelu', ''),  # aten.rrelu_with_noise.default - couldn't find symbolic meta function...
-    xfail('nn.functional.silu', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.smooth_l1_loss', ''),  # could not find kernel
     xfail('nn.functional.triplet_margin_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.triplet_margin_with_distance_loss', ''),  # Cannot call sizes() on tensor with symbo...
@@ -961,7 +955,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.upsample_bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.upsample_nearest', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('norm', 'fro'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('norm', 'nuc'),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
     xfail('normal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('normal', 'number_mean'),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1029,7 +1022,8 @@ symbolic_aot_autograd_failures = {
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('unbind', ''),  # tensor_split() received an invalid combination of arguments - got (FakeTensor, torch...
     xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('unfold', ''),  # could not find kernel
+    xfail('unfold', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('unfold_copy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('var', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('var_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('view_as_complex', ''),  # aten.view_as_complex.default - couldn't find symbolic meta function/deco...
