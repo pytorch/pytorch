@@ -203,11 +203,15 @@ at::Tensor getRequantMultiplierTensor(double requant_multiplier, uint8_t num_dim
   return requantize_multiplier_tensor;
 }
 
-uint8_t getAlignment(const at::Tensor &t) {
+uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
   uint8_t alignment = 1;
   uintptr_t address = reinterpret_cast<uintptr_t>(t.data_ptr());
-  while (address % alignment == 0 && alignment < 16) alignment *= 2;
+  for (; alignment < 16; alignment *= 2) {
+    if (address % (alignment * 2)) {
+      return alignment;
+    }
+  }
   return alignment;
 }
 
