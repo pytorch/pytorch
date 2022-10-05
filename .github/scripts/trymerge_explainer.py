@@ -60,14 +60,14 @@ class TryMergeExplainer(object):
 
     def _get_flag_msg(self) -> str:
         if self.force:
-            return "Since you used the force (-f) flag your change will be merged **immediately**, " + \
+            return "Your change will be merged **immediately** since you used the force (-f) flag, " + \
                 "bypassing any CI checks (ETA: 1-5 minutes)."
         elif self.on_green:
-            return "Since you used the green (-g) flag. your change will be merged once all checks " + \
-                "on your PR pass (ETA: 0-4 Hours)."
+            return "Your change will be merged once all checks on your PR pass since you used the green (-g) flag (ETA: 0-4 Hours)."
         elif self.land_checks:
             flag_msg = \
-                "**The `-l` land checks flag is deprecated and no longer needed.**\n\n"
+                "**The `-l` land checks flag is deprecated and no longer needed.** Instead we now automatically " + \
+                "add the `ciflow\\trunk` label to your PR once it's approved\n\n"
             
             if self.has_trunk_label:
                 flag_msg += "Your change will be merged once all checks on your PR pass (ETA 0-4 Hours)."
