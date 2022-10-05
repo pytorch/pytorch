@@ -1654,7 +1654,7 @@ def gather_shape_check(self, dim, index):
                         f" to be smaller than self {self.shape} apart from dimension {dim}"
             )
 
-@register_meta(aten.gather.default)
+@register_meta(aten.gather.default, register_dispatcher=False)
 def meta_gather(self, dim, index, sparse_grad=False):
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
     is_index_empty = index.numel() == 0
