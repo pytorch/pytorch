@@ -6,8 +6,11 @@ from torch.utils._python_dispatch import TorchDispatchMode
 from typing import Dict, Tuple, Optional, Set
 import weakref
 
-__all__ = ["saved_tensors_hooks", "save_on_cpu", "allow_mutation_on_saved_tensors"]
-
+__all__ = [
+    "saved_tensors_hooks",
+    "save_on_cpu",
+    "allow_mutation_on_saved_tensors"
+]
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
@@ -139,6 +142,67 @@ class save_on_cpu(saved_tensors_hooks):
             return tensor.to(device, non_blocking=pin_memory)
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
+
+
+def register_multi_grad_hook(tensors, fn):
+    r"""Registers a backward hook.
+
+    The hook will be called every time a gradient with respect to the
+    Tensor is computed. The hook should have the following signature::
+
+        hook(grad) -> Tensor or None
+
+
+    The hook should not modify its argument, but it can optionally return
+    a new gradient which will be used in place of :attr:`grad`.
+
+    This function returns a handle with a method ``handle.remove()``
+    that removes the hook from the module.
+
+    Example::
+
+        >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
+        >>> h = v.register_hook(lambda grad: grad * 2)  # double the gradient
+        >>> v.backward(torch.tensor([1., 2., 3.]))
+        >>> v.grad
+
+            2
+            4
+            6
+        [torch.FloatTensor of size (3,)]
+
+        >>> h.remove()  # removes the hook
+    """
+    count = 0
+    nb_calls = None
+    buffer = None
+
+    def get_grad_fn(t):
+        # or grad accumulator
+        if t.requires_grad and t.grad_fn is None:
+            return t.clone().grad_fn.next_functions[0][0]
+        else:
+            return t.grad_fn
+
+    grad_fns = list(map(get_grad_fn, tensors))
+
+    def get_inner_hook(idx):
+        def inner_hook(grad):
+            nonlocal count, nb_calls, buffer
+
+            if count == 0:
+                # On the first call, compute the actual nb_calls and buffer
+                nb_calls = sum(1 for g in grad_fns if torch._C._will_engine_execute_node(g))
+                buffer = [None] * nb_calls
+
+            buffer[idx] = grad
+            count += 1
+
+            if count == nb_calls:
+                fn(buffer)
+        return inner_hook
+    for i, t in enumerate(tensors):
+        t.register_hook(get_inner_hook(i))
 
 
 @contextlib.contextmanager
