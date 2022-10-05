@@ -69,7 +69,7 @@ def profile_times(module: nn.Sequential, sample: Union[List[Any], Tensor], timeo
             batch = batch.call(layer)
 
             # Backward
-            backward_tensors = tuple(y for y in batch if y.requires_grad)
+            backward_tensors = tuple(y for y in batch if torch.is_tensor(y) and y.requires_grad)
             if backward_tensors:
                 torch.autograd.backward(backward_tensors, backward_tensors)
 
