@@ -124,13 +124,15 @@ CommonIndexKey::CommonIndexKey(
     if (it != concrete_leaf_ids.end()) {
       // This leaf reference id is used for indexing the consumer id
       used_loops_.push_back(loop);
-      auto index_it =
-          loop_index_map.find(gpu_lower->caMap()->getConcreteMappedID(
-              loop_domains.at(i), IdMappingMode::EXACT));
+      auto loop_concrete_id = gpu_lower->caMap()->getConcreteMappedID(
+          loop_domains.at(i), IdMappingMode::EXACT);
+      auto index_it = loop_index_map.find(loop_concrete_id);
       TORCH_INTERNAL_ASSERT(
           index_it != loop_index_map.end(),
           "Index not found for leaf ID, ",
-          loop_domains.at(i)->toString());
+          loop_domains.at(i)->toString(),
+          ", concrete ID: ",
+          loop_concrete_id->toString());
       loop_index_vals_.push_back(index_it->second);
     }
   }
@@ -235,6 +237,7 @@ std::pair<Val*, bool> CommonIndexMap::insert(
 
   const CommonIndexKey key(
       indexed_consumer_id, consumer_td, ref_td, ref_index_map, loops);
+
   return tryInsertNewIndex(key, index);
 }
 

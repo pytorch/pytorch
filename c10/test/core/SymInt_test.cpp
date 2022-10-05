@@ -4,7 +4,7 @@
 #include <c10/core/SymIntNodeImpl.h>
 
 using namespace c10;
-
+#ifndef C10_MOBILE
 void check(int64_t value) {
   EXPECT_TRUE(SymInt::check_range(value));
   const auto i = SymInt(value);
@@ -29,3 +29,4 @@ TEST(SymIntTest, AddNode) {
 TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
+#endif

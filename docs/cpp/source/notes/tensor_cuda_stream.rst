@@ -61,7 +61,7 @@ Pytorch's C++ API provides the following ways to set CUDA stream:
 
 .. attention::
 
-  This function may have nosthing to do with the current device. It only changes the current stream on the stream's device.
+  This function may have nothing to do with the current device. It only changes the current stream on the stream's device.
   We recommend using ``CUDAStreamGuard``, instead, since it switches to the stream's device and makes it the current stream on that device.
   ``CUDAStreamGuard`` will also restore the current device and stream when it's destroyed
 
@@ -92,7 +92,7 @@ CUDA Stream Usage Examples
 
   // get the default CUDA stream on device 0
   at::cuda::CUDAStream defaultStream = at::cuda::getDefaultCUDAStream();
-  // set current CUDA stream back to default CUDA stream on devide 0
+  // set current CUDA stream back to default CUDA stream on device 0
   at::cuda::setCurrentCUDAStream(defaultStream);
   // sum() on tensor0 uses `defaultStream` as current CUDA stream
   tensor0.sum();
@@ -120,7 +120,7 @@ CUDA Stream Usage Examples
 .. attention::
 
   Above code is running on the same CUDA device. `setCurrentCUDAStream` will always set current CUDA stream on current device,
-  but note that `setCurrentCUDASteram` actually set current stream on the device of passed in CUDA stream.
+  but note that `setCurrentCUDAStream` actually set current stream on the device of passed in CUDA stream.
 
 
 2. Acquiring and setting CUDA streams on multiple devices.

@@ -4,7 +4,8 @@
 import logging
 import torch
 from torch.nn.utils.parametrize import is_parametrized
-from torch.testing._internal.common_utils import TestCase
+import unittest
+from torch.testing._internal.common_utils import TestCase, TEST_WITH_ASAN
 
 from typing import Tuple
 from torch import nn
@@ -13,6 +14,7 @@ import math
 import copy
 
 from torch.ao.sparsity._experimental.data_sparsifier import BaseDataSparsifier, DataNormSparsifier
+from torch.ao.sparsity._experimental.data_sparsifier.quantization_utils import post_training_sparse_quantize
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -496,3 +498,98 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
 
         self.run_all_checks(data_list=data_list, defaults=defaults,
                             data_with_config=data_with_config, norm_type='L2')
+
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb1 = nn.Embedding(100, 3)
+        self.embbag1 = nn.EmbeddingBag(200, 32)
+        self.emb_seq = nn.Sequential(nn.Embedding(150, 3), nn.EmbeddingBag(100, 3))
+        self.linear1 = nn.Linear(32, 32)
+        self.linear2 = nn.Linear(16, 16)
+
+
+class TestQuantizationUtils(TestCase):
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN due to address sanitization")
+    def test_ptq_sparsify_first(self):
+        """The expectation is post_training_sparse_quantize function
+        1. Takes in a model
+        2. Sparsifies the embeddings
+        3. Quantize the embeddings
+
+        This unit test checks that
+        1. Embeddings and EmbeddingBags are sparsified to the right sparsity levels
+        2. Embeddings and EmbeddingBags are quantized
+        3. Linear modules are not quanitzed
+        """
+        model = Model()
+
+        sparse_config = {'sparsity_level': 0.80, 'sparse_block_shape': (1, 1)}
+        select_embeddings = [model.embbag1, model.emb1]
+        post_training_sparse_quantize(model,
+                                      data_sparsifier_class=DataNormSparsifier,
+                                      sparsify_first=True,
+                                      select_embeddings=select_embeddings,
+                                      **sparse_config)
+
+        assert type(model.emb1) == torch.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.embbag1) == torch.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert type(model.emb_seq[0] == nn.Embedding)
+        assert type(model.emb_seq[1] == nn.EmbeddingBag)
+        assert type(model.linear1) == nn.Linear
+        assert type(model.linear2) == nn.Linear
+
+        dequant_emb1 = torch.dequantize(model.emb1.weight())
+        dequant_embbag1 = torch.dequantize(model.embbag1.weight())
+
+        threshold = 1e-2
+
+        sl_emb1 = (torch.abs(dequant_emb1) < threshold).float().mean()
+        sl_embbag1 = (torch.abs(dequant_embbag1) < threshold).float().mean()
+
+        assert abs(sl_emb1 - 0.80) <= 0.05  # +- 5% leeway
+        assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN due to address sanitization")
+    def test_ptq_quantize_first(self):
+        """The expectation is post_training_sparse_quantize function
+        1. Takes in a model
+        2. Quantize the embeddings
+        3. Sparsifies the embeddings
+
+        This unit test checks that
+        1. Embeddings and EmbeddingBags are sparsified to the right sparsity levels
+        2. Embeddings and EmbeddingBags are quantized
+        3. Linear modules are not quanitzed
+        """
+        model = Model()
+
+        sparse_config = {'sparsity_level': 0.8, 'sparse_block_shape': (1, 1)}
+        post_training_sparse_quantize(model, DataNormSparsifier, sparsify_first=False, **sparse_config)
+
+        assert type(model.emb1) == torch.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.embbag1) == torch.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert type(model.emb_seq[0] == torch.nn.quantized.modules.embedding_ops.Embedding)
+        assert type(model.emb_seq[1] == torch.nn.quantized.modules.embedding_ops.EmbeddingBag)
+        assert type(model.linear1) == nn.Linear  # not quantized
+        assert type(model.linear2) == nn.Linear  # not quantized
+
+
+        dequant_emb1 = torch.dequantize(model.emb1.weight())
+        dequant_embbag1 = torch.dequantize(model.embbag1.weight())
+        dequant_emb_seq_0 = torch.dequantize(model.emb_seq[0].weight())
+        dequant_emb_seq_1 = torch.dequantize(model.emb_seq[1].weight())
+
+        # higher threshold as quantization occurs before sparsity
+        threshold = 1  # zero points seem to have higher magnitude with sparsity occuring after
+
+        sl_emb1 = (torch.abs(dequant_emb1) < threshold).float().mean()
+        sl_embbag1 = (torch.abs(dequant_embbag1) < threshold).float().mean()
+        sl_emb_seq_0 = (torch.abs(dequant_emb_seq_0) < threshold).float().mean()
+        sl_emb_seq_1 = (torch.abs(dequant_emb_seq_1) < threshold).float().mean()
+
+        assert abs(sl_emb1 - 0.80) <= 0.05  # +- 5% leeway
+        assert abs(sl_embbag1 - 0.80) <= 0.05  # +- 5% leeway
+        assert abs(sl_emb_seq_0 - 0.80) <= 0.05  # +- 5% leeway
+        assert abs(sl_emb_seq_1 - 0.80) <= 0.05  # +- 5% leeway

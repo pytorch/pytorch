@@ -39,7 +39,7 @@ class FuseHandler(ABC):
              is_qat: bool) -> Node:
         pass
 
-# TODO: move this to backend_config.fuse_handler
+# TODO: move this to backend_config_utils
 class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,

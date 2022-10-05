@@ -11,10 +11,6 @@
 
 namespace c10 {
 
-class C10_CUDA_API CUDAOutOfMemoryError : public c10::Error {
-  using Error::Error;
-};
-
 // Caching allocator will execute every registered callback if it unable to find
 // block inside of already allocated area.
 class C10_CUDA_API FreeMemoryCallback {
@@ -142,6 +138,7 @@ C10_CUDA_API void raw_delete(void* ptr);
 C10_CUDA_API Allocator* get();
 C10_CUDA_API void init(int device_count);
 C10_CUDA_API void setMemoryFraction(double fraction, int device);
+C10_CUDA_API void setAllocatorSettings(const std::string& env);
 C10_CUDA_API void emptyCache();
 C10_CUDA_API void cacheInfo(
     int dev_id,

@@ -7,7 +7,6 @@ import functorch._src.top_operators_github_usage as top_ops
 import pprint
 import unittest
 import enum
-from functorch_lagging_op_db import in_functorch_lagging_op_db
 from torch.testing._internal.common_device_type import toleranceOverride
 
 # Importing these files make modifications to the op_db that we need
@@ -650,9 +649,6 @@ class Operator:
         """Returns NO if any opinfos have a skip or xfail for the test"""
         if not self.has_opinfo():
             return Support.UNKNOWN
-        if not any([o in additional_op_db for o in self.opinfos]):
-            if not any([in_functorch_lagging_op_db(o) for o in self.opinfos]):
-                return Support.UNKNOWN
         for opinfo in self.opinfos:
             for decorator in opinfo.decorators:
                 if not hasattr(decorator, 'test_name'):

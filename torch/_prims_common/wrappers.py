@@ -18,8 +18,8 @@ from itertools import chain
 
 # TODO: implement ref.cast with an option to enforce safe casting
 def _maybe_convert_to_dtype(
-    a: Union[TensorLikeType, NumberType, Sequence], dtype: torch.dtype
-) -> Union[TensorLikeType, NumberType, Sequence]:
+    a: Union[TensorLikeType, NumberType, Sequence, None], dtype: torch.dtype
+) -> Union[TensorLikeType, NumberType, Sequence, None]:
     import torch._prims as prims
     if isinstance(a, TensorLike):
         if a.dtype != dtype:
@@ -28,9 +28,13 @@ def _maybe_convert_to_dtype(
             return prims.convert_element_type(a, dtype)
         return a
     if isinstance(a, Number):
-        return utils.dtype_to_type(dtype)(a)
+        return utils.dtype_to_type_ctor(dtype)(a)
     if isinstance(a, Sequence):
         return tuple(_maybe_convert_to_dtype(x, dtype) for x in a)
+    # Passthrough None because some functions wrapped with type promotion
+    # wrapper might have optional args
+    if a is None:
+        return None
 
     raise ValueError(
         "Received type {0} that is neither a tensor or a number!".format(type(a))
@@ -114,9 +118,11 @@ class elementwise_type_promotion_wrapper(object):
 
             result = fn(**bound.arguments)
 
-            # FIXME?: assumes result is a single tensor
-            assert isinstance(result, TensorLike)
-            return _maybe_convert_to_dtype(result, result_dtype)
+            if isinstance(result, TensorLike):
+                return _maybe_convert_to_dtype(result, result_dtype)
+            if isinstance(result, Sequence):
+                return tuple(_maybe_convert_to_dtype(x, result_dtype) for x in result)
+            raise AssertionError(f"Unhandled result type: {type(result)}")
 
         _fn.__signature__ = sig  # type: ignore[attr-defined]
         return _fn
@@ -269,15 +275,18 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
 
 
 def backwards_not_supported(prim):
+    def redispatch_prim(args, kwargs):
+        g = torch._C._AutoDispatchBelowAutograd()
+        try:
+            return prim(*args, **kwargs)
+        finally:
+            del g
+
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
         def forward(ctx, args_spec, *flat_args):
             args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
-            g = torch._C._AutoDispatchBelowAutograd()
-            try:
-                return prim(*args, **kwargs)
-            finally:
-                del g
+            return redispatch_prim(args, kwargs)
 
         @staticmethod
         def backward(ctx, *args):
@@ -286,7 +295,20 @@ def backwards_not_supported(prim):
     @wraps(prim)
     def _autograd_impl(*args, **kwargs):
         flat_args, args_spec = tree_flatten((args, kwargs))
-        return BackwardsNotSupported.apply(args_spec, *flat_args)
+        if torch.is_grad_enabled() and any(a.requires_grad for a in flat_args if isinstance(a, torch.Tensor)):
+            # TODO: There is a subtle bug here: prims like copy_to
+            # return their input argument after mutating it; and custom
+            # autograd function will incorrectly turn the result into
+            # a view which will fail test_python_ref_executor tests.
+            # At the moment, we sidestep this by observing that the
+            # unit tests don't ever try to run the executor with
+            # autograd, so we don't exercise the buggy case, but if
+            # you ever want to feed autograd through this, be aware
+            # of it!  We need a way of properly implementing autograd
+            # for mutating operations in Python to do this.
+            return BackwardsNotSupported.apply(args_spec, *flat_args)
+        else:
+            return redispatch_prim(args, kwargs)
 
     return _autograd_impl
 
