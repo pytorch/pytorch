@@ -68,7 +68,7 @@ Tensor pixel_unshuffle_cpu(const Tensor& self, int64_t downscale_factor) {
   check_pixel_unshuffle_shapes(self, downscale_factor);
 
   if (self.numel() == 0) {
-    return self;
+    return self.clone();
   }
 
   // Format: (B1, ..., Bn), C, H, W
