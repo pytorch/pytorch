@@ -93,7 +93,7 @@ struct KernelLauncher {
   }
 };
 
-TensorIterator make_binary_op_intersection_iter(
+TensorIterator make_value_selection_intersection_iter(
     const Tensor& lhs_values,
     const Tensor& lhs_select_idx,
     const Tensor& rhs_values,
@@ -142,7 +142,7 @@ TensorIterator make_binary_op_intersection_iter(
 
 template <
   template <typename func_t> class kernel_t,
-  typename binary_op_intersection_t,
+  typename value_selection_intersection_kernel_t,
   typename index_t = int64_t,
   typename hash_t = int64_t,
   typename offset_t = int64_t>
@@ -498,7 +498,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   const auto binary_op_res_dtype = at::result_type(
       source._values(),
       probably_coalesced._values());
-  auto res_values = binary_op_intersection_t::apply(
+  auto res_values = value_selection_intersection_kernel_t::apply(
       source._values().to(binary_op_res_dtype), // promote for better accuracy
       selected_source,
       probably_coalesced._values().to(binary_op_res_dtype), // promote for better accuracy
@@ -532,7 +532,7 @@ void _sparse_binary_op_intersection_kernel_impl(
 
 template <
   template <typename func_t> class kernel_t,
-  typename binary_op_intersection_t>
+  typename value_selection_intersection_kernel_t>
 void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
@@ -575,7 +575,7 @@ void _sparse_binary_op_intersection_kernel_out(
       using index_t = index_t2;
       using hash_t = index_t1;
       using offset_t = index_t0;
-      _sparse_binary_op_intersection_kernel_impl<kernel_t, binary_op_intersection_t, index_t, hash_t, offset_t>(
+      _sparse_binary_op_intersection_kernel_impl<kernel_t, value_selection_intersection_kernel_t, index_t, hash_t, offset_t>(
           res, x, y, broadcasted_shape, commutes_with_sum);
   });
 }

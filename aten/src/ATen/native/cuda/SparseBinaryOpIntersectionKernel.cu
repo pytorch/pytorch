@@ -97,13 +97,13 @@ void binary_op_intersection_kernel(
 
 
 template <typename binary_op_t>
-struct CUDABinaryOpIntersection {
+struct CUDAValueSelectionIntersectionKernel {
   static Tensor apply(
       const Tensor& lhs_values,
       const Tensor& lhs_select_idx,
       const Tensor& rhs_values,
       const Tensor& rhs_select_idx) {
-    auto iter = make_binary_op_intersection_iter(
+    auto iter = make_value_selection_intersection_iter(
         lhs_values,
         lhs_select_idx,
         rhs_values,
@@ -137,8 +137,8 @@ void mul_sparse_sparse_out_cuda_kernel(
     Tensor& result,
     const Tensor& x,
     const Tensor& y) {
-  using CUDAMulOpIntersection = CUDABinaryOpIntersection<MulOp>;
-  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAMulOpIntersection>(
+  using CUDAValueSelectionMulKernel = CUDAValueSelectionIntersectionKernel<MulOp>;
+  _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueSelectionMulKernel>(
       result, x, y
   );
 }
