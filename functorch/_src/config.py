@@ -12,7 +12,7 @@ import os
 use_functionalize = True
 
 # TODO Benchmark
-use_fake_tensor = False
+use_fake_tensor = True
 
 debug_fake_cross_ref = os.environ.get('AOT_FAKE_CROSSREF', False)
 
