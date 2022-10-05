@@ -539,7 +539,7 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
 
   auto retain_grad_hook = [weak_self](const at::Tensor& grad) {
-    if (weak_self.expired()) {
+    if (weak_self.expired() || !grad.defined()) {
       return;
     } else {
       auto var = weak_self.lock();
