@@ -206,11 +206,14 @@ symint:
   - view_copy
   - as_strided_copy
   - as_strided_scatter
+  - diagonal_backward
   - slice_backward
   - slice_copy.Tensor
   - slice_scatter
   - empty_strided
   - new_empty_strided
+  - _reshape_alias_copy
+  - select_backward
 autograd:
   - max_pool3d
   - native_group_norm

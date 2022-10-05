@@ -67,3 +67,4 @@ jobs:
           unset CI
 
           ${CONDA_RUN} --cwd test python3 test_mps.py -v
+          ${CONDA_RUN} --cwd test python3 test_metal.py -v
