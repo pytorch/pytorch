@@ -49,9 +49,11 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
 
   void handle(UnaryOp*) final;
   void handle(BinaryOp*) final;
+  // TODO: handle swizzle
 
  private:
   std::unordered_map<const Val*, IntOrDouble> known_values_;
+  std::unordered_map<std::string, IntOrDouble> known_named_scalars_;
   Fusion* fusion_ = nullptr;
   FusionPrecomputedValues* evaluator_precomputed_values_ = nullptr;
 };

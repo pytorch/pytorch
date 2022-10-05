@@ -58,7 +58,8 @@ enum class DebugDumpOption {
   TransformPropagator, //! When running TransformPropagator, print propagation
                        //! path and replay result
   Cubin, //! Dump compiled CUBIN
-  Ptx //! Dump compiled PTX
+  Ptx, //! Dump compiled PTX
+  BankConflictInfo //! Dump bank confliction info
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
