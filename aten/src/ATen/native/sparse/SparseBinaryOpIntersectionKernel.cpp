@@ -42,8 +42,8 @@ struct CPUValueSelectionIntersectionKernel {
         rhs_select_idx);
     auto res_values = iter.tensor(0);
 
-    const auto lhs_nnz_stride = lhs_values.stride(0);
-    const auto rhs_nnz_stride = rhs_values.stride(0);
+    auto lhs_nnz_stride = lhs_values.stride(0);
+    auto rhs_nnz_stride = rhs_values.stride(0);
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
         ScalarType::Bool, ScalarType::Half, ScalarType::BFloat16, res_values.scalar_type(),
