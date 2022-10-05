@@ -4215,7 +4215,7 @@ def sample_inputs_dist(op_info, device, dtype, requires_grad, **kwargs):
 
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
-def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, **kwargs):
     # target.index_select(dim, idx)
     select = "index_select" in op_info.name
     # target.index_add(dim, idx, source, *, alpha=1)
@@ -4225,12 +4225,19 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
     # target.index_fill(dim, idx, value)
     fill = "index_fill" in op_info.name
 
-
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_permutation = partial(torch.randperm, device=device, dtype=torch.int64)
-
-    def make_idx(n):
-        return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=n)
+    # Extended reference inputs. We generate that exercise atomic adds / writing
+    # several times to one location
+    if reference:
+        make_arg = partial(torch.ones, device=device, dtype=dtype, requires_grad=requires_grad)
+        make_idx = partial(torch.zeros, device=device, dtype=torch.int64)
+    else:
+        make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+        # idx They need to be different for copy and add to be deterministic
+        if copy or add:
+            make_idx = partial(torch.randperm, device=device, dtype=torch.int64)
+        else:
+            def make_idx(n):
+                return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=n)
 
     shapes = [(), (1,), (S, S)]
     # extra parameter for add
@@ -4250,9 +4257,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, **kwargs):
         dim = 1 if t.ndim == 2 else 0
         args.append(dim)
 
-        # idx They need to be different for copy and add to be deterministic
-        make_idx_fn = make_permutation if copy or add else make_idx
-        idx = make_idx_fn(t.shape[dim] if t.ndim != 0 else 1)
+        idx = make_idx(t.shape[dim] if t.ndim != 0 else 1)
         args.append(idx)
 
         # source
@@ -13834,7 +13839,8 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_index),
+           sample_inputs_func=sample_inputs_index,
+           reference_inputs_func=partial(sample_inputs_index, reference=True)),
     OpInfo('index_copy',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=True,
@@ -13845,11 +13851,13 @@ op_db: List[OpInfo] = [
            skips=(
            ),
            sample_inputs_func=sample_inputs_index,
+           reference_inputs_func=partial(sample_inputs_index, reference=True),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_index,
+           reference_inputs_func=partial(sample_inputs_index, reference=True),
            error_inputs_func=error_inputs_index_select,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13863,6 +13871,7 @@ op_db: List[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_index,
+           reference_inputs_func=partial(sample_inputs_index, reference=True),
            skips=(
                # boolean alpha not handled properly
                DecorateInfo(unittest.expectedFailure,
