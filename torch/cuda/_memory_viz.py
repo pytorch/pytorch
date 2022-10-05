@@ -4,7 +4,6 @@ import os
 import io
 import subprocess
 
-from typing import Dict, Any
 __all__ = ["format_flamegraph", "segments", "memory", "compare"]
 
 def _frame_fmt(f):
@@ -116,16 +115,17 @@ def calc_active(seg):
 
 def _report_free(free_external, free_internal):
     total = free_external + free_internal
-    pct = (free_internal / total)*100
+    pct = (free_internal / total) * 100
     suffix = f' ({pct:.1f}% internal)'
     return f'{Bytes(total)}{suffix}'
 
 def segsum(data):
-    PAGE_SIZE = 1024*1024*20
+    PAGE_SIZE = 1024 * 1024 * 20
     segments = []
     out = io.StringIO()
     out.write(f"Summary of segments >= {Bytes(PAGE_SIZE)} in size\n")
-    out.write("(each line is a segment, each letter is 16MB, different letters for different tensors in the segment, * means multiple tensors in the 20MBs, ' ' means free)\n")
+    out.write("(each line is a segment, each letter is 16MB, different letters for different tensors in the segment,"
+              " * means multiple tensors in the 20MBs, ' ' means free)\n")
     total_reserved = 0
     total_allocated = 0
     free_external = 0
@@ -138,9 +138,8 @@ def segsum(data):
         seg_allocated = 0
         all_ranges = []
         boffset = 0
-        #active_size = sum(b['size'] for b in seg['blocks'] if b['state'] == 'active_allocated')
         for b in seg['blocks']:
-            active =  b['state'] == 'active_allocated'
+            active = b['state'] == 'active_allocated'
             if 'history' in b:
                 # use the more accureate real_size to account for internal fragmenetation if we have it
                 for h in b['history']:
@@ -164,20 +163,20 @@ def segsum(data):
 
         nseg = (seg['total_size'] - 1) // PAGE_SIZE + 1
         occupied = [' ' for _ in range(nseg)]
-        frac = [0.0  for _ in range(nseg)]
+        frac = [0.0 for _ in range(nseg)]
         active_size = 0
         for i, (start_, size, active) in enumerate(all_ranges):
             active_size += size
             finish_ = (start_ + size)
             start = start_ // PAGE_SIZE
             finish = (finish_ - 1) // PAGE_SIZE + 1
-            m = chr( (ord('a' if active else 'A') + (i % 26)))
+            m = chr((ord('a' if active else 'A') + (i % 26)))
             for j in range(start, finish):
-                s = max(start_, j*PAGE_SIZE)
-                e = min(finish_, (j+1)*PAGE_SIZE)
+                s = max(start_, j * PAGE_SIZE)
+                e = min(finish_, (j + 1) * PAGE_SIZE)
                 frac[j] += (e - s) / PAGE_SIZE
                 if occupied[j] != ' ':
-                    occupied[j] = '0123456789*'[int(frac[j]*10)]
+                    occupied[j] = '0123456789*'[int(frac[j] * 10)]
                 else:
                     occupied[j] = m
         stream = '' if seg['stream'] == 0 else f', stream_{seg["stream"]}'
@@ -185,7 +184,8 @@ def segsum(data):
         assert seg_free_external + seg_free_internal + seg_allocated == seg['total_size']
         stream = f' stream_{seg["stream"]}' if seg['stream'] != 0 else ''
         if seg['total_size'] >= PAGE_SIZE:
-            out.write(f'[{body}] {Bytes(seg["total_size"])} allocated, {_report_free(seg_free_external, seg_free_internal)} free{stream}\n')
+            out.write(f'[{body}] {Bytes(seg["total_size"])} allocated, '
+                      f'{_report_free(seg_free_external, seg_free_internal)} free{stream}\n')
     out.write(f'segments: {len(data["segments"])}\n')
     out.write(f'total_reserved: {Bytes(total_reserved)}\n')
     out.write(f'total_allocated: {Bytes(total_allocated)}\n')
@@ -196,13 +196,15 @@ def segsum(data):
 
 def trace(data):
     out = io.StringIO()
+
     def format(entries):
-        segment_intervals = []
+        segment_intervals : list = []
         segment_addr_to_name = {}
         allocation_addr_to_name = {}
 
-        free_names = []
+        free_names : list = []
         next_name = 0
+
         def _name():
             nonlocal next_name
             if free_names:
@@ -282,7 +284,6 @@ if __name__ == "__main__":
     if thedir in sys.path:
         # otherwise we find cuda/random.py as random...
         sys.path.remove(thedir)
-    from pprint import pprint
     import argparse
 
     fn_name = 'torch.cuda.memory_dbg.snapshot()'
@@ -330,8 +331,8 @@ if __name__ == "__main__":
         else:
             f = open(name, 'rb')
         data = pickle.load(f)
-        if isinstance(data, list): # segements only...
-            data = { 'segments': data, 'traces': [] }
+        if isinstance(data, list):  # segments only...
+            data = {'segments': data, 'traces': []}
         return data
 
     def _write(name, data):

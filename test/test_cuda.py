@@ -4727,13 +4727,14 @@ class TestCudaComm(TestCase):
                             found = True
             last_action = mem['device_traces'][0][-1]
             self.assertTrue(last_action['action'] == 'alloc')
-            self.assertTrue(last_action['size'] == 311*411*4)
+            self.assertTrue(last_action['size'] == 311 * 411 * 4)
             self.assertTrue(found)
         finally:
             m.record(False)
 
     def test_notifies_oom(self):
         x = False
+
         def cb(device, alloc, device_alloc, device_free):
             print(device, alloc, device_alloc, device_free)
             print(torch.cuda.memory._snapshot())

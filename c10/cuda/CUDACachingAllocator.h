@@ -129,9 +129,18 @@ struct SegmentInfo {
 };
 
 struct TraceEntry {
-  enum Action {ALLOC, FREE, SEGMENT_ALLOC, SEGMENT_FREE, SNAPSHOT, OOM};
-  TraceEntry(Action action, int64_t addr, size_t size, cudaStream_t stream, std::shared_ptr<Context> context=nullptr)
-  : action_(action), addr_(addr), context_(context), stream_(stream), size_(size) {}
+  enum Action { ALLOC, FREE, SEGMENT_ALLOC, SEGMENT_FREE, SNAPSHOT, OOM };
+  TraceEntry(
+      Action action,
+      int64_t addr,
+      size_t size,
+      cudaStream_t stream,
+      std::shared_ptr<Context> context = nullptr)
+      : action_(action),
+        addr_(addr),
+        context_(context),
+        stream_(stream),
+        size_(size) {}
   Action action_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<Context> context_;
@@ -143,7 +152,6 @@ struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
 };
-
 
 C10_CUDA_API void* raw_alloc(size_t nbytes);
 C10_CUDA_API void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream);
@@ -175,8 +183,16 @@ C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 
-C10_CUDA_API void recordHistory(bool enabled, CreateContextFn context_recorder, size_t alloc_trace_max_entries, bool alloc_trace_record_context);
-using OutOfMemoryObserver = std::function<void(int64_t device, int64_t allocated, int64_t device_total, int64_t device_free)>;
+C10_CUDA_API void recordHistory(
+    bool enabled,
+    CreateContextFn context_recorder,
+    size_t alloc_trace_max_entries,
+    bool alloc_trace_record_context);
+using OutOfMemoryObserver = std::function<void(
+    int64_t device,
+    int64_t allocated,
+    int64_t device_total,
+    int64_t device_free)>;
 C10_CUDA_API void attachOutOfMemoryObserver(OutOfMemoryObserver observer);
 
 C10_CUDA_API std::shared_ptr<void> getIpcDevPtr(std::string handle);

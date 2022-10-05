@@ -33,8 +33,9 @@ c10::List<IValue> new_list() {
   return List<IValue>(c10::AnyType::get());
 }
 } // namespace
-void _record_memory_history(bool enabled, bool alloc_trace_max_entries=1) {
-  c10::cuda::CUDACachingAllocator::recordHistory(enabled, nullptr, alloc_trace_max_entries, false);
+void _record_memory_history(bool enabled, bool alloc_trace_max_entries = 1) {
+  c10::cuda::CUDACachingAllocator::recordHistory(
+      enabled, nullptr, alloc_trace_max_entries, false);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -123,13 +124,19 @@ std::string _memory_snapshot_pickled() {
   using namespace c10::cuda::CUDACachingAllocator;
 
   auto action_to_str = [&](TraceEntry::Action action) {
-    switch(action) {
-      case TraceEntry::ALLOC: return alloc_s;
-      case TraceEntry::FREE: return free_s;
-      case TraceEntry::SEGMENT_ALLOC: return segment_alloc_s;
-      case TraceEntry::SEGMENT_FREE: return segment_free_s;
-      case TraceEntry::OOM: return oom_s;
-      case TraceEntry::SNAPSHOT: return snapshot_s;
+    switch (action) {
+      case TraceEntry::ALLOC:
+        return alloc_s;
+      case TraceEntry::FREE:
+        return free_s;
+      case TraceEntry::SEGMENT_ALLOC:
+        return segment_alloc_s;
+      case TraceEntry::SEGMENT_FREE:
+        return segment_free_s;
+      case TraceEntry::OOM:
+        return oom_s;
+      case TraceEntry::SNAPSHOT:
+        return snapshot_s;
     }
     throw std::runtime_error("unreachable");
   };
@@ -139,8 +146,9 @@ std::string _memory_snapshot_pickled() {
     for (const auto& te : traceInfo) {
       auto trace_entry = new_dict();
       trace_entry.insert(action_s, action_to_str(te.action_));
-      trace_entry.insert(TraceEntry::OOM == te.action_ ? device_free_s : addr_s, te.addr_);
-      trace_entry.insert(size_s, (int64_t) te.size_);
+      trace_entry.insert(
+          TraceEntry::OOM == te.action_ ? device_free_s : addr_s, te.addr_);
+      trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
       trace.push_back(trace_entry);
     }
