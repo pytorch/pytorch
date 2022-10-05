@@ -1149,8 +1149,10 @@ class TestLRScheduler(TestCase):
             scheduler.step()
 
         import gc
+        gc.collect()
         run()
-        self.assertEqual(gc.collect(), 0)
+        garbage = gc.collect()
+        self.assertEqual(garbage, 0)
 
     def test_old_pattern_warning(self):
         epochs = 35
