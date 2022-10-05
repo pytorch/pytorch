@@ -65,7 +65,7 @@ void initPythonBindings(PyObject* module) {
           "    verbose (bool) : whether the trace file has `Call stack` field or not.",
           py::arg("profiler_metrics") = std::vector<std::string>(),
           py::arg("profiler_measure_per_kernel") = false,
-          py::arg("verbose") = true)
+          py::arg("verbose") = false)
       .def(py::pickle(
           [](const ExperimentalConfig& p) { // __getstate__
             py::list py_metrics;
