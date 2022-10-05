@@ -256,33 +256,33 @@ at::Tensor _to_copy_functionalize(
 // The idea with _unsafe_view is that you're guaranteed that the input
 // is a temporary, and don't actually have to worry about propagating
 // mutations between the input and output.
-at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::IntArrayRef size) {
+at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRef size) {
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
     at::AutoDispatchSkipFunctionalize guard;
-    return at::_unsafe_view(self, size);
+    return at::_unsafe_view_symint(self, size);
   }
 
   auto self_ = at::functionalization::impl::from_functional_tensor(self);
   at::Tensor tmp_output;
   {
     at::AutoDispatchSkipFunctionalize guard;
-    tmp_output = at::_unsafe_view(self_, size);
+    tmp_output = at::_unsafe_view_symint(self_, size);
   }
 
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
-      return at::_unsafe_view(base, size);
+      return at::_unsafe_view_symint(base, size);
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return at::_unsafe_view(mutated_view, base.sizes());
+      return at::_unsafe_view_symint(mutated_view, base.sym_sizes());
     }
   );
 
   auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
   // See  Note [Propagating strides in the functionalization pass]
   // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
-  auto inferred_size = at::infer_size_dv(size, self.numel());
-  auto stride = at::detail::computeStride(self.sizes(), self.strides(), inferred_size);
+  auto inferred_size = at::infer_size_dv(size, self.sym_numel());
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
   TORCH_INTERNAL_ASSERT(stride.has_value());
   out.unsafeGetTensorImpl()->set_sizes_and_strides(inferred_size, stride.value());
   return out;
