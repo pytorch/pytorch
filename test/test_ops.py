@@ -1812,7 +1812,6 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "linalg.svd",
     "linalg.svdvals",
     "nn.functional.binary_cross_entropy_with_logits",
-    "nn.functional.huber_loss",
     "nn.functional.logsigmoid",
     "nn.functional.multilabel_soft_margin_loss",
     "pca_lowrank",
