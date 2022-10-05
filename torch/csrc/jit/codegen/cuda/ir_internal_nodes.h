@@ -36,6 +36,8 @@ class TORCH_CUDA_CU_API FullOp : public Expr {
 
   FullOp(const FullOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   bool sameAs(const Statement* other) const override;
 
   DataType dtype() const {
@@ -63,6 +65,8 @@ class TORCH_CUDA_CU_API ARangeOp : public Expr {
       Val* linear_index = nullptr);
 
   ARangeOp(const ARangeOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   bool sameAs(const Statement* other) const override;
 
@@ -127,6 +131,8 @@ class TORCH_CUDA_CU_API EyeOp : public Expr {
 
   EyeOp(const EyeOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   bool sameAs(const Statement* other) const override;
 
   DataType dtype() const {
@@ -172,6 +178,8 @@ class TORCH_CUDA_CU_API UnaryOp : public Expr {
 
   UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -200,6 +208,8 @@ class TORCH_CUDA_CU_API BinaryOp : public Expr {
   BinaryOp(IrBuilderPasskey, BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
   BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -238,6 +248,8 @@ class TORCH_CUDA_CU_API RNGOp : public Expr {
       Val* philox_index = nullptr);
 
   RNGOp(const RNGOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   RNGOpType getRNGOpType() const {
     return rng_op_type_;
@@ -298,6 +310,8 @@ class TORCH_CUDA_CU_API BroadcastOp : public Expr {
 
   BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -346,6 +360,8 @@ class TORCH_CUDA_CU_API ReductionOp : public Expr {
 
   ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -393,6 +409,8 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
       ExprType expr_type = ExprType::GroupedReductionOp);
 
   GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   //! Number of expressions grouped horizontally. It does not reflect
   //! iteration grouping.
@@ -580,6 +598,8 @@ class TORCH_CUDA_CU_API WelfordOp : public Expr {
 
   WelfordOp(const WelfordOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return output().avg();
   }
@@ -674,6 +694,8 @@ class TORCH_CUDA_CU_API GroupedWelfordOp : public Expr {
       ExprType expr_type = ExprType::GroupedWelfordOp);
 
   GroupedWelfordOp(const GroupedWelfordOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   //! Number of expressions grouped horizontally. It does not reflect
   //! iteration grouping. As horizontal grouping is not supported,
@@ -798,6 +820,8 @@ class TORCH_CUDA_CU_API MmaOp : public Expr {
 
   MmaOp(const MmaOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -856,6 +880,8 @@ class TORCH_CUDA_CU_API TransposeOp : public Expr {
 
   TransposeOp(const TransposeOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   TensorView* out() const {
     return out_;
   }
@@ -886,6 +912,8 @@ class TORCH_CUDA_CU_API ExpandOp : public Expr {
 
   ExpandOp(const ExpandOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   TensorView* out() const {
     return out_;
   }
@@ -915,6 +943,8 @@ class TORCH_CUDA_CU_API TernaryOp : public Expr {
       Val* in3);
 
   TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -958,6 +988,8 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
       std::vector<int> pad_width);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -1008,6 +1040,8 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
 
   GatherOp(const GatherOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -1054,6 +1088,8 @@ class TORCH_CUDA_CU_API ViewAsScalar : public Expr {
 
   ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   Val* out() const {
     return out_;
   }
@@ -1087,6 +1123,8 @@ class TORCH_CUDA_CU_API ViewOp : public Expr {
 
   ViewOp(const ViewOp* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   TensorView* out() const {
     return out_;
   }
@@ -1111,6 +1149,8 @@ class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
   LoadStoreOp(IrBuilderPasskey, LoadStoreOpType op_type, Val* out, Val* in);
 
   LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   Val* out() const {
     return out_;
@@ -1691,6 +1731,8 @@ class TORCH_CUDA_CU_API Split : public Expr {
 
   Split(const Split* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   IterDomain* outer() const {
     return outer_;
   }
@@ -1751,6 +1793,8 @@ class TORCH_CUDA_CU_API Merge : public Expr {
 
   Merge(const Merge* src, IrCloner* ir_cloner);
 
+  Expr* shallowCopy() const override;
+
   IterDomain* out() const {
     return out_;
   }
@@ -1782,6 +1826,8 @@ class TORCH_CUDA_CU_API Swizzle2D : public Expr {
       SwizzleMode swizzle_mode = SwizzleMode::Data);
 
   Swizzle2D(const Swizzle2D* src, IrCloner* ir_cloner);
+
+  Expr* shallowCopy() const override;
 
   IterDomain* outX() const {
     return out_x_;

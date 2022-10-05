@@ -446,8 +446,8 @@ class ReplaceExprInput : private kir::ExprMutator {
 
   // Copy predicates and register expression replacement
   void registerReplaceWithPredicate(Expr* old_expr, Expr* new_expr) {
-    new_expr->setPredicate(old_expr->predicate());
-    new_expr->setWritePredicate(old_expr->writePredicate());
+    new_expr = new_expr->withPredicate(old_expr->predicate())
+                   ->withWritePredicate(old_expr->writePredicate());
     registerReplace(old_expr, new_expr);
   }
 

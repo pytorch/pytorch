@@ -1001,6 +1001,9 @@ struct DummyExpr : public Expr {
   DummyExpr& operator=(const DummyExpr& other) = delete;
   DummyExpr(DummyExpr&& other) = delete;
   DummyExpr& operator=(DummyExpr&& other) = delete;
+  Expr* shallowCopy() const override {
+    return nullptr;
+  }
 };
 
 TEST_F(NVFuserTest, FusionTopoSort_CUDA) {

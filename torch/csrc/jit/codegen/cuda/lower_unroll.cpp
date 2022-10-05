@@ -54,6 +54,14 @@ bool isReductionInitExpr(const Expr* expr) {
 
 } // namespace
 
+void UnrollPass::registerReplace(
+    Expr* reference,
+    Expr* new_expr,
+    kir::Scope* scope) {
+  kir::ExprMutator::registerReplace(reference, new_expr, scope);
+  GpuLower::current()->propagateExprInfo(reference, new_expr);
+}
+
 void UnrollPass::handle(Expr* expr) {
   if (ir_utils::isTvOp(expr)) {
     // If tv op, predicate it
@@ -79,11 +87,16 @@ void UnrollPass::handle(Expr* expr) {
 
     non_trivial_pred_found_ = true;
 
+    Expr* expr_with_predicate = expr;
+
     // When a predicate needs to account for ShiftOp, it is currently
     // taken care by its own function.
     if (GpuLower::current()->haloInfo()->needsShiftPredicate(expr)) {
-      ShiftPredicateInserter::insert(
+      expr_with_predicate = ShiftPredicateInserter::insert(
           expr, for_loops_, thread_pred, unswitched_loop_);
+      if (expr_with_predicate != expr) {
+        registerReplace(expr, expr_with_predicate, &for_loops_.back()->body());
+      }
       return;
     }
 
@@ -93,7 +106,7 @@ void UnrollPass::handle(Expr* expr) {
           ? thread_pred_expr
           : IrBuilder::create<kir::Predicate>(
                 PredicateType::ReductionWrite, expr, thread_pred);
-      expr->setWritePredicate(write_pred);
+      expr_with_predicate = expr_with_predicate->withWritePredicate(write_pred);
     }
 
     // For expr calling a device func with block sync, don't create
@@ -103,7 +116,8 @@ void UnrollPass::handle(Expr* expr) {
           ? thread_pred_expr
           : IrBuilder::create<kir::Predicate>(
                 PredicateType::Inline, expr, thread_pred);
-      expr->setPredicate(pred);
+      expr_with_predicate = expr_with_predicate->withPredicate(pred);
+      registerReplace(expr, expr_with_predicate, &for_loops_.back()->body());
       return;
     }
 
@@ -135,7 +149,10 @@ void UnrollPass::handle(Expr* expr) {
       kir::ExprMutator::registerReplace(
           expr, inline_ite, &for_loops_.back()->body());
     }
-    inline_ite->thenBody().push_back(expr);
+    if (expr != expr_with_predicate) {
+      GpuLower::current()->propagateExprInfo(expr, expr_with_predicate);
+    }
+    inline_ite->thenBody().push_back(expr_with_predicate);
   } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
     handle(for_loop);
   }

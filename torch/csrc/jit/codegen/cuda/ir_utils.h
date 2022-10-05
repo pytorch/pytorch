@@ -325,7 +325,7 @@ TORCH_CUDA_CU_API std::vector<ViewOp*> getViewOps(Fusion*);
 template <typename T>
 std::string toString(const T& nodes) {
   std::stringstream ss;
-  for (Statement* stmt : nodes) {
+  for (const Statement* stmt : nodes) {
     if (ss.tellp() != 0) {
       ss << ", ";
     }

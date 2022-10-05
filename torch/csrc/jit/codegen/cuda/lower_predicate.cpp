@@ -20,7 +20,7 @@ namespace cuda {
 
 namespace {
 
-class ConditionalFromPredicateModifier : public kir::IrVisitor {
+class ConditionalFromPredicateModifier : public kir::ExprMutator {
  public:
   ConditionalFromPredicateModifier() = delete;
 
@@ -32,11 +32,11 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
  private:
   ConditionalFromPredicateModifier(const std::vector<Expr*>& exprs) {
     FUSER_PERF_SCOPE(
-        "GpuLower::Lower::ConditionalFromPredicateModifier::process");
-    kir::IrVisitor::handle(exprs);
+        "ConditionalFromPredicateModifier::ConditionalFromPredicateModifier");
+    traverseAndInsert(exprs);
   }
 
-  using kir::IrVisitor::handle;
+  using kir::ExprMutator::handle;
 
   void handle(Expr* expr) final {
     if (expr != nullptr && expr->predicate() != nullptr) {
@@ -72,7 +72,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       TORCH_INTERNAL_ASSERT(conditional != nullptr);
       expr->predicate()->setValue(conditional);
       TORCH_INTERNAL_ASSERT(expr->predicate()->value() != nullptr);
-      setWritePredicate(expr, conditional);
+      setWritePredicate(expr);
     }
 
     // Note: [Predicate Inversion for CpAsync]
@@ -101,7 +101,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       invertPredicateForGmemToSharedMemInitialize(expr);
     }
 
-    kir::IrVisitor::handle(expr);
+    kir::ExprMutator::handle(expr);
   }
 
   // Invert the predicate of given expr.
@@ -123,7 +123,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
         ir_utils::isCpAsyncInit(maybe_init.value());
   }
 
-  void setWritePredicate(Expr* expr, Bool* read_cond) {
+  void setWritePredicate(Expr* expr) {
     if (expr->writePredicate() != nullptr) {
       auto write_cond = generateConditional(expr->writePredicate());
       if (write_cond) {
@@ -131,7 +131,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       } else {
         // If generateConditional returns null, it means no specific
         // predicate needs to be used.
-        expr->setWritePredicate(nullptr);
+        registerReplace(expr, expr->withWritePredicate(nullptr));
       }
     }
   }
@@ -150,7 +150,7 @@ class ConditionalFromPredicateModifier : public kir::IrVisitor {
       ite->predicate()->setValue(conditional);
       TORCH_INTERNAL_ASSERT(ite->predicate()->value() != nullptr);
     }
-    kir::IrVisitor::handle(ite);
+    kir::ExprMutator::handle(ite);
   }
 
   // Generate conditional according to PredicateType

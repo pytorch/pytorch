@@ -17,7 +17,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-void ShiftPredicateInserter::insert(
+Expr* ShiftPredicateInserter::insert(
     Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
     Bool* thread_pred,
@@ -30,7 +30,7 @@ void ShiftPredicateInserter::insert(
   const bool needs_shift_predicate =
       gpu_lower->haloInfo()->needsShiftPredicate(out_tv->definition());
   if (!needs_shift_predicate) {
-    return;
+    return expr;
   }
 
   // The conditional branches to create:
@@ -57,8 +57,7 @@ void ShiftPredicateInserter::insert(
   // the expr with shift_pred. Since the expr is not shift, the
   // padding is safe to omit.
   if (lower_utils::hasBlockSync(expr, gpu_lower->threadPredMap())) {
-    expr->setPredicate(shift_pred);
-    return;
+    return expr->withPredicate(shift_pred);
   }
 
   auto shift_ite = IrBuilder::create<kir::IfThenElse>(shift_pred);
@@ -76,7 +75,7 @@ void ShiftPredicateInserter::insert(
 
   // No padding condition is required if this is within unswitch.
   if (within_unswitch) {
-    return;
+    return expr;
   }
 
   // Padding by zero
@@ -89,6 +88,8 @@ void ShiftPredicateInserter::insert(
   bounds_ite->thenBody().push_back(pad_expr);
   // Insert the else block
   shift_ite->elseBody().push_back(bounds_ite);
+
+  return expr;
 }
 
 int AxisHaloInfo::width() const {

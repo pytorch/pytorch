@@ -225,7 +225,7 @@ class ShiftPredicateInserter {
   //! the generated predicate. The branch structure is different from
   //! the usual predicated expression, so the insertion is also done
   //! here.
-  static void insert(
+  static Expr* insert(
       Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       Bool* thread_pred,
