@@ -2443,6 +2443,7 @@ def register_inplace(aten_op, outplace_op):
 
 
 register_inplace(aten.add_, aten.add)
+register_inplace(aten.sub_, aten.sub)
 register_inplace(aten.mul_, aten.mul)
 register_inplace(aten.relu_, aten.relu)
 register_inplace(aten.hardtanh_, aten.hardtanh)
