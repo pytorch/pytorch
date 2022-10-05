@@ -240,7 +240,7 @@ class _DDPJoinHook(JoinHook):
 class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
-    
+
     This container provides data parallelism by synchronizing gradients
     across each model replica. The devices to synchronize across are
     specified by the input ``process_group``, which is the entire world
