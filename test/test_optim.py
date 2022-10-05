@@ -2999,7 +2999,7 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     opt.state[p].update(opt_differentiable_state)
     opt.step()
     return (p,) + tuple(
-        v for v in opt_differentiable_state.values() if isinstance(v, torch.Tensor) and v.requires_grad)
+        v for v in opt.state[p].values() if isinstance(v, torch.Tensor) and v.requires_grad)
 
 
 class TestDifferentiableOptimizer(TestCase):
@@ -3085,6 +3085,39 @@ class TestDifferentiableOptimizer(TestCase):
             _diff_fn,
             (p, grad, state, torch.optim.Adamax,
              {'lr': 0.9, 'weight_decay': 0.1, 'differentiable': True}, *state.values())
+        )
+
+    def test_asgd(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` `eta` & `mu` are not continuous variables (even though we define them as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['eta'] = torch.tensor(0.9, requires_grad=False, dtype=torch.float64)
+        state['mu'] = torch.tensor(1.0, requires_grad=False, dtype=torch.float64)
+        state['ax'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.ASGD,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
+        )
+
+    def test_rprop(self):
+        state = {}
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        # `step` is not a continuous variable (even though we define it as a float)
+        # and so it shouldn't require gradients.
+        state['step'] = torch.tensor(10., requires_grad=False, dtype=torch.float64)
+        state['prev'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state['step_size'] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+
+        gradcheck(
+            _diff_fn,
+            (p, grad, state, torch.optim.Rprop,
+             {'lr': 0.9, 'differentiable': True}, *state.values())
         )
 
 
