@@ -167,10 +167,6 @@ See :doc:`/notes/randomness` for more information.""",
 }
 
 sparse_support_notes = {
-    "sparse_arg_support": """This operation has support for arguments with :ref:`sparse layouts<sparse-docs>` \
-the layout of all operands will determine the output layout. In the case where attr:`out` is provided it's layout will \
-used without modification. In general more layouts are supported when a single argument is sparse, if all \
-arguments have sparse layout fewer combinations will be supported. """,
     "sparse_beta_warning": """
 .. warning::
     Sparse support is a beta feature and some layout(s)/dtype/device combinations may not be supported,
@@ -547,7 +543,9 @@ it will not be propagated.
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
-{sparse_arg_support}
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. If
+:attr:`input` is sparse the result will have the same layout and if :attr:`out`
+is provided it should have the same layout as :attr:`input`.
 
 {sparse_beta_warning}
 
@@ -7479,7 +7477,9 @@ If :attr:`input` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
-{sparse_arg_support}
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`.
+If :attr:`out` is provided it's layout will be used. Otherwise, the result
+layout will be deduced from that of :attr:`input`.
 
 {sparse_beta_warning}
 
@@ -7559,7 +7559,9 @@ The behavior depends on the dimensionality of the tensors as follows:
   tensor, these inputs are valid for broadcasting even though the final two dimensions (i.e. the
   matrix dimensions) are different. :attr:`out` will be a :math:`(j \times k \times n \times p)` tensor.
 
-{sparse_arg_support}
+This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`. In particular the
+matrix-matrix (both arguments 2-dimensional) supports sparse arguments with the same restrictions
+as :func:`torch.mm`
 
 {sparse_beta_warning}
 
