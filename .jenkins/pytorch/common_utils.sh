@@ -121,7 +121,7 @@ function checkout_install_torchdeploy() {
   mkdir temp
   popd
   popd
-  # currently in /var/lib/jenkins/workspace
+  # currently in /var/lib/jenkins/workspace d
   pwd
   ls
   cp -r dist/ ../multipy/temp/
