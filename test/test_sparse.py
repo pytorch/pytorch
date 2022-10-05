@@ -3817,6 +3817,20 @@ class TestSparse(TestSparseBase):
         # even if there are no duplicates
         self.assertFalse(torch.sparse_coo_tensor([[0, 1], [0, 1]], [1, 2], (2, 2)).is_coalesced())
 
+    @coalescedonoff
+    @dtypes(*all_types_and_complex_and(torch.bool))
+    def test_sum(self, device, dtype, coalesced):
+        def run_test(shape, nnz):
+            a = self._gen_sparse(2, nnz, shape, dtype, device, coalesced)[0]
+            self.assertEqual(a.sum(), a._values().sum())
+            if dtype.is_floating_point or dtype.is_complex:
+                a.requires_grad_(True)
+                a.sum().backward()
+                self.assertEqual(a.grad, torch.ones(shape, dtype=dtype, device=device))
+        for shape in [(10, 5), (10, 10)]:
+            run_test(shape, 0)
+            run_test(shape, max(shape))
+            run_test(shape, shape[0] * shape[1])
 
 
 class TestSparseOneOff(TestCase):
