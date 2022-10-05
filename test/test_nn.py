@@ -13313,45 +13313,126 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
 
-    @onlyCPU
-    def test_conv_contiguous_for_oneDNN(self):
-        # See https://github.com/pytorch/pytorch/issues/80837.
-        for dtype in [torch.float, torch.bfloat16]:
-            conv = nn.Conv2d(
-                1,
-                128,
-                kernel_size=(5, 2),
-                stride=(2, 1),
-                padding=(0, 1),
-                dilation=(1, 1),
-                groups=1,
-                bias=True,
-                padding_mode='zeros').to(dtype=dtype)
+    def test_Dropout(self, device):
+        input = torch.empty(1000)
+        self._test_dropout(nn.Dropout, device, input)
 
-            x = torch.rand([1, 2, 321, 201, 1]).to(dtype=dtype)
-            x = torch.transpose(x, 1, 4)
-            x2 = x[..., 0]
-            inputs = [x2, conv.weight, conv.bias, (2, 1), (0, 1), (1, 1), False, (0, 1), 1]
-            if torch.backends.mkldnn.is_available():
-                y = conv(x2)
-                # Disable MKLDNN explicitly
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_ = conv(x2)
-                    self.assertEqual(y, y_)
+        self._test_dropout_discontiguous(nn.Dropout, device)
+        self._test_dropout_discontiguous(nn.Dropout, device, memory_format=torch.channels_last)
 
-    @onlyCPU
-    def test_conv_ic1_channels_last_for_oneDNN(self):
-        # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
-        for dtype in [torch.float, torch.bfloat16]:
-            conv = torch.nn.Conv2d(1, 64, kernel_size=(3, 3), padding=(1, 1), bias=False)
-            conv = conv.to(memory_format=torch.channels_last).to(dtype=dtype)
-            x = torch.rand(2, 1, 100, 100).to(dtype=dtype)
-            if torch.backends.mkldnn.is_available():
-                y = conv(x)
-                # Disable MKLDNN explicitly
-                with torch.backends.mkldnn.flags(enabled=False):
-                    y_ = conv(x)
-                    self.assertEqual(y, y_)
+        self._test_dropout_stride_mean_preserve(nn.Dropout, device)
+
+        if self.device_type == 'cuda' or self.device_type == 'cpu':
+            input = input.bfloat16()
+            self._test_dropout(nn.Dropout, device, input)
+
+    def _test_dropoutNd_no_batch(self, dropout, input):
+        input_clone = input.clone()
+        with freeze_rng_state():
+            res_no_batch = dropout(input)
+
+        with freeze_rng_state():
+            res_batched = dropout(input_clone.unsqueeze(0)).squeeze(0)
+
+        self.assertEqual(res_no_batch, res_batched)
+
+    def _test_dropoutNd_channel_zero(self, dropout, input):
+        # Verify the number of zeros in a channel is 0 or the number of elements in the channel
+        # for a fully positive input tensor
+        shape = input.shape
+        B = shape[0]
+        C = shape[1]
+        channel_numel = torch.tensor(shape[2:]).prod()
+        result = dropout(input)
+
+        for b, c in product(range(B), range(C)):
+            self.assertTrue(result[b, c].count_nonzero() in (0, channel_numel))
+
+    @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
+    def test_Dropout1d(self, device):
+        N, C, L = random.randint(10, 15), random.randint(10, 15), random.randint(10, 15)
+        input = torch.empty(N, C, L)
+        self._test_dropout(nn.Dropout1d, device, input)
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D or 3D input, but received a 4D input"):
+            nn.Dropout1d(p=0.5)(torch.rand(1, 2, 2, 2, device=device))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected 2D or 3D input, but received a 1D input"):
+            nn.Dropout1d(p=0.5)(torch.rand(2, device=device))
+
+        # no batch dims
+        input = torch.rand(50, 2, device=device)
+        self._test_dropoutNd_no_batch(nn.Dropout1d(p=0.5), input)
+        self._test_dropoutNd_no_batch(nn.Dropout1d(p=0.5, inplace=True), input)
+
+        # check that complete channels are dropped
+        input = torch.ones(10, 4, 2, device=device)
+        self._test_dropoutNd_channel_zero(nn.Dropout1d(p=0.5), input)
+        self._test_dropoutNd_channel_zero(nn.Dropout1d(p=0.5, inplace=True), input)
+
+    @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
+    def test_Dropout2d(self, device):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        num_features = 1000
+        input = torch.empty(num_features, b, w, h)
+        self._test_dropout(nn.Dropout2d, device, input)
+        self._test_dropout(nn.Dropout2d, device, input, memory_format=torch.channels_last)
+
+        self._test_dropout_discontiguous(nn.Dropout2d, device)
+        self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
+
+        with self.assertWarnsRegex(UserWarning, "Received a 5-D input to dropout2d"):
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, 2, 2, 2, device=device))
+
+        with self.assertWarnsRegex(UserWarning, "Received a 2-D input to dropout2d"):
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, device=device))
+
+        # TODO: Uncomment these lines once no-batch-dim inputs are supported.
+        # For now, the historical dropout1d behavior is performed for 3D inputs.
+        # See https://github.com/pytorch/pytorch/issues/77081
+
+        # input = torch.rand(50, 2, 2, device=device)
+        # self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5), input)
+        # self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5, inplace=True), input)
+
+        with self.assertWarnsRegex(UserWarning, "assuming that channel-wise 1D dropout behavior is desired"):
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, 2, device=device))
+
+        # check that complete channels are dropped
+        input = torch.ones(10, 4, 2, 2, device=device)
+        self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5), input)
+        self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5, inplace=True), input)
+
+    @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
+    def test_Dropout3d(self, device):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        d = random.randint(1, 2)
+        num_features = 1000
+        input = torch.empty(num_features, b, d, w, h)
+        self._test_dropout(nn.Dropout3d, device, input)
+
+        self._test_dropout_discontiguous(nn.Dropout3d, device)
+        self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
+
+        with self.assertWarnsRegex(UserWarning, "Received a 6-D input to dropout3d"):
+            nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, 2, 2, 2, device=device))
+
+        with self.assertWarnsRegex(UserWarning, "Received a 3-D input to dropout3d"):
+            nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, device=device))
+
+        # no batch dims
+        input = torch.rand(50, 2, 2, 2, device=device)
+        self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5), input)
+        self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5, inplace=True), input)
+
+        # check that complete channels are dropped
+        input = torch.ones(10, 4, 2, 2, 2, device=device)
+        self._test_dropoutNd_channel_zero(nn.Dropout3d(p=0.5), input)
+        self._test_dropoutNd_channel_zero(nn.Dropout3d(p=0.5, inplace=True), input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
