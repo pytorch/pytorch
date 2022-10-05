@@ -486,8 +486,6 @@ Tensor& multinomial_out_mps(const Tensor& self,
     c10::optional<Generator> gen,
     Tensor& result) {
 
-  std::cout<<"Multinomial MPS\n";
-
   TORCH_CHECK(
       result.device() == self.device(),
       "multinomial arguments must have the same device");
