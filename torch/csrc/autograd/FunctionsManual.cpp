@@ -1840,7 +1840,7 @@ Tensor split_with_sizes_backward(
 
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    int64_t split_size,
+    c10::SymInt split_size,
     int64_t dim,
     c10::SymIntArrayRef sym_sizes,
     const at::TensorOptions& options) {
