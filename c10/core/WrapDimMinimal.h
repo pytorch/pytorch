@@ -13,10 +13,7 @@ C10_API T maybe_wrap_dim_slow(T dim, T dim_post_expr, bool wrap_scalar);
 } // namespace detail
 
 template <typename T>
-T _maybe_wrap_dim(
-    T dim,
-    T dim_post_expr,
-    bool wrap_scalar = true) {
+T _maybe_wrap_dim(T dim, T dim_post_expr, bool wrap_scalar = true) {
   // Inline the fast paths
   if (C10_LIKELY(dim_post_expr * -1 <= dim && dim < dim_post_expr)) {
     // For SymInts, we want an explicit control flow to trigger a guard, so we
@@ -27,8 +24,7 @@ T _maybe_wrap_dim(
     return dim;
   }
   // Check edge-cases out-of-line (wrapping scalars and out-of-bounds errors)
-  return c10::detail::maybe_wrap_dim_slow<T>(
-      dim, dim_post_expr, wrap_scalar);
+  return c10::detail::maybe_wrap_dim_slow<T>(dim, dim_post_expr, wrap_scalar);
 }
 
 inline int64_t maybe_wrap_dim(
