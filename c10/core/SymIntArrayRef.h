@@ -324,7 +324,7 @@ class arrayref_optional_base<ArrayRef<SymInt>> {
       const std::initializer_list<T>& v)
       : storage_(v) {}
 
-  constexpr bool initialized() const noexcept {
+  bool initialized() const noexcept {
     typename storage::raw repr;
     // Cast to void* to suppress GCC's -Wclass-memaccess.
     memcpy(
