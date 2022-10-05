@@ -365,5 +365,35 @@ TEST_F(NVFuserTest, FusionUniform_CUDA) {
   }
 }
 
+TEST_F(NVFuserTest, FusionRandLikeReduction_CUDA) {
+  auto dtype = kFloat;
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2, aten_to_data_type(dtype));
+  fusion->addInput(tv0);
+  auto tv1 = sum(tv0, {0});
+  auto tv2 = rand_like(tv1);
+  auto tv3 = add(tv1, tv2);
+  fusion->addOutput(tv3);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+
+  auto options = at::TensorOptions().dtype(dtype).device(at::kCUDA, 0);
+  at::Tensor t0 = at::zeros({2, 3}, options);
+
+  at::manual_seed(0);
+  auto cg_outputs = fec.runFusionWithInputs({t0});
+  auto out = cg_outputs[0];
+
+  at::manual_seed(0);
+  auto t1 = t0.sum(0);
+  auto t2 = generate_uniform(3, dtype).expand_as(t1);
+  auto t3 = t1.add(t2);
+
+  testValidate(fec.fusion(), {out}, {t0}, {t3}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch

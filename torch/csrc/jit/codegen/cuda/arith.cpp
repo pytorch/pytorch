@@ -471,17 +471,18 @@ TensorView* uniform(
   return out;
 }
 
-TensorView* rand_like(TensorView* v) {
+TensorView* rand_like(TensorView* tv) {
   TORCH_CHECK(
-      isFloatingPointType(v->dtype()),
+      isFloatingPointType(tv->dtype()),
       "input must have floating point type, but got ",
-      v->dtype());
+      tv->dtype());
   std::vector<Val*> shape;
-  shape.reserve(v->getMaybeRFactorDomain().size());
-  for (auto id : v->getMaybeRFactorDomain()) {
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  shape.reserve(dom.size());
+  for (auto id : dom) {
     shape.emplace_back(id->getMaybeExpandedExtent());
   }
-  return rand(shape, v->dtype());
+  return rand(shape, tv->dtype());
 }
 
 Val* rand_like(Val* v) {
@@ -505,8 +506,9 @@ TensorView* full(
 
 TensorView* full_like(TensorView* tv, Val* fill_value) {
   std::vector<Val*> shape;
-  shape.reserve(tv->getMaybeRFactorDomain().size());
-  for (auto id : tv->getMaybeRFactorDomain()) {
+  auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
+  shape.reserve(dom.size());
+  for (auto id : dom) {
     shape.emplace_back(id->getMaybeExpandedExtent());
   }
   return full(shape, fill_value, tv->dtype());
