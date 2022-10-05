@@ -254,7 +254,7 @@ static inline Tensor applySelect(
         " is out of bounds for dimension ",
         real_dim,
         " with size ",
-        size.guard_int(__FILE__, __LINE__));
+        size);
   }
 
   // if the index is negative, do not normalize it because that would fix the
