@@ -1294,8 +1294,6 @@ symbolic_tensor_failures = {
     xfail('special.spherical_bessel_j0', ''),  # aten.special_spherical_bessel_j0.default - couldn't find symbolic meta fun...
     xfail('special.xlog1py', ''),  # aten.special_xlog1py.default - couldn't find symbolic meta function/decomposition
     xfail('split', ''),  # 'torch._C.SymIntNode' and 'int'
-    xfail('split', 'list_args'),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('split_with_sizes', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
