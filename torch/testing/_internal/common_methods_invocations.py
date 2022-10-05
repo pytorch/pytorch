@@ -7432,6 +7432,16 @@ def sample_inputs_pixel_shuffle(op_info, device, dtype, requires_grad, **kwargs)
             kwargs=dict(upscale_factor=upscale_factor),
         )
         for upscale_factor in (1, 3)
+    ] + [
+        SampleInput(
+            make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad),
+            kwargs=dict(upscale_factor=1),
+        )
+        for shape in [
+            (1, 0, 1, 1),
+            (1, 1, 0, 1),
+            (1, 1, 1, 0),
+        ]
     ]
 
 def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwargs):
@@ -7441,6 +7451,16 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
             kwargs=dict(downscale_factor=downscale_factor),
         )
         for downscale_factor in (1, 3)
+    ] + [
+        SampleInput(
+            make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad),
+            kwargs=dict(downscale_factor=1),
+        )
+        for shape in [
+            (1, 0, 1, 1),
+            (1, 1, 0, 1),
+            (1, 1, 1, 0),
+        ]
     ]
 
 def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
