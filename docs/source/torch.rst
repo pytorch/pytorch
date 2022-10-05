@@ -630,3 +630,14 @@ Operator Tags
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
+
+.. automodule:: torch.autograd
+.. currentmodule:: torch.autograd
+
+Engine Configuration
+----------------------------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    set_multithreading_enabled
