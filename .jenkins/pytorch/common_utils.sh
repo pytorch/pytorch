@@ -121,11 +121,12 @@ function checkout_install_torchdeploy() {
   mkdir temp
   popd
   popd
+  # currently in /var/lib/jenkins/workspace
   pwd
   ls
+  cp -r dist/ ../multipy/temp/
   pushd ..
   pushd multipy
-  cp -r ../pytorch/dist temp/
   DOCKER_BUILDKIT=1 docker build -t multipy --progress=plain
   popd
   popd
