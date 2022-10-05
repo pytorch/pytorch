@@ -294,6 +294,14 @@ class TORCH_API TensorBase {
     return impl_->numel() * impl_->itemsize();
   }
 
+  c10::SymInt sym_nbytes() const {
+    TORCH_CHECK(layout () != at::kSparse,
+                "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
+                "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
+                "equivalent dense tensor, multiply numel() by element_size()");
+    return impl_->sym_numel() * impl_->itemsize();
+  }
+
   int64_t numel() const {
     return impl_->numel();
   }
@@ -569,6 +577,10 @@ class TORCH_API TensorBase {
 
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>
   PackedTensorAccessor32<T,N,PtrTraits> packed_accessor32() const& {
+    TORCH_CHECK(
+        impl_->numel() <=
+            static_cast<int64_t>(std::numeric_limits<int32_t>::max()),
+        "numel needs to be smaller than int32_t max; otherwise, please use packed_accessor64");
     return generic_packed_accessor<T,N,PtrTraits,int32_t>();
   }
   template<typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits>

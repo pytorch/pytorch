@@ -107,23 +107,20 @@ Tensor& pad_out_template(Tensor &output, const Tensor &input_, IntArrayRef paddi
     grad_output = grad_output_.contiguous();
   }
 
-  const int64_t input_dim = input.dim();
-  MPSShape *leftPadding = nullptr, *rightPadding = nullptr;
-  if (padding_dim == 3) {
-    leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_front), @(pad_t), @(pad_l) } count:input_dim];
-    rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_back), @(pad_b), @(pad_r) } count:input_dim];
-  } else if (padding_dim == 2) {
-    leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_t), @(pad_l) } count:input_dim];
-    rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_b), @(pad_r) } count:input_dim];
-  } else if (padding_dim == 1) {
-    if (input_dim > 1) {
-      leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_l) } count:input_dim];
-      rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(0), @(0), @(pad_r) } count:input_dim];
-    } else {
-      leftPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(pad_l) } count:input_dim];
-      rightPadding = [NSArray arrayWithObjects:(const NSNumber*[]){ @(pad_r) } count:input_dim];
-    }
+  std::vector<NSNumber*> leftPadVec(ndims, @(0));
+  std::vector<NSNumber*> rightPadVec(ndims, @(0));
+  leftPadVec [ndims - 1] = @(pad_l);
+  rightPadVec[ndims - 1] = @(pad_r);
+  if (padding_dim >= 2) {
+    leftPadVec [ndims - 2] = @(pad_t);
+    rightPadVec[ndims - 2] = @(pad_b);
   }
+  if (padding_dim >= 3) {
+    leftPadVec [ndims - 3] = @(pad_front);
+    rightPadVec[ndims - 3] = @(pad_back);
+  }
+  MPSShape *leftPadding  = [NSArray arrayWithObjects:leftPadVec.data() count:ndims];
+  MPSShape *rightPadding = [NSArray arrayWithObjects:rightPadVec.data() count:ndims];
 
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) { }
@@ -296,6 +293,11 @@ Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& i
 // backward pass is exlicitly handled in autograd by negating the "pad" argument
 Tensor constant_pad_nd_mps(const Tensor& self, IntArrayRef pad, const Scalar& value)
 {
+  if (pad.size() > 6) {
+    TORCH_WARN_ONCE("MPS: The constant padding of more than 3 dimensions is not currently supported natively. ",
+                    "It uses View Ops default implementation to run. This may have performance implications.");
+    return at::native::constant_pad_nd(self, pad, value);
+  }
   Tensor output = at::empty({0}, self.options());
   return mps::pad_out_template(output, self, pad, c10::nullopt, MPSGraphPaddingModeConstant, value.toDouble(), __func__);
 }

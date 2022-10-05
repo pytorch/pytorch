@@ -1815,6 +1815,8 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "nn.functional.huber_loss",
     "nn.functional.logsigmoid",
     "nn.functional.multilabel_soft_margin_loss",
+    "unfold",  # fails an aliasing assert
+    "unfold_copy",  # fails an aliasing assert
     "pca_lowrank",
     "roll",
     "svd_lowrank",
@@ -1933,7 +1935,7 @@ class TestFakeTensor(TestCase):
             )
 
             # TODO: enable check_aliasing, batch norm fails
-            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=False):
+            with torch._subclasses.CrossRefFakeMode(ignore_op_fn=lambda fn: fn in common_skip_ops, check_aliasing=True):
                 with warnings.catch_warnings(), context():
                     composite_compliance.compute_expected_grads(
                         op.get_op(), args, kwargs,
