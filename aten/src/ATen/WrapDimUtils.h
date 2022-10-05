@@ -93,13 +93,13 @@ inline int64_t _legacy_cat_wrap_dim(
   return dim;
 }
 
-int64_t legacy_cat_wrap_dim(
+inline int64_t legacy_cat_wrap_dim(
     int64_t dim,
     const std::vector<std::vector<int64_t>>& tensor_sizes) {
   return _legacy_cat_wrap_dim<int64_t>(dim, tensor_sizes);
 }
 
-int64_t legacy_cat_wrap_dim_symint(
+inline int64_t legacy_cat_wrap_dim_symint(
     int64_t dim,
     const std::vector<std::vector<c10::SymInt>>& tensor_sizes) {
   return _legacy_cat_wrap_dim<c10::SymInt>(dim, tensor_sizes);
