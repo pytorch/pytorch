@@ -60,15 +60,15 @@ class TryMergeExplainer(object):
 
     def _get_flag_msg(self) -> str:
         if self.force:
-            return "Your change will be merged **immediately** since you used the force (-f) flag, " + \
-                "bypassing any CI checks (ETA: 1-5 minutes)."
+            return "Your change will be merged immediately since you used the force (-f) flag, " + \
+                "**bypassing any CI checks** (ETA: 1-5 minutes)."
         elif self.on_green:
             return "Your change will be merged once all checks on your PR pass since you used the green (-g) flag (ETA: 0-4 Hours)."
         elif self.land_checks:
             flag_msg = \
                 "**The `-l` land checks flag is deprecated and no longer needed.** Instead we now automatically " + \
                 "add the `ciflow\\trunk` label to your PR once it's approved\n\n"
-            
+
             if self.has_trunk_label:
                 flag_msg += "Your change will be merged once all checks on your PR pass (ETA 0-4 Hours)."
             else:
@@ -77,7 +77,7 @@ class TryMergeExplainer(object):
             return flag_msg
         else:
             return "Your change will be merged once all checks pass (ETA 0-4 Hours)."
-        
+
     def _get_land_check_progress(self, commit: Optional[str]) -> str:
         if commit is not None:
             return (
@@ -92,10 +92,11 @@ class TryMergeExplainer(object):
         main_message = self._get_flag_msg()
 
         advanced_debugging = "\n".join((
-                "<details><summary>Advanced Debugging</summary>",
-                f"Check the merge workflow status <a href=\"{os.getenv('GH_RUN_URL')}\">here</a>{self._get_land_check_progress()}",
-                "</details>"
-            ))
+            "<details><summary>Advanced Debugging</summary>",
+            "Check the merge workflow status ",
+            f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>{self._get_land_check_progress(commit)}",
+            "</details>"
+        ))
 
         msg = title + "\n"
         msg += main_message + "\n\n"
