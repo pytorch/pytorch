@@ -11,7 +11,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/col2im_backward_native.h>
 #include <ATen/ops/col2im_native.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/im2col_native.h>
