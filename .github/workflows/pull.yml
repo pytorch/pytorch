@@ -315,12 +315,12 @@ jobs:
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
-  deploy-pytorch-linux-jammy-cuda11.6-cudnn8-py3_8-clang12-test:
-    name: pytorch-linux-jammy-cuda11.6-cudnn8-py3_8-clang12-deploy
+  deploy-pytorch-linux-jammy-cuda11_6-cudnn8-py3_8-clang12-test:
+    name: pytorch-linux-jammy-cuda11_6-cudnn8-py3_8-clang12-deploy
     uses: ./.github/workflows/_linux-test.yml
     needs: deploy-linux-jammy-cuda-11_6-cudnn8-py3_8-clang12-build
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7-deploy
+      build-environment: deploy-linux-jammy-cuda-11_6-cudnn8-py3_8-clang12-build
       docker-image: ${{ needs.deploy-linux-jammy-cuda-11_6-cudnn8-py3_8-clang12-build.outputs.docker-image }}
       test-matrix: ${{ needs.deploy-linux-jammy-cuda-11_6-cudnn8-py3_8-clang12-build.outputs.test-matrix }}
 
