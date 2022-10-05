@@ -72,19 +72,19 @@ void binary_op_intersection_kernel(
   }
 
   auto* RESTRICT ptr_res_values_bytes = reinterpret_cast<char*>(iter.data_ptr(0));
-  const auto* ptr_lhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(1));
-  const auto* ptr_lhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(2));
-  const auto* ptr_rhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(3));
-  const auto* ptr_rhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(4));
+  const auto* RESTRICT ptr_lhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(1));
+  const auto* RESTRICT ptr_lhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(2));
+  const auto* RESTRICT ptr_rhs_values_bytes = reinterpret_cast<char*>(iter.data_ptr(3));
+  const auto* RESTRICT ptr_rhs_select_idx_bytes = reinterpret_cast<char*>(iter.data_ptr(4));
 
   auto offset_calc = make_offset_calculator<5>(iter);
   auto loop = [=] FUNCAPI (int i) {
     auto offsets = offset_calc.get(i);
 
     auto* RESTRICT ptr_res_values = reinterpret_cast<scalar_t*>(ptr_res_values_bytes + offsets[0]);
-    const auto* ptr_lhs_values = reinterpret_cast<const scalar_t*>(ptr_lhs_values_bytes + offsets[1]);
+    const auto* RESTRICT ptr_lhs_values = reinterpret_cast<const scalar_t*>(ptr_lhs_values_bytes + offsets[1]);
     const auto lhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_lhs_select_idx_bytes + offsets[2]);
-    const auto* ptr_rhs_values = reinterpret_cast<const scalar_t*>(ptr_rhs_values_bytes + offsets[3]);
+    const auto* RESTRICT ptr_rhs_values = reinterpret_cast<const scalar_t*>(ptr_rhs_values_bytes + offsets[3]);
     const auto rhs_nnz_idx = *reinterpret_cast<const index_t*>(ptr_rhs_select_idx_bytes + offsets[4]);
 
     *ptr_res_values = binary_op_t::apply(
