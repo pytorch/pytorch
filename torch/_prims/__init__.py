@@ -243,7 +243,10 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    return torch.empty_strided(shape, strides, dtype=dtype, device=device)
+    if isinstance(tensorlike, torch.Tensor):
+        return tensorlike.as_strided(shape, strides).to(dtype=dtype, device=device)
+    else:
+        return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
 
 def _make_prim(
