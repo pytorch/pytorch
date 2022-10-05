@@ -76,9 +76,7 @@ if __name__ == "__main__":
             if handle is not None:
                 stats["per_process_gpu_info"] = get_per_process_gpu_info(handle)
                 # https://docs.nvidia.com/deploy/nvml-api/structnvmlUtilization__t.html
-                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(
-                    handle
-                )
+                gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(handle)
                 stats["total_gpu_utilization"] = gpu_utilization.gpu
                 stats["total_gpu_mem_utilization"] = gpu_utilization.memory
         except Exception as e:
