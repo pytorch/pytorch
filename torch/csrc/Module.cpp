@@ -1,6 +1,5 @@
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
-#include <string>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>

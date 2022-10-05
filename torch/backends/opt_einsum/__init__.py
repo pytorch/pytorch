@@ -53,6 +53,7 @@ def _set_strategy(_strategy: str) -> None:
 def _get_strategy() -> str:
     return strategy
 
+
 def set_flags(_enabled=None, _strategy=None):
     orig_flags = (enabled, None if not is_available() else strategy)
     if _enabled is not None:
@@ -76,7 +77,7 @@ def flags(enabled=False, strategy='auto'):
 
 # The magic here is to allow us to intercept code like this:
 #
-#   torch.backends.opteinsum.enabled = True
+#   torch.backends.opt_einsum.enabled = True
 
 class OptEinsumModule(PropModule):
     def __init__(self, m, name):
