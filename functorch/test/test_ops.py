@@ -987,6 +987,7 @@ class TestOperators(TestCase):
         xfail('tensor_split'),
         xfail('to_sparse'),
         xfail('unfold'),
+        xfail('unfold_copy'),
         xfail('vdot'),
         xfail('nn.functional.dropout'),
         xfail('fft.ihfft2'),
