@@ -119,13 +119,23 @@ def _report_free(free_external, free_internal):
     suffix = f' ({pct:.1f}% internal)'
     return f'{Bytes(total)}{suffix}'
 
+PAGE_SIZE = 1024 * 1024 * 20
+legend = f"""\
+
+Legend:
+    [a     ] - a segment in the allocator
+    ^-- a page {Bytes(PAGE_SIZE)} of memory in the segment
+    a-z: pages filled with a single block's content
+    ' ': page is completely free
+    *: page if completely full with multiple blocks
+    0-9: page is partially full with tensors of multiple blocks (9 == 90% full)
+    (X% internal) - of the free memory, X% is free because we rounded the size of the allocation.
+"""
+
 def segsum(data):
-    PAGE_SIZE = 1024 * 1024 * 20
     segments = []
     out = io.StringIO()
     out.write(f"Summary of segments >= {Bytes(PAGE_SIZE)} in size\n")
-    out.write("(each line is a segment, each letter is 16MB, different letters for different tensors in the segment,"
-              " * means multiple tensors in the 20MBs, ' ' means free)\n")
     total_reserved = 0
     total_allocated = 0
     free_external = 0
@@ -191,6 +201,7 @@ def segsum(data):
     out.write(f'total_allocated: {Bytes(total_allocated)}\n')
     internal_external = f' ({Bytes(free_internal)} internal + {Bytes(free_external)} external)' if free_internal else ''
     out.write(f'total_free: {_report_free(free_external, free_internal)}\n')
+    out.write(legend)
     assert free_internal + free_external + total_allocated == total_reserved
     return out.getvalue()
 
@@ -300,11 +311,6 @@ if __name__ == "__main__":
     trace_a = subparsers.add_parser('trace', description='Prints ring buffer of most recent allocation events')
     trace_a.add_argument('input', help=pickled)
 
-    sim_a = subparsers.add_parser('sim', description='Simulates most recent events, prints summary of simulation')
-    sim_a.add_argument('input', help=pickled)
-    sim_a.add_argument('-m' , '--mode', default='sim', help='which algorithm to use')
-
-
     description = 'Generate a flamegraph that visualizes what memory is stored in each allocator segment (aka block)'
     segments_a = subparsers.add_parser('segments', description=description)
     segments_a.add_argument('input', help=pickled)
@@ -351,18 +357,6 @@ if __name__ == "__main__":
     elif args.action == 'trace':
         data = _read(args.input)
         print(trace(data))
-    elif args.action == 'sim':
-        data = _read(args.input)
-        the_sim = globals()[args.mode]
-        if 'oom' in data:
-            total_free = data['oom']['device_allocated']
-        else:
-            total_free = 0
-            for seg in data['segments']:
-                total_free += seg['total_size']
-            # total_free = 50*1024*1024*1024
-        print(the_sim(data, total_free))
-
     elif args.action == 'compare':
         before = _read(args.before)
         after = _read(args.after)
