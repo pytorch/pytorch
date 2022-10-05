@@ -360,6 +360,11 @@ __half random_half_gen() {
     return __float2half(std::rand() % 10);
 }
 
+__nv_bfloat16 random_half_gen_bfloat16() {
+    // return static_cast<float>(std::rand() % 10);
+    return __int2bfloat16_rn(std::rand() % 10);
+}
+
 double cusparselt_spmma(const at::Tensor& A, int64_t m, int64_t n, int64_t k) {
     int major_cc, minor_cc;
     CHECK_CUDA( cudaDeviceGetAttribute(&major_cc,
@@ -404,6 +409,7 @@ double cusparselt_spmma(const at::Tensor& A, int64_t m, int64_t n, int64_t k) {
     auto     A_size         = num_batches * batch_strideA;
     auto     B_size         = num_batches * batch_strideB;
     auto     C_size         = num_batches * batch_strideC;
+    // __half is equivalent to fp16, I believe
     auto     A_size_bytes   = num_batches * batch_strideA * sizeof(__half);
     auto     B_size_bytes   = num_batches * batch_strideB * sizeof(__half);
     auto     C_size_bytes   = num_batches * batch_strideC * sizeof(__half);
@@ -567,7 +573,6 @@ double cusparselt_spmma(const at::Tensor& A, int64_t m, int64_t n, int64_t k) {
                                       num_streams) )
       t_min_ms = (t_cur_ms <= t_min_ms) ? t_cur_ms : t_min_ms;
       t_max_ms = (t_cur_ms >= t_max_ms) ? t_cur_ms : t_max_ms;
-      t_avg_ms += t_cur_ms;
     }
     cudaEventRecord(t_stop);
     cudaEventSynchronize(t_stop);
@@ -622,23 +627,33 @@ double cusparselt_spmma2(const at::Tensor& A, int64_t m, int64_t n, int64_t k) {
     auto     A_size         = num_batches * batch_strideA;
     auto     B_size         = num_batches * batch_strideB;
     auto     C_size         = num_batches * batch_strideC;
+    // __half is equivalent to fp16, I believe
     auto     A_size_bytes   = num_batches * batch_strideA * sizeof(__half);
     auto     B_size_bytes   = num_batches * batch_strideB * sizeof(__half);
     auto     C_size_bytes   = num_batches * batch_strideC * sizeof(__half);
+    // auto     A_size_bytes   = num_batches * batch_strideA * sizeof(__nv_bfloat16);
+    // auto     B_size_bytes   = num_batches * batch_strideB * sizeof(__nv_bfloat16);
+    // auto     C_size_bytes   = num_batches * batch_strideC * sizeof(__nv_bfloat16);
     auto hA = new __half[A_size];
     auto hB = new __half[B_size];
     auto hC = new __half[C_size]();
+    // auto hA = new __nv_bfloat16[A_size];
+    // auto hB = new __nv_bfloat16[B_size];
+    // auto hC = new __nv_bfloat16[C_size]();
     for (int i = 0; i < A_size; ++i) {
       hA[i] = random_half_gen();
+      // hA[i] = random_half_gen_bfloat16();
     }
     for (int i = 0; i < B_size; ++i) {
       hB[i] = random_half_gen();
+      // hB[i] = random_half_gen_bfloat16();
     }
     float alpha = 1.0f;
     float beta  = 0.0f;
     //--------------------------------------------------------------------------
     // Device memory management
-    __half *dA, *dB, *dC, *dD, *dA_compressed;
+    // __half *dA, *dB, *dC, *dD, *dA_compressed;
+    __nv_bfloat16 *dA, *dB, *dC, *dD, *dA_compressed;
     int    *d_valid;
     CHECK_CUDA( cudaMalloc((void**) &dA, A_size_bytes) )
     CHECK_CUDA( cudaMalloc((void**) &dB, B_size_bytes) )
@@ -714,8 +729,8 @@ double cusparselt_spmma2(const at::Tensor& A, int64_t m, int64_t n, int64_t k) {
     auto  hBias = new float[m];
     for (int i = 0; i < m; i++)
         hBias[i] = 1.0f;
-    CHECK_CUDA( cudaMalloc((void**) &dBias, m * sizeof(float)) )
-    CHECK_CUDA( cudaMemcpy(dBias, hBias, m * sizeof(float),
+    CHECK_CUDA( cudaMalloc((void**) &dBias, m * sizeof(c10::kBFloat16)) )
+    CHECK_CUDA( cudaMemcpy(dBias, hBias, m * sizeof(c10::kBFloat16),
                            cudaMemcpyHostToDevice) )
     CHECK_CUSPARSE( cusparseLtMatmulDescSetAttribute(&handle, &matmul,
                                                 CUSPARSELT_MATMUL_BIAS_POINTER,
@@ -789,21 +804,20 @@ double cusparselt_spmma2(const at::Tensor& A, int64_t m, int64_t n, int64_t k) {
 
     //
     int iters = 100;
+    cudaEventRecord(t_start);
     for (int i = 0; i < iters; ++i)
     {
-      cudaEventRecord(t_start);
 
       CHECK_CUSPARSE( cusparseLtMatmul(&handle, &plan, &alpha, dA_compressed, dB,
                                       &beta, dC, dD, d_workspace, streams,
                                       num_streams) )
-      cudaEventRecord(t_stop);
-      cudaEventSynchronize(t_stop);
-      cudaEventElapsedTime(&t_cur_ms, t_start, t_stop);
       t_min_ms = (t_cur_ms <= t_min_ms) ? t_cur_ms : t_min_ms;
       t_max_ms = (t_cur_ms >= t_max_ms) ? t_cur_ms : t_max_ms;
-      t_avg_ms += t_cur_ms;
     }
-    t_avg_ms /= (float)iters;
+    cudaEventRecord(t_stop);
+    cudaEventSynchronize(t_stop);
+    cudaEventElapsedTime(&t_cur_ms, t_start, t_stop);
+    t_avg_ms = t_cur_ms / (float)iters;
     return t_avg_ms;
 }
 
