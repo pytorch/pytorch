@@ -56,35 +56,22 @@ def sample_inputs_softmax_variant(
 
 
 def _generate_masked_op_mask(input_shape, device, **kwargs):
+    make_arg = partial(
+        make_tensor, dtype=torch.bool, device=device, requires_grad=False
+    )
     yield None
-    yield make_tensor(input_shape, dtype=torch.bool, device=device, requires_grad=False)
+    yield make_arg(input_shape)
     if len(input_shape) > 2:
         # broadcast last mask dimension:
-        yield make_tensor(
-            input_shape[:-1] + (1,),
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:-1] + (1,))
         # broadcast middle mask dimension:
-        yield make_tensor(
-            input_shape[:1] + (1,) + input_shape[2:],
-            dtype=torch.bool,
-            device=device,
-            requires_grad=False,
-        )
+        yield make_arg(input_shape[:1] + (1,) + input_shape[2:])
         # broadcast first mask dimension:
-        yield make_tensor(
-            (1,) + input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg((1,) + input_shape[1:])
         # mask.ndim < input.ndim
-        yield make_tensor(
-            input_shape[1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[1:])
         # mask.ndim == 1
-        yield make_tensor(
-            input_shape[-1:], dtype=torch.bool, device=device, requires_grad=False
-        )
+        yield make_arg(input_shape[-1:])
         # masks that require broadcasting of inputs (mask.ndim >
         # input.ndim) will not be supported, however, we may
         # reconsider this if there will be demand on this kind of
@@ -300,13 +287,11 @@ def sample_inputs_masked_softmax(
         for mask in _generate_masked_op_mask(
             sample_input.input.shape, device, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = sample_input.args, dict(
-                mask=mask, **sample_input.kwargs
-            )
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
-                args=sample_input_args,
-                kwargs=sample_input_kwargs,
+                *sample_input.args,
+                mask=mask,
+                **sample_input.kwargs,
             )
 
 
@@ -336,8 +321,8 @@ def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs)
                 sample_input_args = (dim,)
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
-                args=sample_input_args,
-                kwargs=sample_input_kwargs,
+                *sample_input_args,
+                **sample_input_kwargs,
             )
 
 
@@ -351,20 +336,18 @@ def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwar
         list(_generate_masked_op_mask(shape, device, **kwargs)) for shape in shapes
     ]
 
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
     for shape, input_masks, other_masks in zip(
         shapes, input_mask_lists, other_mask_lists
     ):
         for input_mask, other_mask in zip(input_masks, other_masks):
-            input = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
-            )
-            other = make_tensor(
-                shape, dtype=dtype, device=device, requires_grad=requires_grad
-            )
             yield SampleInput(
-                input.clone().requires_grad_(requires_grad),
-                args=(other.clone().requires_grad_(requires_grad),),
-                kwargs=dict(input_mask=input_mask, other_mask=other_mask),
+                make_arg(shape),
+                make_arg(shape),
+                input_mask=input_mask,
+                other_mask=other_mask,
             )
 
 
@@ -374,13 +357,11 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
         for sample_input in sample_inputs_softmax_variant(
             op_info, device, dtype, requires_grad, **kwargs
         ):
-            sample_input_args, sample_input_kwargs = (
-                ord,
-            ) + sample_input.args, sample_input.kwargs.copy()
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
-                args=sample_input_args,
-                kwargs=sample_input_kwargs,
+                ord,
+                *sample_input.args,
+                **sample_input.kwargs,
             )
 
 
