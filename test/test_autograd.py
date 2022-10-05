@@ -6911,6 +6911,36 @@ for shape in [(1,), ()]:
             memory_with_hooks = torch.cuda.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
+    def test_multi_grad_hooks(self):
+        t1 = torch.rand(2, requires_grad=True)
+        t2 = torch.rand(2, requires_grad=True)
+        t3 = torch.rand(2, requires_grad=True)
+        t4 = torch.rand(2, requires_grad=True)
+
+        def hook(grads):
+            print(f"Multi-hook called with {len(grads)} gradients")
+        torch.autograd.graph.register_multi_grad_hook((t2, t3), hook)
+
+        def get_hook(name):
+            def hook(grad):
+                print(f"{name} hook called")
+            return hook
+        t1.register_hook(get_hook("t1"))
+        t3.register_hook(get_hook("t3"))
+
+        out = t1.clone()
+        out = out + t2
+        out = out + t3
+        out = out + t4
+
+        out.sum().backward(inputs=(t2, t3))
+        # t3 hook called
+        # Multi-hook called with 2 gradients
+        # t1 hook called
+
+        out.sum().backward(inputs=(t1, t2))
+        # Multi-hook called with 1 gradient
+
     def test_pynode_destruction_deadlock(self):
         script = """
 import torch
