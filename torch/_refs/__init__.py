@@ -1989,7 +1989,7 @@ def sum(
     dim: Union[Optional[int], Optional[List[int]]] = None,
     keepdim: bool = False,
     *,
-    dtype=None,
+    dtype: Optional[torch.dtype] = None,
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
     if dtype is None:
@@ -3572,6 +3572,30 @@ def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     return self.unfold(dimension, size, step).to(  # type: ignore[call-overload]
         memory_format=torch.contiguous_format, copy=True
     )
+
+
+@register_decomposition(torch.ops.aten.cumsum)
+def cumsum(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    keepdim: bool = False,
+    dtype: Optional[torch.dtype] = None,
+    out: Optional[Tensor] = None,
+) -> TensorLikeType:
+    # We implement all the kwargs of a reduction. ATen just handles dtype
+    # nb. This decomposition may not be as efficient as a backend-specific implementation
+    ndim = a.ndim
+    dim = utils.canonicalize_dim(ndim, dim)
+    if ndim == 0:
+        return sum(a.unsqueeze(0), dim=0, keepdim=keepdim, dtype=dtype, out=out)
+    a = a.unsqueeze(dim + 1)
+    rg = torch.arange(a.shape[dim], device=a.device)
+    mask = rg.unsqueeze(1) <= rg
+    for _ in range(ndim - dim - 1):
+        mask = mask.unsqueeze(-1)
+    masked_a = utils.mask_tensor(mask, a)
+    return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
 
 
 @register_decomposition(torch.ops.aten.unsqueeze, disable_meta=True)

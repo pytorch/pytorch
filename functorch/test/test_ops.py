@@ -9,7 +9,7 @@
 import itertools
 import unittest
 
-from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64
+from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_ARM64, parametrize
 import torch
 from torch import Tensor
 import functools
@@ -21,8 +21,7 @@ from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
-    get_exhaustive_batched_inputs,
-    get_exhaustive_batched_inputs_batch_norm_is_training,
+    generate_vmap_inputs,
     decorate,
     xfail,
     skip,
@@ -291,6 +290,48 @@ vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
 }
 
+aliasing_ops = {
+    'T',
+    'broadcast_to',
+    'conj',
+    'contiguous',
+    'diagonal',  # linalg.diagonal is an alias
+    'expand',
+    'flatten',
+    'imag',
+    'mH',  # adjoint is an alias
+    'mT',
+    'movedim',  # moveaxis is an alias
+    'narrow',
+    'permute',
+    'positive',
+    # 'ravel', is composite implict autograd and may call clone
+    'real',
+    'reshape',
+    'resolve_conj',
+    'resolve_neg',
+    'select',
+    'squeeze',
+    'transpose',  # swapdims and swapaxes are aliases
+    'unflatten',
+    'unfold',
+    'unsqueeze',
+    'view',
+    'view_as',
+    'view_as_complex',
+    'view_as_real',
+}
+
+aliasing_ops_list_return = {
+    'chunks',
+    'dsplit',
+    'hsplit',
+    'split',
+    'unbind',
+    'vsplit',
+    # 'tensor_split' not composite compliant, see vjp_fail
+}
+
 
 class TestOperators(TestCase):
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -354,6 +395,7 @@ class TestOperators(TestCase):
         skip('nn.functional.max_unpool1d'),  # fails everywhere except on mac
         skip('nn.functional.max_unpool2d'),  # fails everywhere except on windows
         skip('nn.functional.max_unpool3d'),  # fails everywhere except on mac
+        xfail("native_batch_norm"),
 
         xfail('nn.functional.rrelu')  # in-place test errors out with no formula implemented
     }))
@@ -602,6 +644,7 @@ class TestOperators(TestCase):
         xfail("nn.functional.batch_norm", 'without_cudnn'),
         # view doesn't work on sparse
         xfail("to_sparse"),
+        xfail("native_batch_norm"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -684,6 +727,7 @@ class TestOperators(TestCase):
         # ---------------------------- BUGS ------------------------------------
         # All of the following are bugs and need to be fixed
         skip('linalg.svdvals'),  # # really annoying thing where it passes correctness check but not has_batch_rule
+        skip("native_batch_norm"),
         xfail('__getitem__', ''),  # dynamic error
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
@@ -792,6 +836,7 @@ class TestOperators(TestCase):
         # erroring because running_mean and running_var aren't differentiable
         xfail('nn.functional.batch_norm'),
         xfail('nn.functional.batch_norm', 'without_cudnn'),
+        xfail("native_batch_norm"),
         # ----------------------------------------------------------------------
     }
 
@@ -860,7 +905,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
-        xfail('istft'),  # col2im fallback
         xfail('polar'),  # complex fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
@@ -958,7 +1002,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.max_pool3d'),
-        xfail('istft'),
         xfail('nn.functional.fractional_max_pool2d'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
@@ -992,6 +1035,7 @@ class TestOperators(TestCase):
         xfail('linalg.vecdot', ''),
         xfail('segment_reduce', 'lengths'),
         xfail('sparse.sampled_addmm', ''),
+        xfail("native_batch_norm"),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
@@ -1057,6 +1101,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('sparse.sampled_addmm', ''),
+        xfail("native_batch_norm"),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -1083,10 +1128,10 @@ class TestOperators(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            if is_batch_norm and is_batch_norm_training(op.name, kwargs):
-                generator = get_exhaustive_batched_inputs_batch_norm_is_training(args, kwargs)
-            else:
-                generator = get_exhaustive_batched_inputs(args, kwargs)
+
+            is_batch_norm_and_training = is_batch_norm and is_batch_norm_training(op.name, kwargs)
+            generator = generate_vmap_inputs(args, kwargs,
+                                             is_batch_norm_and_training=is_batch_norm_and_training)
 
             for batched_args, in_dims, kwargs in generator:
                 vmapped_op = vmap(op, in_dims)
@@ -1300,6 +1345,10 @@ class TestOperators(TestCase):
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition
         xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
+        # RuntimeError: Batch norm got a batched tensor as
+        # input while the running_mean or running_var, which will be updated in
+        # place, were not batched.
+        xfail("native_batch_norm"),
     }))
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1611,6 +1660,64 @@ class TestOperators(TestCase):
         loop_out = loop2(fn, in_dims_all, in_dims_all, 0, 0, B0, B1, *args)
         self.assertEqual(loop_out, batched_out)
 
+    @ops(filter(lambda op: op.name in aliasing_ops, op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace(self, device, dtype, op, grad_op):
+        for sample_input in op.sample_inputs(device, dtype):
+            def f(x):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs).copy_(x)
+                return x
+
+            without_grad = op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+            if grad_op == "jvp":
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+            else:
+                assert grad_op == "vjp"
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    vjp(f, torch.randn_like(without_grad))
+
+    @ops(filter(lambda op: op.name in aliasing_ops_list_return, op_db + additional_op_db), allowed_dtypes=(torch.float,))
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace_list_return(self, device, dtype, op, grad_op):
+        for sample_input in op.sample_inputs(device, dtype):
+            def f(x):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs)[0].copy_(x)
+                return x
+
+            without_grad = op(sample_input.input, *sample_input.args, **sample_input.kwargs)[0]
+            with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                if grad_op == "jvp":
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+                else:
+                    assert grad_op == "vjp"
+                    vjp(f, torch.randn_like(without_grad))
+
+    @parametrize("grad_op", ["jvp", "vjp"])
+    def test_view_then_inplace_special(self, grad_op):
+        # some things in __getitem__ use at::index, which doesn't alias, so this tests a subset of them that do alias
+        ops = [
+            lambda x: x[0],
+            lambda x: x[0, 0, 0],
+            lambda x: x[:1],
+            lambda x: x[:, :1],
+            lambda x: x[:, :1, :],
+        ]
+
+        for op in ops:
+            def f(x):
+                op(captured).copy_(x)
+                return x
+
+            captured = torch.randn(4, 3, 3)
+            without_grad = op(captured)
+            if grad_op == "jvp":
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    jvp(f, (torch.randn_like(without_grad),), (torch.randn_like(without_grad),))
+            else:
+                assert grad_op == "vjp"
+                with self.assertRaisesRegex(RuntimeError, "During a grad .* attempted to call in-place operation"):
+                    vjp(f, torch.randn_like(without_grad))
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
