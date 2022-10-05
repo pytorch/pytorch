@@ -4694,6 +4694,7 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
+    @unittest.skipIf(IS_WINDOWS, 'Windows CI does not like the load_inline')
     def test_cpp_memory_snapshot_pickle(self):
         from torch.utils.cpp_extension import load_inline
         source = """
