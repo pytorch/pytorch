@@ -4796,7 +4796,7 @@
   variants: function, method
   device_guard: False
 
-- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4804,7 +4804,7 @@
     CompositeExplicitAutograd: unsafe_split_with_sizes
   autogen: unsafe_split_with_sizes.out
 
-- func: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+- func: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -12808,7 +12808,7 @@
     CompositeExplicitAutogradNonFunctional: split_copy_Tensor
   tags: view_copy
 
-- func: split_with_sizes_copy(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: split_with_sizes_copy(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: split_with_sizes_copy
@@ -13020,7 +13020,7 @@
     CompositeExplicitAutograd: split_copy_Tensor_out
 
 
-- func: split_with_sizes_copy.out(Tensor self, int[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()
+- func: split_with_sizes_copy.out(Tensor self, SymInt[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_with_sizes_copy_out
