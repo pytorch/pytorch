@@ -173,13 +173,8 @@ class TestCommon(TestCase):
     # Tests that the cpu and gpu results are consistent
     @onlyCUDA
     @suppress_warnings
-    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_one)
+    @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
-
-        if dtype not in op.dtypes:
-            # OpDTypes.any_one prefers float32
-            # there is a chance that future ops might not find a common type between
-            raise unittest.SkipTest("This test requires both cuda and cpu support")
 
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):
