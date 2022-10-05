@@ -640,4 +640,4 @@ Engine Configuration
     :toctree: generated
     :nosignatures:
 
-    get_num_threads
+    set_multithreading_enabled
