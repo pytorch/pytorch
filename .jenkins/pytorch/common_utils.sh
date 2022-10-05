@@ -113,8 +113,8 @@ function checkout_install_torchvision() {
 
 function checkout_install_torchdeploy() {
   local commit
-  apt-get update
-  apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  sudo apt-get update
+  sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
   python setup.py bdist_wheel
   pushd ..
   git clone https://github.com/pytorch/multipy
