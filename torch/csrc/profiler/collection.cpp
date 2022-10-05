@@ -846,27 +846,50 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   {
     storage_id_t current_id{0};
     ska::flat_hash_map<StorageImplData, storage_id_t> live_storage;
+    auto lookup = [&current_id, &live_storage](const StorageImplData data) {
+      auto inserted = live_storage.insert({data, current_id});
+      current_id += storage_id_t(inserted.second);
+      return inserted.first->second;
+    };
+
+    ska::flat_hash_set<storage_id_t> tensor_set;
     for (auto& result : sorted_results) {
       result->visit(c10::overloaded(
           [&](ExtraFields<EventType::TorchOp>& torch_op) {
             for (auto& m : torch_op.inputs_.tensor_metadata_) {
               if (m.has_value() && m->impl_ && m->data_) {
-                auto inserted = live_storage.insert({m->data_, current_id});
-                current_id += storage_id_t(inserted.second);
-                tensors.emplace_back(TensorStoragePair{
-                    m->impl_, inserted.first->second, m->id_});
+                auto id = lookup(m->data_);
+                tensor_set.insert(id);
+                tensors.emplace_back(TensorStoragePair{m->impl_, id, m->id_});
               }
             }
           },
-
-          // Handle deallocation
           [&](ExtraFields<EventType::Allocation>& alloc_op) {
+            // We won't know which allocations are for Tensor storage yet.
+            // We'll filter after we see all of the op inputs.
+            tensors.emplace_back(TensorStoragePair{
+                TensorImplAddress(nullptr),
+                lookup(StorageImplData(alloc_op.ptr_)),
+                alloc_op.id_});
+
+            // Handle deallocation
             if (alloc_op.alloc_size_ < 0) {
               live_storage.erase(StorageImplData(alloc_op.ptr_));
             }
           },
           [](const auto&) {}));
     }
+
+    // Handle any allocation events which we cannot prove are for
+    // `StorageImpl`s.
+    tensors.erase(
+        std::remove_if(
+            tensors.begin(),
+            tensors.end(),
+            [&tensor_set](const auto& i) {
+              return tensor_set.find(i.storage_id_) == tensor_set.end();
+            }),
+        tensors.end());
   }
 
   // Step 2) Handle the case that the storage of a TensorImpl changed.
@@ -876,6 +899,12 @@ void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
   {
     ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
     for (const auto& t : tensors) {
+      // Storage allocations / frees don't have an associated TensorImpl, so
+      // we don't want all storages to merge through nullptr.
+      if (!t.impl_) {
+        continue;
+      }
+
       const auto it = impl_map.insert({t.impl_, t.storage_id_}).first;
 
       // The pair needs to be sorted for the coalesce step to work properly.
@@ -1042,7 +1071,13 @@ RecordQueue::getRecords(
     queue.torch_ops_.materialize(
         out, converter, queue.tid(), queue.kineto_info());
     materialize(queue.backend_events_);
-    materialize(queue.allocations_);
+    for (auto& i : queue.allocations_) {
+      out.emplace_back(Result::create(
+          /*start_time_ns_=*/converter(i.start_time_),
+          /*start_tid_=*/queue.tid(),
+          /*kineto_info_=*/queue.kineto_info(),
+          /*extra_fields_=*/ExtraFields<EventType::Allocation>(i)));
+    }
     materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {
