@@ -74,7 +74,7 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Union[_device, str, int, None]=None"
+DEVICE_PARAM = "device: Device=None"
 FACTORY_PARAMS = (
     f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: _bool=False"
 )
