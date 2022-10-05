@@ -1,5 +1,6 @@
 import warnings
 from typing import Optional, Tuple
+import heapq
 
 import torch
 from torch import Tensor
@@ -1444,6 +1445,25 @@ class HierarchicalSoftmax(Module):
 
     def extra_repr(self) -> str:
         return 'dim={dim}'.format(dim=self.dim)
+    
+    @staticmethod
+    def create_huffman_tree(word_counts):
+        if not word_counts:
+            raise ValueError('Empty vocabulary')
+
+        pq = []
+
+        for idx, (word, count) in enumerate(word_counts.items()):
+            heapq.heappush(pq, (count, idx, word))
+
+        while len(pq) >= 2:
+            (count1, id1, word1) = heapq.heappop(pq)
+            (count2, id2, word2) = heapq.heappop(pq)
+            count = count1 + count2
+            binary_tree = (word1, word2)
+            heapq.heappush(pq, (count, min(id1, id2), binary_tree))
+
+        return pq[0][2]
 
 
 class Softmax2d(Module):
