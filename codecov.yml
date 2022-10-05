@@ -1,0 +1,8 @@
+flag_management:
+  default_rules:
+    carryforward: true
+  individual_flags:
+    - name: torch.onnx
+      paths:
+      - torch/onnx
+      carryforward: true
