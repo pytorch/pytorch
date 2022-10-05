@@ -111,32 +111,72 @@ function checkout_install_torchvision() {
   popd
 }
 
+function install_deploy_deps_ubuntu() {
+    apt update && DEBIAN_FRONTEND=noninteractive apt install -yq --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    ccache \
+    curl \
+    wget \
+    git \
+    libjpeg-dev \
+    xz-utils \
+    bzip2 \
+    libbz2-dev \
+    liblzma-dev \
+    libreadline6-dev \
+    libexpat1-dev \
+    libgdbm-dev \
+    glibc-source \
+    libgmp-dev \
+    libffi-dev \
+    libgl-dev \
+    ncurses-dev \
+    libncursesw5-dev \
+    libncurses5-dev \
+    gnome-panel \
+    libssl-dev \
+    tcl-dev \
+    tix-dev \
+    libgtest-dev \
+    tk-dev \
+    libsqlite3-dev \
+    zlib1g-dev \
+    llvm \
+    python-openssl \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    software-properties-common \
+    python-pip \
+    python3-pip && \
+    wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/magic-key.gpg && \
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/magic-key.gpg] https://apt.kitware.com/ubuntu/ bionic main" | tee -a /etc/apt/sources.list && \
+    echo "deb http://security.ubuntu.com/ubuntu focal-security main" | tee -a /etc/apt/sources.list && \
+    apt update && \
+    apt install -y binutils && \
+    rm -rf /var/lib/apt/lists/*
+}
+
 function checkout_install_torchdeploy() {
   local commit
-  sudo apt-get update
-  sudo apt-get install ca-certificates curl gnupg lsb-release
-   sudo mkdir -p /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-  sudo apt-get update
-  sudo apt-get install docker-ce docker-ce-cli containerd.io docker-compose-plugin
-  python setup.py bdist_wheel
+  install_deploy_deps_ubuntu
+  # @todo: @PaliC let's not hardcode testing
+  # to 3.10 and make it flexible in case we need more coverage
+  conda install -c conda-forge libpython-static=3.10
   pushd ..
   git clone https://github.com/pytorch/multipy
   pushd multipy
   git checkout 850862ddc5f5f614697b2415e42df982f04df3ed
-  mkdir temp
+  pushd multipy/runtime
+  python examples/generate_examples.py
+  mkdir build
+  pushd build
+  cmake ..
+  cmake --build .
+  cmake --install . --prefix "."
   popd
   popd
-  # currently in /var/lib/jenkins/workspace
-  pwd
-  ls
-  cp -r dist/ ../multipy/temp/
-  pushd ..
-  pushd multipy
-  DOCKER_BUILDKIT=1 docker build -t multipy --progress=plain --build-arg PYTHON_MINOR_VERSION=10 .
   popd
   popd
 }
