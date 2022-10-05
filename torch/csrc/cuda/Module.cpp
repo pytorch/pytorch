@@ -537,6 +537,7 @@ struct Frame {
 struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   std::vector<Frame> frames;
   ~StackContext() {
+    py::gil_scoped_acquire acquire;
     for (auto& f : frames) {
       Py_XDECREF((PyObject*)f.code);
     }
