@@ -156,7 +156,6 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
       // If there's anything wrong with source, we shouldn't return dst_ silently and must error out.
       TORCH_INTERNAL_ASSERT(sourceBuffer && dst_tensor_nbytes > 0);
-      TORCH_INTERNAL_ASSERT(dst_tensor_nbytes >= (dst.storage_offset() * dst.element_size()));
 
       stream->copy_and_sync(tmpBuffer, destBuffer, size_to_copy, storage_byte_offset, destOffset, non_blocking);
       [destBuffer release];
@@ -199,7 +198,6 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_, bool n
   const size_t size_to_copy = src.nbytes();
   const void* host_src = src.storage().data();
   TORCH_INTERNAL_ASSERT(src_total_size >= (src.storage_offset() * src.element_size()));
-  TORCH_INTERNAL_ASSERT(dst_.nbytes() >= dst_byte_offset);
 
   NSUInteger sourceOffset = 0;
   @autoreleasepool {
