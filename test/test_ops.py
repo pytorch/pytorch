@@ -173,8 +173,8 @@ class TestCommon(TestCase):
     def test_compare_cpu(self, device, dtype, op):
 
         if dtype not in op.dtypes:
-            raise unittest.SkipTest("This test requires both cuda and cpu support")
-        if dtype not in op.dtypesIfCUDA:
+            # OpDTypes.any_one prefers float32
+            # there is a chance that future ops might not find a common type between
             raise unittest.SkipTest("This test requires both cuda and cpu support")
 
         def to_cpu(arg):
