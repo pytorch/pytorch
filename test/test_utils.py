@@ -52,37 +52,38 @@ class TestCheckpoint(TestCase):
         num_chunks,
         input,
     ):
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                # not checkpointed
+                out = model(input)
+                out_not_checkpointed = out.detach().clone()
+                model.zero_grad()
+                out.sum().backward()
+                grad_not_checkpointed = {
+                    name: param.grad.detach().clone()
+                    for name, param in model.named_parameters()
+                }
+                input_grad_not_checkpointed = input.grad.detach().clone()
+                for model_to_compare in module_lists_to_compare:
+                    # checkpointed model by passing list of modules
+                    detached = input.detach()
+                    detached.requires_grad = True
 
-        # not checkpointed
-        out = model(input)
-        out_not_checkpointed = out.detach().clone()
-        model.zero_grad()
-        out.sum().backward()
-        grad_not_checkpointed = {
-            name: param.grad.detach().clone()
-            for name, param in model.named_parameters()
-        }
-        input_grad_not_checkpointed = input.grad.detach().clone()
-        for model_to_compare in module_lists_to_compare:
-            # checkpointed model by passing list of modules
-            detached = input.detach()
-            detached.requires_grad = True
-
-            # pass list of modules to checkpoint
-            out = checkpoint_sequential(model_to_compare, num_chunks, detached)
-            out_checkpointed = out.detach().clone()
-            model.zero_grad()
-            out.sum().backward()
-            grad_checkpointed = {
-                name: param.grad.detach().clone()
-                for name, param in model.named_parameters()
-            }
-            input_grad_checkpointed = detached.grad.detach().clone()
-            # compare outputs as well as the gradients of input and parameters
-            self.assertEqual(out_checkpointed, out_not_checkpointed)
-            self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
-            for name in grad_checkpointed:
-                self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+                    # pass list of modules to checkpoint
+                    out = checkpoint_sequential(model_to_compare, num_chunks, detached, use_reentrant=use_reentrant)
+                    out_checkpointed = out.detach().clone()
+                    model.zero_grad()
+                    out.sum().backward()
+                    grad_checkpointed = {
+                        name: param.grad.detach().clone()
+                        for name, param in model.named_parameters()
+                    }
+                    input_grad_checkpointed = detached.grad.detach().clone()
+                    # compare outputs as well as the gradients of input and parameters
+                    self.assertEqual(out_checkpointed, out_not_checkpointed)
+                    self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
+                    for name in grad_checkpointed:
+                        self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
