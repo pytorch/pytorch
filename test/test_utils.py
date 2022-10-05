@@ -100,18 +100,20 @@ class TestCheckpoint(TestCase):
                 return input_var
 
         # checkpointed
-        modules = [Net() for _ in range(10)]
-        for m in modules:
-            self.assertEqual(m.counter, 0)
-        input_var = torch.randn(3, 4, requires_grad=True)
-        out = checkpoint_sequential(modules, 2, input_var)
-        for m in modules:
-            self.assertEqual(m.counter, 1)
-        out.sum().backward()
-        for m in modules[:(len(modules) // 2)]:
-            self.assertEqual(m.counter, 2)
-        for m in modules[(len(modules) // 2):]:
-            self.assertEqual(m.counter, 1)
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                modules = [Net() for _ in range(10)]
+                for m in modules:
+                    self.assertEqual(m.counter, 0)
+                input_var = torch.randn(3, 4, requires_grad=True)
+                out = checkpoint_sequential(modules, 2, input_var, use_reentrant=use_reentrant)
+                for m in modules:
+                    self.assertEqual(m.counter, 1)
+                out.sum().backward()
+                for m in modules[:(len(modules) // 2)]:
+                    self.assertEqual(m.counter, 2)
+                for m in modules[(len(modules) // 2):]:
+                    self.assertEqual(m.counter, 1)
 
     def test_checkpoint_valid(self):
         model = nn.Sequential(
@@ -133,6 +135,18 @@ class TestCheckpoint(TestCase):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
+        # works with use_reentrant=False, and grads are the same
+        out = model(input_var)
+        grads_no_checkpoint = torch.autograd.grad(
+            outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        out_checkpoint = checkpoint_sequential(modules, chunks, input_var, use_reentrant=False)
+        # check outputs are the same
+        self.assertEqual(out_checkpoint, out)
+        grads_checkpoint = torch.autograd.grad(
+            outputs=[out_checkpoint], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True,
+        )
+        self.assertEqual(grads_no_checkpoint, grads_checkpoint)
 
     def test_checkpoint(self):
         model = nn.Sequential(
@@ -193,8 +207,10 @@ class TestCheckpoint(TestCase):
         a = torch.randn(1, 100, requires_grad=True)
         b = torch.randn(1, 100, requires_grad=True)
 
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):
@@ -202,9 +218,10 @@ class TestCheckpoint(TestCase):
                 pass
 
         model = nn.Sequential(Noop())
-
-        with self.assertRaises(TypeError):
-            checkpoint_sequential(model, 1)  # type: ignore[call-arg]
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                with self.assertRaises(TypeError):
+                    checkpoint_sequential(model, 1)  # type: ignore[call-arg]
 
     def test_checkpoint_rng_cpu(self):
         for _ in range(5):
