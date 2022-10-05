@@ -21,7 +21,7 @@
 #include <regex>
 #include <set>
 #include <vector>
-#include <iostream>
+
 namespace c10 {
 
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
@@ -168,6 +168,12 @@ struct BlockPool {
   PrivatePool* owner_PrivatePool;
 };
 
+struct HistoryChain {
+  History h;
+  std::unique_ptr<HistoryChain> next; // when blocks are merged we keep records of
+                                      // what used to be in the block
+};
+
 struct Block {
   int device; // gpu
   cudaStream_t stream; // allocation stream
@@ -181,8 +187,8 @@ struct Block {
   int event_count; // number of outstanding CUDA events
   int gc_count; // counter for prioritizing older / less useful blocks for
                 // garbage collection
-  std::unique_ptr<History> history;
-  History* history_last;
+  std::unique_ptr<HistoryChain> history;
+  HistoryChain* history_last;
 
   Block(
       int device,
@@ -284,7 +290,7 @@ struct AllocParams {
 
 int trimHistoryBefore(Block* block, void* point) {
   int n = 0;
-  while (block->history && block->history->addr < point) {
+  while (block->history && block->history->h.addr < point) {
     block->history = std::move(block->history->next);
     ++n;
   }
@@ -549,8 +555,12 @@ class DeviceCachingAllocator {
 
   bool set_fraction = false;
 
-  const size_t ALLOC_TRACE_MAX = (1024*1024*256 / sizeof(TraceEntry)); // 256MB max circular buffer
+
+  bool record_history = false;
+  std::atomic<CreateContextFn> context_recorder_;
   size_t alloc_trace_next = 0;
+  bool alloc_trace_record_context = false;
+  size_t alloc_trace_max_entries = 1;
   std::vector<TraceEntry>* alloc_trace; // pointer because we need to intentionally leak this on deallocation
                                         // it can hold references to Python state which will already be
                                         // destroyed when we are in exit handlers
@@ -571,7 +581,6 @@ class DeviceCachingAllocator {
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
   ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
-  std::atomic<CreateContextFn> context_recorder_;
 
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
@@ -584,8 +593,14 @@ class DeviceCachingAllocator {
     context_recorder_.store(nullptr);
   }
 
-  void setContextRecorder(CreateContextFn c) {
-    context_recorder_.store(c);
+  void recordHistory(bool enabled, CreateContextFn context_recorder, size_t alloc_trace_max_entries, bool alloc_trace_record_context) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    this->record_history = enabled;
+    this->context_recorder_.store(context_recorder);
+    this->alloc_trace_max_entries = std::max(size_t(1), alloc_trace_max_entries);
+    this->alloc_trace_record_context = alloc_trace_record_context;
+    alloc_trace_next = 0;
+    alloc_trace->clear();
   }
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
@@ -648,7 +663,7 @@ class DeviceCachingAllocator {
           // Free all non-split cached blocks and retry alloc.
           || (C10_LIKELY(captures_underway == 0) && release_cached_blocks() &&
               alloc_block(params, true));
-      if (context && block_found) {
+      if (record_history && block_found) {
        record_trace(TraceEntry::SEGMENT_ALLOC, int64_t(params.block->ptr), params.block->size, params.stream(), context);
       }
     }
@@ -667,7 +682,7 @@ class DeviceCachingAllocator {
         allowed_info = format_size(allowed_memory_maximum) + " allowed; ";
       }
 
-      if (context) {
+      if (record_history) {
         record_trace(TraceEntry::OOM, device_free, params.size(), params.stream(), context);
       }
       stats.num_ooms += 1;
@@ -749,7 +764,7 @@ class DeviceCachingAllocator {
       bool inserted = pool.blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-      if (context) {
+      if (record_history) {
         trimHistoryBefore(remaining, (char*)block->ptr + size);
       }
 
@@ -775,17 +790,17 @@ class DeviceCachingAllocator {
     }
 
     block->allocated = true;
-    if (context) {
+    if (record_history) {
       trimHistoryBefore(block, (char*)block->ptr + size);
-      block->history = std::make_unique<History>(History{
+      block->history = std::make_unique<HistoryChain>(HistoryChain{History{
           block->ptr,
           orig_size,
-          std::move(context),
+          std::move(context)},
           std::move(block->history)});
       if (!block->history_last) {
         block->history_last = block->history.get();
       }
-      record_trace(TraceEntry::ALLOC, int64_t(block->ptr), orig_size, block->stream, block->history->context);
+      record_trace(TraceEntry::ALLOC, int64_t(block->ptr), orig_size, block->stream, block->history->h.context);
     }
 
     bool inserted = active_blocks.insert(block).second;
@@ -829,7 +844,7 @@ class DeviceCachingAllocator {
       update_stat(stats.allocated_bytes[stat_type], -block->size);
     });
     if (block->history) {
-      record_trace(TraceEntry::FREE, int64_t(block->ptr), block->history->real_size, block->stream, block->history->context);
+      record_trace(TraceEntry::FREE, int64_t(block->ptr), block->history->h.real_size, block->stream, block->history->h.context);
     }
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_allocations, -1);
@@ -999,8 +1014,11 @@ class DeviceCachingAllocator {
         if (block_info.active) {
           segment_info.active_size += block_info.size;
         }
-        // XXX: a pointer is unsafe here, we need to copy the list into a std::vector
-        block_info.history = block->history.get();
+        HistoryChain* h = block->history.get();
+        while (h) {
+          block_info.history.push_back(h->h);
+          h = h->next.get();
+        }
         block = block->next;
       }
       total_active += segment_info.active_size;
@@ -1015,7 +1033,7 @@ class DeviceCachingAllocator {
 
 
 
-    if (context_recorder_.load()) {
+    if (record_history) {
       record_trace(TraceEntry::SNAPSHOT, 0, total_active, 0, nullptr);
     }
     return result;
@@ -1555,7 +1573,7 @@ class DeviceCachingAllocator {
     if (block->size >= CachingAllocatorConfig::max_split_size())
       update_stat(stats.oversize_segments, -1);
     if (block->history) {
-      record_trace(TraceEntry::SEGMENT_FREE, int64_t(block->ptr), block->size, block->stream, block->history->context);
+      record_trace(TraceEntry::SEGMENT_FREE, int64_t(block->ptr), block->size, block->stream, block->history->h.context);
     }
     pool->blocks.erase(block);
     delete block;
@@ -1689,12 +1707,12 @@ class DeviceCachingAllocator {
   }
 
   void record_trace(TraceEntry::Action action, int64_t addr, size_t size, cudaStream_t stream, std::shared_ptr<Context> context) {
-    auto te = TraceEntry(action, addr, size, stream, nullptr/*std::move(context)*/);
-    if (alloc_trace->size() < ALLOC_TRACE_MAX) {
+    auto te = TraceEntry(action, addr, size, stream, alloc_trace_record_context ? std::move(context) : nullptr);
+    if (alloc_trace->size() < alloc_trace_max_entries) {
       alloc_trace->emplace_back(te);
     } else {
       (*alloc_trace)[alloc_trace_next++] = te;
-      if (alloc_trace_next == ALLOC_TRACE_MAX) {
+      if (alloc_trace_next == alloc_trace_max_entries) {
         alloc_trace_next = 0;
       }
     }
@@ -1798,10 +1816,10 @@ class THCCachingAllocator {
     device_allocator[device]->setMemoryFraction(fraction);
   }
 
-  void setContextRecorder(CreateContextFn recorder) {
+  void recordHistory(bool enabled, CreateContextFn context_recorder, size_t alloc_trace_max_entries, bool alloc_trace_record_context) {
     int device;
     C10_CUDA_CHECK(cudaGetDevice(&device));
-    device_allocator[device]->setContextRecorder(std::move(recorder));
+    device_allocator[device]->recordHistory(enabled, std::move(context_recorder), alloc_trace_max_entries, alloc_trace_record_context);
   }
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
@@ -1926,8 +1944,8 @@ void setMemoryFraction(double fraction, int device) {
   caching_allocator.setMemoryFraction(fraction, device);
 }
 
-void setContextRecorder(CreateContextFn recorder) {
-  caching_allocator.setContextRecorder(std::move(recorder));
+void recordHistory(bool enabled, CreateContextFn context_recorder, size_t alloc_trace_max_entries, bool alloc_trace_record_context){
+  caching_allocator.recordHistory(enabled, std::move(context_recorder), alloc_trace_max_entries, alloc_trace_record_context);
 }
 
 void setAllocatorSettings(const std::string& env) {

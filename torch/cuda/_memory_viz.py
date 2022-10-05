@@ -43,12 +43,15 @@ def _write_blocks(f, prefix, blocks):
         for h in b['history']:
             sz = h['real_size']
             accounted_for_size += sz
-            frames = h['frames']
-            if frames:
-                frame_s = ';'.join([_frame_fmt(f) for f in reversed(frames)])
+            if 'frames' in h:
+                frames = h['frames']
+                if frames:
+                    frame_s = ';'.join([_frame_fmt(f) for f in reversed(frames)])
+                else:
+                    frame_s = "<non-python>"
+                f.write(f'{prefix};{b["state"]};{frame_s} {sz}\n')
             else:
-                frame_s = "<non-python>"
-            f.write(f'{prefix};{b["state"]};{frame_s} {sz}\n')
+                f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
         gaps = b['size'] - accounted_for_size
         if gaps:
             f.write(f'{prefix};{b["state"]};<gaps> {gaps}\n')
@@ -261,8 +264,9 @@ def trace(data):
                     free_names.append(name)
                     del segment_addr_to_name[name]
             elif e['action'] == 'oom':
-                size = e['addr']
-                out.write(f'raise OutOfMemoryError() # {Bytes(size)}\n')
+                size = e['size']
+                free = e['device_free']
+                out.write(f'raise OutOfMemoryError() # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
             else:
                 out.write(f'{e}\n')
         out.write(f"TOTAL MEM: {Bytes(count)}")

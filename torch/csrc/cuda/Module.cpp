@@ -628,17 +628,15 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s));
-      if (blockInfo.history) {
+      if (blockInfo.history.size()) {
         py::list history;
-        History* h = blockInfo.history;
-        while (h) {
+        for (const History& h : blockInfo.history) {
           py::dict history_entry;
-          history_entry[addr_s] = (int64_t)h->addr;
-          history_entry[real_size_s] = h->real_size;
-          if (h->context) {
-            history_entry[frames_s] = get_frames((StackContext*)h->context.get());
+          history_entry[addr_s] = (int64_t)h.addr;
+          history_entry[real_size_s] = h.real_size;
+          if (h.context) {
+            history_entry[frames_s] = get_frames((StackContext*)h.context.get());
           }
-          h = h->next.get();
           history.append(std::move(history_entry));
         }
         blockDict[history_s] = std::move(history);
@@ -689,9 +687,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         // without further compression frames can get really large on dump
         trace_entry[frames_s] = get_frames((StackContext*)te.context_.get());
       }
-      trace_entry[action_s] = action_to_str(te.action());
-      trace_entry[TraceEntry::OOM == te.action() ? device_free_s : addr_s] = te.addr_;
-      trace_entry[size_s] = te.size();
+      trace_entry[action_s] = action_to_str(te.action_);
+      trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] = te.addr_;
+      trace_entry[size_s] = te.size_;
       trace_entry[stream_s] = int64_t(te.stream_);
       trace.append(trace_entry);
     }
@@ -706,15 +704,16 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* enabled) {
+PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
-      PyBool_Check(enabled),
-      "recordMemoryHistory expects a bool, "
-      "but got %s",
-      THPUtils_typename(enabled));
-  c10::cuda::CUDACachingAllocator::setContextRecorder(
-      enabled == Py_True ? StackContext::gather : nullptr);
+  int enabled;
+  int record_context;
+  Py_ssize_t alloc_trace_max_entries;
+  int alloc_trace_record_context;
+  if (!PyArg_ParseTuple(args, "ppnp", &enabled, &record_context, &alloc_trace_max_entries, &alloc_trace_record_context)) {
+    return nullptr;
+  }
+  c10::cuda::CUDACachingAllocator::recordHistory(enabled, record_context ? StackContext::gather : nullptr, alloc_trace_max_entries, alloc_trace_record_context);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -993,7 +992,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
     {"_cuda_recordMemoryHistory",
      THCPModule_recordMemoryHistory,
-     METH_O,
+     METH_VARARGS,
      nullptr},
     {"_cuda_attach_out_of_memory_observer",
      THCPModule_attachOutOfMemoryObserver,

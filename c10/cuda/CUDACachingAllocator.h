@@ -104,8 +104,6 @@ struct History {
   void* addr;
   size_t real_size; // unrounded, actually requested size
   std::shared_ptr<Context> context; // per-watcher context
-  std::unique_ptr<History> next; // when blocks are merged we keep records of
-                                 // what used to be in the block
 };
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
@@ -115,8 +113,7 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
-  History* history =
-      nullptr; // borrowed reference because it is owned by the allocator
+  std::vector<History> history;
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
@@ -134,20 +131,12 @@ struct SegmentInfo {
 struct TraceEntry {
   enum Action {ALLOC, FREE, SEGMENT_ALLOC, SEGMENT_FREE, SNAPSHOT, OOM};
   TraceEntry(Action action, int64_t addr, size_t size, cudaStream_t stream, std::shared_ptr<Context> context=nullptr)
-  : addr_(addr), context_(context), stream_(stream) {
-    action_size_ = size | (size_t(action) << 48);
-  }
+  : action_(action), addr_(addr), context_(context), stream_(stream), size_(size) {}
+  Action action_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<Context> context_;
   cudaStream_t stream_;
-  Action action() const {
-    return Action(action_size_ >> 48);
-  }
-  size_t size() const {
-    return ((0x1ULL << 48) - 1) & action_size_;
-  }
-private:
-  size_t action_size_;
+  int64_t size_;
 };
 
 struct SnapshotInfo {
@@ -186,7 +175,7 @@ C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 
-C10_CUDA_API void setContextRecorder(CreateContextFn recorder);
+C10_CUDA_API void recordHistory(bool enabled, CreateContextFn context_recorder, size_t alloc_trace_max_entries, bool alloc_trace_record_context);
 using OutOfMemoryObserver = std::function<void(int64_t device, int64_t allocated, int64_t device_total, int64_t device_free)>;
 C10_CUDA_API void attachOutOfMemoryObserver(OutOfMemoryObserver observer);
 
