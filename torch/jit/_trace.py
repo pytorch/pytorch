@@ -316,6 +316,7 @@ def _check_trace(
     force_outplace,
     is_trace_module,
     _module_class,
+    unpack_input_dict=False
 ):
     # Note: tracing is independent of optimizations, which consume the trace
     for inputs in check_inputs:
@@ -335,10 +336,11 @@ def _check_trace(
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
                 _compilation_unit=torch._C.CompilationUnit(),
+                unpack_input_dict=unpack_input_dict
             )
             check_mod_func = check_mod._c._get_method(traced_func.name)
             inputs = inputs[traced_func.name]
-            if isinstance(inputs, (torch.Tensor)):
+            if isinstance(inputs, (torch.Tensor)) or isinstance(inputs, dict) and not unpack_input_dict:
                 inputs = (inputs,)
         else:
             check_mod = torch.jit.trace(
@@ -348,6 +350,7 @@ def _check_trace(
                 strict=strict,
                 _force_outplace=force_outplace,
                 _module_class=_module_class,
+                unpack_input_dict=unpack_input_dict
             )
             check_mod_func = check_mod
 
@@ -440,7 +443,7 @@ def _check_trace(
 
         def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
             try:
-                if isinstance(inputs, dict):
+                if isinstance(inputs, dict) and unpack_input_dict:
                     outs = wrap_retval(mod(**inputs))
                 else:
                     outs = wrap_retval(mod(*_clone_inputs(inputs)))
@@ -607,6 +610,7 @@ def trace(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
+    unpack_input_dict=False,
 ):
     """
     Trace a function and return an executable  or :class:`ScriptFunction`
@@ -769,6 +773,7 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
+            unpack_input_dict=unpack_input_dict
         )
 
     if (
@@ -786,6 +791,7 @@ def trace(
             strict,
             _force_outplace,
             _module_class,
+            unpack_input_dict=unpack_input_dict
         )
 
     # Special case for common case of passing a single Tensor
@@ -826,6 +832,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
+                unpack_input_dict=unpack_input_dict
             )
         else:
             _check_trace(
@@ -837,6 +844,7 @@ def trace(
                 _force_outplace,
                 False,
                 _module_class,
+                unpack_input_dict=unpack_input_dict
             )
 
     return traced
@@ -856,6 +864,7 @@ def trace_module(
     _force_outplace=False,
     _module_class=None,
     _compilation_unit=_python_cu,
+    unpack_input_dict=False
 ):
     """
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
@@ -974,7 +983,7 @@ def trace_module(
                 func = getattr(mod, method_name)
                 argument_names = get_callable_argument_names(func)
 
-            if isinstance(example_inputs, dict):
+            if isinstance(example_inputs, dict) and unpack_input_dict:
                 # Raise exception when the user provided key names are not aligned with forward() method's arguments' name/
                 for key in example_inputs:
                     if key not in argument_names:
@@ -1016,6 +1025,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
+                        unpack_input_dict=unpack_input_dict
                     )
                 else:
                     _check_trace(
@@ -1027,6 +1037,7 @@ def trace_module(
                         _force_outplace,
                         True,
                         _module_class,
+                        unpack_input_dict=unpack_input_dict
                     )
     finally:
         torch.jit._trace._trace_module_map = old_module_map
