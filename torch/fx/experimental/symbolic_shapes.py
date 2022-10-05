@@ -225,7 +225,7 @@ unary_magic_methods = {
     'ceil'
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil"}
+float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "eq", "gt", "lt", "le", "ge"}
 
 def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
