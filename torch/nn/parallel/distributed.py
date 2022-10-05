@@ -241,13 +241,13 @@ class DistributedDataParallel(Module, Joinable):
     r"""Implements distributed data parallelism that is based on
     ``torch.distributed`` package at the module level.
 
-    This container parallelizes the application of the given module by
-    splitting the input across the specified devices by chunking in the batch
-    dimension. The module is replicated on each machine and each device, and
-    each such replica handles a portion of the input. During the backwards
-    pass, gradients from each node are averaged.
-
-    The batch size should be larger than the number of GPUs used locally.
+    This container provides data parallelism by synchronizing gradients
+    across each model replica. The devices to synchronize across are
+    specified by the input ``process_group``, which is the entire world
+    by default. Note that ``DistributedDataParallel`` does not chunk or
+    otherwise shard the input across participating GPUs; the user is
+    responsible for defining how to do so, for example through the use
+    of a :class:`DistributedSampler`.
 
     See also: :ref:`distributed-basics` and :ref:`cuda-nn-ddp-instead`.
     The same constraints on input as in :class:`torch.nn.DataParallel` apply.
