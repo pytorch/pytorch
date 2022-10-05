@@ -75,15 +75,16 @@ void _propagate_functional_input_mutation(
   // storage.
   if (unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl()) {
   } else {
-    if (unwrapped.nbytes() != wrapped_inner.nbytes()) {
+    if (unwrapped.sym_nbytes() != wrapped_inner.sym_nbytes()) {
       // Functions might resize zero-sized inputs, which we need to reflect
       // ehre.
-      unwrapped.resize_(wrapped_inner.sizes());
+      unwrapped.resize__symint(wrapped_inner.sym_sizes());
     }
     // If the input tensor's metadata was mutated, then use as_strided_()
     // to propagate the metadata change.
-    if (unwrapped.sizes() != wrapped_inner.sizes()) {
-      unwrapped.as_strided_(wrapped_inner.sizes(), wrapped_inner.strides());
+    if (unwrapped.sym_sizes() != wrapped_inner.sym_sizes()) {
+      unwrapped.as_strided__symint(
+          wrapped_inner.sym_sizes(), wrapped_inner.sym_strides());
     }
     unwrapped.copy_(wrapped_inner);
   }
