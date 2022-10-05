@@ -100,7 +100,6 @@
 #include <ATen/ops/matrix_exp_backward_native.h>
 #include <ATen/ops/matrix_exp_native.h>
 #include <ATen/ops/matrix_power_native.h>
-#include <ATen/ops/matrix_rank_native.h>
 #include <ATen/ops/max.h>
 #include <ATen/ops/mm.h>
 #include <ATen/ops/mm_native.h>

@@ -26,8 +26,6 @@
 #include <ATen/ops/_linalg_eigh.h>
 #include <ATen/ops/_linalg_eigh_meta.h>
 #include <ATen/ops/_linalg_eigh_native.h>
-#include <ATen/ops/_linalg_inv_out_helper.h>
-#include <ATen/ops/_linalg_inv_out_helper_native.h>
 #include <ATen/ops/_linalg_solve_ex.h>
 #include <ATen/ops/_linalg_solve_ex_meta.h>
 #include <ATen/ops/_linalg_solve_ex_native.h>
@@ -49,8 +47,6 @@
 #include <ATen/ops/clone.h>
 #include <ATen/ops/complex.h>
 #include <ATen/ops/cumprod.h>
-#include <ATen/ops/eig.h>
-#include <ATen/ops/eig_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/geqrf.h>
@@ -101,7 +97,7 @@
 #include <ATen/ops/linalg_svdvals.h>
 #include <ATen/ops/linalg_svdvals_native.h>
 #include <ATen/ops/linalg_vander_native.h>
-#include <ATen/ops/lstsq_native.h>
+#include <ATen/ops/linalg_vecdot_native.h>
 #include <ATen/ops/lu_solve_native.h>
 #include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_meta.h>
