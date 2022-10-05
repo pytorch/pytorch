@@ -268,7 +268,7 @@ Examples::
     set_grad_enabled
     is_grad_enabled
     inference_mode
-    set_multithreading_enabled
+    is_inference_mode_enabled
 
 Math operations
 ---------------
