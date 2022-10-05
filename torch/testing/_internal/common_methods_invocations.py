@@ -4951,6 +4951,7 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
         # Test var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
         SampleInput(tensor_nd(), args=(True,)),
         SampleInput(tensor_nd(), args=(False,)),
+        SampleInput(tensor_nd(), dim=None, correction=None),
     ]
 
 
@@ -17796,6 +17797,12 @@ python_ref_db = [
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
+    ),
+    PythonRefInfo(
+        "_refs.cumsum",
+        torch_opinfo_name="cumsum",
+        supports_out=True,
+        supports_nvfuser=False,  # arange not supported
     ),
     PythonRefInfo(
         "_refs.sum_to_size",
