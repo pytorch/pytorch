@@ -119,6 +119,12 @@ function checkout_install_torchdeploy() {
   pushd multipy
   git checkout 850862ddc5f5f614697b2415e42df982f04df3ed
   mkdir temp
+  popd
+  popd
+  pwd
+  ls
+  pushd ..
+  pushd multipy
   cp -r ../pytorch/dist temp/
   DOCKER_BUILDKIT=1 docker build -t multipy --progress=plain
   popd
