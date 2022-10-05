@@ -193,6 +193,7 @@ def adamw(params: List[Tensor],
           # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
           foreach: bool = None,
           capturable: bool = False,
+          differentiable: bool = False,
           *,
           amsgrad: bool,
           beta1: float,
@@ -200,8 +201,7 @@ def adamw(params: List[Tensor],
           lr: float,
           weight_decay: float,
           eps: float,
-          maximize: bool,
-          differentiable: bool):
+          maximize: bool):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
