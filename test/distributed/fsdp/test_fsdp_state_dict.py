@@ -13,16 +13,13 @@ from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
 )
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import (
     CPUOffload,
     FullStateDictConfig,
     LocalStateDictConfig,
-    ShardedStateDictConfig,
-)
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import (
-    LocalStateDictConfig,
     MixedPrecision,
+    ShardedStateDictConfig,
     StateDictType,
 )
 from torch.distributed.fsdp._shard_utils import _gather_state_dict
@@ -78,8 +75,8 @@ BUFFER_SHAPE = [5, 5]
 
 NON_ROOT_FSDP_PREFIX = 'non_fsdp_lin'
 
-_UNFLATTENED_STATE_DICT_IMPLS = ["state_dict"]
-_FLATTENED_STATE_DICT_IMPLS = []
+_UNFLATTENED_STATE_DICT_IMPLS = ["state_dict", "sharded_state_dict"]
+_FLATTENED_STATE_DICT_IMPLS = ["local_state_dict"]
 _SUPPORTED_STATE_DICT_IMPLS = (
     _UNFLATTENED_STATE_DICT_IMPLS + _FLATTENED_STATE_DICT_IMPLS
 )
@@ -97,11 +94,17 @@ class Model(Module):
         self.inner = Linear(*INNER_SHAPE)
         if register_buffers:
             self.inner.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
+            self.inner.register_buffer(
+                "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
+            )
         if wrap_fsdp:
             self.inner = FSDP(self.inner, ignored_modules=([self.inner] if ignore_inner else []))
         self.outer = Linear(*OUTER_SHAPE)
         if register_buffers:
             self.outer.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
+            self.outer.register_buffer(
+                "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
+            )
 
     def forward(self, x):
         # Forward twice.
@@ -194,7 +197,7 @@ class TestFSDPStateDict(FSDPTest):
                 offload_to_cpu=state_dict_rank0_and_offload,
             )
         else:
-            raise ValueError("Unspported state_dict_type")
+            raise ValueError("Unsupported state_dict_type")
         return FSDP.state_dict_type(model, _state_dict_type, config)
 
     def _validate_state_dict_contents(
