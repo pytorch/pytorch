@@ -26,9 +26,17 @@
 namespace torch {
 namespace profiler {
 namespace impl {
+using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
+// ============================================================================
+// == PyTorch Ops =============================================================
+// ============================================================================
+
+// ----------------------------
+// |  Input / Output encoder  |
+// ----------------------------
 void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   for (const auto& value : values) {
     if (value.isTensor()) {
@@ -56,21 +64,26 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     tags_.emplace_back(Tag::Tensor);
     const auto& sizes = t.sizes();
     const auto dim = sizes.size();
+    const auto layout = t.layout();
     TORCH_CHECK(
         dim <= std::numeric_limits<uint32_t>::max(),
         "Cannot profile Tensors of size > uint32 max. Got dim: ",
         dim);
 
     tensor_metadata_.emplace_back(
-        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*impl_=*/TensorImplAddress(t.unsafeGetTensorImpl()),
+        /*data_=*/
+        StorageImplData(t.has_storage() ? t.storage().data() : nullptr),
         /*device_type_*/ t.device().type(),
         /*device_index_*/ t.device().index(),
-        /*dtype=*/t.scalar_type(),
-        /*dim_=*/(uint32_t)dim,
-        /*layout_=*/t.layout());
+        /*dtype_=*/t.scalar_type(),
+        /*layout_=*/layout,
+        /*dim_=*/(uint32_t)dim);
 
-    for (const auto i : sizes) {
-      tensor_sizes_.emplace_back(i);
+    tensor_sizes_strides_.copy(sizes);
+    if (layout == at::kStrided) {
+      // Only Strided layout tensors have strides
+      tensor_sizes_strides_.copy(t.strides());
     }
   } else {
     tags_.emplace_back(Tag::UndefinedTensor);
@@ -82,20 +95,26 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
-          tensor_size_it = tensor_sizes_.begin(),
+          tensor_size_strides_it = tensor_sizes_strides_.begin(),
           ivals_it = ivalues_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
       out.shapes_.emplace_back();
+      out.strides_.emplace_back();
       switch (*tag_it) {
         case Tag::Tensor: {
-          const auto& md = *tensor_metadata_it++;
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
-            out.shapes_.back().push_back(*tensor_size_it++);
+          const TensorMetadata md{*tensor_metadata_it++};
+          for (C10_UNUSED const auto _ : c10::irange(md.dim_)) {
+            out.shapes_.back().push_back(*tensor_size_strides_it++);
           }
-          out.tensor_metadata_.emplace_back(md);
+          if (md.layout_ == at::kStrided) {
+            for (const auto _ : c10::irange(md.dim_)) {
+              (void)_; // Suppress unused variable warning
+              out.strides_.back().push_back(*tensor_size_strides_it++);
+            }
+          }
+          out.tensor_metadata_.emplace_back(std::move(md));
           out.ivalues_.emplace_back();
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
@@ -125,6 +144,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
         case Tag::TERMINATOR:
           // This marks the end of this op.
           out.shapes_.pop_back();
+          out.strides_.pop_back();
           terminate = true;
           break;
 
@@ -140,8 +160,171 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
 void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
-  tensor_sizes_.clear();
+  tensor_sizes_strides_.clear();
   ivalues_.clear();
+}
+
+// ---------------------------------------------------
+// |  Correlation ID tracking (OpList & EventBlock)  |
+// ---------------------------------------------------
+template <typename T, size_t ChunkSize>
+ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::EventBlock() {
+  static std::atomic<uint64_t> counter_{0};
+  id_start_ = 1 + ChunkSize * counter_++;
+}
+
+template <class... Args>
+std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::
+    TorchOpStorage::OpList::emplace_back(Args&&... args) {
+  maybe_grow();
+  *next_ = {std::forward<Args>(args)...};
+  auto corr_id = buffer_last_->correlation_id(next_);
+  return {next_++, corr_id};
+}
+
+uint64_t ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(
+    const OpList::Iterator& e) {
+  return e.address().first->correlation_id(&*e);
+}
+
+template <typename T, size_t ChunkSize>
+uint64_t ThreadLocalSubqueue::TorchOpStorage::EventBlock<T, ChunkSize>::
+    correlation_id(const T* ptr) const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      ptr >= this->data() && ptr < this->data() + ChunkSize);
+  return id_start_ + (ptr - this->data());
+}
+
+// ---------------------------------
+// |  Collection (Observer logic)  |
+// ---------------------------------
+std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
+    const at::RecordFunction& fn) {
+  KinetoObserverContext::Event* event;
+  uint64_t corr_id;
+  std::tie(event, corr_id) = torch_ops_.op_events_.emplace_back(
+      fn.seqNr(),
+      fn.forwardThreadId(),
+      fn.scope(),
+      fn.isAsync(),
+      fn.debugHandle(),
+      fn.name());
+  if (config_.report_input_shapes) {
+    torch_ops_.inputs_outputs_.push(fn.inputs());
+  }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+  } else {
+    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+  }
+
+#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
+  // backward nodes source range corresponds to the forward node
+  // TODO: consider using C++ stack trace
+  if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+    auto cs = torch::profiler::impl::prepareCallstack(jit::currentCallstack());
+    torch_ops_.jit_stack_.emplace_back(callstackStr(cs));
+  }
+  if (config_.with_modules &&
+      fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
+    torch_ops_.jit_modules_.emplace_back(jit::currentModuleHierarchy());
+  }
+#endif
+  if (config_.with_flops) {
+    torch_ops_.extra_args_.emplace_back(
+        torch::profiler::impl::saveExtraArgs(fn));
+  }
+
+  auto out = std::make_unique<KinetoObserverContext>(event);
+
+  if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
+    try {
+      out->fallback_ = torch_ops_.gpu_fallback_.emplace_back();
+      torch::profiler::impl::cudaStubs()->record(
+          nullptr, &out->fallback_->cuda_event_start_, nullptr);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Failed to record CUDA event. " << e.what();
+    }
+  }
+
+  event->start_time_ = torch::profiler::impl::getApproximateTime();
+  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
+  return out;
+}
+
+// ---------------
+// |  Collation  |
+// ---------------
+namespace {
+template <typename T>
+struct StealOrDefault {
+  StealOrDefault(T& container)
+      : container_{container}, it_{container.begin()} {}
+
+  ~StealOrDefault() {
+    container_.get().clear();
+  }
+
+  typename T::Iterator::value_type operator()() {
+    if (it_.exhausted()) {
+      return typename T::Iterator::value_type();
+    } else {
+      auto result = std::move(*it_);
+      ++it_;
+      return result;
+    }
+  }
+
+  std::reference_wrapper<T> container_;
+  typename T::Iterator it_;
+};
+} // namespace
+
+void ThreadLocalSubqueue::TorchOpStorage::materialize(
+    std::vector<std::shared_ptr<Result>>& out,
+    const std::function<time_t(approx_time_t)> time_converter,
+    const uint64_t tid,
+    const kineto::DeviceAndResource& kineto_info) {
+  // Plumb Autograd info to the top level annotation.
+  auto it = op_events_.begin();
+  for (C10_UNUSED const auto _ :
+       c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
+    auto& first = it->basic_fields_;
+    auto& second = (++it)->basic_fields_;
+    if (first.scope_ == at::RecordScope::FUNCTION &&
+        second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
+        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
+      first.sequence_number_ = second.sequence_number_;
+      first.forward_tid_ = second.forward_tid_;
+    }
+  }
+
+  auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
+
+  // TODO: CTAD will take care of template args when we move to C++17
+  auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
+  auto jit_module = StealOrDefault<decltype(jit_modules_)>(jit_modules_);
+  auto extra_args = StealOrDefault<decltype(extra_args_)>(extra_args_);
+  auto gpu_fallback = StealOrDefault<decltype(gpu_fallback_)>(gpu_fallback_);
+
+  for (auto event = op_events_.begin(); event != op_events_.end(); ++event) {
+    ExtraFields<EventType::TorchOp> e{
+        std::move(event->basic_fields_),
+        ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
+        time_converter(event->end_time_),
+        input_getter(),
+        jit_stack(),
+        jit_module(),
+        extra_args(),
+        gpu_fallback(),
+        event->allow_tf32_cublas_};
+
+    out.emplace_back(Result::create(
+        time_converter(event->start_time_), tid, kineto_info, std::move(e)));
+  }
+
+  op_events_.clear();
+  inputs_outputs_.clear();
 }
 
 namespace {
@@ -160,42 +343,7 @@ struct SubQueueThreadCache {
 // `sub_queue_cache_` and fall back to a different mechanism.
 std::atomic<uint32_t> queue_id_{0};
 thread_local SubQueueThreadCache sub_queue_cache_{0, nullptr};
-} // namespace
 
-namespace python_tracer {
-namespace {
-GetFn get_fn;
-
-struct NoOpPythonTracer : public PythonTracerBase {
-  static NoOpPythonTracer& singleton() {
-    static NoOpPythonTracer singleton_;
-    return singleton_;
-  }
-  void start(RecordQueue*) override {}
-  void stop() override {}
-  void clear() override {}
-  std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)>,
-      std::vector<CompressedEvent>&) override {
-    return {};
-  }
-  ~NoOpPythonTracer() = default;
-};
-} // namespace
-
-void registerTracer(GetFn get_tracer) {
-  get_fn = get_tracer;
-}
-
-PythonTracerBase& PythonTracerBase::get() {
-  if (get_fn == nullptr) {
-    return NoOpPythonTracer::singleton();
-  }
-  return get_fn();
-}
-} // namespace python_tracer
-
-namespace {
 std::string toString(const ExtraFields<EventType::PyCall>& e) {
   if (e.module_.has_value()) {
     return fmt::format(
@@ -272,13 +420,21 @@ uint64_t Result::correlationID() const {
 }
 
 int64_t Result::endTimeNS() const {
-  return visit(c10::overloaded(
+  auto end_time_ns = visit(c10::overloaded(
       ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
       ATTRIBUTE(Backend, e.end_time_us_ * 1000),
       ATTRIBUTE(Allocation, start_time_ns_),
       ATTRIBUTE(OutOfMemory, start_time_ns_),
       ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
       [&](const auto& e) -> int64_t { return e.end_time_ns_; }));
+
+  // In rare cases we're willing to tolerate ops which are missing an end time
+  // so long as they can borrow their parent's end time. A consequence of this,
+  // however, is that `endTimeNS` may not make sense until tree construction is
+  // complete.
+  auto end_time_is_valid =
+      !finished_ || SOFT_ASSERT(end_time_ns >= start_time_ns_, name());
+  return end_time_is_valid ? end_time_ns : start_time_ns_;
 }
 
 uint64_t Result::endTID() const {
@@ -297,23 +453,6 @@ c10::DeviceType Result::deviceType() const {
 }
 #undef ATTRIBUTE
 
-template <typename T, size_t ChunkSize>
-ThreadLocalSubqueue::EventBlock<T, ChunkSize>::EventBlock() {
-  static std::atomic<uint64_t> counter_{0};
-  id_start_ = 1 + ChunkSize * counter_++;
-}
-template <class... Args>
-std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::OpList::
-    emplace_back(Args&&... args) {
-  maybe_grow();
-  *next_ = {std::forward<Args>(args)...};
-  auto corr_id = buffer_last_->correlation_id(next_);
-  return {next_++, corr_id};
-}
-uint64_t ThreadLocalSubqueue::OpList::correlationID(const OpList::Iterator& e) {
-  return e.address().first->correlation_id(&*e);
-}
-
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
     const ProfilerConfig& config)
@@ -321,65 +460,12 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
   torch::profiler::impl::kineto::recordThreadInfo();
 }
 
-std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
-    const at::RecordFunction& fn) {
-  KinetoObserverContext::Event* event;
-  uint64_t corr_id;
-  std::tie(event, corr_id) = op_events_.emplace_back(
-      fn.seqNr(),
-      fn.forwardThreadId(),
-      fn.scope(),
-      fn.isAsync(),
-      fn.debugHandle(),
-      fn.name());
-  if (config_.report_input_shapes) {
-    inputs_outputs_.push(fn.inputs());
-  }
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
-  } else {
-    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
-  }
-
-#if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
-  // backward nodes source range corresponds to the forward node
-  // TODO: consider using C++ stack trace
-  if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
-    auto cs = torch::profiler::impl::prepareCallstack(jit::currentCallstack());
-    jit_stack_.emplace_back(callstackStr(cs));
-  }
-  if (config_.with_modules &&
-      fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
-    jit_modules_.emplace_back(jit::currentModuleHierarchy());
-  }
-#endif
-  if (config_.with_flops) {
-    extra_args_.emplace_back(torch::profiler::impl::saveExtraArgs(fn));
-  }
-
-  auto out = std::make_unique<KinetoObserverContext>(event);
-
-  if (config_.state == ProfilerState::KINETO_GPU_FALLBACK) {
-    try {
-      out->fallback_ = gpu_fallback_.emplace_back();
-      torch::profiler::impl::cudaStubs()->record(
-          nullptr, &out->fallback_->cuda_event_start_, nullptr);
-    } catch (const std::exception& e) {
-      LOG(WARNING) << "Failed to record CUDA event. " << e.what();
-    }
-  }
-
-  event->start_time_ = torch::profiler::impl::getApproximateTime();
-  event->allow_tf32_cublas_ = at::globalContext().allowTF32CuBLAS();
-  return out;
-}
-
 RecordQueue::RecordQueue(
     const ProfilerConfig& config,
     std::set<ActivityType> activities)
     : id_(++queue_id_), config_{config}, activities_{activities} {
   if (tracePython()) {
-    python_tracer::PythonTracerBase::get().start(this);
+    python_tracer_ = python_tracer::PythonTracerBase::make(this);
   }
 }
 
@@ -414,23 +500,12 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
 }
 
 void RecordQueue::stop() {
-  if (tracePython()) {
-    python_tracer::PythonTracerBase::get().stop();
+  if (python_tracer_) {
+    python_tracer_->stop();
   }
 }
 
 namespace {
-template <typename T>
-auto steal_or_default(T& it) {
-  if (it.exhausted()) {
-    return typename T::value_type();
-  } else {
-    auto result = std::move(*it);
-    ++it;
-    return result;
-  }
-}
-
 void mark_finished(std::shared_ptr<Result>& r) {
   TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
   r->finished_ = true;
@@ -727,7 +802,7 @@ trace_ptr_t addKinetoEvents(
   passEventsToKineto(results, start_time_us, end_time_us);
 
   // In on demand mode kineto is directly controlled by other machinery.
-  if (config.state == ProfilerState::KINETO_ONDEMAND) {
+  if (config.global()) {
     return nullptr;
   }
 
@@ -737,48 +812,140 @@ trace_ptr_t addKinetoEvents(
   return trace;
 }
 
-struct EvaluateFunctionVisitor {
-  void operator()(
-      ExtraFields<EventType::TorchOp>& first,
-      ExtraFields<EventType::TorchOp>& second) {
-    if (first.scope_ == at::RecordScope::FUNCTION &&
-        second.scope_ == at::RecordScope::BACKWARD_FUNCTION &&
-        first.name_.rfind("autograd::engine::evaluate_function: ", 0) == 0) {
-      first.sequence_number_ = second.sequence_number_;
-      first.forward_tid_ = second.forward_tid_;
+template <typename T>
+struct PairHash {
+  size_t operator()(const std::pair<T, T>& i) {
+    return c10::get_hash(i.first, i.second);
+  }
+};
+
+void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
+  // This task is equivilent to https://leetcode.com/problems/number-of-islands/
+  // We first cluster events with a greedy index assignment, and then merge
+  // groups that overlap.
+
+  using storage_id_t = strong::type<
+      size_t,
+      struct _StorageID,
+      strong::regular,
+      strong::hashable,
+      strong::arithmetic,
+      strong::ordered>;
+
+  struct TensorStoragePair {
+    TensorImplAddress impl_;
+    storage_id_t storage_id_;
+
+    // Used to assign the result.
+    std::reference_wrapper<c10::optional<TensorID>> id_ref_;
+  };
+  std::vector<TensorStoragePair> tensors;
+
+  // Step 1) Flatten and convert storage data pointers. (Handle address reuse.)
+  // --------------------------------------------------------------------------
+  {
+    storage_id_t current_id{0};
+    ska::flat_hash_map<StorageImplData, storage_id_t> live_storage;
+    auto lookup = [&current_id, &live_storage](const StorageImplData data) {
+      auto inserted = live_storage.insert({data, current_id});
+      current_id += storage_id_t(inserted.second);
+      return inserted.first->second;
+    };
+
+    ska::flat_hash_set<storage_id_t> tensor_set;
+    for (auto& result : sorted_results) {
+      result->visit(c10::overloaded(
+          [&](ExtraFields<EventType::TorchOp>& torch_op) {
+            for (auto& m : torch_op.inputs_.tensor_metadata_) {
+              if (m.has_value() && m->impl_ && m->data_) {
+                auto id = lookup(m->data_);
+                tensor_set.insert(id);
+                tensors.emplace_back(TensorStoragePair{m->impl_, id, m->id_});
+              }
+            }
+          },
+          [&](ExtraFields<EventType::Allocation>& alloc_op) {
+            // We won't know which allocations are for Tensor storage yet.
+            // We'll filter after we see all of the op inputs.
+            tensors.emplace_back(TensorStoragePair{
+                TensorImplAddress(nullptr),
+                lookup(StorageImplData(alloc_op.ptr_)),
+                alloc_op.id_});
+
+            // Handle deallocation
+            if (alloc_op.alloc_size_ < 0) {
+              live_storage.erase(StorageImplData(alloc_op.ptr_));
+            }
+          },
+          [](const auto&) {}));
+    }
+
+    // Handle any allocation events which we cannot prove are for
+    // `StorageImpl`s.
+    tensors.erase(
+        std::remove_if(
+            tensors.begin(),
+            tensors.end(),
+            [&tensor_set](const auto& i) {
+              return tensor_set.find(i.storage_id_) == tensor_set.end();
+            }),
+        tensors.end());
+  }
+
+  // Step 2) Handle the case that the storage of a TensorImpl changed.
+  // --------------------------------------------------------------------------
+  using storage_id_pair_t = std::pair<storage_id_t, storage_id_t>;
+  ska::flat_hash_set<storage_id_pair_t, PairHash<storage_id_t>> same_group_set;
+  {
+    ska::flat_hash_map<TensorImplAddress, storage_id_t> impl_map;
+    for (const auto& t : tensors) {
+      // Storage allocations / frees don't have an associated TensorImpl, so
+      // we don't want all storages to merge through nullptr.
+      if (!t.impl_) {
+        continue;
+      }
+
+      const auto it = impl_map.insert({t.impl_, t.storage_id_}).first;
+
+      // The pair needs to be sorted for the coalesce step to work properly.
+      it->second < t.storage_id_
+          ? same_group_set.insert({it->second, t.storage_id_})
+          : same_group_set.insert({t.storage_id_, it->second});
     }
   }
 
-  template <typename T0, typename T1>
-  void operator()(T0&, T1&) {}
-};
-
-void set_autograd_evaluate(std::vector<std::shared_ptr<Result>>& results) {
-  auto end = results.size() > 2 ? results.end() - 1 : results.begin();
-  for (auto it = results.begin(); it < end; ++it) {
-    if ((*it)->start_tid_ == (*(it + 1))->start_tid_) {
-      c10::visit(
-          EvaluateFunctionVisitor(),
-          (*it)->extra_fields_,
-          (*(it + 1))->extra_fields_);
+  // Step 3) Coalesce groups and assign final IDs.
+  // --------------------------------------------------------------------------
+  ska::flat_hash_map<storage_id_t, size_t> id_map;
+  {
+    std::vector<storage_id_pair_t> unique_pairs;
+    for (const auto& i : same_group_set) {
+      unique_pairs.push_back(i);
     }
+    std::sort(unique_pairs.begin(), unique_pairs.end());
+
+    size_t current_id{0};
+    for (const auto& i : unique_pairs) {
+      auto inserted = id_map.insert({i.first, current_id});
+      current_id += inserted.second;
+      id_map.insert({i.second, inserted.first->second});
+    }
+  }
+
+  // Step 4) Write back to metadata
+  // --------------------------------------------------------------------------
+  for (const auto& t : tensors) {
+    t.id_ref_.get() = TensorID(id_map.at(t.storage_id_));
   }
 }
 
-using result_ptr_t = std::shared_ptr<Result>;
 struct ResultGreater {
   bool operator()(const result_ptr_t& a, const result_ptr_t& b) const {
     return a->endTimeNS() > b->endTimeNS();
   }
 };
 
-void build_tree(std::vector<std::shared_ptr<Result>>& events) {
-  set_autograd_evaluate(events);
-  std::stable_sort(
-      events.begin(), events.end(), [](const auto& a, const auto& b) {
-        return a->start_time_ns_ < b->start_time_ns_;
-      });
-
+void build_tree(std::vector<std::shared_ptr<Result>>& sorted_events) {
   using op_fields = ExtraFields<EventType::TorchOp>;
   ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
   std::priority_queue<result_ptr_t, std::vector<result_ptr_t>, ResultGreater>
@@ -853,7 +1020,7 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
   };
 
   // Stack replay loop.
-  for (auto& event : events) {
+  for (auto& event : sorted_events) {
     while (!end_events_.empty() &&
            end_events_.top()->endTimeNS() < event->start_time_ns_) {
       pop_event(end_events_.top());
@@ -886,66 +1053,32 @@ RecordQueue::getRecords(
   std::vector<python_tracer::CompressedEvent> python_enters;
   for (auto& subqueue_it : sub_queues_) {
     auto& queue = *subqueue_it.second;
-    for (auto& i : queue.backend_events_) {
-      auto start_time = i.start_time_us_;
-      out.emplace_back(Result::create(
-          /*start_time_ns_=*/start_time * 1000,
-          /*start_tid_=*/queue.tid(),
-          /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i)));
-    }
-    queue.backend_events_.clear();
+    auto materialize = [&](auto& events) {
+      for (auto& i : events) {
+        out.emplace_back(Result::create(
+            /*start_time_ns_=*/c10::guts::if_constexpr<std::is_same<
+                typename std::remove_reference<decltype(i)>::type,
+                ExtraFields<EventType::Backend>>::value>(
+                [&](auto _) { return _(i).start_time_us_ * 1000; },
+                [&](auto _) { return converter(_(i).start_time_); }),
+            /*start_tid_=*/queue.tid(),
+            /*kineto_info_=*/queue.kineto_info(),
+            /*extra_fields_=*/std::move(i)));
+      }
+      events.clear();
+    };
 
-    auto input_getter = queue.inputs_outputs_.getNextShapesAndDtypes();
-    auto jit_stack_it = queue.jit_stack_.begin();
-    auto jit_module_it = queue.jit_modules_.begin();
-    auto extra_args_it = queue.extra_args_.begin();
-    auto gpu_fallback_it = queue.gpu_fallback_.begin();
-    for (auto event = queue.op_events_.begin(); event != queue.op_events_.end();
-         ++event) {
-      auto& i = *event;
-      auto start_time = converter(i.start_time_);
-      out.emplace_back(Result::create(
-          start_time,
-          /*start_tid_=*/queue.tid(),
-          /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/
-          ExtraFields<EventType::TorchOp>(
-              std::move(i.basic_fields_),
-              ThreadLocalSubqueue::OpList::correlationID(event),
-              converter(i.end_time_),
-              input_getter(),
-              steal_or_default(jit_stack_it),
-              steal_or_default(jit_module_it),
-              steal_or_default(extra_args_it),
-              steal_or_default(gpu_fallback_it),
-              i.allow_tf32_cublas_)));
-    }
-    queue.op_events_.clear();
-    queue.inputs_outputs_.clear();
-    queue.jit_stack_.clear();
-    queue.jit_modules_.clear();
-    queue.extra_args_.clear();
-    queue.gpu_fallback_.clear();
-
+    queue.torch_ops_.materialize(
+        out, converter, queue.tid(), queue.kineto_info());
+    materialize(queue.backend_events_);
     for (auto& i : queue.allocations_) {
-      auto start_time = converter(i.start_time_);
       out.emplace_back(Result::create(
-          start_time,
+          /*start_time_ns_=*/converter(i.start_time_),
           /*start_tid_=*/queue.tid(),
           /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i)));
+          /*extra_fields_=*/ExtraFields<EventType::Allocation>(i)));
     }
-    queue.allocations_.clear();
-    for (auto& i : queue.ooms_) {
-      auto start_time = converter(i.start_time_);
-      out.emplace_back(Result::create(
-          start_time,
-          /*start_tid_=*/queue.tid(),
-          /*kineto_info_=*/queue.kineto_info(),
-          /*extra_fields_=*/std::move(i)));
-    }
-    queue.ooms_.clear();
+    materialize(queue.ooms_);
 
     for (auto& i : queue.py_calls_) {
       python_enters.push_back(
@@ -953,15 +1086,24 @@ RecordQueue::getRecords(
     }
   }
 
-  if (tracePython()) {
-    auto& tracer = python_tracer::PythonTracerBase::get();
-    for (auto i : tracer.getEvents(converter, python_enters)) {
+  if (python_tracer_) {
+    for (auto i : python_tracer_->getEvents(
+             converter, python_enters, end_time_us * 1000)) {
       out.push_back(i);
     }
-    tracer.clear();
+    python_tracer_.reset();
   }
 
   auto trace = addKinetoEvents(out, start_time_us, end_time_us, config_);
+
+  std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+    return a->start_time_ns_ < b->start_time_ns_;
+  });
+
+  if (config_.report_input_shapes && config_.profile_memory) {
+    calculate_unique_tensor_ids(out);
+  }
+
   build_tree(out);
   return {out, std::move(trace)};
 }

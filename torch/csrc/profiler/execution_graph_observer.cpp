@@ -10,10 +10,14 @@
 #endif // _WIN32
 
 #include <fmt/format.h>
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include <stack>
 #include <stdexcept>
 #include <vector>
@@ -40,10 +44,12 @@ inline std::string vectorToString(const std::vector<T>& v) {
   return fmt::format("[{}]", fmt::join(v, ","));
 }
 
+constexpr size_t maxNumElements = 4096;
+
 inline std::string getValueType(
     const c10::IValue& val,
     const bool baseType = true,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   std::string type = val.tagKind();
 
   if (val.isTensor()) {
@@ -75,7 +81,7 @@ inline std::string getValueType(
 
 inline std::string getValueShape(
     const c10::IValue& val,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
     if (tensor.defined()) {
@@ -107,14 +113,25 @@ inline std::string getValueShape(
 
 inline std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
-    return std::to_string(val.toDouble());
+    double d_val = val.toDouble();
+    if (std::isinf(d_val) || std::isnan(d_val)) {
+      return fmt::format("\"{}\"", std::to_string(d_val));
+    } else {
+      return std::to_string(d_val);
+    }
   } else if (val.isInt()) {
     return std::to_string(val.toInt());
   } else if (val.isBool()) {
     return val.toBool() ? "true" : "false";
   } else if (val.isString()) {
-    constexpr int maxStringLen = 500;
-    return fmt::format("\"{}\"", val.toStringRef().substr(0, maxStringLen));
+    const std::string& str_val = val.toStringRef();
+    if (str_val.size() > maxNumElements) {
+      LOG(WARNING) << "string size=" << str_val.size()
+                   << " exceeded maxNumElements=" << maxNumElements;
+      return fmt::format("\"{}\"", str_val.substr(0, maxNumElements));
+    }
+
+    return fmt::format("\"{}\"", str_val);
   } else if (val.isDevice()) {
     return fmt::format("\"{}\"", val.toDevice().str());
   }
@@ -305,7 +322,7 @@ bool initExecutionGraphStart(ExecutionGraphObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.0", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.1", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -359,7 +376,7 @@ inline ExecutionGraphObserver::ID getObjectID(
 inline std::string convertIValue(
     ExecutionGraphObserver& ob,
     const c10::IValue& val,
-    const size_t maxArrayLen = 100) {
+    const size_t maxArrayLen = maxNumElements) {
   if (val.isTensor()) {
     const auto t = val.toTensor().unsafeGetTensorImpl();
     ExecutionGraphObserver::ID tensor_id = getObjectID(ob, t);
@@ -367,14 +384,23 @@ inline std::string convertIValue(
     size_t offset = 0;
     size_t numel = 0;
     size_t itemsize = 0;
+    std::string device_str = "";
     if (t->has_storage()) {
-      storage_id = getObjectID(ob, t->storage().data());
+      auto& t_storage = t->storage();
+      storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();
       numel = t->numel();
       itemsize = t->itemsize();
+      device_str = t->device().str();
     }
-    return vectorToString(
-        std::vector<size_t>{tensor_id, storage_id, offset, numel, itemsize});
+    return fmt::format(
+        "[{},{},{},{},{},\"{}\"]",
+        tensor_id,
+        storage_id,
+        offset,
+        numel,
+        itemsize,
+        device_str);
   } else if (val.isTuple()) {
     std::vector<std::string> str_array;
     const auto& val_tuple = val.toTupleRef().elements();
@@ -489,6 +515,33 @@ std::unique_ptr<ObserverContext> onFunctionEnter(const RecordFunction& fn) {
   return nullptr;
 }
 
+inline std::string json_str_escape(const std::string& str) {
+  std::ostringstream ostream;
+  for (auto ch = str.cbegin(); ch != str.cend(); ch++) {
+    if (*ch == '"') {
+      ostream << "\\\"";
+    } else if (*ch == '\\') {
+      ostream << "\\\\";
+    } else if (*ch == '\b') {
+      ostream << "\\b";
+    } else if (*ch == '\f') {
+      ostream << "\\f";
+    } else if (*ch == '\n') {
+      ostream << "\\n";
+    } else if (*ch == '\r') {
+      ostream << "\\r";
+    } else if (*ch == '\t') {
+      ostream << "\\t";
+    } else if ('\x00' <= *ch && *ch <= '\x1f') {
+      ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
+              << static_cast<int>(*ch);
+    } else {
+      ostream << *ch;
+    }
+  }
+  return ostream.str();
+}
+
 void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   using RunState = ExecutionGraphObserver::RunState;
   auto ob = ObserverManager::get();
@@ -536,7 +589,7 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       std::string op_schema_str{};
       const auto op_schema = fn.operator_schema();
       if (op_schema.has_value()) {
-        op_schema_str = c10::toString(op_schema.value());
+        op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
       writeJsonNode(
@@ -570,7 +623,7 @@ void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
 bool addExecutionGraphObserver(const std::string& output_file_path) {
   // Check if the observer is already initialized.
   if (ObserverManager::get() == nullptr) {
-    ObserverManager::init();
+    ObserverManager::push(std::make_shared<ExecutionGraphObserver>());
     auto& ob = *ObserverManager::get();
     ob.pid = processId();
     // Set output
@@ -607,7 +660,9 @@ void removeExecutionGraphObserver() {
       removeCallback(ob->cb_handle);
       ob->cb_handle = INVALID_CALLBACK_HANDLE;
       // Release the current EG observer object and reset.
-      ObserverManager::pop();
+      TORCH_INTERNAL_ASSERT(
+          ObserverManager::pop() != nullptr,
+          "Global state ptr cannot be null before resetting");
       VLOG(1) << "Removed PyTorch execution graph observer";
     } else {
       LOG(WARNING) << "Execution graph observer was not registered.";

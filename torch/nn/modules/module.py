@@ -21,6 +21,7 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar('T', bound='Module')
 
+
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
@@ -40,6 +41,7 @@ def _addindent(s_, numSpaces):
     s = '\n'.join(s)
     s = first + '\n' + s
     return s
+
 
 class _WrappedHook:
     def __init__(self, hook: Callable, module: Optional["Module"] = None):
@@ -151,6 +153,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     _global_forward_hooks[handle.id] = hook
     return handle
 
+
 def register_module_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
 ) -> RemovableHandle:
@@ -176,6 +179,7 @@ def register_module_backward_hook(
     handle = hooks.RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
+
 
 def register_module_full_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
@@ -352,6 +356,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
@@ -705,20 +710,17 @@ class Module:
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Linear(in_features=2, out_features=2, bias=True)
             Parameter containing:
-            tensor([[ 1.,  1.],
-                    [ 1.,  1.]])
+            tensor([[1., 1.],
+                    [1., 1.]], requires_grad=True)
             Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)
             )
-            Sequential(
-              (0): Linear(in_features=2, out_features=2, bias=True)
-              (1): Linear(in_features=2, out_features=2, bias=True)
-            )
+
         """
         for module in self.children():
             module.apply(fn)
@@ -923,6 +925,7 @@ class Module:
 
         Examples::
 
+            >>> # xdoctest: +IGNORE_WANT("non-deterministic")
             >>> linear = nn.Linear(2, 2)
             >>> linear.weight
             Parameter containing:
@@ -934,6 +937,7 @@ class Module:
             Parameter containing:
             tensor([[ 0.1913, -0.3420],
                     [-0.5113, -0.2325]], dtype=torch.float64)
+            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA1)
             >>> gpu1 = torch.device("cuda:1")
             >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
             Linear(in_features=2, out_features=2, bias=True)
@@ -1070,7 +1074,7 @@ class Module:
 
     def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
         if not isinstance(result, torch.Tensor):
-            if not (isinstance(result, tuple) and all([isinstance(r, torch.Tensor) for r in result])):
+            if not (isinstance(result, tuple) and all(isinstance(r, torch.Tensor) for r in result)):
                 warnings.warn("Using non-full backward hooks on a Module that does not return a "
                               "single Tensor or a tuple of Tensors is deprecated and will be removed "
                               "in future versions. This hook will be missing some of the grad_output. "
@@ -1080,7 +1084,7 @@ class Module:
             result = (result,)
 
         if not isinstance(inputs, torch.Tensor):
-            if not (isinstance(inputs, tuple) and all([isinstance(i, torch.Tensor) for i in inputs])):
+            if not (isinstance(inputs, tuple) and all(isinstance(i, torch.Tensor) for i in inputs)):
                 warnings.warn("Using non-full backward hooks on a Module that does not take as input a "
                               "single Tensor or a tuple of Tensors is deprecated and will be removed "
                               "in future versions. This hook will be missing some of the grad_input. "
@@ -1368,11 +1372,15 @@ class Module:
     # TODO: Change `*args` to `*` and remove the copprespinding warning in docs when BC allows.
     # Also remove the logic for arg parsing together.
     def state_dict(self, *args, destination=None, prefix='', keep_vars=False):
-        r"""Returns a dictionary containing a whole state of the module.
+        r"""Returns a dictionary containing references to the whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
         Parameters and buffers set to ``None`` are not included.
+
+        .. note::
+            The returned object is a shallow copy. It contains references
+            to the module's parameters and buffers.
 
         .. warning::
             Currently ``state_dict()`` also accepts positional arguments for
@@ -1402,6 +1410,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> module.state_dict().keys()
             ['bias', 'weight']
 
@@ -1621,13 +1630,15 @@ class Module:
             # mypy isn't aware that "_metadata" exists in state_dict
             state_dict._metadata = metadata  # type: ignore[attr-defined]
 
-        def load(module, prefix=''):
+        def load(module, local_state_dict, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             module._load_from_state_dict(
-                state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
+                local_state_dict, prefix, local_metadata, True, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
-                    load(child, prefix + name + '.')
+                    child_prefix = prefix + name + '.'
+                    child_state_dict = {k: v for k, v in local_state_dict.items() if k.startswith(child_prefix)}
+                    load(child, child_state_dict, child_prefix)
 
             # Note that the hook can modify missing_keys and unexpected_keys.
             incompatible_keys = _IncompatibleKeys(missing_keys, unexpected_keys)
@@ -1639,7 +1650,7 @@ class Module:
                     "it should be done inplace."
                 )
 
-        load(self)
+        load(self, state_dict)
         del load
 
         if strict:
@@ -1685,6 +1696,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for param in model.parameters():
             >>>     print(type(param), param.size())
             <class 'torch.Tensor'> (20L,)
@@ -1709,6 +1721,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
             >>>        print(param.size())
@@ -1733,6 +1746,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for buf in model.buffers():
             >>>     print(type(buf), buf.size())
             <class 'torch.Tensor'> (20L,)
@@ -1757,6 +1771,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, buf in self.named_buffers():
             >>>    if name in ['running_var']:
             >>>        print(buf.size())
@@ -1786,6 +1801,7 @@ class Module:
 
         Example::
 
+            >>> # xdoctest: +SKIP("undefined vars")
             >>> for name, module in model.named_children():
             >>>     if name in ['conv4', 'conv5']:
             >>>         print(module)
@@ -1812,7 +1828,7 @@ class Module:
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
-                    print(idx, '->', m)
+            ...     print(idx, '->', m)
 
             0 -> Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
@@ -1846,7 +1862,7 @@ class Module:
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
-                    print(idx, '->', m)
+            ...     print(idx, '->', m)
 
             0 -> ('', Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)

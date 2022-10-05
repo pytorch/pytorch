@@ -1,6 +1,6 @@
 import torch
-import torch.nn.qat as nnqat
-import torch.nn.intrinsic as nni
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.intrinsic as nni
 import torch.nn.functional as F
 
 class LinearReLU(nnqat.Linear, nni._FusedModule):
@@ -19,6 +19,7 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> m = nn.qat.LinearReLU(20, 30)
         >>> input = torch.randn(128, 20)
         >>> output = m(input)

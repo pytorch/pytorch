@@ -22,6 +22,7 @@ load(
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
+    "torch_mobile_tracer_sources",
 )
 load(
     ":pt_ops.bzl",
@@ -249,6 +250,7 @@ PT_BACKEND_HEADERS = [
     "CompositeExplicitAutograd",
     "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
+    "CompositeImplicitAutogradNestedTensor",
     "Meta",
 ]
 
@@ -307,6 +309,7 @@ def get_aten_generated_files(enabled_backends):
     src_files = [
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
+        "RegisterCompositeImplicitAutogradNestedTensor.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
         "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
@@ -327,10 +330,13 @@ def get_aten_generated_files(enabled_backends):
         "Operators_4.cpp",
         "CompositeImplicitAutogradFunctions.h",
         "CompositeImplicitAutogradFunctions_inl.h",
+        "CompositeImplicitAutogradNestedTensorFunctions.h",
+        "CompositeImplicitAutogradNestedTensorFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradNonFunctionalFunctions.h",
         "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
+        "VmapGeneratedPlumbing.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
@@ -364,7 +370,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeImplicitAutogradNestedTensor.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
@@ -502,6 +508,16 @@ def copy_template_registration_files(name, apple_sdks = None):
         default_outs = ["."],
         apple_sdks = apple_sdks,
     )
+
+def get_feature_tracer_source_list():
+    """
+    Return just the Feature specific handlers used in the model tracer.
+    """
+    sources = []
+    for s in torch_mobile_tracer_sources:
+        if s.endswith("Tracer.cpp"):
+            sources.append(s)
+    return sources
 
 def pt_operator_query_codegen(
         name,
@@ -739,7 +755,7 @@ def get_pt_operator_registry_dict(
                    third_party("glog"),
                    C10,
                ] + ([ROOT + ":torch_mobile_train"] if train else []) +
-               ([ROOT + ":torch_flatbuffer_all"] if enable_flatbuffer else []),
+               ([ROOT + ":flatbuffers_mobile"] if enable_flatbuffer else []),
         **kwargs
     )
 
@@ -803,6 +819,7 @@ def define_buck_targets(
             ("aten/src", "ATen/*.h"),
             ("aten/src", "ATen/cpu/**/*.h"),
             ("aten/src", "ATen/detail/*.h"),
+            ("aten/src", "ATen/functorch/**/*.h"),
             ("aten/src", "ATen/quantized/*.h"),
             ("aten/src", "ATen/vulkan/*.h"),
             ("aten/src", "ATen/metal/*.h"),
@@ -865,6 +882,7 @@ def define_buck_targets(
                 ("", "torch/custom_class_detail.h"),
                 # Add again due to namespace difference from aten_header.
                 ("", "aten/src/ATen/*.h"),
+                ("", "aten/src/ATen/functorch/**/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ],
             exclude = [
@@ -1083,6 +1101,8 @@ def define_buck_targets(
             "CompositeExplicitAutogradNonFunctionalFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions_inl.h]",
             "CompositeImplicitAutogradFunctions.h": ":gen_aten[CompositeImplicitAutogradFunctions.h]",
             "CompositeImplicitAutogradFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradFunctions_inl.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions.h]",
+            "CompositeImplicitAutogradNestedTensorFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradNestedTensorFunctions_inl.h]",
             "FunctionalInverses.h": ":gen_aten[FunctionalInverses.h]",
             "Functions.h": ":gen_aten[Functions.h]",
             "MethodOperators.h": ":gen_aten[MethodOperators.h]",
@@ -1246,12 +1266,8 @@ def define_buck_targets(
     pt_xplat_cxx_library(
         name = "torch_model_tracer",
         srcs = [
-            "torch/csrc/jit/mobile/model_tracer/BuildFeatureTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/CustomClassTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
-            "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
             "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
-        ],
+        ] + get_feature_tracer_source_list(),
         header_namespace = "",
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + (["-DSYMBOLICATE_MOBILE_DEBUG_HANDLE"] if get_enable_eager_symbolication() else []),
@@ -1347,7 +1363,7 @@ def define_buck_targets(
         exported_preprocessor_flags = get_pt_preprocessor_flags(),
         visibility = ["PUBLIC"],
         exported_deps = [
-            ":torch_flatbuffer_all",
+            ":flatbuffers_mobile",
             ":torch_mobile_core",
         ],
     )
@@ -1417,6 +1433,7 @@ def define_buck_targets(
             "torch/csrc/autograd/VariableTypeManual.cpp",
             "torch/csrc/autograd/FunctionsManual.cpp",
             "torch/csrc/api/src/data/datasets/mnist.cpp",
+            "torch/csrc/jit/mobile/quantization.cpp",
             "torch/csrc/jit/mobile/train/export_data.cpp",
             "torch/csrc/jit/mobile/train/optim/sgd.cpp",
             "torch/csrc/jit/mobile/train/random.cpp",
@@ -1633,7 +1650,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1660,7 +1676,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             "-DEDGE_PROFILER_USE_KINETO",
         ],
         # @lint-ignore BUCKLINT link_whole
@@ -1687,21 +1702,29 @@ def define_buck_targets(
         cmd = "$(exe {})".format(third_party("flatc")) +
               " --cpp --gen-mutable --scoped-enums -o ${OUT} ${SRCS}",
         default_outs = ["."],
+        visibility = [
+            "{}:mobile_bytecode".format(ROOT),
+        ],
     )
 
+    # Users of this target will need to add third_party("flatbuffers-api") as a
+    # dep.
     fb_xplat_cxx_library(
         name = "mobile_bytecode",
         header_namespace = "",
         exported_headers = {
             "torch/csrc/jit/serialization/mobile_bytecode_generated.h": ":mobile_bytecode_header[mobile_bytecode_generated.h]",
         },
-        exported_deps = [
-            third_party("flatbuffers-api"),
+        # Avoid leaking implementation details by only exposing this header to
+        # the internals of the loader/serializer layer.
+        visibility = [
+            "{}:flatbuffer_loader".format(ROOT),
+            "{}:flatbuffer_serializer_mobile".format(ROOT),
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer",
+        name = "flatbuffers_serializer_mobile",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer.h",
@@ -1715,14 +1738,13 @@ def define_buck_targets(
         ] + (["-DFB_XPLAT_BUILD"] if not IS_OSS else []),
         visibility = ["PUBLIC"],
         deps = [
+            ":mobile_bytecode",
             ":torch_mobile_module",
             C10,
+            third_party("flatbuffers-api"),
         ],
         exported_deps = [
-            ":flatbuffer_loader",
-            ":mobile_bytecode",
             ":torch_mobile_train",
-            third_party("flatbuffers-api"),
         ],
     )
 
@@ -1737,7 +1759,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DUSE_KINETO_UPDATED",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1756,16 +1777,18 @@ def define_buck_targets(
             "-Wl,--no-as-needed",
         ],
         visibility = ["PUBLIC"],
-        exported_deps = [
+        deps = [
             ":mobile_bytecode",
-            ":torch_mobile_deserialize",
             third_party("flatbuffers-api"),
+        ],
+        exported_deps = [
+            ":torch_mobile_deserialize",
             C10,
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "flatbuffer_serializer_jit",
+        name = "flatbuffers_serializer_jit",
         srcs = ["torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp"],
         exported_headers = [
             "torch/csrc/jit/serialization/flatbuffer_serializer_jit.h",
@@ -1783,22 +1806,29 @@ def define_buck_targets(
         visibility = ["PUBLIC"],
         deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":mobile_bytecode",
+            ":flatbuffers_serializer_mobile",
             ":torch_core",
             ":torch_mobile_module",
-            third_party("flatbuffers-api"),
             C10,
         ],
     )
 
     fb_xplat_cxx_library(
-        name = "torch_flatbuffer_all",
+        name = "flatbuffers_jit",
         visibility = ["PUBLIC"],
         exported_deps = [
             ":flatbuffer_loader",
-            ":flatbuffer_serializer",
-            ":flatbuffer_serializer_jit",
+            ":flatbuffers_serializer_mobile",
+            ":flatbuffers_serializer_jit",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "flatbuffers_mobile",
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            ":flatbuffer_loader",
+            ":flatbuffers_serializer_mobile",
         ],
     )
 
