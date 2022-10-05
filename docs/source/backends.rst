@@ -139,7 +139,7 @@ torch.backends.openmp
 
 
 torch.backends.opt_einsum
-^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.opt_einsum
 
 .. autofunction:: torch.backends.opt_einsum.is_available

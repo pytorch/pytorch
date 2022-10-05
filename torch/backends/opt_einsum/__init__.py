@@ -42,7 +42,7 @@ def _set_strategy(_strategy: str) -> None:
                          'unset `strategy`.')
     if not enabled:
         warnings.warn('opt_einsum is not enabled, so setting a `strategy` will not make a meaningful change. '
-                      'torch.einsum will bypass path calculation and simply contract from left to right.'
+                      'torch.einsum will bypass path calculation and simply contract from left to right. '
                       'Please set `enabled` to `True` as well or unset `strategy`.')
     if _strategy not in ['auto', 'greedy', 'optimal']:
         raise ValueError(f'`strategy` must be one of the following: [auto, greedy, optimal] but is {_strategy}')
