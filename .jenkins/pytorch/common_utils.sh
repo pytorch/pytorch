@@ -113,6 +113,7 @@ function checkout_install_torchvision() {
 
 function checkout_install_torchdeploy() {
   local commit
+  python setup.py bdist_wheel
   pushd ..
   git clone https://github.com/pytorch/multipy
   pushd multipy
