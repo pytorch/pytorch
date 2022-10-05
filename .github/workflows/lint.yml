@@ -134,33 +134,7 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
-          set -x
-
-          ancestor=$(git merge-base "${BASE}" "${HEAD}")
-          details=$(git diff --shortstat "$ancestor" "${HEAD}")
-          add=$(echo "$details" | grep -o '[0-9]* insertion' | grep -o '[0-9]*' || true)
-          remove=$(echo "$details" | grep -o '[0-9]* deletion' | grep -o '[0-9]*' || true)
-
-          pr_size=0
-          if [ "$add" ]; then
-              pr_size=$(("$pr_size" + "$add"))
-          fi
-          if [ "$remove" ]; then
-              pr_size=$(("$pr_size" + "$remove"))
-          fi
-
-          if ((pr_size > 2000)); then
-            echo
-            echo 'Your PR is '"$pr_size"' LOC which is more than the 2000 maximum'
-            echo 'allowed within PyTorch infra. PLease make sure to split up'
-            echo 'your PR into smaller pieces that can be reviewed.'
-            echo 'If you think that this rule should not apply to your PR,'
-            echo 'please contact @albanD or @seemethere.'
-            echo
-            false
-          fi
-
-
+          bash .github/scripts/pr-sanity-check.sh
 
   workflow-checks:
     name: workflow-checks

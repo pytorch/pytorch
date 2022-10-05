@@ -307,6 +307,7 @@ class StateDictType(Enum):
     LOCAL_STATE_DICT = auto()
     SHARDED_STATE_DICT = auto()
 
+
 @dataclass
 class StateDictConfig:
     """
@@ -316,6 +317,7 @@ class StateDictConfig:
     implementation FSDP will use.
     """
     offload_to_cpu: bool = False
+
 
 @dataclass
 class FullStateDictConfig(StateDictConfig):
@@ -352,15 +354,18 @@ class FullStateDictConfig(StateDictConfig):
 class LocalStateDictConfig(StateDictConfig):
     pass
 
+
 @dataclass
 class ShardedStateDictConfig(StateDictConfig):
     pass
+
 
 _state_dict_type_to_config = {
     StateDictType.FULL_STATE_DICT: FullStateDictConfig,
     StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
     StateDictType.SHARDED_STATE_DICT: ShardedStateDictConfig,
 }
+
 
 class OptimStateKeyType(Enum):
     PARAM_NAME = auto()
@@ -389,7 +394,12 @@ class _ExecOrderData:
     graph but may be provide an incorrect order).
     """
 
-    def __init__(self, debug_level: dist.DebugLevel) -> None:
+    def __init__(
+        self,
+        debug_level: dist.DebugLevel,
+        backward_prefetch_limit: int,
+        forward_prefetch_limit: int,
+    ) -> None:
         # Tracks the (static) pre-forward order for execution order validation
         # and forward prefetching
         self.handles_pre_forward_order: List[int] = []
@@ -400,6 +410,11 @@ class _ExecOrderData:
         # Maps each handles key to its index in `handles_post_forward_order`
         self.handles_to_post_forward_order_index: Dict[_HandlesKey, int] = {}
         self.is_first_iter = True
+
+        # Gives the max number of backward/forward prefetched all-gathers by a
+        # single module
+        self._backward_prefetch_limit = backward_prefetch_limit
+        self._forward_prefetch_limit = forward_prefetch_limit
 
         # Data structures for execution order validation
         self._checking_order: bool = (
@@ -447,38 +462,48 @@ class _ExecOrderData:
     def get_handles_to_backward_prefetch(
         self,
         current_handles_key: _HandlesKey,
-    ) -> Optional[_HandlesKey]:
+    ) -> List[_HandlesKey]:
         """
-        Returns the handles key of the handles to backward prefetch given the
-        current handles key or ``None`` if there is no valid handles key to
-        prefetch.
+        Returns a :class:`list` of the handles keys of the handles to backward
+        prefetch given the current handles key. If there are no valid handles
+        keys to prefetch, then this returns an empty :class:`list`.
         """
         current_index = self.handles_to_post_forward_order_index.get(current_handles_key, None)
         if current_index is None:
             return None
         target_index = current_index - 1
-        if target_index < 0:
-            return None
-        target_handles_key = self.handles_post_forward_order[target_index]
-        return target_handles_key
+        target_handles_keys: List[_HandlesKey] = []
+        for _ in range(self._backward_prefetch_limit):
+            if target_index < 0:
+                break
+            target_handles_keys.append(
+                self.handles_post_forward_order[target_index]
+            )
+            target_index -= 1
+        return target_handles_keys
 
     def get_handles_to_forward_prefetch(
         self,
         current_handles_key: _HandlesKey,
-    ) -> Optional[_HandlesKey]:
+    ) -> List[_HandlesKey]:
         """
-        Returns the handles key of the handles to forward prefetch given the
-        current handles key or ``None`` if there is no valid handles key to
-        prefetch.
+        Returns a :class:`list` of the handles keys of the handles to forward
+        prefetch given the current handles key. If there are no valid handles
+        keys to prefetch, then this returns an empty :class:`list`.
         """
         current_index = self.handles_to_pre_forward_order_index.get(current_handles_key, None)
         if current_index is None:
             return None
         target_index = current_index + 1
-        if target_index >= len(self.handles_pre_forward_order):
-            return None
-        target_handles_key = self.handles_pre_forward_order[target_index]
-        return target_handles_key
+        target_handles_keys: List[_HandlesKey] = []
+        for _ in range(self._forward_prefetch_limit):
+            if target_index >= len(self.handles_pre_forward_order):
+                break
+            target_handles_keys.append(
+                self.handles_pre_forward_order[target_index]
+            )
+            target_index += 1
+        return target_handles_keys
 
     def record_post_forward(self, handles: List[FlatParamHandle]) -> None:
         """
@@ -1031,6 +1056,8 @@ class FullyShardedDataParallel(nn.Module):
         self.backward_prefetch = backward_prefetch
         self.forward_prefetch = forward_prefetch
         self.limit_all_gathers = limit_all_gathers
+        backward_prefetch_limit = 1
+        forward_prefetch_limit = 1
         # We clamp the strategy to `NO_SHARD` for world size of 1 since they
         # are currently functionally equivalent. This may change if/when we
         # integrate FSDP with MoE.
@@ -1095,7 +1122,11 @@ class FullyShardedDataParallel(nn.Module):
         self._streams: Dict[str, torch.cuda.Stream] = {}
         self._free_event_queue = _FreeEventQueue()
         self._debug_level = dist.get_debug_level()
-        self._exec_order_data = _ExecOrderData(self._debug_level)
+        self._exec_order_data = _ExecOrderData(
+            self._debug_level,
+            backward_prefetch_limit,
+            forward_prefetch_limit,
+        )
         self._handles_prefetched: Dict[_HandlesKey, bool] = {}
         # Used for guarding against mistargeted backward prefetches
         self._needs_pre_backward_unshard: Dict[_HandlesKey, bool] = {}
@@ -1993,23 +2024,22 @@ class FullyShardedDataParallel(nn.Module):
         if not current_handles_key:
             return
         handles_to_prefetch = self._get_handles_to_prefetch(current_handles_key)
-        if handles_to_prefetch is not None:
+        for handles_key in handles_to_prefetch:
             # Prefetch the next set of handles without synchronizing to allow
             # the sync to happen as late as possible to maximize overlap
-            self._unshard(handles_to_prefetch)
-            self._handles_prefetched[handles_to_prefetch] = True
+            self._unshard(handles_key)
+            self._handles_prefetched[handles_key] = True
 
     def _get_handles_to_prefetch(
         self,
         current_handles_key: _HandlesKey,
-    ) -> Optional[_HandlesKey]:
+    ) -> List[_HandlesKey]:
         """
-        Returns the handles to prefetch if the module corresponding to
-        ``current_handles_key`` should prefetch for the next module and
-        ``None`` otherwise.
+        Returns a :class:`list` of the handles keys to prefetch for the next
+        module(s), where ``current_handles_key`` represents the current module.
 
         "Prefetching" refers to running the unshard logic early (without
-        synchronization), and the "next" module depends on the recorded
+        synchronization), and the "next" modules depend on the recorded
         execution order and the current training state.
         """
         training_state = self._get_training_state(current_handles_key)
@@ -2024,27 +2054,34 @@ class FullyShardedDataParallel(nn.Module):
             f"currently in {training_state}"
         )
         eod = self._exec_order_data
-        target_handles_key: Optional[_HandlesKey] = None
+        target_handles_keys: List[_HandlesKey] = []
         if (
-            training_state == HandleTrainingState.BACKWARD_PRE
-            and self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
+            (
+                training_state == HandleTrainingState.BACKWARD_PRE
+                and self.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
+            )
+            or (
+                training_state == HandleTrainingState.BACKWARD_POST
+                and self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
+            )
         ):
-            target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
-            if not self._needs_pre_backward_unshard.get(target_handles_key, False):
-                target_handles_key = None
-        elif (
-            training_state == HandleTrainingState.BACKWARD_POST
-            and self.backward_prefetch == BackwardPrefetch.BACKWARD_POST
-        ):
-            target_handles_key = eod.get_handles_to_backward_prefetch(current_handles_key)
-            if not self._needs_pre_backward_unshard.get(target_handles_key, False):
-                target_handles_key = None
+            target_handles_keys = [
+                target_handles_key for target_handles_key in
+                eod.get_handles_to_backward_prefetch(current_handles_key)
+                if self._needs_pre_backward_unshard.get(target_handles_key, False)
+                and not self._handles_prefetched.get(target_handles_key, False)
+            ]
         elif (
             training_state == HandleTrainingState.FORWARD
             and self.forward_prefetch
         ):
-            target_handles_key = eod.get_handles_to_forward_prefetch(current_handles_key)
-        return target_handles_key
+            target_handles_keys = [
+                target_handles_key for target_handles_key in
+                eod.get_handles_to_forward_prefetch(current_handles_key)
+                if self._needs_pre_forward_unshard.get(target_handles_key, False)
+                and not self._handles_prefetched.get(target_handles_key, False)
+            ]
+        return target_handles_keys
 
     def _get_training_state(
         self,
@@ -2218,6 +2255,9 @@ class FullyShardedDataParallel(nn.Module):
                     f"{checkpoint_wrapper._CHECKPOINT_PREFIX}.", ""
                 )
                 fqn = f"{prefix}{clean_key}"
+                if fqn not in state_dict:
+                    # A buffer can be registered as non-persistent.
+                    continue
                 if state_dict[fqn].device != cpu_device:
                     state_dict[fqn] = state_dict[fqn].to(cpu_device)
         return state_dict
@@ -2254,7 +2294,7 @@ class FullyShardedDataParallel(nn.Module):
         sharded_tensor = init_from_local_shards(
             local_shards, full_numel, process_group=self.process_group
         )  # type: ignore[assignment]
-        if self._state_dict_type.offload_to_cpu:
+        if self._state_dict_config.offload_to_cpu:
             sharded_tensor = sharded_tensor.cpu()
         state_dict[f"{prefix}{FLAT_PARAM}"] = sharded_tensor
         return state_dict
@@ -2818,8 +2858,12 @@ class FullyShardedDataParallel(nn.Module):
         p_assert(self._is_root is not None, "Expects a root FSDP to have been set")
         if not self._is_root:
             return args, kwargs
+        if self.forward_prefetch:
+            for fsdp_module in self.fsdp_modules(self):
+                handles_key = tuple(fsdp_module._handles)
+                if handles_key:
+                    self._needs_pre_forward_unshard[handles_key] = True
         self._wait_for_previous_optim_step()
-        self._needs_pre_forward_unshard.clear()
         args, kwargs = self._cast_forward_inputs(*args, **kwargs)
         return args, kwargs
 
@@ -3659,7 +3703,7 @@ class FullyShardedDataParallel(nn.Module):
     def _warn_optim_input(optim_input):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated. You may remove it "
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
                 "from your code without changing its functionality."
             )
 
