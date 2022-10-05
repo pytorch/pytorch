@@ -120,18 +120,17 @@ namespace profiler {
 
 namespace {
 using torch::profiler::impl::ActiveProfilerType;
-using torch::profiler::impl::ProfilerThreadLocalStateBase;
+using torch::profiler::impl::ProfilerStateBase;
 
-struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
+struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ProfilerLegacyThreadLocalState(
       const torch::profiler::impl::ProfilerConfig& config)
-      : ProfilerThreadLocalStateBase(config),
-        remoteProfiledEvents_{c10::nullopt} {}
+      : ProfilerStateBase(config), remoteProfiledEvents_{c10::nullopt} {}
   ~ProfilerLegacyThreadLocalState() override = default;
 
   static ProfilerLegacyThreadLocalState* getTLS() {
-    auto tls = ProfilerThreadLocalStateBase::getTLS();
+    auto tls = ProfilerStateBase::get(/*global=*/false);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::LEGACY);
     return static_cast<ProfilerLegacyThreadLocalState*>(tls);
@@ -160,6 +159,10 @@ struct ProfilerLegacyThreadLocalState : public ProfilerThreadLocalStateBase {
 
   ActiveProfilerType profilerType() override {
     return ActiveProfilerType::LEGACY;
+  }
+
+  void leakHandle() {
+    handle_ = 0;
   }
 
  protected:
@@ -452,10 +455,7 @@ thread_event_lists disableProfilerLegacy(
       state_ptr && !state_ptr->config().disabled(),
       "Can't disable profiler when it's not running");
 
-  if (cleanupTLSState) {
-    at::removeCallback(state_ptr->callbackHandle());
-  }
-
+  cleanupTLSState ? state_ptr->removeCallback() : state_ptr->leakHandle();
   if (!consolidate ||
       state_ptr->config().state == torch::profiler::impl::ProfilerState::NVTX) {
     return thread_event_lists();

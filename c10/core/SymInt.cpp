@@ -1,3 +1,4 @@
+#include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
@@ -51,6 +52,21 @@ static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   TORCH_INTERNAL_ASSERT(false, "SymInts aren't available on mobile");
 }
 #endif
+
+int64_t SymInt::guard_int(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymIntNode a = toSymIntNodeImpl();
+  return a->guard_int(file, line);
+}
+
+SymInt::operator SymFloat() const {
+  if (!is_symbolic()) {
+    return SymFloat(double(data_));
+  }
+  return SymFloat::toSymFloat(toSymIntNodeImpl()->sym_float());
+}
 
 SymInt SymInt::operator+(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
@@ -140,6 +156,10 @@ void SymInt::operator*=(SymInt sci) {
   *this = *this * sci;
 }
 
+void SymInt::operator+=(SymInt sci) {
+  *this = *this + sci;
+}
+
 bool SymInt::operator<(int64_t sci) const {
   return *this < c10::SymInt(sci);
 }
@@ -166,6 +186,15 @@ bool SymInt::operator!=(int64_t sci) const {
 
 SymInt SymInt::operator*(int64_t sci) const {
   return *this * c10::SymInt(sci);
+}
+
+std::ostream& operator<<(std::ostream& os, SymInt s) {
+  if (s.is_symbolic()) {
+    os << s.toSymIntNodeImpl()->str();
+  } else {
+    os << s.as_int_unchecked();
+  }
+  return os;
 }
 
 } // namespace c10

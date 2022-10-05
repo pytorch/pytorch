@@ -201,6 +201,9 @@ void initLazyBindings(PyObject* module) {
   lazy.def("_get_symbolic_shape_mode", []() {
     return FLAGS_ltc_enable_symbolic_shapes;
   });
+  lazy.def("_get_default_device_type", []() {
+    return getBackend()->GetDefaultDeviceType()->toString();
+  });
 
   lazy_ts_backend.def("_init", []() {
 #if !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))

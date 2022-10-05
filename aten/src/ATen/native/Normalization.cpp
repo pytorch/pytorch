@@ -14,6 +14,7 @@
 #include <c10/util/irange.h>
 
 #include <vector>
+#include <c10/core/SymIntArrayRef.h>
 
 static const int MIOPEN_DIM_MAX = 5;
 
@@ -41,7 +42,7 @@ DEFINE_DISPATCH(batch_norm_cpu_backward_stub);
 DEFINE_DISPATCH(renorm_scale_factor_stub);
 
 namespace {
-  void check_dims_match_num_input_features(const char* arg_name, int64_t expected, int64_t actual){
+  void check_dims_match_num_input_features(const char* arg_name, SymInt expected, SymInt actual){
     TORCH_CHECK(actual == expected,
              arg_name, " should contain ", expected, " elements not ", actual);
   }
@@ -443,14 +444,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
 
-  auto num_features = input.sizes()[1];
+  auto num_features = input.sym_sizes()[1];
 
-  if (input.numel() == 0) {
+  if (input.sym_numel() == 0) {
     Tensor reserve = at::empty({0}, input.options().dtype(kByte));
     auto options = input.options().dtype(
         at::toAccumulateType(input.scalar_type(), /*is_cuda=*/input.is_cuda()));
-    auto save_mean = at::empty({num_features}, options);
-    auto save_invstd = at::empty({num_features}, options);
+    auto save_mean = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
+    auto save_invstd = at::empty_symint(c10::SymIntArrayRef({num_features}), options);
 
     // don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();
@@ -461,20 +462,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   }
 
   if (running_mean.defined()) {
-    check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
+    check_dims_match_num_input_features("running_mean", num_features, running_mean.sym_numel());
   } else if (!training) {
     AT_ERROR("running_mean must be defined in evaluation mode");
   }
   if (running_var.defined()) {
-    check_dims_match_num_input_features("running_var", num_features, running_var.numel());
+    check_dims_match_num_input_features("running_var", num_features, running_var.sym_numel());
   } else if (!training) {
     AT_ERROR("running_var must be defined in evaluation mode");
   }
   if (weight.defined()) {
-    check_dims_match_num_input_features("weight", num_features, weight.numel());
+    check_dims_match_num_input_features("weight", num_features, weight.sym_numel());
   }
   if (bias.defined()) {
-    check_dims_match_num_input_features("bias", num_features, bias.numel());
+    check_dims_match_num_input_features("bias", num_features, bias.sym_numel());
   }
 
   const bool use_cudnn = (

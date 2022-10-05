@@ -68,8 +68,13 @@ fi
 pip_install -r requirements.txt || true
 
 # Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export USE_LLVM=/opt/rocm/llvm
+  export LLVM_DIR=/opt/rocm/llvm/lib/cmake/llvm
+else
+  export USE_LLVM=/opt/llvm
+  export LLVM_DIR=/opt/llvm/lib/cmake/llvm
+fi
 
 # TODO: Don't install this here
 if ! which conda; then
@@ -146,9 +151,9 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   if [[ -n "$CI" && -z "$PYTORCH_ROCM_ARCH" ]]; then
-      # Set ROCM_ARCH to gfx900 and gfx906 for CI builds, if user doesn't override.
-      echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CI builds"
-      export PYTORCH_ROCM_ARCH="gfx900;gfx906"
+      # Set ROCM_ARCH to gfx906 for CI builds, if user doesn't override.
+      echo "Limiting PYTORCH_ROCM_ARCH to gfx906 for CI builds"
+      export PYTORCH_ROCM_ARCH="gfx906"
   fi
 
   # hipify sources
@@ -163,8 +168,11 @@ if [ -z "$MAX_JOBS" ]; then
   fi
 fi
 
-# Target only our CI GPU machine's CUDA arch to speed up the build
-export TORCH_CUDA_ARCH_LIST="5.2"
+# TORCH_CUDA_ARCH_LIST must be passed from an environment variable
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
+  echo "TORCH_CUDA_ARCH_LIST must be defined"
+  exit 1
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
@@ -224,7 +232,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install dist/*.whl
+    python -mpip install "$(echo dist/*.whl)[opt-einsum]"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x

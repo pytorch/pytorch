@@ -195,6 +195,10 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         set([
             F.hardswish,
         ]),
+        # F.group_norm
+        set([
+            F.group_norm,
+        ]),
         # F.instance_norm
         set([
             F.instance_norm,

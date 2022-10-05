@@ -282,7 +282,7 @@ class CudaKernelGenerator : private OptOutConstDispatch {
     // Shared memory
     if (has_dynamic_smem || has_reductions || has_parallel_welford) {
       indent() << "alignas("
-#ifndef __HIP_PLATFORM_HCC__
+#ifndef USE_ROCM
                << 16 // always align to 16B for any shared mem allocation
 #else
                << 8 // for HIP, we want 8-aligned even for smaller datatypes
@@ -783,9 +783,11 @@ class CudaKernelGenerator : private OptOutConstDispatch {
              << rop->getRNGOffset() << ";\n";
     indent() << "if (rng_subseq != rng_subseq" << rop->name()
              << " || rng_offset != rng_offset" << rop->name() << ") {\n";
-    indent() << "  rng_result = philox(philox_args.seed_, rng_subseq"
-             << rop->name() << ", philox_offset / 4 + rng_offset" << rop->name()
-             << ");\n";
+    indent() << "  auto seed = philox_args.captured_ ?\n"
+             << "      static_cast<uint64_t>(*(philox_args.seed_.ptr)) : \n"
+             << "      philox_args.seed_.val;\n";
+    indent() << "  rng_result = philox(seed, rng_subseq" << rop->name()
+             << ", philox_offset / 4 + rng_offset" << rop->name() << ");\n";
     indent() << "  rng_subseq = rng_subseq" << rop->name() << ";\n";
     indent() << "  rng_offset = rng_offset" << rop->name() << ";\n";
     indent() << "}\n";

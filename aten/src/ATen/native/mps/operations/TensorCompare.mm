@@ -37,6 +37,47 @@ void clamp_mps_graph(CachedGraph* cachedGraph, const Tensor& input_tensor)
     }
 }
 
+void check_min_max_dims(const OptionalTensorRef clamp_opt,
+                        const Tensor& input_t,
+                        string op_name) {
+
+    if(!clamp_opt->is_same_size(input_t)) {
+
+        auto num_clamp_dims = clamp_opt->dim();
+        auto num_input_dims = input_t.dim();
+
+        auto clamp_shape = clamp_opt->sizes();
+        auto input_shape = input_t.sizes();
+
+        TORCH_CHECK(num_clamp_dims <= num_input_dims, op_name + ": clamp tensor number of dims must not be greater than that of input tensor")
+
+        for(int i = 0; i < num_clamp_dims; i++)
+            // One of the indices is allowed to be 1; will be handled by broadcast
+            TORCH_CHECK(clamp_shape[num_clamp_dims-1-i] == input_shape[num_input_dims-1-i] ||
+                        clamp_shape[num_clamp_dims-1-i] == 1 ||
+                        input_shape[num_input_dims-1-i] == 1,
+                        op_name + ": clamp tensor trailing shape must match input tensor")
+
+    }
+}
+
+void fill_new_shape(int64_t num_input_dims,
+                    int64_t num_clamp_dims,
+                    int64_t *new_shape,
+                    IntArrayRef clamp_shape) {
+
+    // Extend the shape with ones to the left
+    int clamp_idx = 0;
+    for(int i = 0; i < num_input_dims; i++) {
+        if(i <  num_input_dims - num_clamp_dims)
+            new_shape[i] = 1;
+        else {
+            new_shape[i] = clamp_shape[clamp_idx];
+            clamp_idx++;
+        }
+    }
+}
+
 void clamp_tensor_out_mps(const Tensor& input_t,
                           const OptionalTensorRef min_opt,
                           const OptionalTensorRef max_opt,
@@ -48,17 +89,54 @@ void clamp_tensor_out_mps(const Tensor& input_t,
 
     TORCH_CHECK(has_min || has_max, op_name + ": either min, max or both tensors must be defined")
     if (has_min)
-        TORCH_CHECK(min_opt->is_same_size(input_t), op_name + ": min and input tensors must be of the same shape")
+        check_min_max_dims(min_opt, input_t, op_name);
+
     if (has_max)
-        TORCH_CHECK(max_opt->is_same_size(input_t), op_name + ": max and input tensors must be of the same shape")
+        check_min_max_dims(max_opt, input_t, op_name);
 
     if (output_t.numel() == 0)
         return;
 
+    IntArrayRef new_min_shape;
+    IntArrayRef new_max_shape;
+
+    auto num_min_dims = min_opt->dim();
+    auto num_max_dims = max_opt->dim();
+    auto num_input_dims = input_t.dim();
+
+    std::vector<int64_t> new_min_arr(num_input_dims);
+    std::vector<int64_t> new_max_arr(num_input_dims);
+
+    if(has_min && num_min_dims < num_input_dims) {
+        fill_new_shape(num_input_dims, num_min_dims, new_min_arr.data(), min_opt->sizes());
+        new_min_shape = IntArrayRef(new_min_arr);
+    }
+
+    if(has_max && num_max_dims < num_input_dims) {
+        fill_new_shape(num_input_dims, num_max_dims, new_max_arr.data(), max_opt->sizes());
+        new_max_shape = IntArrayRef(new_max_arr);
+    }
+
+    Tensor min_opt_tensor;
+    Tensor max_opt_tensor;
+
+    if(has_min) {
+        min_opt_tensor = (num_min_dims < num_input_dims) ? (*min_opt).view(new_min_shape) : *min_opt;
+    }
+    if(has_max) {
+        max_opt_tensor = (num_max_dims < num_input_dims) ? (*max_opt).view(new_max_shape) : *max_opt;
+    }
+
     @autoreleasepool {
         // the optional min/max refs could affect how we build the cached graph
+
+        auto tensor_key = has_min ? (has_max ? getTensorsStringKey({input_t, min_opt_tensor, max_opt_tensor})
+                                             : getTensorsStringKey({input_t, min_opt_tensor}))
+                                  : (has_max ? getTensorsStringKey({input_t, max_opt_tensor})
+                                             : getTensorsStringKey({input_t}));
+
         string key = op_name + (has_min ? "_min" : "") + (has_max ? "_max" : "")
-                             + "_tensor" + getTensorsStringKey({input_t});
+                             + "_tensor" + tensor_key;
         MPSGraphCache* cache_ = MPSGraphCache::getInstance();
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
@@ -71,9 +149,9 @@ void clamp_tensor_out_mps(const Tensor& input_t,
                     newCachedGraph = new CachedGraph(mpsGraph);
 
                     if (has_min)
-                        newCachedGraph->minTensor = mpsGraphRankedPlaceHolder(mpsGraph, *min_opt);
+                        newCachedGraph->minTensor = mpsGraphRankedPlaceHolder(mpsGraph, min_opt_tensor);
                     if (has_max)
-                        newCachedGraph->maxTensor = mpsGraphRankedPlaceHolder(mpsGraph, *max_opt);
+                        newCachedGraph->maxTensor = mpsGraphRankedPlaceHolder(mpsGraph, max_opt_tensor);
 
                     clamp_mps_graph(newCachedGraph, input_t);
                 }
@@ -88,11 +166,11 @@ void clamp_tensor_out_mps(const Tensor& input_t,
         NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
         feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
         if (has_min) {
-            auto minPlaceholder = Placeholder(cachedGraph->minTensor, *min_opt);
+            auto minPlaceholder = Placeholder(cachedGraph->minTensor, min_opt_tensor);
             feeds[minPlaceholder.getMPSGraphTensor()] = minPlaceholder.getMPSGraphTensorData();
         }
         if (has_max) {
-            auto maxPlaceholder = Placeholder(cachedGraph->maxTensor, *max_opt);
+            auto maxPlaceholder = Placeholder(cachedGraph->maxTensor, max_opt_tensor);
             feeds[maxPlaceholder.getMPSGraphTensor()] = maxPlaceholder.getMPSGraphTensorData();
         }
 
@@ -312,7 +390,7 @@ Tensor where_mps(const Tensor& condition,
 
   TORCH_CHECK(max_dim == 0 || !(sum_dims % max_dim), "All inputs of where should have same/compatible number of dims")
 
-  int64_t out_arr[max_dim];
+  std::vector<int64_t> out_arr(max_dim);
 
   // Broadcasted output shape
   for(int i = 0; i < max_dim; i++) {
@@ -324,7 +402,7 @@ Tensor where_mps(const Tensor& condition,
     out_arr[i] = std::max(cond_num, std::max(self_num, other_num));
   }
 
-  Tensor ret = empty_mps(IntArrayRef(out_arr, max_dim),
+  Tensor ret = empty_mps(IntArrayRef(out_arr),
                          self.scalar_type(),
                          c10::nullopt,
                          kMPS,

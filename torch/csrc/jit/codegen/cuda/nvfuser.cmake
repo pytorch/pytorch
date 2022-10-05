@@ -36,6 +36,15 @@ list(APPEND NVFUSER_RUNTIME_FILES
   ${TORCH_ROOT}/aten/src/ATen/cuda/detail/UnpackRaw.cuh
 )
 
+if(USE_ROCM)
+list(APPEND NVFUSER_RUNTIME_FILES
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/array_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default_rocm.cu
+  ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp_rocm.cu
+)
+endif()
+
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
 
 # "stringify" NVFUSER runtime sources
