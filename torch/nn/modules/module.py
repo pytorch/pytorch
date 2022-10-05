@@ -13,7 +13,8 @@ from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overloa
 from ...utils.hooks import RemovableHandle
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook', 'register_module_backward_hook',
-           'register_module_full_backward_hook', 'Module']
+           'register_module_full_backward_hook', 'register_module_buffer_registration_hook',
+           'register_module_module_registration_hook', 'register_module_parameter_registration_hook', 'Module']
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
@@ -95,7 +96,7 @@ _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
 
 
-def register_buffer_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_module_buffer_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Registers a buffer registration hook common to all modules.
 
     .. warning ::
@@ -105,7 +106,7 @@ def register_buffer_registration_hook(hook: Callable[..., None]) -> RemovableHan
     The hook will be called every time :func:`register_buffer` is invoked.
     It should have the following signature::
 
-        hook(name, module) -> None or modified input
+        hook(module, name, buffer) -> None or new buffer
 
     The hook can modify the input or return a single modified value in the hook.
 
@@ -119,7 +120,7 @@ def register_buffer_registration_hook(hook: Callable[..., None]) -> RemovableHan
     return handle
 
 
-def register_module_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_module_module_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Registers a module registration hook common to all modules.
 
     .. warning ::
@@ -129,7 +130,7 @@ def register_module_registration_hook(hook: Callable[..., None]) -> RemovableHan
     The hook will be called every time :func:`register_module` is invoked.
     It should have the following signature::
 
-        hook(name, module) -> None or modified input
+        hook(module, name, submodule) -> None or new submodule
 
     The hook can modify the input or return a single modified value in the hook.
 
@@ -143,7 +144,7 @@ def register_module_registration_hook(hook: Callable[..., None]) -> RemovableHan
     return handle
 
 
-def register_parameter_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
+def register_module_parameter_registration_hook(hook: Callable[..., None]) -> RemovableHandle:
     r"""Registers a parameter registration hook common to all modules.
 
     .. warning ::
@@ -153,7 +154,7 @@ def register_parameter_registration_hook(hook: Callable[..., None]) -> Removable
     The hook will be called every time :func:`register_parameter` is invoked.
     It should have the following signature::
 
-        hook(name, param) -> None or modified input
+        hook(module, name, param) -> None or new parameter
 
     The hook can modify the input or return a single modified value in the hook.
 
