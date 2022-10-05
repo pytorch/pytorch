@@ -119,7 +119,7 @@ Tensor transformer_encoder_layer_forward(
      auto x_size_0 = x.size(0);
      x = x.view({x_size_0, -1, 3, num_heads, embed_dim / num_heads});
      x = flash_attention_helper(x, x, x, 0.0, false);
-     x = x.view({{x_size_0, -1, embed_dim});
+     x = x.view({x_size_0, -1, embed_dim});
      x = at::linear(x, proj_weight, proj_bias);
   } else {
 #endif
