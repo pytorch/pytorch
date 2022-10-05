@@ -50,7 +50,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
-    IS_ARM64,
     run_tests,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -128,7 +127,7 @@ class TestProfilerCUDA(TestCase):
             q = s.sum()
             q.backward()
 
-@unittest.skipIf(IS_ARM64, "ITT is not available on ARM")
+@unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
 class TestProfilerITT(TestCase):
 
     def test_custom_module_input_op_ids(self):
