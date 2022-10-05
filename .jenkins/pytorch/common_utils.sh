@@ -116,6 +116,7 @@ function checkout_install_torchdeploy() {
   pushd ..
   git clone https://github.com/pytorch/multipy
   pushd multipy
+  git checkout 850862ddc5f5f614697b2415e42df982f04df3ed
   mkdir temp
   cp -r ../pytorch/dist temp/
   DOCKER_BUILDKIT=1 docker build -t multipy --progress=plain
