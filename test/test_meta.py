@@ -652,7 +652,7 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 
         return run_meta_crossref(
             self.test_case, test_expect, func, args,
-            kwargs, dtype=self.dtype, device_type=self.device_type
+            kwargs, dtype=self.dtype, device_type=self.device_type, run_symbolic_meta=False
         )
 
 aten = torch.ops.aten
