@@ -1624,6 +1624,48 @@ def meta_select_scatter(self, src, dim, index):
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
+def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
+    if dim_post_expr <= 0:
+        assert wrap_scalar
+        dim_post_expr = 1
+    min = -dim_post_expr
+    max = dim_post_expr - 1
+    assert not (dim < min or dim > max)
+    if dim < 0:
+        dim += dim_post_expr
+    return dim
+
+def ensure_nonempty_size(t, dim):
+    return 1 if t.dim() == 0 else t.shape[dim]
+
+# From aten/src/ATen/native/ScatterGatherChecks.h
+def gather_shape_check(self, dim, index):
+    self_dims = max(self.dim(), 1)
+    index_dims = max(index.dim(), 1)
+    check(
+        self_dims == index_dims,
+        lambda: "Index tensor must have the same number of dimensions as input tensor"
+    )
+    for i in len(self_dims):
+        if i != dim:
+            check(
+                ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
+                lambda: f"Size does not match at dimension {i} expected index {index.shape}" +
+                        f" to be smaller than self {self.shape} apart from dimension {dim}"
+            )
+
+@register_meta(aten.gather.default)
+def meta_gather(self, dim, index, sparse_grad=False):
+    wrapped_dim = maybe_wrap_dim(dim, self.dim())
+    is_index_empty = index.numel() == 0
+    if not is_index_empty:
+        check(
+            index.dtype == torch.long,
+            lambda: "gather(): Expected dtype int64 for index",
+        )
+        gather_shape_check(self, wrapped_dim, index)
+    return self.new_empty(index.shape)
+
 
 # hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)
