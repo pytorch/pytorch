@@ -1379,11 +1379,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-@register_decomposition(aten._efficientzerotensor.default)
-def efficient_zero(*args, **kwargs):
-    return torch.zeros(*args, **kwargs)
-
-
 @register_decomposition(aten._to_copy)
 def _to_copy(
     x: Tensor,

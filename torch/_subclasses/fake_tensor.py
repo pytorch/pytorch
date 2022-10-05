@@ -271,6 +271,11 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+@register_op_impl(aten._efficientzerotensor.default)
+def efficient_zero(fake_mode, func, *args, **kwargs):
+    return constructors(fake_mode, aten.zeros.default, *args, **kwargs)
+
+
 @register_op_impl(
     lambda func: (_is_tensor_constructor(func) or func in _like_tensor_constructors)
 )
