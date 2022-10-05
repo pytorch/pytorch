@@ -29,6 +29,7 @@ from . import _lazy as _lazy
 from . import _lazy_ts_backend as _lazy_ts_backend
 
 T = TypeVar('T')
+S = TypeVar("S", bound="torch.Tensor")
 
 # Defined in torch/csrc/Device.cpp
 class device:
