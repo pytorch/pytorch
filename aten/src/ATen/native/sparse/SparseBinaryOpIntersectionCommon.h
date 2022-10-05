@@ -118,10 +118,10 @@ TensorIterator make_value_selection_intersection_iter(
     return idx.as_strided(idx_sizes, idx_strides);
   };
 
-  const auto restride_values = [](const Tensor& values) -> Tensor {
+  const auto restride_values = [&lhs_select_idx](const Tensor& values) -> Tensor {
     auto values_sizes = at::DimVector(values.sizes());
     auto values_strides = at::DimVector(values.strides());
-    values_sizes[0] = 1;
+    values_sizes[0] = lhs_select_idx.numel();
     values_strides[0] = 0;
     return values.as_strided(values_sizes, values_strides);
   };
