@@ -93,6 +93,5 @@ class OptEinsumModule(PropModule):
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = OptEinsumModule(sys.modules[__name__], __name__)
 
-# Add type annotation for the replaced module
-enabled: bool = True
-strategy: str = 'auto'
+enabled = True
+strategy = 'auto'
