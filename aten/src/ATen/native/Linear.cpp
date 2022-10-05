@@ -15,7 +15,6 @@
 #else
 #include <ATen/ops/_trilinear.h>
 #include <ATen/ops/_trilinear_native.h>
-#include <ATen/ops/_mps_linear.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/addmm.h>
 #include <ATen/ops/bilinear_native.h>
