@@ -22,14 +22,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization.fuse_modules": [
-    "List",
-    "Optional",
-    "fuse_conv_bn",
-    "fuse_conv_bn_relu",
-    "get_fuser_method",
-    "type_before_parametrizations"
-  ],
   "torch.ao.quantization.fuser_method_mappings": [
     "Callable",
     "Dict",
