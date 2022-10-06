@@ -360,37 +360,13 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(bmm, lower_precision_fp)
   KERNEL(chain_matmul, lower_precision_fp)
   KERNEL(linalg_multi_dot, lower_precision_fp)
-  // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
-  m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
-         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(_thnn_fused_lstm_cell)>::type::call)));
-  m.impl("_thnn_fused_gru_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(_thnn_fused_gru_cell)>::type::call)));
-  m.impl("lstm_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
-                                 std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 std::tuple<Tensor,Tensor> (const Tensor &, TensorList, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(lstm_cell)>::type::call)));
-  m.impl("gru_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(gru_cell)>::type::call)));
-  m.impl("rnn_tanh_cell", // tanh unary op is executed as a cuda math library call.
-         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(rnn_tanh_cell)>::type::call)));
-  m.impl("rnn_relu_cell",
-         TORCH_FN((&WrapFunction<CastPolicy::lower_precision_fp, DeviceType::CUDA,
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 Tensor (const Tensor &, const Tensor &, const Tensor &, const Tensor &, const c10::optional<Tensor>&, const c10::optional<Tensor>&),
-                                 &ADD_NS(rnn_relu_cell)>::type::call)));
+  KERNEL(_thnn_fused_lstm_cell, lower_precision_fp)
+  KERNEL(_thnn_fused_gru_cell, lower_precision_fp)
+  KERNEL(lstm_cell, lower_precision_fp)
+  KERNEL(gru_cell, lower_precision_fp)
+  KERNEL(rnn_tanh_cell, lower_precision_fp)
+  KERNEL(rnn_relu_cell, lower_precision_fp)
+
   // fp32
   KERNEL(acos, fp32)
   KERNEL(asin, fp32)
@@ -411,12 +387,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL2(pow, Scalar, fp32)
   KERNEL(softplus, fp32)
   KERNEL(layer_norm, fp32)
-  // The macro doesn't like this one (I think it chokes on commas inside <>) so write it manually
-  m.impl(TORCH_SELECTIVE_NAME("aten::native_layer_norm"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CUDA,
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
-                                 std::tuple<Tensor,Tensor,Tensor> (const Tensor&, IntArrayRef, const c10::optional<Tensor>&, const c10::optional<Tensor>&, double),
-                                 &ADD_NS(native_layer_norm)>::type::call)));
+  KERNEL(native_layer_norm, fp32)
   KERNEL(group_norm, fp32)
   KERNEL(frobenius_norm, fp32)
   KERNEL2(frobenius_norm, dim, fp32)
@@ -600,110 +571,23 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(linalg_tensorinv, fp32)
   KERNEL_CPU(linalg_tensorsolve, fp32)
   KERNEL_CPU(fake_quantize_per_tensor_affine, fp32)
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::geqrf"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &),
-                                 &ADD_NS(geqrf)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::_lu_with_info"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
-                                 &ADD_NS(_lu_with_info)>::type::call)));
-
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::qr"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 &ADD_NS(qr)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::svd"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
-                                 &ADD_NS(svd)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::symeig"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 &ADD_NS(symeig)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::triangular_solve"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool, bool),
-                                 &ADD_NS(triangular_solve)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::fractional_max_pool2d"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
-                                 &ADD_NS(fractional_max_pool2d)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::fractional_max_pool3d"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef, IntArrayRef, const Tensor &),
-                                 &ADD_NS(fractional_max_pool3d)>::type::call)));
-
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::adaptive_max_pool3d"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, IntArrayRef),
-                                 &ADD_NS(adaptive_max_pool3d)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::multilabel_margin_loss_forward"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, int64_t),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &, int64_t),
-                                 &ADD_NS(multilabel_margin_loss_forward)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_qr"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
-                                 &ADD_NS(linalg_qr)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_cholesky_ex"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 &ADD_NS(linalg_cholesky_ex)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_svd"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, c10::optional<c10::string_view>),
-                                 std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, c10::optional<c10::string_view>),
-                                 &ADD_NS(linalg_svd)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_eig"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &),
-                                 &ADD_NS(linalg_eig)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_eigh"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, c10::string_view),
-                                 &ADD_NS(linalg_eigh)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_lstsq"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor, Tensor, Tensor> (const Tensor &, const Tensor &, c10::optional<double>, c10::optional<c10::string_view>),
-                                 std::tuple<Tensor, Tensor, Tensor, Tensor> (const Tensor &, const Tensor &, c10::optional<double>, c10::optional<c10::string_view>),
-                                 &ADD_NS(linalg_lstsq)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::linalg_inv_ex"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 &ADD_NS(linalg_inv_ex)>::type::call)));
+  KERNEL_CPU(geqrf, fp32)
+  KERNEL_CPU(_lu_with_info, fp32)
+  KERNEL_CPU(qr, fp32)
+  KERNEL_CPU(svd, fp32)
+  KERNEL_CPU(symeig, fp32)
+  KERNEL_CPU(triangular_solve, fp32)
+  KERNEL_CPU(fractional_max_pool2d, fp32)
+  KERNEL_CPU(fractional_max_pool3d, fp32)
+  KERNEL_CPU(adaptive_max_pool3d, fp32)
+  KERNEL_CPU(multilabel_margin_loss_forward, fp32)
+  KERNEL_CPU(linalg_qr, fp32)
+  KERNEL_CPU(linalg_cholesky_ex, fp32)
+  KERNEL_CPU(linalg_svd, fp32)
+  KERNEL_CPU(linalg_eig, fp32)
+  KERNEL_CPU(linalg_eigh, fp32)
+  KERNEL_CPU(linalg_lstsq, fp32)
+  KERNEL_CPU(linalg_inv_ex, fp32)
 
   // promote
   KERNEL_CPU(stack, promote)
