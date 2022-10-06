@@ -250,7 +250,7 @@ def meta__fused_moving_avg_obs_fq_helper(
 
 @register_meta(aten.bernoulli_.float, register_dispatcher=False)
 def meta_bernoulli_(self, p, generator=None):
-    return self.new_empty(())
+    return self
 
 
 def dot_check(self, other):
@@ -1467,6 +1467,23 @@ def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=
 def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
+
+
+@register_meta(aten.upsample_nearest2d.vec)
+def upsample_nearest2d_vec(input, output_size, scale_factors):
+    mem_format = utils.suggest_memory_format(input)
+    if output_size is not None:
+        assert scale_factors is None
+        return input.new_empty(input.size()).to(memory_format=mem_format)
+
+    assert output_size is None
+    out_size = list(input.size())
+
+    for i in range(len(out_size) - 2):
+        sym_float = (out_size[i + 2] / 1) * scale_factors[i]
+        assert sym_float >= 0
+        out_size[i + 2] = math.floor(sym_float)
+    return input.new_empty(out_size).to(memory_format=mem_format)
 
 
 # We must also trigger meta registrations from PrimTorch ref
