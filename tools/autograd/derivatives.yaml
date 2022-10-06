@@ -354,7 +354,7 @@
   self, other: matmul_backward(grad, self, other, grad_input_mask)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
-  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
+  tensors: cat_tensors_backward(grad, to_args_sizes_symint(tensors), to_args_scalartypes(tensors), dim)
   result: cat_jvp(tensors, dim)
 
 - name: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
@@ -527,14 +527,14 @@
   result: auto_linear
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
-  self: diag_backward(grad, self.sizes(), diagonal)
+  self: diag_backward_symint(grad, self.sym_sizes(), diagonal)
   result: auto_linear
 
 - name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
-  self: diagonal_backward(grad, self.sizes(), offset, dim1, dim2)
+  self: diagonal_backward_symint(grad, self.sym_sizes(), offset, dim1, dim2)
   result: auto_linear
 
-- name: diagonal_backward(Tensor grad_output, int[] input_sizes, int offset, int dim1, int dim2) -> Tensor
+- name: diagonal_backward(Tensor grad_output, SymInt[] input_sizes, int offset, int dim1, int dim2) -> Tensor
   grad_output: grad.diagonal(offset, dim1, dim2)
   result: auto_linear
 
@@ -781,7 +781,7 @@
   other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
-  self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
+  self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)
   result: auto_linear
 
 - name: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
@@ -1054,7 +1054,7 @@
   result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: mean_backward(grad, self.sizes(), dim, self.numel(), keepdim)
+  self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
   result: auto_linear
 
 - name: median(Tensor self) -> Tensor
@@ -1153,18 +1153,18 @@
   save_mean: not_implemented("native_batch_norm_backward save_mean")
   save_invstd: not_implemented("native_batch_norm_backward save_invstd")
 
-- name: native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "grad.defined() ? native_layer_norm_backward(grad, input, normalized_shape, result1, result2, weight, bias, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+- name: native_layer_norm(Tensor input, SymInt[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "grad.defined() ? native_layer_norm_backward_symint(grad, input, normalized_shape, result1, result2, weight, bias, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result0: layer_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, normalized_shape)
 
-- name: native_layer_norm_backward(Tensor grad_out, Tensor input, int[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- name: native_layer_norm_backward(Tensor grad_out, Tensor input, SymInt[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   input, weight, grad_out: layer_norm_double_backward(input, weight, grads[0], grads[1], grads[2], grad_out, mean, rstd, normalized_shape, grad_input_mask)
   bias: Tensor()
   mean: not_implemented("native_layer_norm_backward mean")
   rstd: not_implemented("native_layer_norm_backward rstd")
 
-- name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
-  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward(grads[0].is_contiguous() ? grads[0] : grads[0].contiguous(), input.is_contiguous() ? input : input.contiguous(), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
+- name: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, SymInt N, SymInt C, SymInt HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
+  input, weight, bias: "GradMode::is_enabled() || grads[1].defined() || grads[2].defined() ? infinitely_differentiable_native_group_norm_backward(grads[0], grads[1], grads[2], input, result1, result2, weight, N, C, HxW, group, eps, grad_input_mask) : (grads[0].defined() ? native_group_norm_backward_symint(grads[0].is_contiguous() ? grads[0] : grads[0].contiguous(), input.is_contiguous() ? input : input.contiguous(), result1, result2, weight, N, C, HxW, group, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>())"
   result0: group_norm_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, result1, result2, group)
   result1: group_norm_mean_jvp(input_t, result1, group)
   result2: group_norm_invstd_jvp(input_p, input_t, result1, result2, group)
@@ -1324,8 +1324,8 @@
 - name: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   self: renorm_backward(grad, self, p, dim, maxnorm)
 
-- name: repeat(Tensor self, int[] repeats) -> Tensor
-  self: repeat_backward(grad, repeats, self.sizes())
+- name: repeat(Tensor self, SymInt[] repeats) -> Tensor
+  self: repeat_backward(grad, repeats, self.sym_sizes())
   result: auto_linear
 
 - name: special_entr(Tensor self) -> Tensor
@@ -1352,8 +1352,8 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_alias(Tensor(a) self, int[] size, int[] stride) -> Tensor(a)
-  self: grad.reshape(self.sizes())
+- name: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
+  self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
 - name: round(Tensor self) -> Tensor
@@ -1388,12 +1388,12 @@
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   dispatch:
     Default:
-      self: select_backward(grad, self.sizes(), dim, index)
+      self: select_backward_symint(grad, self.sym_sizes(), dim, index)
       result: auto_linear
     AutogradNestedTensor:
       self: _nested_select_backward(grad, self, dim, index)
 
-- name: select_backward(Tensor grad_output, int[] input_sizes, int dim, int index) -> Tensor
+- name: select_backward(Tensor grad_output, SymInt[] input_sizes, int dim, int index) -> Tensor
   grad_output: grad.select(dim, index)
   result: auto_linear
 
@@ -1538,13 +1538,13 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes())
+  self: grad.expand_symint(self.sym_sizes())
   result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
     Default:
-      self: sum_backward(grad, self.sizes(), dim, keepdim)
+      self: sum_backward(grad, self.sym_sizes(), dim, keepdim)
       result: auto_linear
     AutogradNestedTensor:
       # TODO: replace this function once semantics for nested tensor expand have been settled on
@@ -1697,8 +1697,8 @@
   output_differentiability: [True, False, False]
   self: not_implemented("_unique2")
 
-- name: _unsafe_view(Tensor self, int[] size) -> Tensor
-  self: grad.reshape(self.sizes())
+- name: _unsafe_view(Tensor self, SymInt[] size) -> Tensor
+  self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
 - name: lift(Tensor self) -> Tensor
@@ -1731,7 +1731,7 @@
 - name: view(Tensor(a) self, SymInt[] size) -> Tensor(a)
   dispatch:
     Default:
-      self: grad.reshape(self.sizes())
+      self: grad.reshape_symint(self.sym_sizes())
       result: auto_linear
     AutogradNestedTensor:
       self: grad.reshape_as(self)
@@ -1829,10 +1829,10 @@
 
 - name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
-  weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
+  weight: embedding_backward_symint(grad, indices, weight.sym_size(0), padding_idx, scale_grad_by_freq, sparse)
   result: auto_linear
 
-- name: embedding_dense_backward(Tensor grad_output, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
+- name: embedding_dense_backward(Tensor grad_output, Tensor indices, SymInt num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
   indices: non_differentiable
   result: auto_linear
@@ -2037,98 +2037,98 @@
   self: replication_pad3d_backward(grad, self, padding)
   result: auto_linear
 
-- name: upsample_linear1d(Tensor self, int[1] output_size, bool align_corners, float? scales=None) -> Tensor
-  self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners, scales)
+- name: upsample_linear1d(Tensor self, SymInt[1] output_size, bool align_corners, float? scales=None) -> Tensor
+  self: upsample_linear1d_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales)
   result: auto_linear
 
-- name: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
+- name: upsample_bilinear2d(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_bilinear2d_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_bilinear2d_aa(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: _upsample_bilinear2d_aa_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
+- name: _upsample_bilinear2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: _upsample_bilinear2d_aa_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
+- name: upsample_bicubic2d(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_bicubic2d_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_bicubic2d_aa(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: _upsample_bicubic2d_aa_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
+- name: _upsample_bicubic2d_aa(Tensor self, SymInt[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: _upsample_bicubic2d_aa_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_h, scales_w)
 
-- name: upsample_trilinear3d(Tensor self, int[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners, scales_d, scales_h, scales_w)
+- name: upsample_trilinear3d(Tensor self, SymInt[3] output_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_trilinear3d_backward_symint(grad, output_size, self.sym_sizes(), align_corners, scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_nearest1d(Tensor self, int[1] output_size, float? scales=None) -> Tensor
-  self: upsample_nearest1d_backward(grad, output_size, self.sizes(), scales)
+- name: upsample_nearest1d(Tensor self, SymInt[1] output_size, float? scales=None) -> Tensor
+  self: upsample_nearest1d_backward_symint(grad, output_size, self.sym_sizes(), scales)
   result: auto_linear
 
-- name: _upsample_nearest_exact1d(Tensor self, int[1] output_size, float? scales=None) -> Tensor
-  self: _upsample_nearest_exact1d_backward(grad, output_size, self.sizes(), scales)
+- name: _upsample_nearest_exact1d(Tensor self, SymInt[1] output_size, float? scales=None) -> Tensor
+  self: _upsample_nearest_exact1d_backward_symint(grad, output_size, self.sym_sizes(), scales)
   result: auto_linear
 
-- name: upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_nearest2d_backward(grad, output_size, self.sizes(), scales_h, scales_w)
+- name: upsample_nearest2d(Tensor self, SymInt[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_nearest2d_backward_symint(grad, output_size, self.sym_sizes(), scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_nearest_exact2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: _upsample_nearest_exact2d_backward(grad, output_size, self.sizes(), scales_h, scales_w)
+- name: _upsample_nearest_exact2d(Tensor self, SymInt[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: _upsample_nearest_exact2d_backward_symint(grad, output_size, self.sym_sizes(), scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_nearest3d(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: upsample_nearest3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w)
+- name: upsample_nearest3d(Tensor self, SymInt[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: upsample_nearest3d_backward_symint(grad, output_size, self.sym_sizes(), scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_nearest_exact3d(Tensor self, int[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  self: _upsample_nearest_exact3d_backward(grad, output_size, self.sizes(), scales_d, scales_h, scales_w)
+- name: _upsample_nearest_exact3d(Tensor self, SymInt[3] output_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: _upsample_nearest_exact3d_backward_symint(grad, output_size, self.sym_sizes(), scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_linear1d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_linear1d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
+- name: upsample_linear1d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  input: upsample_linear1d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
   result: auto_linear
 
-- name: upsample_bilinear2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_bilinear2d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
+- name: upsample_bilinear2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  input: upsample_bilinear2d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
   result: auto_linear
 
-- name: _upsample_bilinear2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: _upsample_bilinear2d_aa_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
+- name: _upsample_bilinear2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  input: _upsample_bilinear2d_aa_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
   result: auto_linear
 
-- name: upsample_trilinear3d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_trilinear3d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
+- name: upsample_trilinear3d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  input: upsample_trilinear3d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
   result: auto_linear
 
-- name: upsample_bicubic2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: upsample_bicubic2d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
+- name: upsample_bicubic2d.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  input: upsample_bicubic2d_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
   result: auto_linear
 
-- name: _upsample_bicubic2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
-  input: _upsample_bicubic2d_aa_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
+- name: _upsample_bicubic2d_aa.vec(Tensor input, SymInt[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  input: _upsample_bicubic2d_aa_backward_symint(grad, output_size, input.sym_sizes(), align_corners, scale_factors)
 
-- name: upsample_nearest1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest1d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: upsample_nearest1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+  input: upsample_nearest1d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
   result: auto_linear
 
-- name: _upsample_nearest_exact1d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact1d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: _upsample_nearest_exact1d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+  input: _upsample_nearest_exact1d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
   result: auto_linear
 
-- name: upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest2d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: upsample_nearest2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+  input: upsample_nearest2d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
   result: auto_linear
 
-- name: _upsample_nearest_exact2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact2d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: _upsample_nearest_exact2d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+  input: _upsample_nearest_exact2d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
   result: auto_linear
 
-- name: upsample_nearest3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: upsample_nearest3d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: upsample_nearest3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+  input: upsample_nearest3d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
   result: auto_linear
 
-- name: _upsample_nearest_exact3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
-  input: _upsample_nearest_exact3d_backward(grad, output_size, input.sizes(), scale_factors)
+- name: _upsample_nearest_exact3d.vec(Tensor input, SymInt[]? output_size, float[]? scale_factors) -> Tensor
+  input: _upsample_nearest_exact3d_backward_symint(grad, output_size, input.sym_sizes(), scale_factors)
   result: auto_linear
 
 - name: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
@@ -2139,7 +2139,7 @@
   self: pixel_shuffle(grad, downscale_factor)
   result: auto_linear
 
-- name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
+- name: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
   result: auto_linear
 
@@ -2209,7 +2209,7 @@
   result: auto_linear
 
 - name: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
-  input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  input, weight, bias: "grad.defined() ? convolution_backward_symint(grad, input, weight, bias->sym_sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result: convolution_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, stride, padding, dilation, transposed, output_padding, groups)
 
 # TorchScript serializes calls to _convolution so this entry is present until that is changed to use convolution.
@@ -2219,10 +2219,10 @@
   input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
   result: _convolution_jvp(input_p, input_t, weight_p, weight_t, bias_p, bias_t, stride, padding, dilation, transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32)
 
-- name: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+- name: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, SymInt[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   grad_output, input, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, transposed, output_padding, groups, grad_input_mask)
-  result0: std::get<0>(convolution_backward(grad_output_p, input_p, weight_t, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {true, false, false})) + std::get<0>(convolution_backward(grad_output_t, input_p, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {true, false, false}))
-  result1: std::get<1>(convolution_backward(grad_output_p, input_t, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {false, true, false})) + std::get<1>(convolution_backward(grad_output_t, input_p, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {false, true, false}))
+  result0: std::get<0>(convolution_backward_symint(grad_output_p, input_p, weight_t, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {true, false, false})) + std::get<0>(convolution_backward_symint(grad_output_t, input_p, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {true, false, false}))
+  result1: std::get<1>(convolution_backward_symint(grad_output_p, input_t, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {false, true, false})) + std::get<1>(convolution_backward_symint(grad_output_t, input_p, weight_p, bias_sizes, stride, padding, dilation, transposed, output_padding, groups, {false, true, false}))
   result2: convolution_backward_jvp_grad_bias(grad_output_t, result2)
 
 - name: convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
@@ -2258,25 +2258,16 @@
 - name: slow_conv_dilated3d(Tensor self, Tensor weight, int[3] kernel_size, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1) -> Tensor
   self, weight, bias: "grad.defined() ? convolution_backward(grad, self, weight, bias->sizes(), stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), 1, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
 
-- name: col2im(Tensor self, int[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  self: col2im_backward(grad, kernel_size, dilation, padding, stride)
+- name: col2im(Tensor self, SymInt[2] output_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
+  self: im2col(grad, kernel_size, dilation, padding, stride)
   result: auto_linear
 
 - name: im2col(Tensor self, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  self: im2col_backward(grad, {self.size(2), self.size(3)}, kernel_size, dilation, padding, stride)
-  result: auto_linear
-
-# NN double backwards support
-- name: im2col_backward(Tensor grad_output, int[2] input_size, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  grad_output: im2col(grad, kernel_size, dilation, padding, stride)
-  result: auto_linear
-
-- name: col2im_backward(Tensor grad_output, int[2] kernel_size, int[2] dilation, int[2] padding, int[2] stride) -> Tensor
-  grad_output: col2im(grad, {grad_output.size(2), grad_output.size(3)}, kernel_size, dilation, padding, stride)
+  self: col2im_symint(grad, {self.sym_size(-2), self.sym_size(-1)}, kernel_size, dilation, padding, stride)
   result: auto_linear
 
 - name: _adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
-  grad_output: _adaptive_avg_pool2d(grad, { grad_output.size(-2), grad_output.size(-1) })
+  grad_output: _adaptive_avg_pool2d_symint(grad, {grad_output.sym_size(-2), grad_output.sym_size(-1)})
   self: zeros_like(self)
   result: _adaptive_avg_pool2d_backward(grad_output_t, self_p)
 
@@ -2471,98 +2462,98 @@
   self: zeros_like(grad)
   result: zeros_like(self_t) + threshold_backward(grad_output_t, self_p, threshold)
 
-- name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
-  grad_output: upsample_linear1d(grad, output_size, align_corners, scales)
+- name: upsample_linear1d_backward(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, bool align_corners, float? scales=None) -> Tensor
+  grad_output: upsample_linear1d_symint(grad, output_size, align_corners, scales)
   result: auto_linear
 
-- name: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_bilinear2d(grad, output_size, align_corners, scales_h, scales_w)
+- name: upsample_bilinear2d_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_bilinear2d_symint(grad, output_size, align_corners, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_bilinear2d_aa_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: _upsample_bilinear2d_aa(grad, output_size, align_corners, scales_h, scales_w)
+- name: _upsample_bilinear2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: _upsample_bilinear2d_aa_symint(grad, output_size, align_corners, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_bicubic2d(grad, output_size, align_corners, scales_h, scales_w)
+- name: upsample_bicubic2d_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_bicubic2d_symint(grad, output_size, align_corners, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_bicubic2d_aa_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: _upsample_bicubic2d_aa(grad, output_size, align_corners, scales_h, scales_w)
+- name: _upsample_bicubic2d_aa_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: _upsample_bicubic2d_aa_symint(grad, output_size, align_corners, scales_h, scales_w)
 
-- name: upsample_trilinear3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_trilinear3d(grad, output_size, align_corners, scales_d, scales_h, scales_w)
+- name: upsample_trilinear3d_backward(Tensor grad_output, SymInt[3] output_size, SymInt[5] input_size, bool align_corners, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_trilinear3d_symint(grad, output_size, align_corners, scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_nearest1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None) -> Tensor
-  grad_output: upsample_nearest1d(grad, output_size, scales)
+- name: upsample_nearest1d_backward(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, float? scales=None) -> Tensor
+  grad_output: upsample_nearest1d_symint(grad, output_size, scales)
   result: auto_linear
 
-- name: _upsample_nearest_exact1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None) -> Tensor
-  grad_output: _upsample_nearest_exact1d(grad, output_size, scales)
+- name: _upsample_nearest_exact1d_backward(Tensor grad_output, SymInt[1] output_size, SymInt[3] input_size, float? scales=None) -> Tensor
+  grad_output: _upsample_nearest_exact1d_symint(grad, output_size, scales)
   result: auto_linear
 
-- name: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_nearest2d(grad, output_size, scales_h, scales_w)
+- name: upsample_nearest2d_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_nearest2d_symint(grad, output_size, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_nearest_exact2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: _upsample_nearest_exact2d(grad, output_size, scales_h, scales_w)
+- name: _upsample_nearest_exact2d_backward(Tensor grad_output, SymInt[2] output_size, SymInt[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: _upsample_nearest_exact2d_symint(grad, output_size, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_nearest3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: upsample_nearest3d(grad, output_size, scales_d, scales_h, scales_w)
+- name: upsample_nearest3d_backward(Tensor grad_output, SymInt[3] output_size, SymInt[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: upsample_nearest3d_symint(grad, output_size, scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: _upsample_nearest_exact3d_backward(Tensor grad_output, int[3] output_size, int[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
-  grad_output: _upsample_nearest_exact3d(grad, output_size, scales_d, scales_h, scales_w)
+- name: _upsample_nearest_exact3d_backward(Tensor grad_output, SymInt[3] output_size, SymInt[5] input_size, float? scales_d=None, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: _upsample_nearest_exact3d_symint(grad, output_size, scales_d, scales_h, scales_w)
   result: auto_linear
 
-- name: upsample_linear1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_linear1d(grad, output_size, align_corners, scale_factors)
+- name: upsample_linear1d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  grad_output: upsample_linear1d_symint(grad, output_size, align_corners, scale_factors)
   result: auto_linear
 
-- name: upsample_bilinear2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_bilinear2d(grad, output_size, align_corners, scale_factors)
+- name: upsample_bilinear2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  grad_output: upsample_bilinear2d_symint(grad, output_size, align_corners, scale_factors)
   result: auto_linear
 
-- name: _upsample_bilinear2d_aa_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_bilinear2d_aa(grad, output_size, align_corners, scale_factors)
+- name: _upsample_bilinear2d_aa_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  grad_output: _upsample_bilinear2d_aa_symint(grad, output_size, align_corners, scale_factors)
   result: auto_linear
 
-- name: upsample_trilinear3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_trilinear3d(grad, output_size, align_corners, scale_factors)
+- name: upsample_trilinear3d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  grad_output: upsample_trilinear3d_symint(grad, output_size, align_corners, scale_factors)
   result: auto_linear
 
-- name: upsample_bicubic2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: upsample_bicubic2d(grad, output_size, align_corners, scale_factors)
+- name: upsample_bicubic2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  grad_output: upsample_bicubic2d_symint(grad, output_size, align_corners, scale_factors)
   result: auto_linear
 
-- name: _upsample_bicubic2d_aa_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_bicubic2d_aa(grad, output_size, align_corners, scale_factors)
+- name: _upsample_bicubic2d_aa_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  grad_output: _upsample_bicubic2d_aa_symint(grad, output_size, align_corners, scale_factors)
 
-- name: upsample_nearest1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest1d(grad, output_size, scale_factors)
+- name: upsample_nearest1d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
+  grad_output: upsample_nearest1d_symint(grad, output_size, scale_factors)
   result: auto_linear
 
-- name: _upsample_nearest_exact1d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact1d(grad, output_size, scale_factors)
+- name: _upsample_nearest_exact1d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
+  grad_output: _upsample_nearest_exact1d_symint(grad, output_size, scale_factors)
   result: auto_linear
 
-- name: upsample_nearest2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest2d(grad, output_size, scale_factors)
+- name: upsample_nearest2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
+  grad_output: upsample_nearest2d_symint(grad, output_size, scale_factors)
   result: auto_linear
 
-- name: _upsample_nearest_exact2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact2d(grad, output_size, scale_factors)
+- name: _upsample_nearest_exact2d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
+  grad_output: _upsample_nearest_exact2d_symint(grad, output_size, scale_factors)
   result: auto_linear
 
-- name: upsample_nearest3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: upsample_nearest3d(grad, output_size, scale_factors)
+- name: upsample_nearest3d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
+  grad_output: upsample_nearest3d_symint(grad, output_size, scale_factors)
   result: auto_linear
 
-- name: _upsample_nearest_exact3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, float[]? scale_factors) -> Tensor
-  grad_output: _upsample_nearest_exact3d(grad, output_size, scale_factors)
+- name: _upsample_nearest_exact3d_backward.vec(Tensor grad_output, SymInt[]? output_size, SymInt[] input_size, float[]? scale_factors) -> Tensor
+  grad_output: _upsample_nearest_exact3d_symint(grad, output_size, scale_factors)
   result: auto_linear
 
 - name: sigmoid_backward(Tensor grad_output, Tensor output) -> Tensor
@@ -2634,12 +2625,12 @@
 
 # Only frst three of _cudnn_rnn outputs can have gradients.
 # _cudnn_rnn outputs: (output, hy, cy, reserve, weight_buf)
-- name: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+- name: _cudnn_rnn(Tensor input, Tensor[] weight, int weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int mode, SymInt hidden_size, SymInt proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, SymInt[] batch_sizes, Tensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
   dropout_state: non_differentiable
   output_differentiability: [True, True, True, False, False]
-  input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, proj_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
+  input, hx, cx, weight: "_cudnn_rnn_backward_symint(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, proj_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
 
-- name: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
+- name: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, SymInt hidden_size, SymInt proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, SymInt[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
   dropout_state: non_differentiable
   input: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
   weight: not_implemented_list("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)

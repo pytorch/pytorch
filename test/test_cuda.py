@@ -3238,32 +3238,6 @@ torch.cuda.synchronize()
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
-    @skipCUDAMemoryLeakCheckIf(True)  # This test may incur an expected allocation for a cuBLAS workspace
-    def test_repeat_graph_capture_cublas_workspace_memory(self):
-        (x, y, z) = 1024, 512, 64
-        a = torch.rand((x, y), device='cuda')
-        b = torch.rand((y, z), device='cuda')
-
-        # warmup
-        torch.mm(a, b)
-
-        free_bytes_before, total_bytes = torch.cuda.mem_get_info()
-        used_gb_before = (total_bytes - free_bytes_before) / 1e9
-
-        for i in range(100):
-            torch_graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(torch_graph):
-                torch.mm(a, b)
-            torch_graph.replay()
-
-        free_bytes_after, _ = torch.cuda.mem_get_info()
-        used_gb_after = (total_bytes - free_bytes_after) / 1e9
-
-        self.assertFalse(used_gb_before + 0.1 < used_gb_after)
-
-    @unittest.skipIf((not TEST_CUDA) or
-                     TEST_WITH_ROCM or
-                     int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_functional(self):
         ops_with_kwargs = ((torch.nn.functional.dropout, {"p": 0.1}),
                            (torch.nn.functional.rrelu, {"training": True}),)
@@ -4663,6 +4637,27 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
 
+    def test_memory_snapshot_with_cpp(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            x = torch.rand(311, 411, device='cuda')
+
+            ss = torch.cuda.memory._snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
@@ -4719,6 +4714,35 @@ class TestCudaComm(TestCase):
     def test_raises_oom(self):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
+
+    @unittest.skipIf(IS_WINDOWS, 'Windows CI does not like the load_inline')
+    def test_cpp_memory_snapshot_pickle(self):
+        from torch.utils.cpp_extension import load_inline
+        source = """
+        #include <torch/csrc/cuda/memory_snapshot.h>
+        py::object do_snapshot() {
+            std::string data = torch::cuda::_memory_snapshot_pickled();
+            return py::bytes(data);
+        }
+        void record(bool e) {
+            torch::cuda::_record_memory_history(e);
+        }
+        """
+        m = load_inline(name='snapshot', cpp_sources=[source], functions=['do_snapshot', 'record'])
+        try:
+            m.record(True)
+            t = torch.rand(311, 411, device='cuda')
+            mem = pickle.loads(m.do_snapshot())
+            found = False
+            for s in mem:
+                for b in s['blocks']:
+                    if b['state'] == 'active_allocated' and 'history' in b:
+                        history = b['history']
+                        if history and history[0]['real_size'] == 311 * 411 * 4:
+                            found = True
+            self.assertTrue(found)
+        finally:
+            m.record(False)
 
 instantiate_parametrized_tests(TestCuda)
 
