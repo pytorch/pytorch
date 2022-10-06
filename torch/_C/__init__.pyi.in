@@ -948,6 +948,9 @@ class _DisableFuncTorch:
 class _EnableTorchFunction:
     def __init__(self) -> None: ...
 
+class _MultithreadingEnabled:
+    def __init__(self, mode: _bool) -> None: ...
+
 # Defined in torch/csrc/jit/python/script_init.cpp
 class LoggerBase(object):
     ...
