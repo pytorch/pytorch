@@ -12,7 +12,7 @@ import os
 __all__ = ['SubgraphMatcher', 'InternalMatch']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
-def init_logger():
+def _init_logger():
     logger = logging.getLogger(__name__)
 
     level = os.environ.get('PYTORCH_MATCHER_LOGLEVEL', 'WARNING').upper()
@@ -26,7 +26,7 @@ def init_logger():
     logger.propagate = False
     return logger
 
-logger = init_logger()
+logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass

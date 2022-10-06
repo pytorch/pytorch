@@ -665,6 +665,8 @@ class QuantizationFp8Pattern:
     ]
 
 class NoAnchorFound:
+    # This test case is for pattern where no matching anchor is found in the target graph
+    # `anchor` is the starting point of the pattern matching, it's usually the boundary returning nodes
     @staticmethod
     def forward(x):
         x = x + 1
