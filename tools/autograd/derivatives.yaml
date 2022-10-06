@@ -781,7 +781,7 @@
   other: -grad * exp((self - 1) * log(other) - other - lgamma(self))
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
-  self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
+  self: index_backward(grad.new_zeros_symint(self.sym_sizes(), self.options()), indices, grad)
   result: auto_linear
 
 - name: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
@@ -1388,7 +1388,7 @@
 - name: select.int(Tensor(a) self, int dim, int index) -> Tensor(a)
   dispatch:
     Default:
-      self: select_backward(grad, self.sizes(), dim, index)
+      self: select_backward_symint(grad, self.sym_sizes(), dim, index)
       result: auto_linear
     AutogradNestedTensor:
       self: _nested_select_backward(grad, self, dim, index)
