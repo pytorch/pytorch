@@ -951,7 +951,7 @@ as_tensor(data, dtype=None, device=None) -> Tensor
 Converts data into a tensor, sharing data and preserving autograd
 history if possible.
 
-If data is already a tensor with the requeseted dtype and device
+If data is already a tensor with the requested dtype and device
 then data itself is returned, but if data is a
 tensor with a different dtype or device then it's copied as if using
 `data.to(dtype=dtype, device=device)`.
@@ -4982,7 +4982,7 @@ The elements are sorted into equal width bins between :attr:`min` and
 :attr:`max`. If :attr:`min` and :attr:`max` are both zero, the minimum and
 maximum values of the data are used.
 
-Elements lower than min and higher than max are ignored.
+Elements lower than min and higher than max and ``NaN`` elements are ignored.
 
 Args:
     {input}
@@ -8514,6 +8514,8 @@ element in :attr:`input` i.e.,
 .. math::
     \text{{out}}_i \sim \text{{Poisson}}(\text{{input}}_i)
 
+:attr:`input` must be non-negative.
+
 Args:
     input (Tensor): the input tensor containing the rates of the Poisson distribution
 
@@ -8942,9 +8944,11 @@ Example::
 
 add_docstr(
     torch.rand,
-    r"""
-rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
-
+    """
+rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+pin_memory=False) -> Tensor
+"""
+    + r"""
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
 
@@ -8961,6 +8965,7 @@ Keyword args:
     {layout}
     {device}
     {requires_grad}
+    {pin_memory}
 
 Example::
 
@@ -11271,15 +11276,15 @@ Example::
 add_docstr(
     torch.rot90,
     r"""
-rot90(input, k, dims) -> Tensor
+rot90(input, k=1, dims=[0,1]) -> Tensor
 
 Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
 Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
 
 Args:
     {input}
-    k (int): number of times to rotate
-    dims (a list or tuple): axis to rotate
+    k (int): number of times to rotate. Default value is 1
+    dims (a list or tuple): axis to rotate. Default value is [0, 1]
 
 Example::
 
@@ -11924,14 +11929,14 @@ Returns a new tensor with the data in :attr:`input` fake quantized using :attr:`
     )
 
 Args:
-    input (Tensor): the input value(s), in ``torch.float32``.
-    scale (double or Tensor): quantization scale
-    zero_point (int64 or Tensor): quantization zero_point
+    input (Tensor): the input value(s), ``torch.float32`` tensor
+    scale (double scalar or ``float32`` Tensor): quantization scale
+    zero_point (int64 scalar or ``int32`` Tensor): quantization zero_point
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
 Returns:
-    Tensor: A newly fake_quantized tensor
+    Tensor: A newly fake_quantized ``torch.float32`` tensor
 
 Example::
 
@@ -11963,15 +11968,15 @@ Returns a new tensor with the data in :attr:`input` fake quantized per channel u
     )
 
 Args:
-    input (Tensor): the input value(s), in ``torch.float32``.
-    scale (Tensor): quantization scale, per channel
-    zero_point (Tensor): quantization zero_point, per channel
+    input (Tensor): the input value(s), in ``torch.float32``
+    scale (Tensor): quantization scale, per channel in ``torch.float32``
+    zero_point (Tensor): quantization zero_point, per channel in ``torch.int32`` or ``torch.half`` or ``torch.float32``
     axis (int32): channel axis
     quant_min (int64): lower bound of the quantized domain
     quant_max (int64): upper bound of the quantized domain
 
 Returns:
-    Tensor: A newly fake_quantized per channel tensor
+    Tensor: A newly fake_quantized per channel ``torch.float32`` tensor
 
 Example::
 
@@ -11985,7 +11990,7 @@ Example::
     >>> scales = (torch.randn(2) + 1) * 0.05
     >>> scales
     tensor([0.0475, 0.0486])
-    >>> zero_points = torch.zeros(2).to(torch.long)
+    >>> zero_points = torch.zeros(2).to(torch.int32)
     >>> zero_points
     tensor([0, 0])
     >>> torch.fake_quantize_per_channel_affine(x, scales, zero_points, 1, 0, 255)
