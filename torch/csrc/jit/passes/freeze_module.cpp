@@ -127,21 +127,26 @@ class AttributePropagator {
     };
 
     std::unordered_map<std::string, std::unordered_set<std::string>>
-        interfacesToRetype;
+        interfacesToReassignType;
 
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Analyzing function: " + function->name());
       auto graph = toGraphFunction(*function).graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
-        inlineInterfaceCalls(graph, interfacesToRetype);
+        inlineInterfaceCalls(graph, interfacesToReassignType);
       }
+    }
+
+    reassignInterfaceTypes(interfacesToReassignType);
+
+    for (auto function : preservedMethods_) {
+      GRAPH_DEBUG("Recording mutable attrs for function: " + function->name());
+      auto graph = toGraphFunction(*function).graph();
       // Record Attributes that are explicitly set in the module.
       // They cannot be folded.
       recordMutableAttrs(graph);
     }
-
-    reassignInterfaceTypes(interfacesToRetype);
 
     for (auto function : preservedMethods_) {
       GRAPH_DEBUG("Propagating function: " + function->name());

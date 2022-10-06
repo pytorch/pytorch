@@ -1649,6 +1649,139 @@ class TestFreezing(JitTestCase):
 
         self.assertEqual(expected, actual)
 
+    def test_freeze_recursive_interfaces_with_reassignment(self):
+        @torch.jit.interface
+        class InnerInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        @torch.jit.interface
+        class OuterInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class InnerImpl1(torch.nn.Module):
+            def __init__(self):
+                super(InnerImpl1, self).__init__()
+                self.x = torch.ones((2, 2))
+
+            def forward(self, inp):
+                return inp.cos() * self.x
+
+
+        class InnerImpl2(torch.nn.Module):
+            def __init__(self):
+                super(InnerImpl2, self).__init__()
+                self.x = torch.ones((2, 2)) * 2
+
+            def forward(self, inp):
+                return inp.sin() / self.x
+
+        class OuterImpl(torch.nn.Module):
+            inner_impl: InnerInterface
+
+            def __init__(self):
+                super(OuterImpl, self).__init__()
+                self.inner_impl = InnerImpl1()
+                self.impl1 = InnerImpl1()
+                self.impl2 = InnerImpl1()
+                self.idx = 0
+
+            def forward(self, inp):
+                self.idx += 1
+                if self.idx % 2 == 0:
+                    self.inner_impl = self.impl1
+                else:
+                    self.inner_impl = self.impl2
+                return inp.relu() + self.inner_impl(inp.sin())
+
+        class WrapperModule(torch.nn.Module):
+            outer_impl: OuterInterface
+
+            def __init__(self):
+                super(WrapperModule, self).__init__()
+                self.outer_impl = OuterImpl()
+
+            def forward(self, inp):
+                return self.outer_impl(inp) + inp
+
+        m = WrapperModule()
+
+        m_s = torch.jit.script(m)
+        m_s.eval()
+        with self.assertRaisesRegex(RuntimeError, "Freezing does not support SetAttr on an interface type"):
+            m_s = torch.jit.freeze(m_s)
+
+    def test_freeze_interface_swapping_two_methods(self):
+        @torch.jit.interface
+        class MyInterface(torch.nn.Module):
+            def forward(self, inp: torch.Tensor) -> torch.Tensor:
+                pass
+
+        class Impl1(torch.nn.Module):
+            def forward(self, inp):
+                return inp.cos()
+
+        class Impl2(torch.nn.Module):
+            def forward(self, inp):
+                return inp.sin()
+
+        class WrapperModule1(torch.nn.Module):
+            interface_impl: MyInterface
+
+            def __init__(self):
+                super(WrapperModule1, self).__init__()
+                self.interface_impl = Impl1()
+                self.impl1 = Impl1()
+                self.impl2 = Impl2()
+                self.idx = 0
+
+            def forward(self, x):
+                return self.interface_impl(x)
+
+            @torch.jit.export
+            def other_method(self, x):
+                self.idx += 1
+                if self.idx % 2 == 0:
+                    self.interface_impl = self.impl1
+                else:
+                    self.interface_impl = self.impl2
+                return self.interface_impl(x)
+
+        class WrapperModule2(torch.nn.Module):
+            interface_impl: MyInterface
+
+            def __init__(self):
+                super(WrapperModule2, self).__init__()
+                self.interface_impl = Impl1()
+                self.impl1 = Impl1()
+                self.impl2 = Impl2()
+                self.idx = 0
+
+            def forward(self, x):
+                self.idx += 1
+                if self.idx % 2 == 0:
+                    self.interface_impl = self.impl1
+                else:
+                    self.interface_impl = self.impl2
+                return self.interface_impl(x)
+
+            @torch.jit.export
+            def other_method(self, x):
+                return self.interface_impl(x)
+
+        m1 = torch.jit.script(WrapperModule1())
+        m2 = torch.jit.script(WrapperModule2())
+
+        m1.eval()
+        m2.eval()
+
+        with self.assertRaisesRegex(RuntimeError, "Freezing does not support SetAttr on an interface type"):
+            torch.jit.freeze(m1, preserved_attrs=["other_method"])
+
+        with self.assertRaisesRegex(RuntimeError, "Freezing does not support SetAttr on an interface type"):
+            torch.jit.freeze(m2, preserved_attrs=["other_method"])
+
     def test_freeze_recursive_interfaces_same_name(self):
         @torch.jit.interface
         class InnerInterface(torch.nn.Module):
