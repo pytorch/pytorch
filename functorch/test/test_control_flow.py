@@ -3,8 +3,6 @@ import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from functorch.experimental.cond import cond
 from torch.fx.experimental.proxy_tensor import make_fx
-import unittest
-
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
