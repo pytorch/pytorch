@@ -30,7 +30,8 @@ The following source file implements a sparse linear operator using cusparseLt
   }
 
 // create a container that holds relevant data for cusparselt linear
-// may need to template this class based on dtype
+// TODO: template this class based on dtype or figure out another way to
+// make dtype variable
 struct CusparseLtLinear : torch::CustomClassHolder {
     at::Tensor weight;
     cusparseLtHandle_t handle;
@@ -39,7 +40,8 @@ struct CusparseLtLinear : torch::CustomClassHolder {
     cusparseLtMatmulPlan_t plan;
     cusparseOperation_t op_weight;
     cusparseOperation_t op_activation;
-    // TODO: make this type a user input
+    cusparseLtMatmulDescriptor_t matmul;
+
     c10::Half *dA, *dB, *dC, *dD, *dA_compressed;
     int* d_valid;
 
@@ -125,6 +127,7 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   // CHECK_CUDA(cudaMalloc((void**)&dB, B_size_bytes))
   CHECK_CUDA(cudaMalloc((void**)&dC, C_size_bytes))
   CHECK_CUDA(cudaMalloc((void**) &d_valid, sizeof(d_valid)))
+
   dD = res.data_ptr<c10::Half>();
   std::cout << "here2" << std::endl;
 
@@ -135,7 +138,6 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   CHECK_CUDA(cudaMemcpy(dC, hC, C_size_bytes, cudaMemcpyHostToDevice))
   //--------------------------------------------------------------------------
   cusparseLtMatDescriptor_t activation_descriptor, matC;
-  cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulAlgSelection_t alg_sel;
   std::cout << "here4" << std::endl;
 
@@ -195,36 +197,65 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
                                               CUSPARSELT_MATMUL_BIAS_POINTER,
                                               &dBias, sizeof(dBias)) )
 
-  int alg = 0;
-  CHECK_CUSPARSE(cusparseLtMatmulAlgSetAttribute(
-      &handle, &alg_sel, CUSPARSELT_MATMUL_ALG_CONFIG_ID, &alg, sizeof(alg)))
+  CHECK_CUSPARSE( cusparseLtMatmulAlgSelectionInit(
+                                          &handle, &alg_sel, &matmul,
+                                          CUSPARSELT_MATMUL_ALG_DEFAULT) )
   size_t workspace_size;
+  CHECK_CUSPARSE(cusparseLtMatmulPlanInit(
+      &handle, &plan, &matmul, &alg_sel, workspace_size))
   CHECK_CUSPARSE(
       cusparseLtMatmulGetWorkspace(&handle, &plan, &workspace_size))
 
-  CHECK_CUSPARSE(cusparseLtMatmulPlanInit(
-      &handle, &plan, &matmul, &alg_sel, workspace_size))
+
+  // // TODO: make this a user input
+  // constexpr cusparseLtPruneAlg_t pruning_algo = CUSPARSELT_PRUNE_SPMMA_STRIP;
+  // //--------------------------------------------------------------------------
+  // // Prune the A matrix (in-place) and check the correcteness
+  // // TODO: what's cusparseLtSpMMAPrune2?
+  // CHECK_CUSPARSE( cusparseLtSpMMAPrune(&handle, &matmul, dA, dA,
+  //                                       pruning_algo, stream) )
+  // CHECK_CUSPARSE( cusparseLtSpMMAPruneCheck(&handle, &matmul, dA,
+  //                                           d_valid, stream) )
+
+  // int* is_valid;
+  // std::cout << stream << std::endl;
+  // std::cout << &is_valid << std::endl;
+  // std::cout << "d_valid " << d_valid << std::endl;
+  // // std::cout << *d_valid << std::endl;
+  // // std::cout << *stream << std::endl;
+  // CHECK_CUDA( cudaMemcpyAsync(is_valid, d_valid, sizeof(d_valid),
+  //                             cudaMemcpyDeviceToHost, stream) )
+  // CHECK_CUDA( cudaStreamSynchronize(stream) )
+
+  // TORCH_CHECK(is_valid == 0, "!!!! The matrix has been pruned in a wrong way. "
+  //             "cusparseLtMatmul will not provide correct results");
 }
 
 // see https://docs.nvidia.com/cuda/cusparselt/types.html for pruning_algo choices
 void CusparseLtLinear::prune() {
-  // make this a user input
+  // TODO: make this a user input
   constexpr cusparseLtPruneAlg_t pruning_algo = CUSPARSELT_PRUNE_SPMMA_STRIP;
   //--------------------------------------------------------------------------
   // Prune the A matrix (in-place) and check the correcteness
-  CHECK_CUSPARSE(cusparseLtSpMMAPrune2(
-      &handle, &weight_descriptor, 1, op_weight, dA, dA, pruning_algo, stream))
+  // TODO: what's cusparseLtSpMMAPrune2?
+  CHECK_CUSPARSE( cusparseLtSpMMAPrune(&handle, &matmul, dA, dA,
+                                        pruning_algo, stream) )
+  CHECK_CUSPARSE( cusparseLtSpMMAPruneCheck(&handle, &matmul, dA,
+                                            d_valid, stream) )
 
-  int *is_valid;
-  CHECK_CUDA(cudaMalloc((void**)&is_valid, sizeof(int)))
-  CHECK_CUSPARSE(
-      cusparseLtSpMMAPruneCheck2(&handle, &weight_descriptor, 1, op_weight, dA, is_valid, stream))
-  int h_is_valid = 0;
-  CHECK_CUDA(cudaMemcpy(&h_is_valid, is_valid, sizeof(int), cudaMemcpyDeviceToHost))
-  CHECK_CUDA(cudaFree(is_valid))
+  int* is_valid;
+  std::cout << stream << std::endl;
+  std::cout << &is_valid << std::endl;
+  std::cout << "d_valid " << d_valid << std::endl;
+  // std::cout << *d_valid << std::endl;
+  // std::cout << *stream << std::endl;
+  cudaDeviceSynchronize();
+  CHECK_CUDA( cudaMemcpyAsync(is_valid, d_valid, sizeof(d_valid),
+                              cudaMemcpyDeviceToHost, stream) )
+  CHECK_CUDA( cudaStreamSynchronize(stream) )
 
-  TORCH_CHECK(h_is_valid == 0, "!!!! The matrix has been pruned in a wrong way. "
-              "cusparseLtMatmul will not provided correct results");
+  TORCH_CHECK(is_valid == 0, "!!!! The matrix has been pruned in a wrong way. "
+              "cusparseLtMatmul will not provide correct results");
 }
 
 void CusparseLtLinear::compress() {

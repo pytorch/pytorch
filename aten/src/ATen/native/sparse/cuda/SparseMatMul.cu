@@ -755,6 +755,7 @@ double cusparselt_spmma2(const at::Tensor& A, int64_t m, int64_t n, int64_t k) {
     CHECK_CUSPARSE( cusparseLtSpMMAPruneCheck(&handle, &matmul, dA,
                                               d_valid, stream) )
     int is_valid;
+    std::cout << "stream " << stream << std::endl;
     CHECK_CUDA( cudaMemcpyAsync(&is_valid, d_valid, sizeof(d_valid),
                                 cudaMemcpyDeviceToHost, stream) )
     CHECK_CUDA( cudaStreamSynchronize(stream) )
