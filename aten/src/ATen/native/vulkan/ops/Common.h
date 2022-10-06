@@ -3,6 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
 #include <ATen/native/vulkan/api/api.h>
 #include <ATen/native/vulkan/ops/Tensor.h>
 
