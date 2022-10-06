@@ -112,7 +112,7 @@ function checkout_install_torchvision() {
 }
 
 function install_deploy_deps_ubuntu() {
-    apt update && DEBIAN_FRONTEND=noninteractive apt install -yq --no-install-recommends \
+    sudo apt update && sudo DEBIAN_FRONTEND=noninteractive apt install -yq --no-install-recommends \
     build-essential \
     ca-certificates \
     ccache \
