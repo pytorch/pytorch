@@ -162,6 +162,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
+        (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -519,6 +521,40 @@ class TestDecomp(TestCase):
                 )
 
 instantiate_device_type_tests(TestDecomp, globals())
+
+class DecompContiguousTests(TestCase):
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_contiguous_softmax(self, device):
+        size = (2, 4, 3, 3)
+        stride = (9, 18, 3, 1)
+        dtype = torch.float32
+
+        x = torch.randn(size, dtype=dtype, device=device)
+        x = torch.as_strided(x, size, stride)
+
+        ref = torch.ops.aten._softmax(x, -1, False)
+        res = torch._decomp.decompositions._softmax(x, -1, False)
+        self.assertEqual(ref.stride(), res.stride())
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
+    def test_contiguous_log_softmax(self, device):
+        size = (2, 4, 3, 3)
+        stride = (9, 18, 3, 1)
+
+        dtype = torch.float32
+        x = torch.randn(size, dtype=dtype, device=device)
+        x = torch.as_strided(x, size, stride)
+
+        ref = torch.ops.aten._log_softmax(x, -1, False)
+        res = torch._decomp.decompositions._log_softmax(x, -1, False)
+        self.assertEqual(ref.stride(), res.stride())
+
+instantiate_device_type_tests(DecompContiguousTests, globals())
+
 
 if __name__ == "__main__":
     run_tests()

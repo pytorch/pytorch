@@ -154,13 +154,13 @@ at::Tensor unsqueeze_multiple(
     size_t n_dims);
 at::Tensor sum_backward(
     const at::Tensor& grad,
-    at::IntArrayRef sizes,
+    at::SymIntArrayRef sizes,
     at::OptionalIntArrayRef opt_dims,
     bool keepdim);
 at::Tensor sum_backward(
     const at::Tensor& grad,
     c10::SymIntArrayRef sizes,
-    c10::SymIntArrayRef dims,
+    c10::IntArrayRef dims,
     bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
@@ -222,7 +222,7 @@ at::Tensor unsqueeze_to(
     at::IntArrayRef sizes);
 std::vector<at::Tensor> cat_tensors_backward(
     const at::Tensor& grad,
-    const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<std::vector<c10::SymInt>>& sizes,
     const std::vector<ScalarType>& dtypes,
     int64_t dim);
 std::vector<at::Tensor> stack_tensors_backward(
@@ -291,8 +291,8 @@ at::Tensor renorm_backward(
     const at::Scalar& maxnorm);
 at::Tensor repeat_backward(
     at::Tensor grad,
-    at::IntArrayRef repeats,
-    at::IntArrayRef input_shape);
+    at::SymIntArrayRef repeats,
+    at::SymIntArrayRef input_shape);
 at::Tensor _fused_dropout_backward(
     at::Tensor grad,
     at::Tensor mask,
@@ -334,9 +334,9 @@ at::Tensor std_backward(
     bool keepdim);
 Tensor mean_backward(
     const Tensor& grad,
-    IntArrayRef shape,
+    c10::SymIntArrayRef shape,
     at::OptionalIntArrayRef opt_dim,
-    int64_t numel,
+    c10::SymInt numel,
     bool keepdim);
 Tensor var_mean_backward(
     const Tensor& gvar,
@@ -698,9 +698,9 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& mean,
     const Tensor& rstd,
     const c10::optional<Tensor>& gamma,
-    int64_t N,
-    int64_t C,
-    int64_t HxW,
+    c10::SymInt N,
+    c10::SymInt C,
+    c10::SymInt HxW,
     int64_t group,
     double eps,
     std::array<bool, 3> grad_input_mask);
@@ -765,7 +765,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& gO,
     const Tensor& save_mean,
     const Tensor& save_invstd,
-    IntArrayRef normalized_shape,
+    c10::SymIntArrayRef normalized_shape,
     std::array<bool, 3> output_mask);
 
 std::tuple<Tensor, Tensor> householder_product_backward(
@@ -896,7 +896,7 @@ Tensor layer_norm_jvp(
     const Tensor& bias_t,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
-    IntArrayRef normalized_shape);
+    c10::SymIntArrayRef normalized_shape);
 
 Tensor group_norm_jvp(
     const Tensor& input_p,
