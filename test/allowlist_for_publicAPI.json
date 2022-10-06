@@ -22,28 +22,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization": [
-    "ABC",
-    "ABCMeta",
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "Module",
-    "Optional",
-    "OrderedDict",
-    "Pattern",
-    "QConfigAny",
-    "Set",
-    "Tuple",
-    "Type",
-    "Union",
-    "abstractmethod",
-    "namedtuple",
-    "partial",
-    "type_before_parametrizations",
-    "wrap_cpp_module"
-  ],
   "torch.ao.quantization.fuse_modules": [
     "List",
     "Optional",
