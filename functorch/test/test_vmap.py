@@ -2369,8 +2369,11 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
     def test_argmax_dim(self):
         def test(f, args):
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(f, args, {}):
-                self.assertEqual(loop_out, batched_out)
+            generator = get_fallback_and_vmap_exhaustive(f, args, {})
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
+
         B0 = 5
         test(lambda x: torch.argmax(x), [torch.randn(B0)])
         test(lambda x: torch.argmax(x), [torch.randn(B0, 2, 3)])
@@ -2664,22 +2667,30 @@ class TestVmapOperators(Namespace.TestVmapBase):
             mod = conv_mod(4, 8, kernel_size=3)
             arg_values = [torch.randn(inp_shape), mod.weight, mod.bias]
             kwarg_values = {}
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
-                self.assertEqual(loop_out, batched_out)
+            generator = get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values)
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
             arg_values = [torch.randn(inp_shape), mod.weight, None]
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
-                self.assertEqual(loop_out, batched_out)
+            generator = get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values)
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
             mod2 = conv_mod(4, 8, kernel_size=3, groups=2, stride=3, padding=1, dilation=2)
             arg_values = [torch.randn(inp_shape), mod2.weight, mod2.bias]
             kwarg_values = dict(groups=2, stride=3, padding=1, dilation=2)
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
-                self.assertEqual(loop_out, batched_out)
+            generator = get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values)
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
             arg_values = [torch.randn(inp_shape), mod2.weight, None]
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
-                self.assertEqual(loop_out, batched_out)
+            generator = get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values)
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
     def test_one_hot(self):
         sample_inputs = [
@@ -2687,8 +2698,10 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (torch.randint(0, 3, [2, 3, 4]), 4),
         ]
         for args in sample_inputs:
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(F.one_hot, args, {}):
-                self.assertEqual(loop_out, batched_out)
+            generator = get_fallback_and_vmap_exhaustive(F.one_hot, args, {})
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
     def test_conj_bit(self):
         x = torch.tensor([1 + 1j, 2 + 1j])
@@ -3119,16 +3132,19 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def vmap_outplace_test(self, func, args, kwargs, in_dims, unbatched_expected, check_shape_only=False,
                            postprocess_fn=None):
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(func, args, kwargs, in_dims,
-                                                                   compute_loop_out=False,
-                                                                   unbatched_expected=unbatched_expected):
+        for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in \
+            compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
-                loop_out = postprocess_fn(loop_out)
-                vmap_out = postprocess_fn(vmap_out)
+                vmap_expected = postprocess_fn(vmap_expected)
+                vmap_actual = postprocess_fn(vmap_actual)
+                vmapvmap_expected = postprocess_fn(vmapvmap_expected)
+                vmapvmap_actual = postprocess_fn(vmapvmap_actual)
             if check_shape_only:
-                self.assertEqual(vmap_out.shape, loop_out.shape)
+                self.assertEqual(vmap_expected.shape, vmap_actual.shape)
+                self.assertEqual(vmapvmap_expected.shape, vmapvmap_actual.shape)
                 continue
-            self.assertEqual(vmap_out, loop_out)
+            self.assertEqual(vmap_expected, vmap_actual)
+            self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
     def vmap_inplace_test(self, func, args, kwargs, in_dims, unbatched_expected, postprocess_fn=None):
         # NB: This test assumes that the first argument is being modified.
@@ -3142,14 +3158,15 @@ class TestVmapOperatorsOpInfo(TestCase):
                         func, args, kwargs, in_dims, compute_loop_out=False, clone_inputs=True):
                     pass
             return
-        for loop_out, vmap_out in compute_quantities_for_vmap_test(
-                func, args, kwargs, in_dims, clone_inputs=True,
-                compute_loop_out=False,
-                unbatched_expected=unbatched_expected):
+        for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in \
+            compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
-                loop_out = postprocess_fn(loop_out)
-                vmap_out = postprocess_fn(vmap_out)
-            self.assertEqual(vmap_out, loop_out)
+                vmap_expected = postprocess_fn(vmap_expected)
+                vmap_actual = postprocess_fn(vmap_actual)
+                vmapvmap_expected = postprocess_fn(vmapvmap_expected)
+                vmapvmap_actual = postprocess_fn(vmapvmap_actual)
+            self.assertEqual(vmap_expected, vmap_actual)
+            self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
     def opinfo_vmap_test(self, device, dtype, op, check_has_batch_rule,
                          skip_inplace=(), postprocess_fn=None):
@@ -3587,8 +3604,9 @@ class TestVmapOperatorsOpInfo(TestCase):
         generator = get_fallback_and_vmap_exhaustive(op, args, {})
 
         def test():
-            for loop_out, batched_out in generator:
-                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual, atol=1e-4, rtol=1e-4)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual, atol=1e-4, rtol=1e-4)
 
         check_vmap_fallback(self, test, op)
 
@@ -3799,8 +3817,10 @@ class TestVmapOperatorsOpInfo(TestCase):
 
     def test_advanced_indexing(self, device):
         def test(f, args):
-            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(f, args, {}):
-                self.assertEqual(loop_out, batched_out)
+            generator = get_fallback_and_vmap_exhaustive(f, args, {})
+            for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in generator:
+                self.assertEqual(vmap_expected, vmap_actual)
+                self.assertEqual(vmapvmap_expected, vmapvmap_actual)
 
         def f(x, idx):
             return x[:, idx]
