@@ -34,6 +34,8 @@
 #include <ATen/ops/_convolution_mode.h>
 #include <ATen/ops/_convolution_mode_native.h>
 #include <ATen/ops/_convolution_native.h>
+#include <ATen/ops/_mps_convolution.h>
+#include <ATen/ops/_mps_convolution_transpose.h>
 #include <ATen/ops/_nnpack_available.h>
 #include <ATen/ops/_nnpack_spatial_convolution.h>
 #include <ATen/ops/_slow_conv2d_backward.h>
@@ -63,6 +65,8 @@
 #include <ATen/ops/miopen_convolution_transpose.h>
 #include <ATen/ops/miopen_depthwise_convolution.h>
 #include <ATen/ops/mkldnn_convolution.h>
+#include <ATen/ops/mps_convolution_backward.h>
+#include <ATen/ops/mps_convolution_transpose_backward.h>
 #include <ATen/ops/slow_conv3d.h>
 #include <ATen/ops/slow_conv_dilated2d.h>
 #include <ATen/ops/slow_conv_dilated3d.h>
