@@ -38,6 +38,7 @@ from common_utils import (
     skipOps,
 )
 from torch._subclasses.fake_tensor import DynamicOutputShapeException
+from torch.fx.experimental.proxy_tensor import is_sym_node
 
 USE_TORCHVISION = False
 try:
@@ -429,9 +430,9 @@ class TestAOTAutograd(AOTTestCase):
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
 
-    @unittest.expectedFailure  # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
+    @skipIfNoSympy
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -550,8 +551,160 @@ class TestPartitioning(AOTTestCase):
 
         fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(3, 10, requires_grad=True), mod.weight, mod.bias],
                                              partitioner=default_partition)
-        self.assertEqual(get_num_ins_outs(fw_graph), (3, 4))
-        self.assertEqual(get_num_ins_outs(bw_graph), (4, 3))
+        self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
+        self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
+
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @skipIfNoSympy
+    def test_min_cut_partitioner_save_shape(self):
+
+        def f(x):
+            s = x.sum(dim=1)
+            return s
+
+        inp = [torch.ones([10, 10], requires_grad=True)]
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        _, fw_output = get_ins_outs(fw_graph)
+        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
+        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
+        self.assertEqual(str(fw_output[0]), "sum_1")
+        # make sure we don't do the suboptimal thing of saving the bigger primals input to sum,
+        # rather than saving the sizes of the primals input for use in backward expand
+        self.assertEqual(str(fw_output[1]), "sym_size")
+        self.assertEqual(str(fw_output[2]), "sym_size_1")
+
+        inp = [
+            torch.randn(10, requires_grad=True),
+            torch.randn((3, 10), requires_grad=True),
+            torch.randn((2, 10), requires_grad=True),
+        ]
+
+        def f(a, b, c):
+            # tried to test what happens if we save a size tuple in the graph;
+            # turns out we never will due to how we trace, but this is probably
+            # still a good test case for various size manipulations
+            sb = torch.ops.aten.sym_size(b)
+            sc = c.size()
+            x = sb[0] + sc[0]
+            a_sz = (x, a.size(0))
+            return torch.cat([a.expand(a_sz), b, c])
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        self.assertEqual(get_num_ins_outs(fw_graph), (3, 5))
+        self.assertEqual(get_num_ins_outs(bw_graph), (5, 3))
+        _, outs = get_ins_outs(fw_graph)
+        self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
+
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @skipIfNoSympy
+    def test_default_partitioner_output_tensor_shape_tensor(self):
+
+        inp = [
+            torch.randn(10, requires_grad=True),
+            torch.randn((3, 10), requires_grad=True),
+            torch.randn((2, 10), requires_grad=True),
+            torch.randn((10, 1), requires_grad=True),
+        ]
+
+        def f(a, b, c, d):
+            # Try to force symints intermixed with outputs in the function's returns
+            sb = b.size()
+            sc = c.size()
+            x = sb[0] + sc[0]
+            a_sz = (x, a.size(0))
+            cat = torch.cat([a.expand(a_sz), b, c])
+            mm = torch.mm(cat, d)
+            mm2 = torch.mm(mm, a.view(mm.size(1), a.size(0)))  # this saves 4 new ints for backward. why?
+            # and what do i have to do to make it save a tensor for backward?
+            return cat, sb, c, mm2
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_outs = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=default_partition,
+            decompositions=default_decompositions)(*inp)
+        fw_graph = fw_graph_cell[0]
+        (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
+        bw_graph = bw_graph_cell[0]
+
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
+        self.assertEqual(get_num_ins_outs(bw_graph), (13, 4))
+        _, fw_graph_out_nodes = get_ins_outs(fw_graph)
+        self.assertEqual(
+            # fw outputs include b.size() which expands to 2 symints,
+            #
+            # TODO(whc)- are the saved-tensors/saved-symints correct here?
+            # i just made the test pass based on what default partition did
+            [False, True, True, False, False] + [False] * 5 + [True] * 3,
+            [is_sym_node(n) for n in fw_graph_out_nodes]
+        )
+
+        real_outs = f(*inp)
+        self.assertEqual(compiled_outs, real_outs)
+        self.assertTrue(isinstance(real_outs[1], torch.Size))
+
+        # TODO(whc) we should learn to return torch.Sizes
+        self.assertFalse(isinstance(compiled_outs[1], torch.Size))
+
+    @patch("functorch.compile.config.use_dynamic_shapes", True)
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @skipIfNoSympy
+    def test_min_cut_partitioner_output_tensor_shape_tensor(self):
+
+        inp = [
+            torch.randn(10, requires_grad=True),
+            torch.randn((3, 10), requires_grad=True),
+            torch.randn((2, 10), requires_grad=True),
+            torch.randn((10, 1), requires_grad=True),
+        ]
+
+        def f(a, b, c, d):
+            # Try to force symints intermixed with outputs in the function's returns
+            sb = b.size()
+            sc = c.size()
+            x = sb[0] + sc[0]
+            a_sz = (x, a.size(0))
+            cat = torch.cat([a.expand(a_sz), b, c])
+            mm = torch.mm(cat, d)
+            mm2 = torch.mm(mm, a.view(mm.size(1), a.size(0)))  # this saves 4 new ints for backward. why?
+            # and what do i have to do to make it save a tensor for backward?
+            return cat, sb, c, mm2
+
+        fw_graph_cell = [None]
+        bw_graph_cell = [None]
+        compiled_outs = aot_function(
+            f,
+            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            partition_fn=min_cut_rematerialization_partition,
+            decompositions=default_decompositions)(*inp)
+        fw_graph = fw_graph_cell[0]
+        (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
+        bw_graph = bw_graph_cell[0]
+
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
+        self.assertEqual(get_num_ins_outs(bw_graph), (13, 4))
+        _, fw_graph_out_nodes = get_ins_outs(fw_graph)
+        self.assertEqual(
+            # fw outputs include b.size() which expands to 2 symints,
+            # then 4 tensors (transposes of matricies used for mm) are saved
+            # finally 4 symints are saved
+            [False, True, True, False, False] + [False] * 4 + [True] * 4,
+            [is_sym_node(n) for n in fw_graph_out_nodes]
+        )
+
+        real_outs = f(*inp)
+        self.assertEqual(compiled_outs, real_outs)
+        self.assertTrue(isinstance(real_outs[1], torch.Size))
+
+        # TODO(whc) we should learn to return torch.Sizes
+        self.assertFalse(isinstance(compiled_outs[1], torch.Size))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner(self):
@@ -576,7 +729,7 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
 
         ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.tanh.default)
+        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
 
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view
@@ -751,8 +904,6 @@ symbolic_aot_autograd_failures = {
     xfail('cumsum', ''),  # aten.cumsum.default - couldn't find symbolic meta function/decomposition
     xfail('cumulative_trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('deg2rad', ''),  # aten.deg2rad.default - couldn't find symbolic meta function/decomposition
-    xfail('diagonal', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('diagonal_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('diff', ''),  # aten.zeros_like.default - couldn't find symbolic meta function/decomposition
     xfail('digamma', ''),  # aten.polygamma.default - couldn't find symbolic meta function/decomposition
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
@@ -781,7 +932,6 @@ symbolic_aot_autograd_failures = {
     xfail('fmax', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('fmin', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
@@ -873,22 +1023,14 @@ symbolic_aot_autograd_failures = {
     xfail('nanmedian', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('native_layer_norm', ''),  # could not find kernel
     xfail('nn.functional._scaled_dot_product_attention', ''),  # Cannot call sizes() on tensor with symbolic ...
-    xfail('nn.functional.adaptive_avg_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.adaptive_avg_pool2d', ''),  # aten._adaptive_avg_pool2d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_max_pool2d', ''),  # aten.adaptive_max_pool2d.default - couldn't find symbo...
     xfail('nn.functional.adaptive_max_pool3d', ''),  # argument 'output_size' (position 2...
-    xfail('nn.functional.avg_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.avg_pool2d', ''),  # aten.avg_pool2d.default - couldn't find symbolic meta function/...
     xfail('nn.functional.avg_pool3d', ''),  # aten.avg_pool3d.default - couldn't find symbolic meta function/...
     xfail('nn.functional.bilinear', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.fill_.Scalar - couldn't find symbolic meta funct...
     xfail('nn.functional.conv1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.conv2d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.conv_transpose1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.conv_transpose2d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn.functional.conv_transpose3d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.cosine_embedding_loss', ''),  # Cannot call sizes() on tensor with symbolic sizes/st...
     xfail('nn.functional.cosine_similarity', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.cross_entropy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -900,7 +1042,6 @@ symbolic_aot_autograd_failures = {
     xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # Cannot call numel() on tensor with symbol...
     xfail('nn.functional.fractional_max_pool2d', ''),  # rand() received an invalid combination of arguments - g...
     xfail('nn.functional.fractional_max_pool3d', ''),  # rand() received an invalid combination of arguments - g...
-    xfail('nn.functional.glu', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.grid_sample', ''),  # prims::arange() Expected a value of type 'number' for argument...
     xfail('nn.functional.group_norm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.hinge_embedding_loss', ''),  # aten.zeros_like.default - couldn't find symbolic meta...
@@ -972,7 +1113,6 @@ symbolic_aot_autograd_failures = {
     xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decompos...
-    xfail('scatter_add', ''),  # aten.scatter_add.default - couldn't find symbolic meta function/decomposition
     xfail('scatter', ''),  # aten.scatter.src - couldn't find symbolic meta function/decomposition
     xfail('scatter_reduce', 'amax'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decom...
     xfail('scatter_reduce', 'amin'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decom...
@@ -990,9 +1130,6 @@ symbolic_aot_autograd_failures = {
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('special.xlog1py', ''),  # aten.special_xlog1py.default - couldn't find symbolic meta function/deco...
     xfail('split', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('split', 'list_args'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('split_with_sizes', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('squeeze', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
