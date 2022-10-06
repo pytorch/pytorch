@@ -1,4 +1,4 @@
-from torch.ao.nn.quantized.dynamic import LinearReLU
+from torch.ao.nn.intrinsic.quantized.dynamic import LinearReLU
 
 __all__ = [
     'LinearReLU',
