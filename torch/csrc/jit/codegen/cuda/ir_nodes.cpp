@@ -1720,6 +1720,37 @@ IterDomain* IterDomain::cloneWithoutRFactor() const {
   return cloned;
 }
 
+bool IterDomain::isTrivialReduction() const {
+  if (!isReduction()) {
+    return false;
+  }
+
+  if (extent()->isOneInt()) {
+    return true;
+  }
+
+  // If this domain is an output of an expression, i.e., not a root
+  // domain, check if all root domains are trivial reductions. This is
+  // almost the same as the analysis done in TrivialReductionInfo, but
+  // is limited within a single tensor, whereas TrivialReductionInfo
+  // does more expensive analysis potentially traversing through
+  // rfactor domains
+  if (definition()) {
+    // Note: There's no const version of IterVisitor.
+    auto id_inputs = InputsOf::output(fusion(), const_cast<IterDomain*>(this));
+    if (std::all_of(
+            ir_utils::filterByType<IterDomain>(id_inputs).begin(),
+            ir_utils::filterByType<IterDomain>(id_inputs).end(),
+            [](IterDomain* root_id) {
+              return root_id->isReduction() && root_id->extent()->isOneInt();
+            })) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 std::vector<IterDomain*> IterDomain::clone(
     const std::vector<IterDomain*>& domains) {
   std::vector<IterDomain*> cloned_domains;
@@ -1744,7 +1775,11 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
       outer->isReduction() == inner->isReduction() ||
           (!outer->isReduction() && inner->isTrivialReduction()) ||
           (outer->isTrivialReduction() && !inner->isReduction()),
-      "Merging IterDomains requires that their iteration types match.");
+      "Merging IterDomains requires that their iteration types match. ",
+      "Outer: ",
+      outer->toString(),
+      ", Inner: ",
+      inner->toString());
   TORCH_CHECK(
       (outer->isGather() && inner->isGather()) ||
           (!outer->isGather() && !inner->isGather()),

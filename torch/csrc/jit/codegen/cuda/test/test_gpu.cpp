@@ -22304,26 +22304,40 @@ TEST_F(NVFuserTest, FusionTrivialReductionForwarding3_CUDA) {
   auto tv2 = add(tv1, IrBuilder::create<Double>(1));
   fusion.addOutput(tv2);
 
-  // Similar pattern as FusionTrivialReductionForwarding2 but no
-  // trivial reduciton at the root domain
+  // Similar pattern as FusionTrivialReductionForwarding2 but trivial
+  // reduciton at non-root domain
 
   // Create a trivial reduction by splitting with a factor of 1
   tv1->split(1, 1, false);
   // Merging with a trivial reduction
   tv1->merge(0, 1);
+  auto tv1_merge_out_id = tv1->axis(0);
   tv1->split(0, 5);
 
   tv2->split(0, 5);
 
-  // While the merge of tv1 is done with a trivial reduciton, it's not
-  // a root domain, so forwarding is not enabled. BestEffortReplay
-  // should only map the first axis of each tensor.
+  // The merge of tv1 is done with a non-root trivial
+  // reduciton. BestEffortReplay should forward the merge.
 
   PairwiseRootDomainMap root_map(tv1, tv2);
   auto p2c = BestEffortReplay::replayCasP(tv2, tv1, 2, root_map).getReplay();
-  TORCH_CHECK(p2c.size() == 1, "Expected only one mapping found");
-  TORCH_CHECK(p2c.begin()->first == tv1->getRootDomain().at(0));
-  TORCH_CHECK(p2c.begin()->second == tv2->getRootDomain().at(0));
+
+  // The two tensors should look like:
+  // tv1: [I1*1//5, 5, I2//1]
+  // tv2: [I1//5, 5]
+  //
+  // BestEffortRepaly should forward the merge of (I1 * 1) and create
+  // mappings of:
+  // I1*1//5 -> I1//5
+  // 5 -> 5
+  // I1*1 -> I1
+
+  TORCH_CHECK(p2c.size() == 3, "Unexpected number of mappings");
+  TORCH_CHECK(p2c.count(tv1->axis(0)) && p2c[tv1->axis(0)] == tv2->axis(0));
+  TORCH_CHECK(p2c.count(tv1->axis(1)) && p2c[tv1->axis(1)] == tv2->axis(1));
+  TORCH_CHECK(
+      p2c.count(tv1_merge_out_id) &&
+      p2c[tv1_merge_out_id] == tv2->getRootDomain()[0]);
 }
 
 TEST_F(NVFuserTest, FusionTrivialReductionForwarding4_CUDA) {
@@ -26123,6 +26137,39 @@ TEST_F(NVFuserTest, FusionTrivialInputForwarding_CUDA) {
   // Second run to ensure cache hit handles trivial forwarding properly
   auto cg_outputs2 = fec.runFusionWithInputs({t0, t1});
   testValidate(fusion, cg_outputs2, {t0, t1}, {t0}, __LINE__, __FILE__);
+}
+
+// Simplified repro of issue #2008
+TEST_F(NVFuserTest, FusionReplayTrivialReductionAndBroadcast2_CUDA) {
+  auto fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr;
+  FusionGuard fg(fusion_ptr.get());
+
+  std::vector<int64_t> shape({10, 1, 1});
+
+  auto tv0 = makeConcreteTensor(shape);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, IrBuilder::create<Double>(1));
+  auto tv2 = sum(tv1, {1, 2});
+  auto tv3 = broadcast(tv2, {false, true, true});
+  fusion.addOutput(tv3);
+
+  tv0->merge(-2, -1)->merge(-2, -1)->split(0, 4);
+
+  MaxRootDomainInfoSpanningTree tree(tv0);
+  TransformPropagator tp(tv0);
+  tree.traverse(&tp);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn(shape, options);
+  std::vector<IValue> aten_inputs({t0});
+
+  FusionExecutor fe;
+  fe.compileFusion(fusion_ptr.get(), aten_inputs);
+  auto outputs = fe.runFusion(aten_inputs);
+
+  testValidate(&fusion, outputs, aten_inputs, {t0 + 1}, __LINE__, __FILE__);
 }
 
 namespace {

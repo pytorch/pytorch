@@ -762,14 +762,6 @@ struct ProducerForwardingInfo {
           (outer->isTrivialReduction() && !inner->isReduction())) {
         auto compliment_id = inner->isTrivialReduction() ? inner : outer;
         auto forwarded_id = inner->isTrivialReduction() ? outer : inner;
-        // Only allow forwarding when the trivial reduction domain is
-        // an root domain
-        if (std::find(
-                producer->getMaybeRFactorDomain().begin(),
-                producer->getMaybeRFactorDomain().end(),
-                compliment_id) == producer->getMaybeRFactorDomain().end()) {
-          continue;
-        }
         forwarding_map.emplace(std::make_pair(forwarded_id, merge->out()));
         compliment_map.emplace(std::make_pair(
             forwarded_id, std::vector<IterDomain*>{compliment_id}));
