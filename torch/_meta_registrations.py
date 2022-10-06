@@ -1246,11 +1246,6 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
 
-@register_meta(aten.index_put.default, register_dispatcher=False)
-def meta_index_put(self, indices, values, accumulate=False):
-    return self.new_empty(self.size())
-
-
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
