@@ -37,6 +37,7 @@ from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
     IS_MACOS,
     make_fullrank_matrices_with_distinct_singular_values,
+    skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
 )
@@ -2241,6 +2242,13 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
                 "TestCommon",
                 "test_noncontiguous_samples",
+                device_type="cuda",
+            ),
+            # This test is flaky under slow gradcheck, likely due to rounding issues
+            DecorateInfo(
+                skipIfSlowGradcheckEnv,
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),
         ),
