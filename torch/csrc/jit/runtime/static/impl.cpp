@@ -109,12 +109,6 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
 
 namespace {
 
-// CustomClass extending torch::CustomClassHolder can be typecasted
-// to IValue StaticRuntimeMetadata is created so that we can attach
-// SR metadata to IR's prim::fork nodes. These CustomClass needs to be
-// registered first in order to be used as IValue.below is an
-// UNUSED VARIABLE but NEEDED to invoke the class_ constructor necessary
-// for class registration.
 auto sr_metadata_registerer = torch::class_<StaticRuntimeMetadata>(
     "StaticRuntime",
     "StaticRuntimeMetadata");
@@ -161,6 +155,7 @@ void OptimizeGraph(
   UseVariadicStack(graph);
   EliminateTrivialEquallySplit(graph);
   EliminateExtraPermuteOps(graph);
+  PrepackWeights(graph);
 
   if (opts.enable_out_variant) {
     UseVariadicOp(

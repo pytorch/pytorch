@@ -482,8 +482,11 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
 
   // We support float16 ops by casting expr inputs to float32
   // and then casting the result back to float16
+
+  GRAPH_DEBUG("Before HalfRewriter ", *stmt);
   HalfRewriter hsFix;
   stmt = stmt->accept_mutator(&hsFix);
+  GRAPH_DEBUG("After HalfRewriter ", *stmt);
 
   // Emit prototype and bind argument Vars to parameter indices.
   llvm::Type* retTy = dtypeToLLVM(dtype);
@@ -536,6 +539,10 @@ llvm::Type* LLVMCodeGenImpl::dtypeToLLVM(Dtype dtype) {
 
     case ScalarType::QUInt8:
       return ByteTy_;
+      break;
+
+    case ScalarType::BFloat16:
+      return ShortTy_;
       break;
 
     default:
@@ -995,9 +1002,7 @@ void LLVMCodeGenImpl::visit(HalfImmPtr v) {
 }
 
 void LLVMCodeGenImpl::visit(BFloat16ImmPtr v) {
-  TORCH_INTERNAL_ASSERT(
-      false,
-      buildErrorMessage("Fuser's LLVM codegen does not support bfloat16"));
+  value_ = llvm::ConstantInt::get(ShortTy_, v->value().x);
 }
 
 void LLVMCodeGenImpl::visit(BoolImmPtr v) {
@@ -1014,6 +1019,25 @@ llvm::Type* llvmTypeToVec(llvm::Type* type, int lanes) {
 
 void LLVMCodeGenImpl::visit(CastPtr v) {
   v->src_value()->accept(this);
+
+  auto dst_type = v->dtype().scalar_type();
+  auto src_type = v->src_value()->dtype().scalar_type();
+  bool is_to_bf16 = (dst_type == c10::kBFloat16);
+  bool is_to_float = (dst_type == c10::kFloat);
+  bool is_from_bf16 = (src_type == c10::kBFloat16);
+  bool is_from_float = (src_type == c10::kFloat);
+
+  bool cast_from_bf16_to_fp32 = is_from_bf16 && is_to_float;
+  bool cast_from_fp32_to_bf16 = is_from_float && is_to_bf16;
+  bool non_bf16_cast = (!is_to_bf16) && (!is_from_bf16);
+  bool valid_bf16_cast = cast_from_bf16_to_fp32 || cast_from_fp32_to_bf16;
+  TORCH_CHECK(
+      valid_bf16_cast || non_bf16_cast,
+      "Cast is not implemented for the conversion between ",
+      src_type,
+      " and ",
+      dst_type,
+      ".");
 
   llvm::Type* dstType =
       llvmTypeToVec(dtypeToLLVM(v->dtype()), v->dtype().lanes());
@@ -1033,6 +1057,56 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
       v->src_value()->dtype().scalar_type() == ScalarType::Bool;
 
   // Scalar casts
+  if (is_from_bf16) {
+    // Shift the BF16 value left by 16bits and then bit cast the shifted value
+    // to FP32.
+    //   FP32_VAL = BF16_VAL << 16
+    auto lans = v->dtype().lanes();
+    value_ = irb_.CreateZExt(value_, llvmTypeToVec(IntTy_, lans));
+    auto vec_shl_val = toVec(llvm::ConstantInt::get(IntTy_, 16), lans);
+    value_ = irb_.CreateShl(value_, vec_shl_val);
+    value_ = irb_.CreateBitOrPointerCast(value_, llvmTypeToVec(FloatTy_, lans));
+    return;
+  }
+
+  if (is_to_bf16) {
+    // Convert the FP32 value by RNE(Rounding to Nearest Even). Algorithm is as
+    // follows:
+    //   STEP1: U32_VAL = BITCAST(F32_VAL)
+    //   STEP2: U32_VAL_TMP = U32_VAL >> 16
+    //   STEP3: U32_VAL_TMP = U32_VAL_TMP & 1
+    //   STEP4: ROUNDING_BIAS = U32_VAL_TMP + UINT32(0x7FFF)
+    //   STEP5: U32_VAL_TMP = U32_VAL + ROUNDING_BIAS
+    //   STEP6: BF16_VAL = static_cast<UINT16>(U32_VAL_TMP >> 16)
+    auto lans = v->src_value()->dtype().lanes();
+    auto shift_len = llvm::ConstantInt::get(IntTy_, 16);
+    auto one = llvm::ConstantInt::get(ShortTy_, 1);
+    auto rounding_bias = llvm::ConstantInt::get(ShortTy_, 0x7FFF);
+    auto bf16_nan = llvm::ConstantInt::get(ShortTy_, 0xFFFF);
+
+    auto mask = irb_.CreateFCmpOEQ(value_, value_);
+    // STEP1: U32_VAL = BITCAST(F32_VAL)
+    auto fp32_i32_value =
+        irb_.CreateBitOrPointerCast(value_, llvmTypeToVec(IntTy_, lans));
+    // STEP2: U32_VAL_TMP = (U32_VAL >> 16)
+    value_ = irb_.CreateLShr(fp32_i32_value, toVec(shift_len, lans));
+    value_ = irb_.CreateTrunc(value_, llvmTypeToVec(ShortTy_, lans));
+    // STEP3: U32_VAL_TMP = U32_VAL_TMP & 1
+    value_ = irb_.CreateAnd(value_, toVec(one, lans));
+    // STEP4: ROUNDING_BIAS = U32_VAL_TMP + UINT32(0x7FFF)
+    value_ = irb_.CreateAdd(value_, toVec(rounding_bias, lans));
+    value_ = irb_.CreateZExt(value_, llvmTypeToVec(IntTy_, lans));
+    // STEP5: U32_VAL_TMP = U32_VAL + ROUNDING_BIAS
+    value_ = irb_.CreateAdd(value_, fp32_i32_value);
+    // STEP6: BF16_VAL = static_cast<UINT16>(U32_VAL_TMP >> 16)
+    value_ = irb_.CreateLShr(value_, toVec(shift_len, lans));
+    value_ = irb_.CreateTrunc(value_, llvmTypeToVec(ShortTy_, lans));
+    value_ = irb_.CreateBitOrPointerCast(value_, llvmTypeToVec(ShortTy_, lans));
+    // If the the value is NaN, return BF16 NaN.
+    value_ = irb_.CreateSelect(mask, value_, toVec(bf16_nan, lans));
+    return;
+  }
+
   if (srcType->isFPOrFPVectorTy()) {
     if (dstType->isFPOrFPVectorTy()) {
       // as with eager, convert from Double -> Half by Converting to Float then
@@ -1066,6 +1140,7 @@ void LLVMCodeGenImpl::visit(CastPtr v) {
     }
     return;
   }
+
   if (!srcType->isIntOrIntVectorTy()) {
     throw unimplemented_lowering(v);
   }
@@ -1176,6 +1251,9 @@ void LLVMCodeGenImpl::visit(RampPtr v) {
     case ScalarType::QUInt8:
       vecType = llvm::VectorType::get(ByteTy_, element_count);
       break;
+    case ScalarType::BFloat16:
+      vecType = llvm::VectorType::get(ShortTy_, element_count);
+      break;
     default:
       throw std::runtime_error("invalid dtype in Ramp");
   }
@@ -1250,6 +1328,9 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
       break;
     case ScalarType::QUInt8:
       loadType = llvm::VectorType::get(ByteTy_, element_count);
+      break;
+    case ScalarType::BFloat16:
+      loadType = llvm::VectorType::get(ShortTy_, element_count);
       break;
     default:
       throw std::runtime_error("invalid dtype in Load");

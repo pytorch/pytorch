@@ -1643,8 +1643,6 @@ except RuntimeError as e:
             _test(1)
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
-    # skip for ROCM. Look into #62533.
-    @skipIfRocm
     def test_cuda_memory_leak_detection(self):
         l = []
 
@@ -4639,6 +4637,27 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
 
+    def test_memory_snapshot_with_cpp(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            x = torch.rand(311, 411, device='cuda')
+
+            ss = torch.cuda.memory._snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
@@ -4695,6 +4714,35 @@ class TestCudaComm(TestCase):
     def test_raises_oom(self):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
+
+    @unittest.skipIf(IS_WINDOWS, 'Windows CI does not like the load_inline')
+    def test_cpp_memory_snapshot_pickle(self):
+        from torch.utils.cpp_extension import load_inline
+        source = """
+        #include <torch/csrc/cuda/memory_snapshot.h>
+        py::object do_snapshot() {
+            std::string data = torch::cuda::_memory_snapshot_pickled();
+            return py::bytes(data);
+        }
+        void record(bool e) {
+            torch::cuda::_record_memory_history(e);
+        }
+        """
+        m = load_inline(name='snapshot', cpp_sources=[source], functions=['do_snapshot', 'record'])
+        try:
+            m.record(True)
+            t = torch.rand(311, 411, device='cuda')
+            mem = pickle.loads(m.do_snapshot())
+            found = False
+            for s in mem:
+                for b in s['blocks']:
+                    if b['state'] == 'active_allocated' and 'history' in b:
+                        history = b['history']
+                        if history and history[0]['real_size'] == 311 * 411 * 4:
+                            found = True
+            self.assertTrue(found)
+        finally:
+            m.record(False)
 
 instantiate_parametrized_tests(TestCuda)
 

@@ -85,7 +85,7 @@ struct FMHA_kernel_traits {
 #endif
     using ElementAccum = float;
 
-    static_assert(WARPS_M == 1);
+    static_assert(WARPS_M == 1, "");
     using ThreadblockShapeQK = cutlass::gemm::GemmShape<STEP, S, D>;
     using WarpCountQK = cutlass::gemm::GemmShape<WARPS_M, WARPS_N, 1>;
     using WarpShapeQK = cutlass::gemm::GemmShape<
@@ -144,7 +144,7 @@ struct FMHA_kernel_traits {
     static constexpr size_t BYTES_PER_SMEM_Q = ThreadblockShapeQK::kM * ThreadblockShapeQK::kK * sizeof(Element);
     static constexpr size_t BYTES_PER_SMEM_K = ThreadblockShapeQK::kN * ThreadblockShapeQK::kK * sizeof(Element);
     static constexpr size_t BYTES_PER_SMEM_V = ThreadblockShapePV::kN * ThreadblockShapePV::kK * sizeof(Element);
-    static_assert(BYTES_PER_SMEM_K == BYTES_PER_SMEM_V);
+    static_assert(BYTES_PER_SMEM_K == BYTES_PER_SMEM_V, "");
     static constexpr size_t BYTES_PER_SMEM_QK = BYTES_PER_SMEM_Q + BYTES_PER_SMEM_K;
     // The extra amount of shared memory needed to load V.
     static constexpr size_t BYTES_PER_SMEM_V_EXTRA = SHARE_SMEM_FOR_K_AND_V ? 0u : BYTES_PER_SMEM_V;

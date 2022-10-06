@@ -970,6 +970,10 @@ def main():
         'typing_extensions',
     ]
 
+    extras_require = {
+        'opt-einsum': ['opt-einsum>=3.3']
+    }
+
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1058,8 +1062,6 @@ def main():
         'include/c10/cuda/impl/*.h',
         'include/c10/hip/*.h',
         'include/c10/hip/impl/*.h',
-        'include/c10d/*.h',
-        'include/c10d/*.hpp',
         'include/caffe2/**/*.h',
         'include/torch/*.h',
         'include/torch/csrc/*.h',
@@ -1090,7 +1092,8 @@ def main():
         'include/torch/csrc/deploy/*.h',
         'include/torch/csrc/deploy/interpreter/*.h',
         'include/torch/csrc/deploy/interpreter/*.hpp',
-        'include/torch/csrc/distributed/c10d/exception.h',
+        'include/torch/csrc/distributed/c10d/*.h',
+        'include/torch/csrc/distributed/c10d/*.hpp',
         'include/torch/csrc/distributed/rpc/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
@@ -1168,6 +1171,7 @@ def main():
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
+        extras_require=extras_require,
         package_data={
             'torch': torch_package_data,
             'torchgen': torchgen_package_data,

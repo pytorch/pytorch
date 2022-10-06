@@ -152,6 +152,13 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            status {
+              contexts {
+                context
+                state
+                targetUrl
+              }
+            }
             pushedDate
             oid
           }
@@ -752,6 +759,13 @@ class GitHubPR:
         checksuites = orig_last_commit["checkSuites"]
 
         self.conclusions = add_workflow_conclusions(checksuites, get_pr_next_check_runs, get_pr_next_checksuites)
+
+        # Append old style statuses(like ones populated by CircleCI or EasyCLA) to conclusions
+        if orig_last_commit["status"] and orig_last_commit["status"]["contexts"]:
+            for status in orig_last_commit["status"]["contexts"]:
+                name = status["context"]
+                self.conclusions[name] = WorkflowCheckState(name=name, status=status["state"], url=status["targetUrl"])
+
         return self.conclusions
 
     def get_authors(self) -> Dict[str, str]:
@@ -1100,7 +1114,7 @@ def find_matching_merge_rule(pr: GitHubPR,
         # Does the PR pass the checks required by this rule?
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-        required_checks = filter(lambda x: skip_mandatory_checks is False or "CLA Check" in x, mandatory_checks)
+        required_checks = filter(lambda x: skip_mandatory_checks is False or "EasyCLA" in x, mandatory_checks)
         [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
         hud_link = f"https://hud.pytorch.org/{pr.org}/{pr.project}/commit/{pr.last_commit()['oid']}"

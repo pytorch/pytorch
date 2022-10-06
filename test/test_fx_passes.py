@@ -621,6 +621,49 @@ class MultiOutputWithWithInvalidMatches:
         TestCase(False, True, 0),
     ]
 
+class QuantizationFp8Pattern:
+    @classmethod
+    def setup(cls):
+        cls.quantization = torch.library.Library("fp8_quantization", "DEF")
+        cls.quantization.define("quantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
+        cls.quantization.define("dequantize_per_tensor_affine_fp8(Tensor self, int dtype, float scale) -> Tensor")
+
+    @classmethod
+    def tearDown(cls):
+        del cls.quantization
+
+    @staticmethod
+    def forward(self, arg0_1, arg1_1):
+        qt = torch.ops.fp8_quantization
+        _scale_0 = self._scale_0
+        quantize_per_tensor_affine_fp8 = qt.quantize_per_tensor_affine_fp8(arg0_1, 0, _scale_0)
+        dequantize_per_tensor_affine_fp8 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8, 0, _scale_0)
+        _scale_1 = self._scale_0
+        quantize_per_tensor_affine_fp8_1 = qt.quantize_per_tensor_affine_fp8(arg1_1, 0, _scale_1)
+        dequantize_per_tensor_affine_fp8_1 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_1, 0, _scale_1)
+        add = torch.ops.aten.add.Tensor(dequantize_per_tensor_affine_fp8, dequantize_per_tensor_affine_fp8_1)
+        _scale_2 = self._scale_0
+        quantize_per_tensor_affine_fp8_2 = qt.quantize_per_tensor_affine_fp8(add, 0, _scale_2)
+        dequantize_per_tensor_affine_fp8_2 = qt.dequantize_per_tensor_affine_fp8(quantize_per_tensor_affine_fp8_2, 0, _scale_2)
+        return dequantize_per_tensor_affine_fp8_2
+
+    @staticmethod
+    def pattern(a, a_dtype, a_scale, b, b_dtype, b_scale, out_scale):
+        qt = torch.ops.fp8_quantization
+        a = qt.dequantize_per_tensor_affine_fp8(a, a_dtype, a_scale)
+        b = qt.dequantize_per_tensor_affine_fp8(b, b_dtype, b_scale)
+        output = torch.ops.aten.add.Tensor(a, b)
+
+        qt.dequantize_per_tensor_affine_fp8
+
+        output = qt.quantize_per_tensor_affine_fp8(output, a_dtype, out_scale)
+        return output
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 1),
+    ]
+
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
@@ -639,8 +682,14 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsIdenticalAnchor,
         MultipleOutputsHorizontalPattern,
         MultiOutputWithWithInvalidMatches,
+        QuantizationFp8Pattern,
     ])
     def test_subgraph_matcher(self, test_model):
+
+        setup = getattr(test_model, "setup", None)
+        if callable(setup):
+            setup()
+
         traced = symbolic_trace(test_model.forward)
         pattern_traced = symbolic_trace(test_model.pattern)
 
@@ -661,6 +710,10 @@ class TestFXMatcherUtils(JitTestCase):
                     if not test_case.match_output and node.op == "output":
                         continue
                     assert node in match.nodes_map
+
+        tearDown = getattr(test_model, "tearDown", None)
+        if callable(setup):
+            tearDown()
 
 
 if __name__ == "__main__":
