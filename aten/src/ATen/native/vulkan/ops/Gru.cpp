@@ -1,7 +1,6 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
