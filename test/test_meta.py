@@ -321,6 +321,10 @@ def run_meta_crossref(
         try:
             meta_args = tree_map(to_meta, args)
             meta_kwargs = tree_map(to_meta, kwargs)
+            # TODO: generalize me
+            if func is torch.ops.aten.randint.low or func is torch.ops.aten.randint.default:
+                meta_kwargs["device"] = "meta"
+                to_meta.hit += 1
         except Exception as e:
             raise RuntimeError(
                 f"failed to convert args to meta; "
@@ -940,4 +944,6 @@ if __name__ == "__main__":
                 print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)
 
-    run_tests()
+    import torch._dispatch.python as d
+    with d.enable_python_dispatcher():
+        run_tests()

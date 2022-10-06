@@ -87,6 +87,10 @@ def meta_randperm(n, *, generator=None, out):
 def meta_randint(high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None):
     return torch.empty(size, dtype=dtype, device=device)
 
+@register_meta(aten.randint.low)
+def meta_randint_low(low, high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None):
+    return torch.empty(size, dtype=dtype, device=device)
+
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
 @out_wrapper()
 def meta_fft_c2r(self, dim, normalization, lastdim):
