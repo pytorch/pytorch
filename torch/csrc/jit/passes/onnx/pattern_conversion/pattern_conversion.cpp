@@ -146,7 +146,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
           std::forward_as_tuple(index_tensor, aten::select));
       dim_offset++;
     } else {
-      AT_ERROR(
+      TORCH_INTERNAL_ASSERT(
           "Unexpected node kind ",
           node->kind().toDisplayString(),
           " Expected aten::slice or aten::select.");
@@ -202,7 +202,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 
   if (((max_index_dim - min_index_dim + 1) != tensor_ind_count) &&
       tensor_ind_count != 0) {
-    AT_ERROR(
+    TORCH_INTERNAL_ASSERT(
         "Only consecutive 1-d tensor indices are supported in exporting aten::index_put to ONNX.",
         "Check https://pytorch.org/docs/stable/onnx.html#indexing for details");
   }
@@ -230,7 +230,8 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
         break;
       }
       default:
-        AT_ERROR("Unexpected node kind ", index_i->second.orig_node_kind);
+        TORCH_INTERNAL_ASSERT(
+            "Unexpected node kind ", index_i->second.orig_node_kind);
     }
 
     if (ind_size != 1) {
