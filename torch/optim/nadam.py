@@ -252,6 +252,8 @@ def _single_tensor_nadam(params: List[Tensor],
         if differentiable:
             denom = denom.add(eps)
             # Make autograd track the operations
+            # by updating the grad and exp_avg directly and not using the
+            # scalar "value" argument of addcdiv.
             grad = grad * (-lr * (1. - mu) / (1. - mu_product))
             exp_avg = grad * (-lr * (1. - mu_next) / (1. - mu_product_next))
             value_grad = 1.0
@@ -259,7 +261,7 @@ def _single_tensor_nadam(params: List[Tensor],
         else:
             denom.add_(eps)
             value_grad = (-lr * (1. - mu) / (1. - mu_product)).item()
-            value_exp_avg = (-lr * (1. - mu_next) / (1. - mu_product_next)).item()
+            value_exp_avg = (-lr * mu_next / (1. - mu_product_next)).item()
 
         param.addcdiv_(grad, denom, value=value_grad)
         param.addcdiv_(exp_avg, denom, value=value_exp_avg)
