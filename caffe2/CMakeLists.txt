@@ -1154,12 +1154,6 @@ install(FILES
   "${TORCH_SRC_DIR}/library.h"
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-if(USE_DEPLOY)
-  install(FILES
-    "${TORCH_SRC_DIR}/deploy.h"
-    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-endif()
-
 if(BUILD_TEST)
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(

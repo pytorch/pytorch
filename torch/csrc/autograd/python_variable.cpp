@@ -1262,34 +1262,6 @@ PyObject* THPVariable_get_base(THPVariable* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef USE_DEPLOY
-// This code is only used for asserts, so it is OK to skip it entirely from
-// deploy interpreters (in which case we will just skip the safety check).  For
-// a more precise check, it would be necessary to test that we are not holding
-// the GIL for *all* active torch deploy interpreters.  There is not really any
-// reason to do this.
-struct ConcretePythonGILHooks : public c10::impl::PythonGILHooks {
-  bool check_python_gil() const override {
-    return Py_IsInitialized() && PyGILState_Check();
-  };
-};
-// During process destruction, python_gil_hooks will get destructed, making
-// further virtual calls on the object invalid.  By the ordering of declarations
-// in this file, the registerer will get destructed first, removing the
-// externally visible reference to the object.  Assuming at this point in time,
-// there aren't other threads racing to read out the hooks, subsequent calls
-// into GIL hooks will hit a nullptr and gracefully no-op the asserts (as
-// desired, since at process shutdown time the Python interpreter is definitely
-// dead).
-//
-// An alternative way to reduce the risk of python_gil_hooks going prematurely
-// dead would be to leak it at destruction time.  I didn't do that because
-// it's annoying to write the Registerer class for this case.
-ConcretePythonGILHooks python_gil_hooks;
-static c10::impl::PythonGILHooksRegisterer python_gil_hooks_registerer(
-    &python_gil_hooks);
-#endif
-
 PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {

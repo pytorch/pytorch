@@ -19,12 +19,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
-  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
-  # only on one config for now, can expand later
-  export USE_DEPLOY=ON
-fi
-
 echo "Python version:"
 python --version
 
