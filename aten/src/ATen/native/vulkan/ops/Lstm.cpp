@@ -1,7 +1,6 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/native/vulkan/ops/Lstm.h>
 #include <ATen/native/vulkan/ops/Mm.h>
-#include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
