@@ -664,6 +664,25 @@ class QuantizationFp8Pattern:
         TestCase(False, False, 1),
     ]
 
+class NoAnchorFound:
+    @staticmethod
+    def forward(x):
+        x = x + 1
+        return x
+
+    @staticmethod
+    def pattern(a):
+        b1 = a.relu()
+        return b1
+
+    test_cases = [
+        # match_output, match_placeholder, num_matches
+        TestCase(False, False, 0),
+        TestCase(True, False, 0),
+        TestCase(False, True, 0),
+        TestCase(True, True, 0)
+    ]
+
 @instantiate_parametrized_tests
 class TestFXMatcherUtils(JitTestCase):
 
@@ -683,6 +702,7 @@ class TestFXMatcherUtils(JitTestCase):
         MultipleOutputsHorizontalPattern,
         MultiOutputWithWithInvalidMatches,
         QuantizationFp8Pattern,
+        NoAnchorFound,
     ])
     def test_subgraph_matcher(self, test_model):
 
