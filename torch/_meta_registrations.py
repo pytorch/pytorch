@@ -1490,7 +1490,9 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     output_width = out_size[1]
     nbatch = input_shape[0]
     channels = input_shape[1]
-    return input.new_empty((nbatch, channels, output_height, output_width)).to(memory_format=mem_format)
+    return input.new_empty((nbatch, channels, output_height, output_width)).to(
+        memory_format=mem_format
+    )
 
 
 # We must also trigger meta registrations from PrimTorch ref
