@@ -199,6 +199,7 @@
     "no_grad",
     "set_detect_anomaly",
     "set_grad_enabled",
+    "set_multithreading_enabled",
     "variable"
   ],
   "torch.autograd.function": [

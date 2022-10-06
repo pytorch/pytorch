@@ -1108,7 +1108,6 @@ symbolic_tensor_failures = {
     xfail('hsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_copy', ''),  # Expected a long tensor for index, but got Float
-    xfail('index_fill', ''),  # aten.index_fill.int_Scalar - couldn't find symbolic meta function/decomposition
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
