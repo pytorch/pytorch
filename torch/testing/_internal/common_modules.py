@@ -1154,7 +1154,7 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
-                                dtypes=[torch.float64]),
+                                dtypes=[torch.float64, torch.complex128]),
                    # Not implmented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
                                 dtypes=(torch.chalf,), device_type='cpu'),
