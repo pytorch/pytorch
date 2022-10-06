@@ -45,7 +45,6 @@ TORCH_META_FUNC(upsample_bicubic2d_backward) (
   set_output_raw_strided(0, input_size, {}, grad_output.options());
 }
 
-
 TORCH_META_FUNC(_upsample_bicubic2d_aa) (
   const Tensor& input, IntArrayRef output_size, bool align_corners, c10::optional<double> scales_h, c10::optional<double> scales_w
 ) {
