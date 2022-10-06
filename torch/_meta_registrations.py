@@ -1801,6 +1801,23 @@ def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
 
 
+@register_meta(aten.upsample_nearest2d.vec)
+def upsample_nearest2d_vec(input, output_size, scale_factors):
+    mem_format = utils.suggest_memory_format(input)
+    if output_size is not None:
+        assert scale_factors is None
+        return input.new_empty(input.size()).to(memory_format=mem_format)
+
+    assert output_size is None
+    out_size = list(input.size())
+
+    for i in range(len(out_size) - 2):
+        sym_float = (out_size[i + 2] / 1) * scale_factors[i] 
+        assert sym_float >= 0
+        out_size[i + 2] = math.floor(sym_float)
+    return input.new_empty(out_size).to(memory_format=mem_format)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
