@@ -16738,6 +16738,10 @@ python_ref_db = [
         torch_opinfo_name="movedim",
         supports_nvfuser=False,
     ),
+    PythonRefInfo(
+        "_refs.bucketize",
+        torch_opinfo_name="bucketize"
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",

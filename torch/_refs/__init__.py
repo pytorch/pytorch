@@ -280,6 +280,7 @@ __all__ = [
     #
     "allclose",
     "equal",  # TODO: add OpInfo
+    "bucketize",
 ]
 
 Tensor = torch.Tensor
@@ -4645,6 +4646,48 @@ def triu_indices(
     return torch.stack(
         (torch.cat((row_inds2, row_inds1)), torch.cat((col_inds2, col_inds1)))
     )
+
+
+@register_decomposition(torch.ops.aten.bucketize)
+@out_wrapper()
+def bucketize(
+    a: TensorLikeType,
+    boundaries: TensorLikeType,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+):
+
+    out_dtype = torch.int32 if out_int32 else torch.int64
+    n_boundaries = boundaries.shape[-1]
+
+    # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
+    start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)
+    end = start + n_boundaries
+    # Max depth of the binary search
+    niters = int(math.log2(n_boundaries)) + 1
+    if not (right):
+        # equivalent to std::upper_bound
+        for _ in range(niters):
+            cond_update = start < end
+            # start might end up pointing to 1 past the end, we guard against that
+            mid = torch.where(cond_update, start + (end - start) // 2, 0)
+            mid_val = boundaries[mid]
+            cond_mid = mid_val >= a
+            start = torch.where((~cond_mid) & cond_update, mid + 1, start)
+            end = torch.where(cond_mid & cond_update, mid, end)
+    else:
+        # equivalent to std::lower_bound
+        for _ in range(niters):
+            cond_update = start < end
+            # start might end up pointing to 1 past the end, we guard against that
+            mid = torch.where(cond_update, start + (end - start) // 2, 0)
+            mid_val = boundaries[mid]
+            cond_mid = mid_val > a
+            start = torch.where((~cond_mid) & cond_update, mid + 1, start)
+            end = torch.where(cond_mid & cond_update, mid, end)
+
+    return start.to(dtype=out_dtype)
 
 
 import torch._refs.fft
