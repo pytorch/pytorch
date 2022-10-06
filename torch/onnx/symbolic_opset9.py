@@ -268,6 +268,7 @@ __all__ = [
     "unsafe_split_with_sizes",
     "unsafe_split",
     "unsqueeze",
+    "unsupported_complex_operators",
     "unused",
     "var_mean",
     "var",
@@ -6663,6 +6664,7 @@ def onnx_placeholder(g: jit_utils.GraphContext, *inputs, **attrs):
 
 
 @_onnx_symbolic("aten::_conj")
+@_onnx_symbolic("aten::conj_physical")
 @_onnx_symbolic("aten::resolve_conj")
 @_onnx_symbolic("aten::resolve_neg")
 @_beartype.beartype
@@ -6670,14 +6672,13 @@ def unsupported_complex_operators(g: jit_utils.GraphContext, input: _C.Value):
     # ONNX does not have operators to manipulate real/imaginary components directly
     # However, some torch operations use complex operations even when input is real,
     # which results in failures due to missing operators for complex numbers
-    # e.g. `print(torch.randn(10, 5))` calls aten::resolve_conj, aten::_conj and aten::resolve_neg
-    #   although input is float
+    # e.g. `print(torch.randn(10, 5))` or `print(torch.randn(10, 5, dtype=torch.cfloat)`
+    #      calls aten::resolve_conj, aten::_conj and aten::resolve_neg although input is float
 
-    # This symbolic is a no-op for real numbers and raise a an exception when input is complex
+    # This symbolic is a no-op for real numbers, but raises an exception when input is complex
     if symbolic_helper.is_complex_value(input):
-        # _C._jit_pass_onnx_node_shape_type_inference raises when shape_inference is enabled,
-        # but this call make sure an  exception still raises without shape inference
         return symbolic_helper._onnx_unsupported(
-            "aten::_conj, aten::resolve_conj, aten::resolve_neg", input
+            "aten::_conj, aten::conj_physical, aten::resolve_conj, aten::resolve_neg",
+            input,
         )
     return input
