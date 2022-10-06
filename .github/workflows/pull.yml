@@ -162,12 +162,12 @@ jobs:
   #     docker-image: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.docker-image }}
   #     test-matrix: ${{ needs.linux-vulkan-bionic-py3_7-clang9-build.outputs.test-matrix }}
 
-  linux-bionic-cuda11_6-py3_10-gcc7-build:
-    name: linux-bionic-cuda11.6-py3.10-gcc7
+  linux-bionic-py3_8-gcc9-build:
+    name:  linux-bionic-py3_8-gcc9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      build-environment: linux-bionic-py3.8-gcc9
+      docker-image-name: pytorch-linux-bionic-py3.8-gcc9
       test-matrix: |
         { include: [
           # { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
@@ -178,18 +178,19 @@ jobs:
           # { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           # { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
           # { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.8xlarge.nvidia.gpu" },
+          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
         ]}
 
-  linux-bionic-cuda11_6-py3_10-gcc7-test:
-    name: linux-bionic-cuda11.6-py3.10-gcc7
+  linux-bionic-py3_8-gcc9-test:
+    name: linux-bionic-py3_8-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_10-gcc7-build
+    needs: linux-bionic-py3_8-gcc9
     with:
-      build-environment: linux-bionic-cuda11.6-py3.10-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-bionic-cuda11_6-py3_10-gcc7-build.outputs.test-matrix }}
+      build-environment: linux-bionic-py3.8-gcc9
+      docker-image: ${{ needs.linux-bionic-py3_8-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-bionic-py3_8-gcc9-build.outputs.test-matrix }}
+
 
   # linux-bionic-py3_7-clang9-build:
   #   name: linux-bionic-py3.7-clang9

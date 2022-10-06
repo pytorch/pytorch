@@ -145,8 +145,14 @@ function install_deploy_deps_ubuntu() {
     llvm \
     python-openssl \
     apt-transport-https \
+    ca-certificates \
     gnupg \
     software-properties-common \
+    python-pip \
+    python3-pip && \
+    sudo wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | sudo gpg --dearmor -o /usr/share/keyrings/magic-key.gpg && \
+    sudo echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/magic-key.gpg] https://apt.kitware.com/ubuntu/ bionic main" | sudo tee -a /etc/apt/sources.list && \
+    sudo echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee -a /etc/apt/sources.list && \
     sudo apt update && \
     sudo apt install -y binutils && \
     sudo rm -rf /var/lib/apt/lists/*
@@ -157,10 +163,11 @@ function checkout_install_torchdeploy() {
   install_deploy_deps_ubuntu
   # @todo: @PaliC let's not hardcode testing
   # to 3.10 and make it flexible in case we need more coverage
-  conda install -c conda-forge libpython-static=3.10
+  conda install -c conda-forge libpython-static=3.8
   pushd ..
   git clone https://github.com/pytorch/multipy
   pushd multipy
+  git checkout 850862ddc5f5f614697b2415e42df982f04df3ed
   pushd multipy/runtime
   python examples/generate_examples.py
   mkdir build
