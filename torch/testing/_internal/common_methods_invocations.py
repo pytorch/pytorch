@@ -10883,6 +10883,9 @@ op_db: List[OpInfo] = [
                # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
                             dtypes=(torch.int64,)),
+               # Reference: https://github.com/pytorch/pytorch/issues/86356
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
+                            dtypes=(torch.double, torch.cdouble)),
                # AssertionError: None mismatch: torch.complex64 is not None
                DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules', 'test_custom_rules',
                             dtypes=(torch.complex64, torch.complex128)),
