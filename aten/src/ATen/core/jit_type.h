@@ -9,6 +9,7 @@
 #include <ATen/core/qualified_name.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Optional.h>
+#include <c10/core/SymFloat.h>
 
 #include <array>
 #include <memory>
@@ -1320,6 +1321,26 @@ struct TORCH_API SymIntType : public Type {
   SymIntType() : Type(TypeKind::SymIntType) {}
 };
 
+struct SymFloatType;
+using SymFloatTypePtr = SingletonTypePtr<SymFloatType>;
+struct TORCH_API SymFloatType : public Type {
+  bool equals(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "SymFloat";
+  }
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "float";
+  }
+  static const TypeKind Kind = TypeKind::SymFloatType;
+  // global singleton
+  static SymFloatTypePtr get();
+
+ private:
+  SymFloatType() : Type(TypeKind::SymFloatType) {}
+};
+
 struct IntType;
 using IntTypePtr = SingletonTypePtr<IntType>;
 // This type represents a Python int number
@@ -1801,6 +1822,20 @@ struct getMaybeFakeTypePtr_<SymInt, true> final {
     return IntType::get();
   }
 };
+
+template <>
+struct getMaybeFakeTypePtr_<SymFloat, false> final {
+  static decltype(auto) call() {
+    return SymFloatType::get();
+  }
+};
+template <>
+struct getMaybeFakeTypePtr_<SymFloat, true> final {
+  static decltype(auto) call() {
+    return FloatType::get();
+  }
+};
+
 template <>
 struct getTypePtr_<c10::Device> final {
   static decltype(auto) call() {
@@ -1887,6 +1922,14 @@ struct getMaybeFakeTypePtr_<c10::List<T>, fake> final {
     return type;
   }
 };
+template <class T, bool fake>
+struct getMaybeFakeTypePtr_<c10::IListRef<T>, fake> final {
+  static const auto& call() {
+    static auto inner_type = getMaybeFakeTypePtr_<T, fake>::call();
+    static auto type = ListType::get("List", inner_type);
+    return type;
+  }
+};
 template <class T, size_t N, bool fake>
 struct getMaybeFakeTypePtr_<std::array<T, N>, fake> final {
   static const auto& call() {
@@ -1937,7 +1980,21 @@ struct getMaybeFakeTypePtr_<at::optional<T>, fake> final {
 template<>
 struct getTypePtr_<at::OptionalIntArrayRef> final {
   static const auto& call() {
-    static auto type = OptionalType::create(getMaybeFakeTypePtr_<IntArrayRef, false>::call());
+    static auto inner_type = getMaybeFakeTypePtr_<IntArrayRef, false>::call();
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto type = OptionalType::get(inner_type);
+    return type;
+  }
+};
+
+template <bool fake>
+struct getMaybeFakeTypePtr_<at::OptionalSymIntArrayRef, fake> final {
+  static const auto& call() {
+    // The "per optional<T>" static singleton needs to live in a .cpp file,
+    // otherwise we'll end up with one singleton instance per shared library.
+    static auto inner_type = getMaybeFakeTypePtr_<SymIntArrayRef, fake>::call();
+    static auto type = OptionalType::get(inner_type);
     return type;
   }
 };
