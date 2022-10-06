@@ -9392,8 +9392,8 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
-               skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3)) 
-                              or (_get_torch_hip_version() >= (5,2))), 
+               skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
+                               or (_get_torch_hip_version() >= (5, 2))),
                           "cusparseSDDMM was added in 11.2.1"),
                skipCPUIfNoMklSparse, ],
            skips=(
