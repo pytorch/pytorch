@@ -4982,7 +4982,7 @@ The elements are sorted into equal width bins between :attr:`min` and
 :attr:`max`. If :attr:`min` and :attr:`max` are both zero, the minimum and
 maximum values of the data are used.
 
-Elements lower than min and higher than max are ignored.
+Elements lower than min and higher than max and ``NaN`` elements are ignored.
 
 Args:
     {input}
