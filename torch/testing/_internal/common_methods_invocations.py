@@ -6246,12 +6246,11 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
     ]
 
     for input_shape, output_shape in sample_shapes:
-        input_t = make_arg(input_shape)
-        yield SampleInput(input_t, args=(output_shape,))
+        yield SampleInput(make_arg(input_shape), args=(output_shape,))
         if output_shape == ():
             continue
-        yield SampleInput(input_t.clone(), args=(list(output_shape),))
-        yield SampleInput(input_t.clone(), args=(*output_shape,))
+        yield SampleInput(make_arg(input_shape), args=(list(output_shape),))
+        yield SampleInput(make_arg(input_shape), args=(*output_shape,))
 
 
 def error_inputs_sum_to_size(op_info, device, **kwargs):
