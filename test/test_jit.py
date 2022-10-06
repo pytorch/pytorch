@@ -3052,9 +3052,9 @@ class TestFrontend(JitTestCase):
         traced_model_2 = torch.jit.trace(model_2, {'x': torch.rand([2]), 'y': torch.rand([2])}, unpack_input_dict=True)
         res_1 = traced_model_1(**example_input_dict)
         self.assertEqual(res_1, 3 * torch.ones(1))
-        with self.assertRaisesRegex(RuntimeError, "forward\(\) is missing value for argument 'x'."):
+        with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'x'."):
             res_2 = traced_model_2(**{'z': torch.rand([2]), 'y': torch.rand([2])})
-        with self.assertRaisesRegex(RuntimeError, "forward\(\) is missing value for argument 'y'."):
+        with self.assertRaisesRegex(RuntimeError, r"forward\(\) is missing value for argument 'y'."):
             res_2 = traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})
 
 
