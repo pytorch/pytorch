@@ -84,7 +84,7 @@ def meta_randperm(n, *, generator=None, out):
     return out
 
 @register_meta(aten.randint.default)
-def meta_randperm(high, size, dtype, layout, device, pin_memory):
+def meta_randint(high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None):
     return torch.empty(size, dtype=dtype, device=device)
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
@@ -1629,7 +1629,7 @@ def meta_gather(self, dim, index, sparse_grad=False):
     if not is_index_empty:
         check(
             index.dtype == torch.long,
-            lambda: "gather(): Expected dtype int64 for index",
+            lambda: f"gather(): Expected dtype int64 for index but got {index.dtype}",
         )
         gather_shape_check(self, wrapped_dim, index)
     return self.new_empty(index.shape)
@@ -1812,7 +1812,7 @@ def upsample_nearest2d_vec(input, output_size, scale_factors):
     out_size = list(input.size())
 
     for i in range(len(out_size) - 2):
-        sym_float = (out_size[i + 2] / 1) * scale_factors[i] 
+        sym_float = (out_size[i + 2] / 1) * scale_factors[i]
         assert sym_float >= 0
         out_size[i + 2] = math.floor(sym_float)
     return input.new_empty(out_size).to(memory_format=mem_format)
