@@ -826,11 +826,11 @@ class FullyShardedDataParallel(nn.Module):
 
     .. note:
         Attempting to run the forward pass of a submodule that is contained in an
-        FSDP unit is not supported and will result in errors. This is because the
+        FSDP instance is not supported and will result in errors. This is because the
         submodule's parameters will be sharded, but it itself is not an FSDP instance,
-        so its forward pass will not materialize the full parameters appropriately.
+        so its forward pass will not all-gather the full parameters appropriately.
         This could potentially happen when attempting to run only the encoder of a
-        encoder-decoder model, and the encoder is not wrapped in its own FSDP unit. To
+        encoder-decoder model, and the encoder is not wrapped in its own FSDP instance. To
         resolve this, please wrap the submodule in its own FSDP unit.
 
     .. note::
