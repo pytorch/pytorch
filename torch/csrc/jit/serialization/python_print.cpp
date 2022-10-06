@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include <ATen/core/dynamic_type.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>

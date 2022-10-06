@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/mobile/import_data.h>
 
 #include <ATen/Functions.h>
+#include <ATen/core/dynamic_type.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/file_adapter.h>
