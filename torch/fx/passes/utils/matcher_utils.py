@@ -7,10 +7,26 @@ from torch.fx._compatibility import compatibility
 import torch.utils._pytree as pytree
 from typing import Dict, List, Set, Any
 import logging
+import os
 
 __all__ = ['SubgraphMatcher', 'InternalMatch']
 
-logger = logging.getLogger(__name__)
+# Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
+def _init_logger():
+    logger = logging.getLogger(__name__)
+
+    level = os.environ.get('PYTORCH_MATCHER_LOGLEVEL', 'WARNING').upper()
+    logger.setLevel(level)
+    console = logging.StreamHandler()
+    formatter = logging.Formatter("%(filename)s > %(message)s")
+    console.setFormatter(formatter)
+    console.setLevel(level)
+    # add the handlers to the logger
+    logger.addHandler(console)
+    logger.propagate = False
+    return logger
+
+logger = _init_logger()
 
 @compatibility(is_backward_compatible=False)
 @dataclass
@@ -126,7 +142,7 @@ class SubgraphMatcher:
         return non_overlapping_matches
 
     def _match_args(self, pn: Any, gn: Any, match: InternalMatch) -> bool:
-        assert not(isinstance(pn, Node) and isinstance(gn, Node)), "pn and gn cannot both be Node"
+        assert not (isinstance(pn, Node) and isinstance(gn, Node)), "pn and gn cannot both be Node"
 
         if isinstance(pn, Node) and not isinstance(gn, Node):
             if pn.op == "placeholder":
@@ -247,6 +263,9 @@ class SubgraphMatcher:
                 if self._nodes_are_equal(pattern_anchor, node):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
+
+        logger.info(f"Initial match_candidates_list: {match_candidates_list}\n")
+
         matches: List[InternalMatch] = []
 
         def backtracking(anchor_index, match):
@@ -275,7 +294,8 @@ class SubgraphMatcher:
                 match = copy.copy(saved_match)
 
         match = InternalMatch(anchors=self.pattern_anchors)
-        backtracking(0, match)
+        if match_candidates_list:
+            backtracking(0, match)
 
         # filter out the matches where the subgraph is not fully_contained
         before = len(matches)
@@ -301,5 +321,7 @@ class SubgraphMatcher:
             after = len(matches)
             if before != after:
                 logger.info(f"Filtered out {before - after} matches because matched subgraphs are overlapping")
+
+        logger.info(f"Matches returned: {matches}")
 
         return matches
