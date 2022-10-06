@@ -134,7 +134,14 @@ Value* tryConvertToType(
       } else if (concrete_int) {
         value = graph.insert(aten::IntImplicit, {value}, {}, loc);
       } else if (concrete_number) {
-        value = graph.insert(aten::ScalarImplicit, {value}, {}, loc);
+        auto scalar_type = value->type()->cast<TensorType>()->scalarType();
+        if (scalar_type && isIntegralType(*scalar_type, false)) {
+          value = graph.insert(aten::IntImplicit, {value}, {}, loc);
+        } else if (scalar_type && isFloatingType(*scalar_type)) {
+          value = graph.insert(aten::FloatImplicit, {value}, {}, loc);
+        } else {
+          value = graph.insert(aten::ScalarImplicit, {value}, {}, loc);
+        }
       }
     } else if (value_equals_number) {
       if (concrete_float) {
