@@ -225,7 +225,7 @@ unary_magic_methods = {
     'ceil'
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "eq", "gt", "lt", "le", "ge"}
+float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge"}
 
 def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
@@ -253,7 +253,7 @@ def _make_magic(method, func, py_type):
             return py_type(out, self.shape_env)
 
     def unary_magic_impl(self):
-        if method in ["ceil"]:
+        if method in ["ceil", "floor"]:
             op = getattr(math, method)
         else:
             op = getattr(operator, method)
@@ -263,7 +263,7 @@ def _make_magic(method, func, py_type):
         expr = self.shape_env.replace(self.expr)
         out = func(expr)
         out = sympy.expand(out)
-        if method in ["ceil"]:
+        if method in ["ceil", "floor"]:
             return PySymInt(out, self.shape_env)
         else:
             return py_type(out, self.shape_env)
