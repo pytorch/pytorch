@@ -651,7 +651,7 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest test
+  pytest test/test_torchinductor.py -o log_cli=True
   popd
 }
 
