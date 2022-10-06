@@ -9304,6 +9304,33 @@ class TestAutogradMultipleDispatch(TestCase):
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)], device=device))
 
+    @onlyCUDA
+    def test_backward_single_threaded(self):
+
+        threads_eq = None
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x, self):
+                ctx.self = self
+                ctx.tid = threading.get_ident()
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                nonlocal threads_eq
+                threads_eq = ctx.tid == threading.get_ident()
+                return gO, None
+
+        inp = torch.rand(10, device="cuda", requires_grad=True)
+
+        with torch.autograd.set_multithreading_enabled(False):
+            TestFn.apply(inp, None).sum().backward()
+        self.assertTrue(threads_eq)
+
+        TestFn.apply(inp, None).sum().backward()
+        self.assertFalse(threads_eq)
+
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
 # the suppressions.
