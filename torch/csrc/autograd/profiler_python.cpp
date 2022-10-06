@@ -209,7 +209,8 @@ struct Config<CallType::PyModuleCall> {
   using key_t = PyModuleSelf;
   using cls_t = PyModuleCls;
   using ephemeral_t = PyFrameObject*;
-  using info_t = std::pair<cls_t, std::vector<std::pair<std::string, void*>>>;
+  using info_t =
+      std::pair<cls_t, std::vector<std::pair<std::string, TensorMetadata>>>;
   struct cache_t {
     c10::optional<CodeLocation> location_; // nn.Module.forward;
     ska::flat_hash_map<key_t, info_t> modules_and_params_;
@@ -233,8 +234,8 @@ struct Config<CallType::PyOptimizerCall> {
   using ephemeral_t = PyFrameObject*;
   struct info_t {
     cls_t cls_;
-    std::vector<void*> params_;
-    std::vector<std::pair<std::string, void*>> states_;
+    std::vector<TensorMetadata> params_;
+    std::vector<std::pair<std::string, TensorMetadata>> states_;
   };
   struct cache_t {
     c10::optional<CodeLocation>
@@ -271,26 +272,25 @@ class Callsite {
 
 void check_and_store(
     const pybind11::handle& name,
-    const pybind11::handle& param,
-    std::vector<std::pair<std::basic_string<char>, void*>>& storeroom) {
-  auto t = param.ptr();
-  if (py::isinstance<py::str>(name) && THPVariable_CheckExact(t)) {
-    auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
-    if (storage) {
-      storeroom.emplace_back(name.cast<std::string>(), storage->data());
-    }
+    const pybind11::handle& param_handle,
+    std::vector<std::pair<std::basic_string<char>, TensorMetadata>>&
+        storeroom) {
+  auto param_ptr = param_handle.ptr();
+  if (py::isinstance<py::str>(name) && THPVariable_CheckExact(param_ptr)) {
+    const auto& param = THPVariable_Unpack(param_ptr);
+
+    storeroom.emplace_back(name.cast<std::string>(), param);
   }
 }
 
 void check_and_store(
-    const pybind11::handle& param,
-    std::vector<void*>& storeroom) {
-  auto t = param.ptr();
-  if (THPVariable_CheckExact(t)) {
-    auto storage = THPVariable_Unpack(t).storage().unsafeGetStorageImpl();
-    if (storage) {
-      storeroom.emplace_back(storage->data());
-    }
+    const pybind11::handle& param_handle,
+    std::vector<TensorMetadata>& storeroom) {
+  auto param_ptr = param_handle.ptr();
+  if (THPVariable_CheckExact(param_ptr)) {
+    const auto& param = THPVariable_Unpack(param_ptr);
+
+    storeroom.emplace_back(param);
   }
 }
 
@@ -381,7 +381,7 @@ void ValueCache::store<CallType::PyModuleCall>(
     auto cls = set_class<CallType::PyModuleCall>(this, cache, key, frame);
 
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
-    std::vector<std::pair<std::string, void*>> params_;
+    std::vector<std::pair<std::string, TensorMetadata>> params_;
     for (auto& it : params) {
       check_and_store(it.first, it.second, params_);
     }
@@ -414,7 +414,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     auto cls = set_class<CallType::PyOptimizerCall>(this, cache, key, frame);
     py::list param_groups_handle =
         py::handle((PyObject*)key).attr("param_groups");
-    std::vector<void*> params_;
+    std::vector<TensorMetadata> params_;
     // param_groups is a list of dict
     for (auto& param_group : param_groups_handle) {
       for (auto& param :
@@ -422,7 +422,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
         check_and_store(param, params_);
       }
     }
-    std::vector<std::pair<std::string, void*>> states_;
+    std::vector<std::pair<std::string, TensorMetadata>> states_;
     py::dict state_handle = py::handle((PyObject*)key).attr("state");
     for (auto& it : state_handle) {
       TORCH_INTERNAL_ASSERT(

@@ -1588,7 +1588,7 @@ class TestTorchTidyProfiler(TestCase):
         modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
         self.assertEqual(len(modules), 2, f"Expected two parameter list, but got {len(modules)}")
 
-        params = [p for module in modules for p in module.params]
+        params = [(n, p.storage_data_ptr) for module in modules for (n, p) in module.params]
         expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
         expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
@@ -1600,26 +1600,26 @@ class TestTorchTidyProfiler(TestCase):
             if (isinstance(node.extra_fields, _ExtraFields_PyCall) and
                     node.extra_fields.opt and node.extra_fields.opt.param_addrs):
                 # avoiding OptInfo duplicates from iterations
-                addr = node.extra_fields.opt.param_addrs[0]
-                if not [o for o in out if addr in o.param_addrs]:
+                addr = node.extra_fields.opt.param_addrs[0].storage_data_ptr
+                if not [o for o in out if addr == o.param_addrs[0].storage_data_ptr]:
                     out.append(node.extra_fields.opt)
             self._flat_out_extrafields(node.children, out)
         return out
 
     def _check_results(self, opt, opts, check_items=False):
-        self.assertEqual(len(opts), 1, "Expected 1 optimizer")
+        self.assertEqual(len(opts), 1, f"Expected 1 optimizer: len(opts): {len(opts)}")
         self.assertEqual(id(opt), opts[0].self, f"Optimizer addr ({id(opt)}) vs. profiled addr ({opts[0].self})")
         if check_items:
             self.assertEqual(len(opt.param_groups), len(opts))
             for group, opt_ in zip(opt.param_groups, opts):
                 self.assertEqual(
                     [(v.storage().data_ptr()) for v in group.get("params", [])],
-                    opt_.param_addrs
+                    [(o.storage_data_ptr) for o in opt_.param_addrs]
                 )
             for opt_ in opts:
                 self.assertEqual(
                     [(name, val.storage().data_ptr()) for dic in opt.state.values() for name, val in dic.items()],
-                    opt_.opt_state
+                    [(n, p.storage_data_ptr) for (n, p) in opt_.opt_state]
                 )
 
     def test_optimizer(self):

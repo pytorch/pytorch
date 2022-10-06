@@ -30,6 +30,15 @@ using result_ptr_t = std::shared_ptr<Result>;
 using trace_ptr_t =
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>;
 
+RawTensorMetadata::RawTensorMetadata(const at::Tensor& t)
+    : /*impl_=*/impl_(t.unsafeGetTensorImpl()),
+      /*data_=*/data_(t.has_storage() ? t.storage().data() : nullptr),
+      /*device_type_*/ device_type_(t.device().type()),
+      /*device_index_*/ device_index_(t.device().index()),
+      /*dtype_=*/dtype_(t.scalar_type()),
+      /*layout_=*/layout_(t.layout()),
+      /*dim_=*/dim_(t.sizes().size()){};
+
 // ============================================================================
 // == PyTorch Ops =============================================================
 // ============================================================================
@@ -70,15 +79,7 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         "Cannot profile Tensors of size > uint32 max. Got dim: ",
         dim);
 
-    tensor_metadata_.emplace_back(
-        /*impl_=*/TensorImplAddress(t.unsafeGetTensorImpl()),
-        /*data_=*/
-        StorageImplData(t.has_storage() ? t.storage().data() : nullptr),
-        /*device_type_*/ t.device().type(),
-        /*device_index_*/ t.device().index(),
-        /*dtype_=*/t.scalar_type(),
-        /*layout_=*/layout,
-        /*dim_=*/(uint32_t)dim);
+    tensor_metadata_.emplace_back(t);
 
     tensor_sizes_strides_.copy(sizes);
     if (layout == at::kStrided) {
@@ -114,7 +115,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
               out.strides_.back().push_back(*tensor_size_strides_it++);
             }
           }
-          out.tensor_metadata_.emplace_back(std::move(md));
+          out.tensor_metadata_.emplace_back(TensorMetadata(md));
           out.ivalues_.emplace_back();
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
