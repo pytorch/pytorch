@@ -4,6 +4,7 @@
 #include <ATen/Functions.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/core/TensorBody.h>
+#include <c10/core/SymInt.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
@@ -211,7 +212,7 @@ static inline Tensor applySlice(
     int64_t step,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<IntArrayRef>& self_sizes) {
+    const c10::optional<SymIntArrayRef>& self_sizes) {
   // TODO: implement negative step
   TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
 
@@ -220,10 +221,10 @@ static inline Tensor applySlice(
     // Skip this optimization if we are tracing, as the trace may be polymorphic
     // over the shape of the `self` tensor, and we still want to record
     // the slice.
-    int64_t length = (self_device == at::kCPU || self_device == at::kCUDA)
+    SymInt length = (self_device == at::kCPU || self_device == at::kCUDA)
         ? (*self_sizes)[dim]
         : self.size(dim);
-    if (!disable_slice_optimization && start == 0 && stop == length &&
+    if (!disable_slice_optimization && start == 0 && length == stop &&
         step == 1) {
       return self;
     }
@@ -237,7 +238,7 @@ static inline Tensor applySelect(
     int64_t index,
     int64_t real_dim,
     const at::Device& /*self_device*/,
-    const c10::optional<IntArrayRef>& self_sizes) {
+    const c10::optional<SymIntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     TORCH_CHECK_INDEX(
@@ -245,9 +246,9 @@ static inline Tensor applySelect(
         "invalid index of a 0-dim tensor. ",
         "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
-    int64_t size = (*self_sizes)[dim];
+    auto size = (*self_sizes)[dim];
     TORCH_CHECK_INDEX(
-        index >= -size && index < size,
+        size >= -index && size > index,
         "index ",
         index,
         " is out of bounds for dimension ",
@@ -424,7 +425,7 @@ static inline Tensor handleDimInMultiDimIndexing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& original_tensor_device,
-    const c10::optional<IntArrayRef>& prev_dim_result_sizes) {
+    const c10::optional<SymIntArrayRef>& prev_dim_result_sizes) {
   if (index.is_integer()) {
     return impl::applySelect(
         prev_dim_result,
@@ -508,7 +509,7 @@ static inline Tensor applySlicing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<IntArrayRef>& self_sizes) {
+    const c10::optional<SymIntArrayRef>& self_sizes) {
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
 
@@ -524,9 +525,9 @@ static inline Tensor applySlicing(
   for (const auto i : c10::irange(indices.size())) {
     auto& obj = indices[i];
     // See NOTE [nested tensor size for indexing]
-    c10::optional<IntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<IntArrayRef>(c10::nullopt)
-        : c10::optional<IntArrayRef>(result.sizes());
+    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
+        ? c10::optional<SymIntArrayRef>(c10::nullopt)
+        : c10::optional<SymIntArrayRef>(result.sym_sizes());
     result = handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
@@ -600,9 +601,9 @@ static inline Tensor get_item(
   // nested tensor does not have a size (yet) so for now we represent its size
   // as null may need to be changed after we reach a better solution for nested
   // tensor size
-  c10::optional<IntArrayRef> self_sizes = self.is_nested()
-      ? c10::optional<IntArrayRef>(c10::nullopt)
-      : c10::optional<IntArrayRef>(self.sizes());
+  c10::optional<SymIntArrayRef> self_sizes = self.is_nested()
+      ? c10::optional<SymIntArrayRef>(c10::nullopt)
+      : c10::optional<SymIntArrayRef>(self.sym_sizes());
 
   // handle simple types: integers, slices, none, ellipsis, bool
   if (indices.size() == 1) {
@@ -663,7 +664,7 @@ static inline void set_item(
     const Tensor& value,
     bool disable_slice_optimization = false) {
   at::Device self_device = self.device();
-  IntArrayRef self_sizes = self.sizes();
+  SymIntArrayRef self_sizes = self.sym_sizes();
 
   // handle simple types: integers, slices, ellipsis, bool
   if (indices.size() == 1) {
