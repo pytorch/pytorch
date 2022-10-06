@@ -1217,6 +1217,21 @@ class TestLRScheduler(TestCase):
         self.assertEqual(
             gc.collect(), 0, msg="Optimizer should be garbage-collected on __del__")
 
+    def test_no_cyclic_references_in_step(self):
+        def run():
+            param = torch.empty(10, requires_grad=True)
+            optim = SGD(params=[param], lr=0.5)
+            scheduler = LambdaLR(optim, lambda epoch: 1.0)
+            param.sum().backward()
+            optim.step()
+            scheduler.step()
+
+        import gc
+        gc.collect()
+        run()
+        garbage = gc.collect()
+        self.assertEqual(garbage, 0)
+
     def test_old_pattern_warning(self):
         epochs = 35
         with warnings.catch_warnings(record=True) as ws:
