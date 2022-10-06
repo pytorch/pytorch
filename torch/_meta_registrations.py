@@ -106,6 +106,7 @@ def meta_index_select_out(self, dim, index, out):
 
 
 @register_meta([aten.max.default, aten.min.default])
+@out_wrapper()
 def meta_max(self):
     return self.new_empty(())
 
