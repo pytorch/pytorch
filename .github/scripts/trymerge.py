@@ -36,7 +36,6 @@ from gitutils import (
 )
 from trymerge_explainer import (
     TryMergeExplainer,
-    get_land_check_troubleshooting_message,
     get_revert_message,
 )
 
@@ -1447,10 +1446,6 @@ def main() -> None:
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
 
-        troubleshooting = ""
-        if args.land_checks:
-            troubleshooting += get_land_check_troubleshooting_message()
-
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
@@ -1464,8 +1459,6 @@ def main() -> None:
         msg = "\n".join((
             f"## {title}",
             f"{exception}",
-            "",
-            f"{troubleshooting}",
             "",
             f"{internal_debugging}"
         ))
