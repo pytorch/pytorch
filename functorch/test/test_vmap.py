@@ -3133,7 +3133,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     def vmap_outplace_test(self, func, args, kwargs, in_dims, unbatched_expected, check_shape_only=False,
                            postprocess_fn=None):
         for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in \
-            compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+                compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
                 vmap_expected = postprocess_fn(vmap_expected)
                 vmap_actual = postprocess_fn(vmap_actual)
@@ -3159,7 +3159,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                     pass
             return
         for vmap_expected, vmap_actual, vmapvmap_expected, vmapvmap_actual in \
-            compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
+                compute_quantities_for_vmap_test(func, args, kwargs, in_dims):
             if postprocess_fn is not None:
                 vmap_expected = postprocess_fn(vmap_expected)
                 vmap_actual = postprocess_fn(vmap_actual)
