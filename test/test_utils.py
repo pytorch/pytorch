@@ -51,39 +51,40 @@ class TestCheckpoint(TestCase):
         module_lists_to_compare,
         num_chunks,
         input,
+        use_reentrant,
     ):
-        for use_reentrant in [True, False]:
-            with self.subTest(use_reentrant=use_reentrant):
-                # not checkpointed
-                out = model(input)
-                out_not_checkpointed = out.detach().clone()
-                model.zero_grad()
-                out.sum().backward()
-                grad_not_checkpointed = {
-                    name: param.grad.detach().clone()
-                    for name, param in model.named_parameters()
-                }
-                input_grad_not_checkpointed = input.grad.detach().clone()
-                for model_to_compare in module_lists_to_compare:
-                    # checkpointed model by passing list of modules
-                    detached = input.detach()
-                    detached.requires_grad = True
+        # not checkpointed
+        out = model(input)
+        out_not_checkpointed = out.detach().clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_not_checkpointed = {
+            name: param.grad.detach().clone()
+            for name, param in model.named_parameters()
+        }
+        input_grad_not_checkpointed = input.grad.detach().clone()
+        for model_to_compare in module_lists_to_compare:
+            # checkpointed model by passing list of modules
+            detached = input.detach()
+            detached.requires_grad = True
 
-                    # pass list of modules to checkpoint
-                    out = checkpoint_sequential(model_to_compare, num_chunks, detached, use_reentrant=use_reentrant)
-                    out_checkpointed = out.detach().clone()
-                    model.zero_grad()
-                    out.sum().backward()
-                    grad_checkpointed = {
-                        name: param.grad.detach().clone()
-                        for name, param in model.named_parameters()
-                    }
-                    input_grad_checkpointed = detached.grad.detach().clone()
-                    # compare outputs as well as the gradients of input and parameters
-                    self.assertEqual(out_checkpointed, out_not_checkpointed)
-                    self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
-                    for name in grad_checkpointed:
-                        self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
+            # pass list of modules to checkpoint
+            out = checkpoint_sequential(
+                model_to_compare, num_chunks, detached, use_reentrant=use_reentrant
+            )
+            out_checkpointed = out.detach().clone()
+            model.zero_grad()
+            out.sum().backward()
+            grad_checkpointed = {
+                name: param.grad.detach().clone()
+                for name, param in model.named_parameters()
+            }
+            input_grad_checkpointed = detached.grad.detach().clone()
+            # compare outputs as well as the gradients of input and parameters
+            self.assertEqual(out_checkpointed, out_not_checkpointed)
+            self.assertEqual(input_grad_not_checkpointed, input_grad_checkpointed)
+            for name in grad_checkpointed:
+                self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
     # Test whether checkpoint is being triggered or not. For this, we check
     # the number of times forward pass happens
@@ -97,7 +98,10 @@ class TestCheckpoint(TestCase):
 
             def forward(self, input_var):
                 self.counter += 1
-                return input_var
+                # For reentrant, need to have autograd actually
+                # pack a tensor to trigger recomp
+                ret = input_var * 2
+                return ret
 
         # checkpointed
         for use_reentrant in [True, False]:
@@ -149,25 +153,28 @@ class TestCheckpoint(TestCase):
         self.assertEqual(grads_no_checkpoint, grads_checkpoint)
 
     def test_checkpoint(self):
-        model = nn.Sequential(
-            nn.Linear(100, 50),
-            nn.ReLU(),
-            nn.Linear(50, 20),
-            nn.ReLU(),
-            nn.Linear(20, 5),
-            nn.ReLU()
-        )
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = nn.Sequential(
+                    nn.Linear(100, 50),
+                    nn.ReLU(),
+                    nn.Linear(50, 20),
+                    nn.ReLU(),
+                    nn.Linear(20, 5),
+                    nn.ReLU()
+                )
 
-        # Compare uncheckpointed model with its checkpointed counterparts
-        # In addition to running checkpoint_sequential on the nn.Sequential
-        # instance, we also run the function on the list of functions within
-        # the module.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.children()), model],
-            2,
-            torch.randn(1, 100, requires_grad=True)
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts
+                # In addition to running checkpoint_sequential on the nn.Sequential
+                # instance, we also run the function on the list of functions within
+                # the module.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.children()), model],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
@@ -188,15 +195,18 @@ class TestCheckpoint(TestCase):
                     input = layer(input)
                 return input
 
-        model = ModuleListNet()
+        for use_reentrant in [True, False]:
+            with self.subTest(use_reentrant=use_reentrant):
+                model = ModuleListNet()
 
-        # Compare uncheckpointed model with its checkpointed counterparts.
-        self._check_checkpoint_sequential(
-            model,
-            [list(model.module_list.children()), model.module_list],
-            2,
-            torch.randn(1, 100, requires_grad=True),
-        )
+                # Compare uncheckpointed model with its checkpointed counterparts.
+                self._check_checkpoint_sequential(
+                    model,
+                    [list(model.module_list.children()), model.module_list],
+                    2,
+                    torch.randn(1, 100, requires_grad=True),
+                    use_reentrant=use_reentrant,
+                )
 
     def test_checkpoint_sequential_deprecated_multiple_args(self):
         class Two(nn.Module):
