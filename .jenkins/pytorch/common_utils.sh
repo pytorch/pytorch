@@ -155,7 +155,7 @@ function install_deploy_deps_ubuntu() {
     sudo echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee -a /etc/apt/sources.list && \
     sudo apt update && \
     sudo apt install -y binutils && \
-    rm -rf /var/lib/apt/lists/*
+    sudo rm -rf /var/lib/apt/lists/*
 }
 
 function checkout_install_torchdeploy() {
