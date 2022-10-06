@@ -6,7 +6,7 @@
 #include <ATen/native/vulkan/api/Utils.h>
 
 #include <c10/core/ScalarType.h>
-#include <c10/core/typeid.h>
+#include <c10/util/typeid.h>
 #include <c10/util/flat_hash_map.h>
 
 #include <stack>
