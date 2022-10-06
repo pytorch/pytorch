@@ -9035,11 +9035,6 @@ op_db: List[OpInfo] = [
                # lambda impl
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float,)),
-               # AssertionError: Tensor-likes are not close!
-               # Mismatched elements: 5 / 5 (100.0%)
-               # https://github.com/pytorch/pytorch/issues/85409
-            #    DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-            #    DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
            )),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
