@@ -303,7 +303,6 @@ class OpOverload(PyOperatorABC):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def __getattr__(self, attr):
-        print(self, attr)
         if len(attr) == 0 or not attr[0].isupper():
             raise AttributeError()
 
