@@ -49,8 +49,11 @@ def bessel_j1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_j1(a)
 
 
-@_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_erfcx
+@register_decomposition(torch.ops.aten.special_erfcx)
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def erfcx(a: TensorLikeType) -> TensorLikeType:
     return prims.erfcx(a)
@@ -84,7 +87,9 @@ def i1e(a: TensorLikeType) -> TensorLikeType:
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def log_ndtr(a: TensorLikeType) -> TensorLikeType:
-    t = a * 0.707106781186547524400844362104849039
+    # Note: M_SQRT1_2 is the value of 1 / √2
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    t = a * M_SQRT1_2
     return torch.where(
         a < 1.0,
         torch.log(torch.special.erfcx(-t) / 2) - t * t,
@@ -126,7 +131,9 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def ndtr(a: TensorLikeType) -> TensorLikeType:
-    a_sqrt_2 = a / 1.414213562373095048801688724209698
+    # Note: M_SQRT1_2 is the value of 1 / √2
+    M_SQRT1_2 = 0.707106781186547524400844362104849039
+    a_sqrt_2 = a * M_SQRT1_2
     return (1 + torch.erf(a_sqrt_2)) * 0.5
 
 
