@@ -3541,28 +3541,72 @@ def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
     return self.unfold(dimension, size, step).clone()
 
 
+def associative_scan(
+    fn: Callable, a: Tensor, dim: int = 0, dtype: Optional[torch.dtype] = None
+):
+    dim = utils.canonicalize_dims(a.ndim, dim)
+
+    computation_dtype, result_dtype = utils.reduction_dtypes(
+        a, REDUCTION_OUTPUT_TYPE_KIND.SAME, dtype
+    )
+    assert result_dtype is not None
+    a = _maybe_convert_to_dtype(a, computation_dtype)  # type: ignore[assignment]
+
+    def scan(x):
+        # Divide and conquer.
+        # TODO implement the algorithm in-place
+        n = x.shape[dim]
+        if n < 2:
+            return x
+
+        # Optimisation.
+        # Choose ceil(n / 2) to have less elements in the call to
+        # fn a the end of the algorithm if n is even
+        mid = (n + 1) // 2
+        slice_fn = partial(prims.slice_in_dim, axis=dim)
+        fst = scan(slice_fn(x, 0, mid))
+        snd = scan(slice_fn(x, mid, n))
+        assert fst.shape[dim] <= snd.shape[dim] + 1
+
+        # Assume that fn broadcasts. Do fst = fn(fst[-1], snd)
+        snd = fn(slice_fn(fst, mid - 1, mid), snd)
+        return torch.cat([fst, snd], dim=dim)
+
+    if a.shape[dim] <= 1:
+        result = a.clone()
+    else:
+        result = scan(a)
+    return _maybe_convert_to_dtype(result, result_dtype)
+
+
 @register_decomposition(torch.ops.aten.cumsum)
 def cumsum(
     a: TensorLikeType,
     dim: int,
     *,
-    keepdim: bool = False,
     dtype: Optional[torch.dtype] = None,
     out: Optional[Tensor] = None,
 ) -> TensorLikeType:
-    # We implement all the kwargs of a reduction. ATen just handles dtype
-    # nb. This decomposition may not be as efficient as a backend-specific implementation
     ndim = a.ndim
     dim = utils.canonicalize_dim(ndim, dim)
-    if ndim == 0:
-        return sum(a.unsqueeze(0), dim=0, keepdim=keepdim, dtype=dtype, out=out)
-    a = a.unsqueeze(dim + 1)
-    rg = torch.arange(a.shape[dim], device=a.device)
-    mask = rg.unsqueeze(1) <= rg
-    for _ in range(ndim - dim - 1):
-        mask = mask.unsqueeze(-1)
-    masked_a = utils.mask_tensor(mask, a)
-    return sum(masked_a, dim=dim, keepdim=keepdim, dtype=dtype, out=out)
+    if ndim <= 1:
+        return sum(a.unsqueeze(0), dim=0, dtype=dtype, out=out)
+
+    if a.shape[dim] >= 32 and out is None:
+        if dtype is None:
+            if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
+                dtype = torch.int64
+            else:
+                dtype = a.dtype
+        return associative_scan(torch.add, a, dim, dtype)
+    else:
+        a = a.unsqueeze(dim + 1)
+        rg = torch.arange(a.shape[dim], device=a.device)
+        mask = rg.unsqueeze(1) <= rg
+        for _ in range(ndim - dim - 1):
+            mask = mask.unsqueeze(-1)
+        masked_a = utils.mask_tensor(mask, a)
+        return sum(masked_a, dim=dim, dtype=dtype, out=out)
 
 
 @register_decomposition(torch.ops.aten.unsqueeze, disable_meta=True)
