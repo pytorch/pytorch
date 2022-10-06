@@ -13,4 +13,8 @@ c10::SymIntNode SymFloatNodeImpl::ceil() {
   TORCH_CHECK(false, "NYI");
 }
 
+c10::SymIntNode SymFloatNodeImpl::floor() {
+  TORCH_CHECK(false, "NYI");
+}
+
 } // namespace c10

@@ -315,6 +315,7 @@ class PythonSymFloatNodeImpl : public c10::SymFloatNodeImpl {
   }
 
   SymIntNode ceil() override;
+  SymIntNode floor() override;
 
   py::handle getPyObj() {
     return py::handle(pyobj_.get()->ptr(getPyInterpreter()));
@@ -339,6 +340,12 @@ SymFloatNode PythonSymIntNodeImpl::sym_float() {
 SymIntNode PythonSymFloatNodeImpl::ceil() {
   py::gil_scoped_acquire acquire;
   auto r = getPyObj().attr("ceil")();
+  return c10::make_intrusive<PythonSymIntNodeImpl>(r);
+}
+
+SymIntNode PythonSymFloatNodeImpl::floor() {
+  py::gil_scoped_acquire acquire;
+  auto r = getPyObj().attr("floor")();
   return c10::make_intrusive<PythonSymIntNodeImpl>(r);
 }
 
@@ -1573,6 +1580,9 @@ void initJITBindings(PyObject* module) {
       .def(
           "__ceil__",
           [](c10::SymFloatNode a) -> c10::SymIntNode { return a->ceil(); })
+      .def(
+          "__floor__",
+          [](c10::SymFloatNode a) -> c10::SymIntNode { return a->floor(); })
       .def(
           "get_pyobj",
           [](c10::SymFloatNode a) -> py::object {
