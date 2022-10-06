@@ -235,10 +235,11 @@ def _single_tensor_adamax(params: List[Tensor],
             exp_inf.mul_(beta2).unsqueeze(0),
             grad.abs().add_(eps).unsqueeze_(0)
         ], 0)
+
         if not differentiable:
             torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
         else:
-            exp_inf = torch.amax(norm_buf, 0, keepdim=False)
+            exp_inf.copy_(torch.amax(norm_buf, 0, keepdim=False))
 
         bias_correction = 1 - beta1 ** step
         clr = lr / bias_correction

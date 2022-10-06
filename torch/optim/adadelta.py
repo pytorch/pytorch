@@ -211,7 +211,6 @@ def _single_tensor_adadelta(params: List[Tensor],
         std = square_avg.add(eps).sqrt_()
         delta = acc_delta.add(eps).sqrt_()
         if differentiable:
-            std = std.clone()
             delta = delta.clone()
         delta.div_(std).mul_(grad)
         acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)

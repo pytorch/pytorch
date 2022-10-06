@@ -283,7 +283,7 @@ def _single_tensor_adagrad(
                 param = torch.view_as_real(param)
             state_sum.addcmul_(grad, grad, value=1)
             if differentiable:
-                std = state_sum.sqrt().clone().add_(eps)
+                std = state_sum.sqrt() + eps
             else:
                 std = state_sum.sqrt().add_(eps)
             param.addcdiv_(grad, std, value=-clr)
