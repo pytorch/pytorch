@@ -1467,7 +1467,9 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         if collective == dist.all_gather:
             collective([tensor], tensor, *args)
         elif collective == dist.reduce_scatter:
-            collective(tensor, [tensor], *args)
+            if backend != "gloo":
+                # gloo does not support reduce_scatter
+                collective(tensor, [tensor], *args)
         else:
             collective(tensor, *args)
 
