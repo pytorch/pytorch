@@ -124,7 +124,7 @@ legend = f"""\
 
 Legend:
     [a     ] - a segment in the allocator
-    ^-- a page {Bytes(PAGE_SIZE)} of memory in the segment
+     ^-- a page {Bytes(PAGE_SIZE)} of memory in the segment
     a-z: pages filled with a single block's content
     ' ': page is completely free
     *: page if completely full with multiple blocks
@@ -133,6 +133,14 @@ Legend:
 """
 
 def segsum(data):
+    """" Visually reports how the allocator has filled its segments. This printout can help debug fragmentation issues
+    since free fragments will appear as gaps in this printout.  The amount of free space is reported for each segment.
+    We distinguish between internal free memory which occurs because the allocator rounds the allocation size, and
+    external free memory, which are the gaps between allocations in a segment.
+    Args:
+        data: snapshot dictionary created from _snapshot()
+
+    """
     segments = []
     out = io.StringIO()
     out.write(f"Summary of segments >= {Bytes(PAGE_SIZE)} in size\n")
@@ -301,18 +309,21 @@ if __name__ == "__main__":
         sys.path.remove(thedir)
     import argparse
 
-    fn_name = 'torch.cuda.memory_dbg.snapshot()'
+    fn_name = 'torch.cuda.memory._snapshot()'
     pickled = f'pickled memory statistics from {fn_name}'
     parser = argparse.ArgumentParser(description=f'Visualize memory dumps produced by {fn_name}')
+
     subparsers = parser.add_subparsers(dest='action')
 
     def _output(p):
         p.add_argument('-o', '--output', default='output.svg', help='flamegraph svg (default: output.svg)')
 
-    stats_a = subparsers.add_parser('stats', description='Prints overall allocation statistics')
+    description = 'Prints overall allocation statistics and a visualization of how the allocators segments are currently filled.'
+    stats_a = subparsers.add_parser('stats', description=description)
     stats_a.add_argument('input', help=pickled)
 
-    trace_a = subparsers.add_parser('trace', description='Prints ring buffer of most recent allocation events')
+    description = 'Prints buffer of the most recent allocation events embedded in the snapshot in a Pythonic style.'
+    trace_a = subparsers.add_parser('trace', description=description)
     trace_a.add_argument('input', help=pickled)
 
     description = 'Generate a flamegraph that visualizes what memory is stored in each allocator segment (aka block)'
