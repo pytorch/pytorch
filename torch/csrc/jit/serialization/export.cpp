@@ -1245,7 +1245,8 @@ void GraphEncoder::EncodeTensor(
     // For now, we use the name of the tensor as the external lookup name to
     // avoid ONNX protobuf changes.
     TORCH_INTERNAL_ASSERT(external_ref.value() == tensor_proto->name());
-    TORCH_INTERNAL_ASSERT(raw_data_export_map_.count(external_ref.value()) == 0);
+    TORCH_INTERNAL_ASSERT(
+        raw_data_export_map_.count(external_ref.value()) == 0);
     raw_data_export_map_[external_ref.value()] = t;
     tensor_proto->set_raw_data("__EXTERNAL");
   } else {
