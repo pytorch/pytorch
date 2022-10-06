@@ -1,6 +1,7 @@
 import torch
 import contextlib
-from typing import Callable, Any, Dict, Tuple, Optional, List, Set
+from typing import Callable, Any, Dict, Tuple, Optional, Sequence, List, Set
+from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
 import weakref
 
@@ -177,38 +178,47 @@ def disable_saved_tensors_hooks(error_message):
             torch._C._autograd._saved_tensors_hooks_disable(maybe_prev_message)
 
 
-def register_multi_grad_hook(tensors, fn):
-    r"""Registers a backward hook.
+def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequence[Optional[torch.Tensor]]], None]):
+    r"""Registers a multi-grad backward hook.
 
-    The hook will be called every time a gradient with respect to the
-    Tensor is computed. The hook should have the following signature::
+    The hook will be called after gradients with respect to every tensor in
+    :attr:`tensors` have been computed. If a tensor is in :attr:`tensors` but
+    is not part of the graph, or if a tensor is not needed to compute the gradients
+    for any ``inputs`` specified for the current ``.backward()`` or ``.grad()`` call,
+    this tensor will be ignored and the hook will not wait for its gradient to be
+    computed.
 
-        hook(grad) -> Tensor or None
+    After every tensor's gradient has been computed, :attr:`fn` will be called with
+    a list of their gradients ordered in the same way they were passed in :attr:`tensors`.
+    For the tensors that are ignored the list takes a value of ``None`` at those indices.
 
+    The hook should not modify its arguments.
 
-    The hook should not modify its argument, but it can optionally return
-    a new gradient which will be used in place of :attr:`grad`.
-
-    This function returns a handle with a method ``handle.remove()``
-    that removes the hook from the module.
+    This function returns a handle with a method ``handle.remove()`` that removes the hook.
 
     Example::
 
-        >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
-        >>> h = v.register_hook(lambda grad: grad * 2)  # double the gradient
-        >>> v.backward(torch.tensor([1., 2., 3.]))
-        >>> v.grad
-
-            2
-            4
-            6
-        [torch.FloatTensor of size (3,)]
-
-        >>> h.remove()  # removes the hook
+        >>> import torch
+        >>>
+        >>> a = torch.rand(2, 3, requires_grad=True)
+        >>> b = torch.rand(2, 3, requires_grad=True)
+        >>> c = a * b
+        >>> d = a * b
+        >>>
+        >>> def fn(grads):
+        ...     print([g is not None for g in grads])
+        ...
+        >>> torch.autograd.graph.register_multi_grad_hook((a, b, c, d), fn)
+        >>>
+        >>> c.sum().backward(retain_graph=True)
+        [True, True, True, False]
+        >>> c.sum().backward(inputs=(a,), retain_graph=True)
+        [True, False, True, False]
+        >>>
     """
     count = 0
     nb_calls = None
-    buffer: Optional[List[Optional[torch.Tensor]]] = None
+    buffer = [None] * len(tensors)
 
     def get_grad_fn(t):
         # or grad accumulator
@@ -226,17 +236,32 @@ def register_multi_grad_hook(tensors, fn):
             if count == 0:
                 # On the first call, compute the actual nb_calls and buffer
                 nb_calls = sum(1 for g in grad_fns if torch._C._will_engine_execute_node(g))  # type: ignore[attr-defined]
-                buffer = [None] * nb_calls
 
-            assert buffer is not None
             buffer[idx] = grad
             count += 1
 
             if count == nb_calls:
                 fn(buffer)
+                # Reset hook so we can perform backward multiple times
+                count = 0
+                buffer = [None] * len(tensors)
         return inner_hook
+
+    class Handle():
+        handles: Tuple[RemovableHandle, ...]
+
+        def __init__(self, handles: Tuple[RemovableHandle, ...]):
+            self.handles = handles
+
+        def remove(self):
+            for handle in self.handles:
+                handle.remove()
+
+    handles: List[RemovableHandle] = []
     for i, t in enumerate(tensors):
-        t.register_hook(get_inner_hook(i))
+        handles.append(t.register_hook(get_inner_hook(i)))
+
+    return Handle(tuple(handles))
 
 
 # NOTE [Allow mutation on tensors saved for backward]
