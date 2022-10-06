@@ -180,8 +180,7 @@ void initPythonBindings(PyObject* module) {
           [](const NNModuleInfo& s) {
             py::list list;
             for (auto& p : s.params_) {
-              list.append(std::make_pair(
-                  p.first, reinterpret_cast<intptr_t>(p.second)));
+              list.append(std::make_pair(p.first, p.second));
             }
             return list;
           })
@@ -199,15 +198,14 @@ void initPythonBindings(PyObject* module) {
           [](const OptimizerInfo& s) {
             py::list params_addrs;
             for (auto& addr : s.params_addr_) {
-              params_addrs.append(reinterpret_cast<intptr_t>(addr));
+              params_addrs.append(addr);
             }
             return params_addrs;
           })
       .def_property_readonly("opt_state", [](const OptimizerInfo& s) {
         py::list states;
         for (auto& a : s.opt_state_) {
-          states.append(
-              std::make_pair(a.first, reinterpret_cast<intptr_t>(a.second)));
+          states.append(std::make_pair(a.first, a.second));
         }
         return states;
       });
