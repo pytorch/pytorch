@@ -205,6 +205,7 @@ reflectable_magic_methods = {
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
     'mod': lambda a, b: a % b,
+    'pow': lambda a, b: a ** b,
     'truediv': lambda a, b: a / b,
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
@@ -225,7 +226,7 @@ unary_magic_methods = {
     'ceil'
 }
 
-float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge"}
+float_magic_methods = {"add", "sub", "mul", "truediv", "ceil", "floor", "eq", "gt", "lt", "le", "ge", "pow"}
 
 def _make_magic(method, func, py_type):
     func = lru_cache(256)(func)
