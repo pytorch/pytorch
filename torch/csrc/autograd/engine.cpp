@@ -1255,7 +1255,9 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
 auto Engine::ready_queue(
     std::shared_ptr<ReadyQueue> cpu_ready_queue,
     at::Device device) -> std::shared_ptr<ReadyQueue> {
-  if (should_run_in_cpu_ready_queue(device.type())) {
+  bool multithreading_disabled =
+      !c10::AutogradState::get_tls_state().get_multithreading_enabled();
+  if (multithreading_disabled || should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;

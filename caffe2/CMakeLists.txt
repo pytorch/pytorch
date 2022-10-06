@@ -810,7 +810,7 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(HAS_WERROR_SIGN_COMPARE AND WERROR AND NOT USE_PYTORCH_METAL)
+if(HAS_WERROR_SIGN_COMPARE AND WERROR)
   # target_compile_options(torch_cpu PRIVATE "-Werror=sign-compare")
   set_property(SOURCE ${ATen_CORE_SRCS} ${ATen_CPU_SRCS} APPEND PROPERTY COMPILE_OPTIONS "-Werror=sign-compare")
 endif()
@@ -1147,9 +1147,6 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
-install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
-  DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
-  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 install(FILES
   "${TORCH_SRC_DIR}/script.h"
   "${TORCH_SRC_DIR}/extension.h"
@@ -1157,12 +1154,6 @@ install(FILES
   "${TORCH_SRC_DIR}/library.h"
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-if(USE_DEPLOY)
-  install(FILES
-    "${TORCH_SRC_DIR}/deploy.h"
-    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
-endif()
-
 if(BUILD_TEST)
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(
