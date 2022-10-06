@@ -824,6 +824,15 @@ class FullyShardedDataParallel(nn.Module):
         same FSDP unit. If enhanced shared parameter support is needed for your
         use case, please ping https://github.com/pytorch/pytorch/issues/77724
 
+    .. note:
+        Attempting to run the forward pass of a submodule that is contained in an
+        FSDP instance is not supported and will result in errors. This is because the
+        submodule's parameters will be sharded, but it itself is not an FSDP instance,
+        so its forward pass will not all-gather the full parameters appropriately.
+        This could potentially happen when attempting to run only the encoder of a
+        encoder-decoder model, and the encoder is not wrapped in its own FSDP instance. To
+        resolve this, please wrap the submodule in its own FSDP unit.
+
     .. note::
         Inputs into FSDP ``forward`` function will be moved to compute device
         (same device FSDP module is on) before running ``forward``, so user does
