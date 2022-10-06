@@ -4637,7 +4637,7 @@ class TestCudaComm(TestCase):
             del x
             torch.cuda.empty_cache()
             ss = torch.cuda.memory._snapshot()
-            assert(ss['device_traces'][0][-1]['action'] == 'segment_free')
+            self.assertTrue(ss['device_traces'][0][-1]['action'] == 'segment_free')
 
         finally:
             torch.cuda.memory._record_memory_history(False)
@@ -4736,8 +4736,6 @@ class TestCudaComm(TestCase):
         x = False
 
         def cb(device, alloc, device_alloc, device_free):
-            print(device, alloc, device_alloc, device_free)
-            print(torch.cuda.memory._snapshot())
             nonlocal x
             x = True
         torch._C._cuda_attach_out_of_memory_observer(cb)

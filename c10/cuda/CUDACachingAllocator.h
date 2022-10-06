@@ -129,7 +129,17 @@ struct SegmentInfo {
 };
 
 struct TraceEntry {
-  enum Action { ALLOC, FREE, SEGMENT_ALLOC, SEGMENT_FREE, SNAPSHOT, OOM };
+  enum Action {
+    ALLOC, // API made to the caching allocator for new memory
+    FREE_REQUESTED, // API call made to the caching allocator to free memory
+    FREE_COMPLETED, // The allocator might have to delay a free because
+                    // it is still in use on another stream via record_stream
+                    // This event is generated when a free actually completes.
+    SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
+    SEGMENT_FREE,  // a call to cudaFree to return memory to the OS (e.g. to defragement or empty_caches)
+    SNAPSHOT,      // a call to snapshot, used to correlate memory snapshots to trace events
+    OOM            // the allocator threw an OutOfMemoryError (addr_ is the amount of free bytes reported by cuda)
+  };
   TraceEntry(
       Action action,
       int64_t addr,

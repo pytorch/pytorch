@@ -33,7 +33,7 @@ c10::List<IValue> new_list() {
   return List<IValue>(c10::AnyType::get());
 }
 } // namespace
-void _record_memory_history(bool enabled, bool alloc_trace_max_entries = 1) {
+void _record_memory_history(bool enabled, int64_t alloc_trace_max_entries) {
   c10::cuda::CUDACachingAllocator::recordHistory(
       enabled, nullptr, alloc_trace_max_entries, false);
 }
@@ -114,7 +114,8 @@ std::string _memory_snapshot_pickled() {
   auto traces = new_list();
   IValue action_s = "action";
   IValue alloc_s = "alloc";
-  IValue free_s = "free";
+  IValue free_requested_s = "free_requested";
+  IValue free_completed_s = "free_completed";
   IValue segment_alloc_s = "segment_alloc";
   IValue segment_free_s = "segment_free";
   IValue snapshot_s = "snapshot";
@@ -127,8 +128,10 @@ std::string _memory_snapshot_pickled() {
     switch (action) {
       case TraceEntry::ALLOC:
         return alloc_s;
-      case TraceEntry::FREE:
-        return free_s;
+      case TraceEntry::FREE_REQUESTED:
+        return free_requested_s;
+      case TraceEntry::FREE_COMPLETED:
+        return free_completed_s;
       case TraceEntry::SEGMENT_ALLOC:
         return segment_alloc_s;
       case TraceEntry::SEGMENT_FREE:

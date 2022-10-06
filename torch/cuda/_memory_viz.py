@@ -255,11 +255,15 @@ def trace(data):
                 out.write(f'{n} = {seg_name}[{offset}:{Bytes(size)}]\n')
                 allocation_addr_to_name[addr] = (n, size, count)
                 count += size
-            elif e['action'] == 'free':
+            elif e['action'] == 'free_requested':
+                addr, size = e['addr'], e['size']
+                name, _, _ = allocation_addr_to_name.get(addr, (addr, None, None))
+                out.write(f'del {name} # {Bytes(size)}\n')
+            elif e['action'] == 'free_completed':
                 addr, size = e['addr'], e['size']
                 count -= size
-                _, name, _ = allocation_addr_to_name.get(addr, (addr, None, None))
-                out.write(f'del {name} # {Bytes(size)}\n')
+                name, _, _ = allocation_addr_to_name.get(addr, (addr, None, None))
+                out.write(f'# free completed for {name} {Bytes(size)}\n')
                 if name in allocation_addr_to_name:
                     free_names.append(name)
                     del allocation_addr_to_name[name]

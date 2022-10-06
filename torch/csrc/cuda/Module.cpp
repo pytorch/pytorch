@@ -658,7 +658,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::list traces;
   py::str action_s = "action";
   py::str alloc_s = "alloc";
-  py::str free_s = "free";
+  py::str free_requested_s = "free_requested";
+  py::str free_completed_s = "free_completed";
   py::str segment_alloc_s = "segment_alloc";
   py::str segment_free_s = "segment_free";
   py::str snapshot_s = "snapshot";
@@ -671,8 +672,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     switch (action) {
       case TraceEntry::ALLOC:
         return alloc_s;
-      case TraceEntry::FREE:
-        return free_s;
+      case TraceEntry::FREE_REQUESTED:
+        return free_requested_s;
+      case TraceEntry::FREE_COMPLETED:
+        return free_completed_s;
       case TraceEntry::SEGMENT_ALLOC:
         return segment_alloc_s;
       case TraceEntry::SEGMENT_FREE:

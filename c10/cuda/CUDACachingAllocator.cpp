@@ -866,7 +866,7 @@ class DeviceCachingAllocator {
     });
     if (block->history) {
       record_trace(
-          TraceEntry::FREE,
+          TraceEntry::FREE_REQUESTED,
           int64_t(block->ptr),
           block->history->h.real_size,
           block->stream,
@@ -1207,7 +1207,14 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
-
+    if (block->history) {
+      record_trace(
+          TraceEntry::FREE_COMPLETED,
+          int64_t(block->ptr),
+          block->history->h.real_size,
+          block->stream,
+          block->history->h.context);
+    }
     size_t original_block_size = block->size;
 
     auto& pool = *block->pool;
