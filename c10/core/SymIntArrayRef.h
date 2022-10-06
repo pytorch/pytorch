@@ -29,7 +29,7 @@ inline SymIntArrayRef fromIntArrayRefKnownNonNegative(IntArrayRef array_ref) {
   return fromIntArrayRefUnchecked(array_ref);
 }
 
-inline SymIntArrayRef fromIntArrayRef(IntArrayRef array_ref) {
+inline SymIntArrayRef fromIntArrayRefSlow(IntArrayRef array_ref) {
   for (size_t i = 0; i < array_ref.size(); ++i) {
     TORCH_CHECK(
         SymInt::check_range(array_ref[i]),
