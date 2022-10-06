@@ -10347,8 +10347,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         subtest(False, name='nobias'), subtest(True, name='bias')])
     @parametrize_test('weight_layout', [
         subtest(torch.strided, name='weightStrided'),
-        # TODO: NotImplementedError: Could not run 'aten::sparse_dim' with arguments from the 'CPU' backend
-        # subtest(torch.sparse_coo, name='weightCOO'),
+        subtest(torch.sparse_coo, name='weightCOO'),
         subtest(torch.sparse_csr, name='weightCSR'),
         subtest(torch.sparse_csc, name='weightCSC'),
         # TODO: addmm: computation on CPU is not implemented for Strided + Strided @ SparseBsr
