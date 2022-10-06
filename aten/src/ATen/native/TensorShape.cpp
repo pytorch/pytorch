@@ -11,6 +11,7 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
@@ -921,7 +922,7 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
-  return self.expand(other.sizes());
+  return self.expand_symint(other.sym_sizes());
 }
 
 Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
@@ -1136,11 +1137,24 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
-Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  auto cur_size = self.sym_size(dim);
+  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
+    start = maybe_wrap_dim(start, cur_size);
+  }
+  TORCH_CHECK(length >= 0 && start <= cur_size - length,
+           "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+  return at::slice_symint(self, dim, start, start + length, 1);
+}
+
+// This overload exists purely for XLA, because they wanted to pass in "symbolic"
+// start via Tensor.
+Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start, SymInt length) {
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
-  return at::narrow(self, dim, st, length);
+  return at::narrow_symint(self, dim, c10::SymInt(st), length);
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
@@ -1498,39 +1512,49 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   return quantizer;
 }
 
-Tensor select(const Tensor& self, int64_t dim, int64_t index) {
+Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
-  auto size = self.size(dim);
-  if (index < -size || index >= size) {
+  auto size = self.sym_sizes()[dim];
+  if (size < -index_ || size <= index_) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
+  SymInt index = index_;
   if (index < 0) {
     index += size;
   }
   if (self.is_sparse()) {
-    return select_sparse(self, dim, index);
+    return select_sparse(self, dim, index.guard_int(__FILE__, __LINE__));
   }
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
-  DimVector strides(self.strides().begin(), self.strides().end());
-  auto storage_offset = self.storage_offset() + index * strides[dim];
-  sizes.erase(sizes.begin() + dim);
-  strides.erase(strides.begin() + dim);
 
   Tensor result;
   if (self.is_quantized()) {
-    auto quantizer = create_subtensor_quantizer(self, true, index, index + 1, dim, 1);
+    auto local_index = index.guard_int(__FILE__, __LINE__);
+
+    DimVector sizes(self.sizes().begin(), self.sizes().end());
+    DimVector strides(self.strides().begin(), self.strides().end());
+    auto storage_offset = self.storage_offset() + local_index * strides[dim];
+    sizes.erase(sizes.begin() + dim);
+    strides.erase(strides.begin() + dim);
+
+    auto quantizer = create_subtensor_quantizer(self, true, local_index, local_index + 1, dim, 1);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
-    result = self.as_strided(sizes, strides, storage_offset);
+    std::vector<c10::SymInt> sizes(self.sym_sizes().begin(), self.sym_sizes().end());
+    std::vector<c10::SymInt> strides(self.sym_strides().begin(), self.sym_strides().end());
+    auto storage_offset = self.sym_storage_offset() + index * strides[dim];
+    sizes.erase(sizes.begin() + dim);
+    strides.erase(strides.begin() + dim);
+
+    result = self.as_strided_symint(sizes, strides, storage_offset);
   }
   namedinference::propagate_names_except(result, self, {dim});
   return result;
@@ -2773,11 +2797,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return self.alias();
   }
 
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-  DimVector strides(self.strides().begin(), self.strides().end());
+  SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
   std::swap(strides[dim0], strides[dim1]);
-  auto result = self.as_strided(sizes, strides);
+  auto result = self.as_strided_symint(sizes, strides);
   propagate_transposed_names(result, self, dim0, dim1);
   return result;
 }
@@ -3343,35 +3367,25 @@ Tensor detach(const Tensor& self) {
     /*allow_tensor_metadata_change=*/false));
 }
 
-Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
-  // some special handling to deal with allow dimension == 0 when self.dim() == 0
-  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
+  // some special handling to deal with allow d == 0 when self.dim() == 0
+  auto ndim = self.dim();
+  d = at::maybe_wrap_dim(d, ndim, /*wrap_scalar=*/true);
 
-  const auto sizes = self.sizes();
-  const auto strides = self.strides();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
-  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
+  int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
-
-  DimVector new_size(self.dim() + 1);
-  DimVector new_stride(self.dim() + 1);
-
-  new_size[self.dim()] = size;
-  new_stride[self.dim()] = self.dim() == 0 ? 1 : strides[dimension];
-  for(const auto d : c10::irange(self.dim())) {
-    const auto self_size = sizes[d];
-    const auto self_stride = strides[d];
-    if(d == dimension) {
-      new_size[d] = (self_size - size) / step + 1;
-      new_stride[d] = step*self_stride;
-    } else {
-      new_size[d] = self_size;
-      new_stride[d] = self_stride;
-    }
+  sizes.push_back(size);
+  strides.push_back(self.dim() == 0 ? 1 : strides[d]);
+  // The if handles the self.dim() == 0 case
+  if (d < ndim) {
+    sizes[d] = (sizes[d] - size) / step + 1;
+    strides[d] *= step;
   }
-
-  return self.as_strided(new_size, new_stride);
+  return self.as_strided(sizes, strides);
 }
 
 template <typename scalar_t>
@@ -3430,7 +3444,7 @@ Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
   return result;
 }
 
-Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+Tensor diag_backward_symint(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
   AT_ASSERT(ndimension == 1 || ndimension == 2);
 
@@ -3439,11 +3453,11 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
+  return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
-Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
+Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
   auto diag = grad_input.diagonal(offset, dim1, dim2);
   diag.copy_(grad);
   return grad_input;

@@ -5286,12 +5286,15 @@ for shape in [(1,), ()]:
         self.assertEqual(out.grad_fn._saved_indices, (None, indices))     # c10::List<c10::optional<Tensor>> -> Tuple[Tensor?]
         self.assertIsInstance(out.grad_fn._saved_indices[1], torch.Tensor)
         self.assertIsInstance(out.grad_fn._raw_saved_indices[1], torch._C._autograd.SavedTensor)
-        self.assertEqual(out.grad_fn._saved_self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
-        self.assertIsInstance(out.grad_fn._saved_self_sizes[0], int)
+        self.assertEqual(out.grad_fn._saved_self_sym_sizes, a.shape)          # SymIntArrayRef -> Tuple[SymInt]
+        self.assertIsInstance(out.grad_fn._saved_self_sym_sizes[0], int)
 
         out.grad_fn._raw_saved_indices[1].register_hooks(lambda x: x, lambda x: x)
         with self.assertRaisesRegex(RuntimeError, "None is forbidden"):
             out.grad_fn._raw_saved_indices[0].register_hooks(lambda x: x, lambda x: x)
+
+        out = a.mean()
+        self.assertEqual(out.grad_fn._saved_self_sizes, a.shape)          # IntArrayRef -> Tuple[int]
 
         a = torch.ones(2, 2, requires_grad=True)
         out = a * a
@@ -5311,6 +5314,24 @@ for shape in [(1,), ()]:
         else:
             self.assertIsNone(out.grad_fn._saved_scales)                  # c10::optional<ArrayRef<double>> -> float[]?
 
+        a = torch.ones(1, 1, 3, 3, requires_grad=True)
+        out = nn.Conv2d(1, 1, 3)(a)
+        self.assertEqual(out.grad_fn._saved_bias_sym_sizes_opt, (1,))     # c10::optional<SymIntArrayRef> -> SymInt[]?
+        out = nn.Conv2d(1, 1, 3, bias=False)(a)
+        # TODO: This is BAD! we converted a c10::nullopt into a (0,)
+        self.assertEqual(out.grad_fn._saved_bias_sym_sizes_opt, (0,))
+
+        a = torch.ones(1, 3, 3, requires_grad=True)
+        out = torch.addbmm(a.squeeze(0), a, a)
+        self.assertEqual(out.grad_fn._saved_batch1_argsize_0, 1)          # int64_t
+        self.assertEqual(out.grad_fn._saved_batch1_argsize_1, 3)          # int64_t
+
+        a = torch.ones(1, 1, 3, 3, requires_grad=True)
+        out = torch.nn.functional.unfold(a, 3)
+        self.assertEqual(out.grad_fn._saved_self_sym_argsize_minus_2, 3)  # SymInt
+        self.assertEqual(out.grad_fn._saved_self_sym_argsize_minus_1, 3)  # SymInt
+
+        a = torch.ones(1, 1, 2, requires_grad=True)
         out = torch.nn.functional.interpolate(a, scale_factor=0.5, mode="linear")
         self.assertIsNone(out.grad_fn._saved_output_size)
         self.assertEqual(out.grad_fn._saved_scale_factors, (0.5,))
@@ -6719,7 +6740,7 @@ for shape in [(1,), ()]:
         self.assertEqual(2 * 3 * 3 * b, b.grad)
 
     def test_disabling_saved_tensor_hooks(self):
-        with torch.autograd.graph._disable_saved_tensors_hooks("error message"):
+        with torch.autograd.graph.disable_saved_tensors_hooks("error message"):
             with self.assertRaisesRegex(RuntimeError, "error message"):
                 with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
                     pass
@@ -6728,15 +6749,15 @@ for shape in [(1,), ()]:
 
         with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
             with self.assertRaisesRegex(RuntimeError, "error message"):
-                with torch.autograd.graph._disable_saved_tensors_hooks("error message"):
+                with torch.autograd.graph.disable_saved_tensors_hooks("error message"):
                     pass
 
         self.assertTrue(torch._C._autograd._saved_tensors_hooks_is_enabled())
 
     def test_disabling_saved_tensor_hooks_nested(self):
-        with torch.autograd.graph._disable_saved_tensors_hooks("outer"):
-            with self.assertRaisesRegex(RuntimeError, "inner"):
-                with torch.autograd.graph._disable_saved_tensors_hooks("inner"):
+        with torch.autograd.graph.disable_saved_tensors_hooks("outer"):
+            with torch.autograd.graph.disable_saved_tensors_hooks("inner"):
+                with self.assertRaisesRegex(RuntimeError, "inner"):
                     with torch.autograd.graph.saved_tensors_hooks(lambda x: x, lambda x: x):
                         pass
 
@@ -8087,7 +8108,7 @@ class TestAutogradDeviceType(TestCase):
         out.sum().backward()
         self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
-    @onlyCPU
+    @unittest.skipIf(not torch.profiler.itt.is_available(), "ITT is required")
     def test_profiler_emit_itt(self, device):
         # This test is not intended to ensure correctness of itt ranges.
         # That would require something a great deal more complex (you'd have to create a
@@ -9303,6 +9324,33 @@ class TestAutogradMultipleDispatch(TestCase):
         nt = torch.nested.nested_tensor([torch.rand(2), torch.rand(2)], device=device, requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace operation"):
             foo(nt).backward(torch.nested.nested_tensor([torch.rand(1), torch.rand(1)], device=device))
+
+    @onlyCUDA
+    def test_backward_single_threaded(self):
+
+        threads_eq = None
+
+        class TestFn(Function):
+            @staticmethod
+            def forward(ctx, x, self):
+                ctx.self = self
+                ctx.tid = threading.get_ident()
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, gO):
+                nonlocal threads_eq
+                threads_eq = ctx.tid == threading.get_ident()
+                return gO, None
+
+        inp = torch.rand(10, device="cuda", requires_grad=True)
+
+        with torch.autograd.set_multithreading_enabled(False):
+            TestFn.apply(inp, None).sum().backward()
+        self.assertTrue(threads_eq)
+
+        TestFn.apply(inp, None).sum().backward()
+        self.assertFalse(threads_eq)
 
 # Import test cases from below autograd/ here. These are found
 # implicitly by the loader, so Flake8 thinks they are unused, hence
