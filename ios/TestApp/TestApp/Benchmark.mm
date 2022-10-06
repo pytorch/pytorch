@@ -1,3 +1,5 @@
+#ifdef BUILD_LITE_INTERPRETER
+
 #import "Benchmark.h"
 #include <string>
 #include <vector>
@@ -103,3 +105,4 @@ static int iter = 10;
 }
 
 @end
+#endif
