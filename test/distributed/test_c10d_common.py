@@ -1488,6 +1488,7 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
             (dist.all_reduce,),
             (dist.all_gather,),
             (dist.reduce_scatter,),
+            (dist.barrier,),
         ]
         for collective, *args in collectives_and_args:
             with self.subTest(collective=collective, args=args):
