@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
@@ -1285,6 +1286,9 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const Scalar& beta,
     const Scalar& alpha
 ) {
+  AT_ASSERT(r.layout() == kStrided, "addmm_sparse_dense: expected strided result tensor, got tensor with layout ", r.layout());
+  AT_ASSERT(sparse_.layout() == kSparse, "addmm_sparse_dense: expected sparse tensor, got tensor with layout ", sparse_.layout());
+
   // TODO: This error message seems awfully opaque
   TORCH_CHECK(
       t.is_cpu(),
@@ -1407,8 +1411,12 @@ Tensor _sparse_mm(
   if (mat1.is_sparse() && mat2.is_sparse()) {
     return at::_sparse_sparse_matmul(mat1, mat2);
   }
-  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
-  return at::_sparse_addmm(t, mat1, mat2, 0, 1);
+  if (mat1.is_sparse() || at::sparse_csr::is_sparse_compressed(mat1)) {
+    Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
+    return at::_sparse_addmm(t, mat1, mat2, 0, 1);
+  }
+  Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat1.options());
+  return at::_sparse_addmm(t.transpose(-2, -1), mat2.transpose(-2, -1), mat1.transpose(-2, -1), 0, 1).transpose(-2, -1);
 }
 
 // NB: Despite its suggestive name, this actually only exists so that
