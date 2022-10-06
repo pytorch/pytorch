@@ -117,13 +117,14 @@ class TestArgumentHandler(TestCase):
         argument_handler.parse_outputs(out)
 
         self.assertEqual(
-            argument_handler.tensor_names,
+            argument_handler.tensor_aliases,
             {
                 M.data_ptr(): ["self"],
                 vec.data_ptr(): ["vec1", "vec2"],
-                out.data_ptr(): ["output"],
+                out.data_ptr(): [],
             },
         )
+        self.assertEqual({out.data_ptr()}, argument_handler.outputs)
 
 
 def tensor_id(i: int) -> DataPtr:
@@ -156,6 +157,7 @@ class TestEventHandler(TestCase):
             stream,
             read_only,
             read_write,
+            {},
             "",
             {k: [""] for k in read_only + read_write},
         )
@@ -446,7 +448,8 @@ class TestMessages(TestCase):
             seq_num=1,
             stream=stream_id(1),
             operator="schema",
-            names=["b"],
+            aliases=["b"],
+            is_output=True,
             stack_trace=traceback.StackSummary.from_list(
                 [("file", 0, "name", "trace a")]
             ),
@@ -456,7 +459,8 @@ class TestMessages(TestCase):
             seq_num=2,
             stream=stream_id(0),
             operator="schema",
-            names=["a"],
+            aliases=["a"],
+            is_output=False,
             stack_trace=traceback.StackSummary.from_list(
                 [("file", 0, "name", "trace b")]
             ),
@@ -477,14 +481,14 @@ class TestMessages(TestCase):
                 CSAN detected a possible data race on tensor with data pointer 1
                 Access by stream 1001 during kernel:
                 schema
-                writing to argument: b
+                writing to argument(s) b, and to the output
                 With stack trace:
                   File "file", line 0, in name
                     trace a
 
                 Previous access by stream 1000 during kernel:
                 schema
-                reading from argument: a
+                reading from argument(s) a
                 With stack trace:
                   File "file", line 0, in name
                     trace b

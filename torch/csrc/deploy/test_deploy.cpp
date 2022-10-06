@@ -490,7 +490,7 @@ TEST(TorchpyTest, TestPyYAML) {
   EXPECT_EQ(1, load.attr("__getitem__")({"a"}).toIValue().toInt());
 
   auto dump = I.global("yaml", "dump")({load});
-  EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
+  EXPECT_EQ(kDocument, dump.toIValue().toStringRef());
 }
 #endif
 
