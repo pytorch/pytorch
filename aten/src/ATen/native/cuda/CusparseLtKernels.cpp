@@ -83,12 +83,10 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   int64_t batch_strideA = m * k;
   int64_t batch_strideB = k * n;
   int64_t batch_strideC = m * n;
-  std::cout << "here" << std::endl;
   // TODO: make these user inputs
   constexpr auto order = CUSPARSE_ORDER_ROW;
   constexpr auto type = CUDA_R_16F;
   constexpr auto compute_type = CUSPARSE_COMPUTE_16F;
-  std::cout << "here1" << std::endl;
 
   bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
   bool isA_transposed = (op_weight != CUSPARSE_OPERATION_NON_TRANSPOSE);
@@ -126,20 +124,17 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   // CHECK_CUDA(cudaMalloc((void**)&dA, A_size_bytes))
   // CHECK_CUDA(cudaMalloc((void**)&dB, B_size_bytes))
   CHECK_CUDA(cudaMalloc((void**)&dC, C_size_bytes))
-  CHECK_CUDA(cudaMalloc((void**) &d_valid, sizeof(d_valid)))
+  CHECK_CUDA(cudaMalloc((void**) &d_valid, sizeof(*d_valid)))
 
   dD = res.data_ptr<c10::Half>();
-  std::cout << "here2" << std::endl;
 
   // CHECK_CUDA(cudaMemcpy(dA, hA, A_size_bytes, cudaMemcpyHostToDevice))
-  std::cout << "here3" << std::endl;
 
   // CHECK_CUDA(cudaMemcpy(dB, hB, B_size_bytes, cudaMemcpyHostToDevice))
   CHECK_CUDA(cudaMemcpy(dC, hC, C_size_bytes, cudaMemcpyHostToDevice))
   //--------------------------------------------------------------------------
   cusparseLtMatDescriptor_t activation_descriptor, matC;
   cusparseLtMatmulAlgSelection_t alg_sel;
-  std::cout << "here4" << std::endl;
 
   CHECK_CUSPARSE(cusparseLtInit(&handle))
   // matrix descriptor initilization
@@ -200,35 +195,14 @@ void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
   CHECK_CUSPARSE( cusparseLtMatmulAlgSelectionInit(
                                           &handle, &alg_sel, &matmul,
                                           CUSPARSELT_MATMUL_ALG_DEFAULT) )
-  size_t workspace_size;
+  // initializing for now because I sometimes see the error:
+  //  ** On entry to cusparseLtMatmulPlanInit() parameter number 5 (workspaceSize) had an illegal value: -9127659781585108992
+  size_t workspace_size = 0;
+  std::cout << workspace_size << std::endl;
   CHECK_CUSPARSE(cusparseLtMatmulPlanInit(
       &handle, &plan, &matmul, &alg_sel, workspace_size))
   CHECK_CUSPARSE(
       cusparseLtMatmulGetWorkspace(&handle, &plan, &workspace_size))
-
-
-  // // TODO: make this a user input
-  // constexpr cusparseLtPruneAlg_t pruning_algo = CUSPARSELT_PRUNE_SPMMA_STRIP;
-  // //--------------------------------------------------------------------------
-  // // Prune the A matrix (in-place) and check the correcteness
-  // // TODO: what's cusparseLtSpMMAPrune2?
-  // CHECK_CUSPARSE( cusparseLtSpMMAPrune(&handle, &matmul, dA, dA,
-  //                                       pruning_algo, stream) )
-  // CHECK_CUSPARSE( cusparseLtSpMMAPruneCheck(&handle, &matmul, dA,
-  //                                           d_valid, stream) )
-
-  // int* is_valid;
-  // std::cout << stream << std::endl;
-  // std::cout << &is_valid << std::endl;
-  // std::cout << "d_valid " << d_valid << std::endl;
-  // // std::cout << *d_valid << std::endl;
-  // // std::cout << *stream << std::endl;
-  // CHECK_CUDA( cudaMemcpyAsync(is_valid, d_valid, sizeof(d_valid),
-  //                             cudaMemcpyDeviceToHost, stream) )
-  // CHECK_CUDA( cudaStreamSynchronize(stream) )
-
-  // TORCH_CHECK(is_valid == 0, "!!!! The matrix has been pruned in a wrong way. "
-  //             "cusparseLtMatmul will not provide correct results");
 }
 
 // see https://docs.nvidia.com/cuda/cusparselt/types.html for pruning_algo choices
@@ -243,14 +217,14 @@ void CusparseLtLinear::prune() {
   CHECK_CUSPARSE( cusparseLtSpMMAPruneCheck(&handle, &matmul, dA,
                                             d_valid, stream) )
 
-  int* is_valid;
+  int is_valid;
   std::cout << stream << std::endl;
   std::cout << &is_valid << std::endl;
   std::cout << "d_valid " << d_valid << std::endl;
   // std::cout << *d_valid << std::endl;
   // std::cout << *stream << std::endl;
   cudaDeviceSynchronize();
-  CHECK_CUDA( cudaMemcpyAsync(is_valid, d_valid, sizeof(d_valid),
+  CHECK_CUDA( cudaMemcpyAsync(&is_valid, d_valid, sizeof(is_valid),
                               cudaMemcpyDeviceToHost, stream) )
   CHECK_CUDA( cudaStreamSynchronize(stream) )
 

@@ -11,7 +11,6 @@ bias = torch.rand(output_channel, device="cuda", dtype=torch.float16)
 
 cusparse_linear = torch.classes.cusparselt.CusparseLtLinear(weight)
 cusparse_linear.init(activation, res, bias)
-print("before prune")
 cusparse_linear.prune()
 # cusparse_linear.compress()
-print("end")
+# cusparse_linear.masked_mm()
