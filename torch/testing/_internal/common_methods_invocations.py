@@ -6250,8 +6250,8 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(input_t, args=(output_shape,))
         if output_shape == ():
             continue
-        yield SampleInput(input_t, args=(list(output_shape),))
-        yield SampleInput(input_t, args=(*output_shape,))
+        yield SampleInput(input_t.clone(), args=(list(output_shape),))
+        yield SampleInput(input_t.clone(), args=(*output_shape,))
 
 
 def error_inputs_sum_to_size(op_info, device, **kwargs):
@@ -9038,8 +9038,8 @@ op_db: List[OpInfo] = [
                # AssertionError: Tensor-likes are not close!
                # Mismatched elements: 5 / 5 (100.0%)
                # https://github.com/pytorch/pytorch/issues/85409
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+            #    DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
+            #    DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
            )),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
