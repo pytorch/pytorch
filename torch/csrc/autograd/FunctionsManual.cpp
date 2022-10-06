@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
@@ -1229,7 +1230,7 @@ at::SymIntArrayRef strides_or_error(
         "'");
     if (input.is_mkldnn())
       return {};
-    if (input.is_sparse_csr())
+    if (at::sparse_csr::is_sparse_compressed(input))
       return {};
     return input.sym_strides();
   } else {
