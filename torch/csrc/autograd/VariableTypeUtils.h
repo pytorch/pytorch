@@ -453,6 +453,16 @@ inline std::vector<std::vector<int64_t>> to_args_sizes(
   return args_sizes;
 }
 
+inline std::vector<std::vector<c10::SymInt>> to_args_sizes_symint(
+    at::ITensorListRef tensors) {
+  std::vector<std::vector<c10::SymInt>> args_sizes(tensors.size());
+  size_t i = 0;
+  for (const auto& t : tensors) {
+    args_sizes[i++] = t.sym_sizes().vec();
+  }
+  return args_sizes;
+}
+
 inline std::vector<c10::ScalarType> to_args_scalartypes(
     at::ITensorListRef tensors) {
   std::vector<c10::ScalarType> args_scalartypes(tensors.size());

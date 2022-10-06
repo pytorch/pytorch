@@ -1464,7 +1464,9 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
         # multi tensor collectives
-        if collective == dist.all_gather:
+        if collective == dist.barrier:
+            collective()
+        elif collective == dist.all_gather:
             collective([tensor], tensor, *args)
         elif collective == dist.reduce_scatter:
             if backend != "gloo":
