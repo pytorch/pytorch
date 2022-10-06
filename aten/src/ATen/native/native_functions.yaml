@@ -2889,6 +2889,7 @@
     CUDA: layer_norm_cuda
     MPS: layer_norm_mps
     CompositeExplicitAutograd: math_native_layer_norm
+    NestedTensorCPU, NestedTensorCUDA: nested_layer_norm
   autogen: native_layer_norm.out
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, SymInt[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
@@ -13136,12 +13137,6 @@
   dispatch:
     NestedTensorCPU: NestedTensor_softmax_dropout
     NestedTensorCUDA: NestedTensor_softmax_dropout_cuda
-
-- func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
-  variants: method
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm
-  autogen: _nested_tensor_layer_norm.out
 
 # Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
 - func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, int? mask_type=None) -> Tensor
