@@ -1126,15 +1126,15 @@ Tensor& narrow_copy_dense_cpu_out(
   return output;
 }
 
-Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  auto cur_size = self.sym_size(dim);
+  auto cur_size = self.size(dim);
   if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = at::maybe_wrap_dim_symint(start, cur_size);
+    start = maybe_wrap_dim(start, cur_size);
   }
   TORCH_CHECK(length >= 0 && start <= cur_size - length,
            "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
-  return at::slice_symint(self, dim, start, start + length, 1);
+  return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
