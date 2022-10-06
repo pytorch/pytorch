@@ -65,7 +65,7 @@ void checkONNXCompatibility(const c10::FunctionSchema& schema) {
       const auto& elem_type =
           reinterpret_cast<ListType*>(type.get())->getElementType();
       if (elem_type->isSubtypeOf(*TensorType::get())) {
-        TORCH_INTERNAL_ASSERTM(
+        TORCH_INTERNAL_ASSERT(
             !has_tensor_list,
             "ONNX export supports at most one TensorList as input.");
         has_tensor_list = true;
