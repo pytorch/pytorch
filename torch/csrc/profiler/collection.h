@@ -73,7 +73,9 @@ using StorageImplData = strong::type<
 // handle ABA for TensorImpl as those allocations are not instrumented.)
 using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
 
-struct RawTensorMetadata {
+struct TORCH_API RawTensorMetadata {
+  RawTensorMetadata() = default;
+  explicit RawTensorMetadata(const at::Tensor& t);
   TensorImplAddress impl_;
   StorageImplData data_;
 
@@ -88,8 +90,8 @@ struct RawTensorMetadata {
 };
 
 struct TensorMetadata : public RawTensorMetadata {
-  explicit TensorMetadata(const RawTensorMetadata& m) : RawTensorMetadata(m) {}
-
+  explicit TensorMetadata(const RawTensorMetadata& r) : RawTensorMetadata(r) {}
+  explicit TensorMetadata(const at::Tensor& t) : RawTensorMetadata(t) {}
   c10::Device device() const {
     return {device_type_, device_index_};
   }
@@ -239,7 +241,7 @@ struct NNModuleInfo {
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<std::pair<std::string, void*>> params_;
+  std::vector<std::pair<std::string, TensorMetadata>> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
 };
@@ -249,8 +251,8 @@ struct OptimizerInfo {
   PyOptimizerCls opt_;
   at::StringView opt_name_;
 
-  std::vector<void*> params_addr_;
-  std::vector<std::pair<std::string, void*>> opt_state_;
+  std::vector<TensorMetadata> params_addr_;
+  std::vector<std::pair<std::string, TensorMetadata>> opt_state_;
 };
 
 struct PyExtraFieldsBase {

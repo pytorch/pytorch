@@ -1408,13 +1408,10 @@ Call this whenever a new thread is created in order to propagate values from
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
   });
 
-  py_module.def("_is_deploy_enabled", []() {
-#if defined(USE_DEPLOY)
-    return true;
-#else
-    return false;
-#endif
-  });
+  py_module.def(
+      "_should_allow_numbers_as_tensors", [](const std::string& name) {
+        return torch::should_allow_numbers_as_tensors(name);
+      });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
