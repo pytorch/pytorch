@@ -1848,9 +1848,8 @@ Tensor split_backward(
   auto dim_size = sym_sizes[dim];
   int64_t num_splits = grads.size();
   std::vector<c10::SymInt> split_sizes(num_splits, split_size);
-  auto sym_split_size = c10::SymInt(split_size);
   split_sizes[num_splits - 1] =
-      sym_split_size - (sym_split_size * num_splits - dim_size);
+      split_size - (split_size * num_splits - dim_size);
   return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
