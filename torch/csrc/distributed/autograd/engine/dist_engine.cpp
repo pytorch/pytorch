@@ -33,8 +33,9 @@ static constexpr char* kNumAutogradContexts = "num_autograd_contexts";
 //   1. Accumuate the gard to RPC context.
 //   2. Call post hooks of the original AccumulateGrad.
 //
-// NB: We don't need to call pre-hooks here because nodes for which grads are captured
-// have their pre-hooks called by the engine (this was not the case for a while).
+// NB: We don't need to call pre-hooks here because nodes for which grads are
+// captured have their pre-hooks called by the engine (this was not the case for
+// a while).
 class DistAccumulateGradCaptureHook
     : public GraphTask::ExecInfo::Capture::GradCaptureHook {
  public:

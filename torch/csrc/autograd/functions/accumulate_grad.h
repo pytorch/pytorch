@@ -43,14 +43,26 @@ struct TORCH_API AccumulateGrad : public Node {
   variable_list apply(variable_list&& grads) override;
 
   std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() noexcept override {
-    TORCH_INTERNAL_ASSERT(pre_hooks_.size() == 0);
-    // TODO: make this smarter
-    hook_.clear();
-    hook_.push_back(
+    // Construct a vector that combines hooks registered to the tensor and
+    // hooks registered to the function.
+    //
+    // Why do we need this?
+    // We cannot directly store hooks registered to the tensor on this
+    // AccumulateGrad node because someone can attempt to register a hook
+    // before another node is able to keep AccumulateGrad alive.
+    //
+    // We could potentially make this smarter, e.g. have additional fields
+    // on the autograd meta that tell us whether hooks have been updated
+    if (hook_idx_ != -1) {
+      pre_hooks_.erase(pre_hooks_.begin() + hook_idx_);
+    }
+    if (!impl::hooks(variable).empty()) {
+      pre_hooks_.push_back(
         std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
-    return hook_;
+        hook_idx_ = pre_hooks_.size() - 1;
+    }
+    return pre_hooks_;
   }
-
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.
@@ -250,6 +262,7 @@ struct TORCH_API AccumulateGrad : public Node {
 
   Variable variable;
   std::vector<std::unique_ptr<FunctionPreHook>> hook_;
+  int hook_idx_ = -1;
 };
 
 #undef CHECK_RESULT
