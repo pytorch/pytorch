@@ -359,13 +359,10 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **k
         matrix.requires_grad_(requires_grad)
         return matrix
 
-    def sample_generator():
-        for batch, size in product(((), (2,), (2, 2)), range(6)):
-            shape = batch + (size, size)
-            for rank in range(1, size):
-                yield make_singular_matrix_batch_base(shape, rank)
-
-    return [SampleInput(t) for t in sample_generator()]
+    for batch, size in product(((), (2,), (2, 2)), range(6)):
+        shape = batch + (size, size)
+        for rank in range(1, size):
+            yield SampleInput(make_singular_matrix_batch_base(shape, rank))
 
 
 def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **kwargs):
@@ -531,7 +528,14 @@ def sample_inputs_linalg_norm(
     else:
         matrix_ords = (None, "fro", "nuc", inf, -inf, 1, -1, 2, -2)
 
-    inputs = []
+    make_arg = partial(
+        make_tensor,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+        low=None,
+        high=None,
+    )
 
     for test_size in test_sizes:
         is_vector_norm = len(test_size) == 1
@@ -542,19 +546,7 @@ def sample_inputs_linalg_norm(
 
         for keepdim in [False, True]:
             if variant != "subgradient_at_zero" and is_valid_for_p2:
-                inputs.append(
-                    SampleInput(
-                        make_tensor(
-                            test_size,
-                            dtype=dtype,
-                            device=device,
-                            low=None,
-                            high=None,
-                            requires_grad=requires_grad,
-                        ),
-                        kwargs=dict(keepdim=keepdim),
-                    )
-                )
+                yield SampleInput(make_arg(test_size), keepdim=keepdim)
 
             if not (is_vector_norm or is_matrix_norm):
                 continue
@@ -585,50 +577,23 @@ def sample_inputs_linalg_norm(
                         continue
 
                 if variant == "subgradient_at_zero":
-                    inputs.append(
-                        SampleInput(
-                            torch.zeros(
-                                test_size,
-                                dtype=dtype,
-                                device=device,
-                                requires_grad=requires_grad,
-                            ),
-                            args=(ord,),
-                            kwargs=dict(keepdim=keepdim),
-                        )
+                    yield SampleInput(
+                        torch.zeros(
+                            test_size,
+                            dtype=dtype,
+                            device=device,
+                            requires_grad=requires_grad,
+                        ),
+                        ord,
+                        keepdim=keepdim,
                     )
                 else:
-                    inputs.append(
-                        SampleInput(
-                            make_tensor(
-                                test_size,
-                                dtype=dtype,
-                                device=device,
-                                low=None,
-                                high=None,
-                                requires_grad=requires_grad,
-                            ),
-                            args=(ord,),
-                            kwargs=dict(keepdim=keepdim),
-                        )
-                    )
+                    yield SampleInput(make_arg(test_size), ord, keepdim=keepdim)
 
                     if ord in ["nuc", "fro"]:
-                        inputs.append(
-                            SampleInput(
-                                make_tensor(
-                                    test_size,
-                                    dtype=dtype,
-                                    device=device,
-                                    low=None,
-                                    high=None,
-                                    requires_grad=requires_grad,
-                                ),
-                                kwargs=dict(ord=ord, keepdim=keepdim, dim=(0, 1)),
-                            )
+                        yield SampleInput(
+                            make_arg(test_size), ord=ord, keepdim=keepdim, dim=(0, 1)
                         )
-
-    return inputs
 
 
 def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
@@ -901,16 +866,14 @@ def sample_inputs_linalg_ldl_solve(
     )
 
     # Symmetric case
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
     for test_case in test_cases1:
         factors, pivots, _ = test_case
         factors.requires_grad = requires_grad
         for B_batch_shape in ((), factors.shape[:-2]):
-            B = make_tensor(
-                (*B_batch_shape, factors.shape[-1], S),
-                device=device,
-                dtype=dtype,
-                requires_grad=requires_grad,
-            )
+            B = make_arg((*B_batch_shape, factors.shape[-1], S))
             yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=False))
             clone_factors = factors.detach().clone().requires_grad_(requires_grad)
             yield SampleInput(
@@ -922,12 +885,7 @@ def sample_inputs_linalg_ldl_solve(
         factors, pivots, _ = test_case
         factors.requires_grad = requires_grad
         for B_batch_shape in ((), factors.shape[:-2]):
-            B = make_tensor(
-                (*B_batch_shape, factors.shape[-1], S),
-                device=device,
-                dtype=dtype,
-                requires_grad=requires_grad,
-            )
+            B = make_arg((*B_batch_shape, factors.shape[-1], S))
             yield SampleInput(factors, args=(pivots, B), kwargs=dict(hermitian=True))
             clone_factors = factors.detach().clone().requires_grad_(requires_grad)
             yield SampleInput(
@@ -955,7 +913,6 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
     else:
         deltas = (0,)
 
-    out = []
     for batch, driver, delta in product(((), (3,), (3, 3)), drivers, deltas):
         shape = batch + (3 + delta, 3)
         a = random_well_conditioned_matrix(*shape, dtype=dtype, device=device)
@@ -968,8 +925,7 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
             high=None,
             requires_grad=requires_grad,
         )
-        out.append(SampleInput(a, args=(b,), kwargs=dict(driver=driver)))
-    return out
+        yield SampleInput(a, b, driver=driver)
 
 
 def error_inputs_lstsq(op_info, device, **kwargs):
@@ -1010,12 +966,10 @@ def sample_inputs_linalg_cholesky(
 
     batches = [(), (0,), (2,), (1, 1)]
     ns = [5, 0]
-    out = []
     for batch, n, upper in product(batches, ns, [True, False]):
         a = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
         a.requires_grad = requires_grad
-        out.append(SampleInput(a, kwargs={"upper": upper}))
-    return out
+        yield SampleInput(a, upper=upper)
 
 
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False, **kwargs):
@@ -1253,14 +1207,13 @@ def sample_inputs_tensorsolve(op_info, device, dtype, requires_grad, **kwargs):
     # a_shapes += [(0, 0, 1, 2, 3, 0)]
     dimss = [None, (0, 2)]
 
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
     for a_shape, dims in itertools.product(a_shapes, dimss):
-        a = make_tensor(
-            a_shape, dtype=dtype, device=device, requires_grad=requires_grad
-        )
-        b = make_tensor(
-            a_shape[:2], dtype=dtype, device=device, requires_grad=requires_grad
-        )
-        yield SampleInput(a, args=(b,), kwargs=dict(dims=dims))
+        a = make_arg(a_shape)
+        b = make_arg(a_shape[:2])
+        yield SampleInput(a, b, dims=dims)
 
 
 def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
@@ -1275,13 +1228,10 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
         ((4, 3), (6, 1, 2)),
     ]
 
-    samples = []
     for shape_lhs, shape_rhs in shapes:
         inp = make_input().reshape(*shape_lhs, *shape_rhs).detach()
         inp.requires_grad_(requires_grad)
-        samples.append(SampleInput(inp, kwargs=dict(ind=len(shape_lhs))))
-
-    return samples
+        yield SampleInput(inp, ind=len(shape_lhs))
 
 
 op_db: List[OpInfo] = [
