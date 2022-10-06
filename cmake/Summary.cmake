@@ -193,7 +193,6 @@ function(caffe2_print_configuration_summary)
   if(NOT "${SELECTED_OP_LIST}" STREQUAL "")
     message(STATUS "  SELECTED_OP_LIST    : ${SELECTED_OP_LIST}")
   endif()
-  message(STATUS "  USE_DEPLOY           : ${USE_DEPLOY}")
   message(STATUS "  Public Dependencies  : ${Caffe2_PUBLIC_DEPENDENCY_LIBS}")
   message(STATUS "  Private Dependencies : ${Caffe2_DEPENDENCY_LIBS}")
   # coreml
