@@ -543,9 +543,18 @@ class CudaKernelGenerator : private OptOutConstDispatch {
   void genCpAsync(const LoadStoreOp* ldst, int vec_size) {
     auto dtype = ldst->in()->getDataType().value();
 
-    indent() << "Ampere::cpAsync("
-             << genVectorPointer(ldst->out(), dtype, vec_size) << ","
-             << genVectorPointer(ldst->in(), dtype, vec_size) << ");\n";
+    if (ldst->predicate() == nullptr) {
+      // Out of line predicate variant
+      indent() << "Ampere::cpAsync("
+               << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+               << genVectorPointer(ldst->in(), dtype, vec_size) << ");\n";
+    } else {
+      // Inline predicate variant
+      indent() << "Ampere::cpAsync("
+               << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+               << genVectorPointer(ldst->in(), dtype, vec_size) << ","
+               << genInline(ldst->predicate()) << ");\n";
+    }
   }
 
   void genLdMatrix(const LoadStoreOp* ldst, int vector_word_size) {

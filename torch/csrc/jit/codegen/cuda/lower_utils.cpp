@@ -727,6 +727,17 @@ BasicAllocInfo getAllocInformation(
   return info;
 }
 
+//! Implementing this in here to avoid including too many headers
+//!  in type.cpp. Conceptually this should be a generic definition
+//!  rather than a util.
+bool supportInlinePredicate(Expr* expr) {
+  if (ir_utils::isCpAsyncOp(expr)) {
+    return true;
+  }
+  // TODO: build out support.
+  return false;
+}
+
 } // namespace lower_utils
 
 } // namespace cuda

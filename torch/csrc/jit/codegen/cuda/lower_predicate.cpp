@@ -43,29 +43,40 @@ class ConditionalFromPredicateModifier : public kir::ExprMutator {
       // Replace expr predicate with bool conditional
       auto conditional = generateConditional(expr->predicate());
       if (expr->predicate()->predicate_type() == PredicateType::Vectorize) {
-        // TODO: This logic doesn't seem to fit well here, for unswitch the
-        // logic is in the unroll loop to set the thread predicate to the expr.
-        // I didn't have a quick way to do that so placing this here for now.
-        TORCH_INTERNAL_ASSERT(
-            expr->isA<kir::IfThenElse>(),
-            "Predicate handling expects ITE statement.");
-        auto ite = expr->as<kir::IfThenElse>();
+        if (expr->isA<kir::IfThenElse>()) {
+          // TODO: This logic doesn't seem to fit well here, for unswitch the
+          // logic is in the unroll loop to set the thread predicate to the
+          // expr. I didn't have a quick way to do that so placing this here for
+          // now.
+          auto ite = expr->as<kir::IfThenElse>();
 
-        TORCH_INTERNAL_ASSERT(
-            ite->thenBody().size() == 1,
-            "Expecting predicated body to only have one vectorized expression.");
-        auto vec_expr = ite->thenBody()[0];
-        TORCH_INTERNAL_ASSERT(
-            vec_expr->isA<UnaryOp>() || vec_expr->isA<LoadStoreOp>(),
-            "Vectorize predicate exprs only supported on set operations.");
-        TORCH_INTERNAL_ASSERT(
-            ir_utils::isTvOp(vec_expr),
-            "Vectorize predicate exprs only supported on tensor view operations.");
-        if (!vec_expr->inputs()[0]->isConstScalar()) {
+          TORCH_INTERNAL_ASSERT(
+              ite->thenBody().size() == 1,
+              "Expecting predicated body to only have one vectorized expression.");
+          auto vec_expr = ite->thenBody()[0];
+          TORCH_INTERNAL_ASSERT(
+              vec_expr->isA<UnaryOp>() || vec_expr->isA<LoadStoreOp>(),
+              "Vectorize predicate exprs only supported on set operations.");
+          TORCH_INTERNAL_ASSERT(
+              ir_utils::isTvOp(vec_expr),
+              "Vectorize predicate exprs only supported on tensor view operations.");
+          if (!vec_expr->inputs()[0]->isConstScalar()) {
+            conditional = SimplifyingIrBuilder::andExpr(
+                              conditional,
+                              GpuLower::current()->threadPredMap().getPredicate(
+                                  ir_utils::getTvOutput(vec_expr)))
+                              ->as<Bool>();
+          }
+        } else {
+          TORCH_INTERNAL_ASSERT(lower_utils::supportInlinePredicate(expr));
+          auto thread_pred = GpuLower::current()->threadPredMap().getPredicate(
+              ir_utils::getTvOutput(expr));
+          TORCH_INTERNAL_ASSERT(
+              thread_pred->isConst() && thread_pred->value().value());
           conditional = SimplifyingIrBuilder::andExpr(
                             conditional,
                             GpuLower::current()->threadPredMap().getPredicate(
-                                ir_utils::getTvOutput(vec_expr)))
+                                ir_utils::getTvOutput(expr)))
                             ->as<Bool>();
         }
       }

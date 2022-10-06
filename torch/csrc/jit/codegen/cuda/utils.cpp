@@ -132,6 +132,7 @@ auto parseDebugDumpOptions() {
 auto parseDisableOptions() {
   std::unordered_map<DisableOption, bool> options_map = {
       {DisableOption::ArchCheck, false},
+      {DisableOption::CompileToSass, false},
       {DisableOption::Fallback, false},
       {DisableOption::Fma, false},
       {DisableOption::IndexHoist, false},
@@ -145,6 +146,8 @@ auto parseDisableOptions() {
       const auto token = options_view.substr(0, end_pos);
       if (token == "arch_check") {
         options_map[DisableOption::ArchCheck] = true;
+      } else if (token == "compile_to_sass") {
+        options_map[DisableOption::CompileToSass] = true;
       } else if (token == "fallback") {
         options_map[DisableOption::Fallback] = true;
       } else if (token == "fma") {

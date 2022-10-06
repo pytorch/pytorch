@@ -263,6 +263,11 @@ BasicAllocInfo getAllocInformation(
     const std::vector<kir::ForLoop*>& loops,
     const std::unordered_map<IterDomain*, IterDomain*>& id_map = {},
     bool use_id_map = false);
+
+//! Returns true if the expression has a variant that takes a predicate
+//!  as an inline argument.
+bool supportInlinePredicate(Expr* expr);
+
 } // namespace lower_utils
 
 } // namespace cuda

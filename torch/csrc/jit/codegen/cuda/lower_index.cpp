@@ -982,7 +982,9 @@ void IndexLowering::handleGroupedGridWelford(
 void IndexLowering::handle(const LoadStoreOp* ldst) {
   const auto in = lowerSrcIndex(ldst->in(), ldst->out());
   const auto out = lowerDstIndex(ldst->out());
-  pushBack(IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in));
+  auto new_ldst = IrBuilder::create<LoadStoreOp>(ldst->opType(), out, in)
+                      ->withPredicate(ldst->predicate());
+  pushBack(new_ldst);
   GpuLower::current()->propagateExprInfo(ldst, back());
 }
 

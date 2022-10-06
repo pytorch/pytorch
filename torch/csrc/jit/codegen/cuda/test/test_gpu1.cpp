@@ -1434,42 +1434,6 @@ TEST_F(NVFuserTest, FusionSimplePWise_CUDA) {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-TEST_F(NVFuserTest, FusionSimpleAmperePipeline_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  // requires ampere+ GPU
-  if (!deviceMajorMinorCheck(8)) {
-    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
-    return;
-  }
-
-  auto tv0 = makeContigTensor(1);
-
-  fusion.addInput(tv0);
-
-  auto tv1 = set(tv0);
-
-  fusion.addOutput(tv1);
-
-  auto tv_cache = tv0->cacheAfter(LoadStoreOpType::CpAsync);
-  tv_cache->setMemoryType(MemoryType::Shared);
-
-  tv1->split(0, 16);
-  tv0->computeAt(tv1, 1);
-
-  tv_cache->circularBuffer(10);
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input1 = at::randn({255}, options);
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion, {input1});
-  auto cg_outputs = fe.runFusion({input1});
-
-  testValidate(&fusion, cg_outputs, {input1}, {input1}, __LINE__, __FILE__);
-}
-
 TEST_F(NVFuserTest, FusionSimplePWiseDtypeComplex_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

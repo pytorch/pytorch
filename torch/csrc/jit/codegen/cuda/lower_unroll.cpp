@@ -138,6 +138,12 @@ void UnrollPass::handle(Expr* expr) {
                                     PredicateType::Inline, expr, thread_pred);
     }
 
+    if (lower_utils::supportInlinePredicate(expr)) {
+      expr_with_predicate = expr_with_predicate->withPredicate(pred);
+      registerReplace(expr, expr_with_predicate, &for_loops_.back()->body());
+      return;
+    }
+
     // If we need a predicate, put expr inside an if then else
     kir::IfThenElse* inline_ite = IrBuilder::create<kir::IfThenElse>(pred);
     if (for_loops_.empty()) {

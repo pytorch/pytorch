@@ -1019,6 +1019,12 @@ std::pair<NvrtcFunction, std::string> nvrtcCompile(
   // compile to sass is not allowed prior to CUDA 11.1
   compile_to_sass = false;
 #endif
+
+  if (isOptionDisabled(DisableOption::CompileToSass)) {
+    // Allows manually disabling compilation to sass
+    //  so the intermediate ptx could be checked.
+    compile_to_sass = false;
+  }
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
   // (since older driver doesn't necessrily recognize PTX emitted by new

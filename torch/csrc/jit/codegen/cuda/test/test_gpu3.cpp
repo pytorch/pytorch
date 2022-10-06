@@ -4073,7 +4073,7 @@ TEST_F(NVFuserTest, FusionLoopSwizzleCheck1_CUDA) {
   // Swizzle inner tile of tv2
   tv2->swizzle(Swizzle2DType::ZShape, -2, -1, SwizzleMode::Loop);
 
-  // Make tv2 swizzled and half-inlined (unsupported).
+  // Make tv2 swizzled and partially-inlined (unsupported).
   tv0->computeAt(tv3, -2);
 
   FusionExecutor fe;
@@ -6438,6 +6438,73 @@ TEST_F(NVFuserTest, FusionVectorizeStrideContiguitySelfOverlapping_CUDA) {
     TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
     testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
   }
+}
+
+TEST_F(NVFuserTest, FusionSimpleAmperePipeline_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+    return;
+  }
+
+  auto tv0 = makeContigTensor(1);
+
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+
+  fusion.addOutput(tv1);
+
+  auto tv_cache = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv_cache->setMemoryType(MemoryType::Shared);
+
+  tv1->split(0, 16);
+  tv0->computeAt(tv1, 1);
+
+  tv_cache->circularBuffer(10);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input1 = at::randn({255}, options);
+
+  // Add check that the cp async op has an inlined predicate.
+  class InlinedCpAsyncPredChecker : public kir::IrVisitor {
+   public:
+    using kir::IrVisitor::handle;
+
+   private:
+    void handle(kir::IfThenElse* ite) final {
+      auto prev_within_ite = within_ite_;
+      within_ite_ = true;
+      kir::IrVisitor::handle(ite);
+      within_ite_ = prev_within_ite;
+    }
+
+    void handle(LoadStoreOp* ldst) final {
+      if (ldst->opType() == LoadStoreOpType::CpAsync) {
+        TORCH_INTERNAL_ASSERT(!within_ite_, "CPASYNC predicate not inlined");
+        TORCH_INTERNAL_ASSERT(
+            ldst->predicate()->hasValue() &&
+                !ldst->predicate()->value()->isConst(),
+            "CPASYNC predicate is not generated");
+      }
+    }
+
+   private:
+    bool within_ite_ = false;
+  } pred_checker;
+
+  // Check that cp async is inlined:
+  GpuLower gpulw(&fusion);
+  pred_checker.handle(gpulw.kernel()->topLevelExprs());
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {input1});
+  auto cg_outputs = fe.runFusion({input1});
+
+  testValidate(&fusion, cg_outputs, {input1}, {input1}, __LINE__, __FILE__);
 }
 
 // Test file size should be up to 10K LoC. Create a new file for more tests.
