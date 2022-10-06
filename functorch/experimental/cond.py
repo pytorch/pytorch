@@ -4,7 +4,7 @@ from torch._ops import PyOperator
 from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _pop_mode_temporarily
+from torch.utils._python_dispatch import _get_current_dispatch_mode, _pop_mode_temporarily
 from torch.fx.experimental.proxy_tensor import track_tensor_tree
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
@@ -13,8 +13,6 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
-from contextlib import contextmanager
-
 cond = PyOperator('cond')
 
 
