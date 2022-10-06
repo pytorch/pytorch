@@ -5,8 +5,8 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <c10/util/flat_hash_map.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/flat_hash_map.h>
 
 #include <mutex>
 
