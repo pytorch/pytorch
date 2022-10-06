@@ -1592,40 +1592,6 @@ def meta_like(self, *args, **kwargs):
     return aten.empty_like.default(self, **kwargs)
 
 
-@register_meta(aten.select.int)
-def meta_select(self, dim, index):
-    ndim = self.dim();
-    if ndim == 0:
-        raise IndexError("select() cannot be applied to a 0-dim tensor.")
-
-    dim = dim if dim >= 0 else dim + ndim
-    size = self.size(dim)
-
-    if (-index > size) or index >= size:
-        raise IndexError(f"select(): index {index} out of range for tensor of size "
-                         f"{self.size()} at dimension {dim}")
-
-    index = index if index >= 0 else index + size
-
-    new_size = list(self.size())
-    new_stride = list(self.stride())
-
-    new_storage_offset = self.storage_offset() + index * new_stride[dim]
-    del new_size[dim]
-    del new_stride[dim]
-
-    return self.as_strided(new_size, new_stride, new_storage_offset)
-
-
-@register_meta(aten.select_scatter.default)
-def meta_select_scatter(self, src, dim, index):
-    return torch.empty_like(self)
-
-
-@register_meta(aten.slice_scatter.default)
-def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
-    return torch.empty_like(self)
-
 def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
     if dim_post_expr <= 0:
         assert wrap_scalar

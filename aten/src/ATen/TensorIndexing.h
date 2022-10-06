@@ -7,7 +7,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
-#include <c10/core/SymInt.h>
 
 // TODO: try to remove this
 // There is some back story, see https://github.com/pytorch/pytorch/issues/48684
@@ -255,7 +254,7 @@ static inline Tensor applySelect(
         " is out of bounds for dimension ",
         real_dim,
         " with size ",
-        concrete_size);
+        size);
   }
 
   // if the index is negative, do not normalize it because that would fix the
