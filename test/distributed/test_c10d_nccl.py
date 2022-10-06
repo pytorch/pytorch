@@ -815,7 +815,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # anticpate an error
         with self.assertRaisesRegex(
-            RuntimeError, "input tensor must be the same type as the outut tensor."
+            RuntimeError, "input tensor must be the same type as the output tensor."
         ):
             tensor = torch.tensor([self.rank], dtype=torch.float).cuda(local_device_id)
             output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(
@@ -2879,6 +2879,12 @@ class CompilerTest(test_c10d_common.CompilerTest):
         self._test_consecutive_comm_work_wait(
             torch.ones(2, 2, device=self.rank) * self.rank
         )
+
+class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_collectives(self):
+        self._test_collectives(backend="nccl")
 
 if __name__ == "__main__":
     assert (

@@ -168,8 +168,11 @@ if [ -z "$MAX_JOBS" ]; then
   fi
 fi
 
-# Target only our CI GPU machine's CUDA arch to speed up the build
-export TORCH_CUDA_ARCH_LIST="5.2"
+# TORCH_CUDA_ARCH_LIST must be passed from an environment variable
+if [[ "$BUILD_ENVIRONMENT" == *cuda* && -z "$TORCH_CUDA_ARCH_LIST" ]]; then
+  echo "TORCH_CUDA_ARCH_LIST must be defined"
+  exit 1
+fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
@@ -229,7 +232,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install dist/*.whl
+    python -mpip install "$(echo dist/*.whl)[opt-einsum]"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
