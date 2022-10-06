@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
@@ -1410,7 +1411,7 @@ Tensor _sparse_mm(
   if (mat1.is_sparse() && mat2.is_sparse()) {
     return at::_sparse_sparse_matmul(mat1, mat2);
   }
-  if (mat1.is_sparse()) {
+  if (mat1.is_sparse() || at::sparse_csr::is_sparse_compressed(mat1)) {
     Tensor t = at::zeros({mat1.size(-2), mat2.size(-1)}, mat2.options());
     return at::_sparse_addmm(t, mat1, mat2, 0, 1);
   }
