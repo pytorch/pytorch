@@ -6919,6 +6919,7 @@ for shape in [(1,), ()]:
 
         res = [None] * 4
         count = [0]
+
         def hook(grads):
             nonlocal res
             count[0] += 1

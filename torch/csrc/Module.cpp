@@ -744,8 +744,6 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
           "A leaf node was passed to _will_engine_execute_node but we are "
           "currently running autograd.grad(). This is currently not supported.");
     }
-  } else {
-    std::cout << "exec info is empty!" << std::endl;
   }
   if (ret) {
     Py_RETURN_TRUE;

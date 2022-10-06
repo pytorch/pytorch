@@ -186,9 +186,9 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     this tensor will be ignored and the hook will not wait for its gradient to be
     computed.
 
-    After every tensor's gradient has been computed, :attr:`fn` will be called with
-    a list of their gradients ordered in the same way they were passed in :attr:`tensors`.
-    For the tensors that are ignored the list takes a value of ``None`` at those indices.
+    After every non-ignored tensor's gradient has been computed, :attr:`fn` will be
+    called with those gradients. ``None`` will be passed for tensors that did not
+    have their gradients computed.
 
     The hook should not modify its arguments.
 
