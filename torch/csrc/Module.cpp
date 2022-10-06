@@ -734,7 +734,7 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   const auto nodes_in_graph =
       torch::autograd::get_current_graph_task_nodes_in_graph();
   bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
-  if (!exec_info->empty()) {
+  if (ret && !exec_info->empty()) {
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
       ret = false;
