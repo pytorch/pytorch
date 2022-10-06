@@ -67,7 +67,7 @@ except ImportError:
     HAS_PSUTIL = False
 import pickle
 
-from torch._C._profiler import _ExtraFields_PyCall
+from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -503,7 +503,7 @@ class TestProfiler(TestCase):
         def call_module(x):
             return mod(x)
 
-        with _profile(with_stack=True, use_kineto=kineto_available()) as p:
+        with _profile(with_stack=True, use_kineto=kineto_available(), experimental_config=_ExperimentalConfig(verbose=True)) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
@@ -1044,7 +1044,7 @@ class TestProfiler(TestCase):
             self.assertEqual(test_schedule(step), test_schedule_expected_outputs[step])
 
     def test_export_stacks(self):
-        with _profile(with_stack=True, use_kineto=kineto_available()) as p:
+        with _profile(with_stack=True, use_kineto=kineto_available(), experimental_config=_ExperimentalConfig(verbose=True)) as p:
             x = torch.randn(10, 10)
             y = torch.randn(10, 10)
             z = torch.mm(x, y)
