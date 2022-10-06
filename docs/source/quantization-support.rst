@@ -600,3 +600,7 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 
 .. py:module:: torch.nn.intrinsic.qat
 .. py:module:: torch.nn.intrinsic.qat.modules
+.. py:module:: torch.nn.intrinsic.quantized
+.. py:module:: torch.nn.intrinsic.quantized.modules
+.. py:module:: torch.nn.intrinsic.quantized.dynamic
+.. py:module:: torch.nn.intrinsic.quantized.dynamic.modules
