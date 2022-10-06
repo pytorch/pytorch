@@ -666,12 +666,14 @@ def trace(
             tensors. When a module is passed `torch.jit.trace`, only the
             ``forward`` method is run and traced (see :func:`torch.jit.trace
             <torch.jit.trace_module>` for details).
-        example_inputs (tuple or torch.Tensor):  A tuple of example inputs that
+        example_inputs (tuple or torch.Tensor or dict):  A tuple of example inputs that
             will be passed to the function while tracing. The resulting trace
             can be run with inputs of different types and shapes assuming the
             traced operations support those types and shapes. `example_inputs`
             may also be a single Tensor in which case it is automatically
-            wrapped in a tuple.
+            wrapped in a tuple. When example_inputs is a dict, if unpack_input_dict
+            is set to True, it reprensents a pack of keyword arguments and can be unpacked
+            by the traced function's arguments name.
 
     Keyword arguments:
         check_trace (``bool``, optional): Check if the same inputs run through
@@ -697,6 +699,10 @@ def trace(
             and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
+        unpack_input_dict (``bool``, optional): When we use a python dict as
+            example_inputs, it suggests wether it is a pack of keyword arguments(True) or
+            a single value(False). This is a workaround for the ambiguity of using dict
+            as example_input. The old behavior will be deprecated.
 
     Returns:
         If `func` is `nn.Module` or ``forward`` of `nn.Module`, `trace` returns
@@ -1000,6 +1006,15 @@ def trace_module(
                     argument_names,
                 )
             else:
+                if isinstance(example_inputs, dict):
+                    warnings.warn(
+                        "Directly using python dict as a `single` value(with unpack_input_dict=False) to "
+                        "example_inputs is deprecated and will be removed in upcoming PyTorch release(2.1)."
+                        "Instead, users should wrap the dict with python tuple first, and then assign to "
+                        "example_inputs for the deprecated behavior. In the future, passing a dict to example_inputs"
+                        "will represent a pack of keyword parameters which will be unpacked according to the "
+                        "traced function's parameter name."
+                    )
                 example_inputs = make_tuple(example_inputs)
                 module._c._create_method_from_trace(
                     method_name,
