@@ -730,8 +730,8 @@ class _ExecOrderData:
 class _FreeEventQueue:
     """
     This tracks all pending frees corresponding to inflight all-gathers. The
-    queueing pattern is iterative enqueues followed by a flush, and the current
-    heuristic for the flush is based on the number of inflight all-gathers.
+    queueing pattern is iterative enqueues with a single dequeue per iteration
+    once the limit ``_max_num_inflight_all_gathers`` is reached.
     """
 
     def __init__(self) -> None:
@@ -742,19 +742,11 @@ class _FreeEventQueue:
         """Enqueues a free event."""
         self._queue.append(free_event)
 
-    def flush_if_needed(self) -> List[torch.cuda.Event]:
-        """
-        If the queue should be flushed (based on an internal criteria), then
-        this returns a non-empty :class:`list` of free events. Otherwise, this
-        returns an empty :class:`list`.
-        """
-        events: List[torch.cuda.Event] = []
+    def dequeue_if_needed(self) -> Optional[torch.cuda.Event]:
+        """Dequeues a single event if the limit is reached."""
         if len(self._queue) >= self._max_num_inflight_all_gathers:
-            while self._queue:
-                event = self._dequeue()
-                assert event is not None
-                events.append(event)
-        return events
+            return self._dequeue()
+        return None
 
     def _dequeue(self) -> Optional[torch.cuda.Event]:
         """Dequeues a free event if possible."""
@@ -1558,10 +1550,9 @@ class FullyShardedDataParallel(nn.Module):
         if not handles:
             return
         if self.limit_all_gathers:
-            events = self._free_event_queue.flush_if_needed()
-            if events:
-                # As a minor optimization, only synchronize the latest event
-                events[-1].synchronize()
+            event = self._free_event_queue.dequeue_if_needed()
+            if event:
+                event.synchronize()
         any_ran_pre_unshard = False
         with torch.cuda.stream(self._streams["pre_all_gather"]):
             for handle in handles:
