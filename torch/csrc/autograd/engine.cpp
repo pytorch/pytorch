@@ -779,7 +779,8 @@ void validate_outputs(
       // Strided when metadata is SparseCsr
       if (!grad.is_sparse() &&
           !(grad.layout() == at::kStrided &&
-            at::sparse_csr::is_sparse_compressed(metadata.layout()))) {
+            (at::sparse_csr::is_sparse_compressed(metadata.layout()) ||
+             metadata.layout() == at::kSparse))) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();

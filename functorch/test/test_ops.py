@@ -340,7 +340,6 @@ class TestOperators(TestCase):
         xfail('chalf', '', device_type='cpu'),  # RuntimeError: "sum_cpu" not implemented for 'ComplexHalf'
         skip('as_strided_scatter', ''),  # silent incorrectness; seems flaky
         xfail('sparse.sampled_addmm', ''),  # RuntimeError: Sparse CSR tensors do not have strides
-        xfail('to_sparse', ''),  # Could not run 'aten::sum.dim_IntList'
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',

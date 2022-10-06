@@ -2051,5 +2051,9 @@ Tensor sum_csr(const Tensor &self, c10::optional<ScalarType> dtype) {
   return self.values().sum(dtype);
 }
 
+Tensor sum_coo(const Tensor &self, c10::optional<ScalarType> dtype) {
+  return self._values().sum(dtype);
+}
+
 } // namespace native
 } // namespace at
