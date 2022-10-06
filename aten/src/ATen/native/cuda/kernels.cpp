@@ -13,7 +13,7 @@ The following source file implements a sparse linear operator using cusparseLt
 #define CHECK_CUDA(func)                                      \
   {                                                           \
     cudaError_t status = (func);                              \
-    TORCH_CHECK(status != cudaSuccess, "CUDA API failed at line %d with error: %s (%d)\n", \
+    TORCH_CHECK(status == cudaSuccess, "CUDA API failed at line %d with error: %s (%d)\n", \
           __LINE__,                                           \
           cudaGetErrorString(status),                         \
           status)                                             \
@@ -22,7 +22,7 @@ The following source file implements a sparse linear operator using cusparseLt
 #define CHECK_CUSPARSE(func)                                      \
   {                                                               \
     cusparseStatus_t status = (func);                             \
-    TORCH_CHECK((status != CUSPARSE_STATUS_SUCCESS),             \
+    TORCH_CHECK((status == CUSPARSE_STATUS_SUCCESS),             \
           "CUSPARSE API failed at line %d with error: %s (%d)\n", \
           __LINE__,                                               \
           cusparseGetErrorString(status),                         \
@@ -36,7 +36,6 @@ struct CusparseLtLinear : torch::CustomClassHolder {
     cusparseLtHandle_t handle;
     cusparseLtMatDescriptor_t weight_descriptor;
     cudaStream_t stream;
-    int64_t num_batches;
     cusparseLtMatmulPlan_t plan;
     cusparseOperation_t op_weight;
     cusparseOperation_t op_activation;
@@ -44,15 +43,13 @@ struct CusparseLtLinear : torch::CustomClassHolder {
     c10::Half *dA, *dB, *dC, *dD, *dA_compressed;
     int* d_valid;
 
-    CusparseLtLinear() : stream{nullptr}, num_batches{1},
-                         op_weight{CUSPARSE_OPERATION_NON_TRANSPOSE},
-                         op_activation{CUSPARSE_OPERATION_NON_TRANSPOSE} {};
-    CusparseLtLinear(const at::Tensor& weight, const int64_t num_batches) : weight{weight},
-                                          stream{nullptr}, num_batches{num_batches},
+    CusparseLtLinear() = delete;
+    CusparseLtLinear(const at::Tensor& weight) : weight{weight},
+                                          stream{nullptr},
                                           op_weight{CUSPARSE_OPERATION_NON_TRANSPOSE},
                                           op_activation{CUSPARSE_OPERATION_NON_TRANSPOSE}
                                           {};
-  void init(int64_t gpu_index, const at::Tensor& activation, const at::Tensor& res, const at::Tensor& bias);
+  void init(const at::Tensor& activation, const at::Tensor& res, const at::Tensor& bias);
   void prune();
   void compress();
   void masked_mm();
@@ -63,15 +60,15 @@ struct CusparseLtLinear : torch::CustomClassHolder {
 // A, B, C, D in the above link corresponds to weight, activation, offset, and output
 
 // does all the initial preparation stuff
-void CusparseLtLinear::init(int64_t gpu_index, const at::Tensor& activation, const at::Tensor& res,
+void CusparseLtLinear::init(const at::Tensor& activation, const at::Tensor& res,
                             const at::Tensor& bias) {
   int major_cc, minor_cc;
   CHECK_CUDA(
       cudaDeviceGetAttribute(&major_cc, cudaDevAttrComputeCapabilityMajor, 0))
   CHECK_CUDA(
       cudaDeviceGetAttribute(&minor_cc, cudaDevAttrComputeCapabilityMinor, 0))
-  TORCH_CHECK((!(major_cc == 8 && minor_cc == 0) &&
-        !(major_cc == 8 && minor_cc == 6)),
+  TORCH_CHECK(((major_cc == 8 && minor_cc == 0) ||
+        (major_cc == 8 && minor_cc == 6)),
               "cusparseLt is supported only on GPU devices with compute capability == 8.0, 8.6 current: " +
                     std::to_string(major_cc) + "." + std::to_string(minor_cc));
 
@@ -79,15 +76,17 @@ void CusparseLtLinear::init(int64_t gpu_index, const at::Tensor& activation, con
   // check if weight is transposed?
   auto m = weight.size(0);
   auto k = weight.size(1);
-  auto n = activation.size(0);
+  auto n = activation.size(1); // this is assuming num_batches > 1
+  auto num_batches = activation.size(0);
   int64_t batch_strideA = m * k;
   int64_t batch_strideB = k * n;
   int64_t batch_strideC = m * n;
-
+  std::cout << "here" << std::endl;
   // TODO: make these user inputs
   constexpr auto order = CUSPARSE_ORDER_ROW;
   constexpr auto type = CUDA_R_16F;
   constexpr auto compute_type = CUSPARSE_COMPUTE_16F;
+  std::cout << "here1" << std::endl;
 
   bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
   bool isA_transposed = (op_weight != CUSPARSE_OPERATION_NON_TRANSPOSE);
@@ -110,8 +109,8 @@ void CusparseLtLinear::init(int64_t gpu_index, const at::Tensor& activation, con
   auto     A_size_bytes   = num_batches * batch_strideA * sizeof(c10::Half);
   auto     B_size_bytes   = num_batches * batch_strideB * sizeof(c10::Half);
   auto     C_size_bytes   = num_batches * batch_strideC * sizeof(__half);
-  auto     hA = weight.data_ptr<c10::Half>();
-  auto     hB = activation.data_ptr<c10::Half>();
+  dA = weight.data_ptr<c10::Half>();
+  dB = activation.data_ptr<c10::Half>();
   // TODO: we may consider removing C or improving the usability;
   // right now, we assume it's not used
   auto     hC = new __half[C_size]();
@@ -122,19 +121,24 @@ void CusparseLtLinear::init(int64_t gpu_index, const at::Tensor& activation, con
 
   //--------------------------------------------------------------------------
   // Device memory management
-  CHECK_CUDA(cudaMalloc((void**)&dA, A_size_bytes))
-  CHECK_CUDA(cudaMalloc((void**)&dB, B_size_bytes))
+  // CHECK_CUDA(cudaMalloc((void**)&dA, A_size_bytes))
+  // CHECK_CUDA(cudaMalloc((void**)&dB, B_size_bytes))
   CHECK_CUDA(cudaMalloc((void**)&dC, C_size_bytes))
   CHECK_CUDA(cudaMalloc((void**) &d_valid, sizeof(d_valid)))
   dD = res.data_ptr<c10::Half>();
+  std::cout << "here2" << std::endl;
 
-  CHECK_CUDA(cudaMemcpy(dA, hA, A_size_bytes, cudaMemcpyHostToDevice))
-  CHECK_CUDA(cudaMemcpy(dB, hB, B_size_bytes, cudaMemcpyHostToDevice))
+  // CHECK_CUDA(cudaMemcpy(dA, hA, A_size_bytes, cudaMemcpyHostToDevice))
+  std::cout << "here3" << std::endl;
+
+  // CHECK_CUDA(cudaMemcpy(dB, hB, B_size_bytes, cudaMemcpyHostToDevice))
   CHECK_CUDA(cudaMemcpy(dC, hC, C_size_bytes, cudaMemcpyHostToDevice))
   //--------------------------------------------------------------------------
   cusparseLtMatDescriptor_t activation_descriptor, matC;
   cusparseLtMatmulDescriptor_t matmul;
   cusparseLtMatmulAlgSelection_t alg_sel;
+  std::cout << "here4" << std::endl;
+
   CHECK_CUSPARSE(cusparseLtInit(&handle))
   // matrix descriptor initilization
   CHECK_CUSPARSE(cusparseLtStructuredDescriptorInit(
@@ -156,10 +160,10 @@ void CusparseLtLinear::init(int64_t gpu_index, const at::Tensor& activation, con
                                           &num_batches, sizeof((int)num_batches)) )
   CHECK_CUSPARSE( cusparseLtMatDescSetAttribute(&handle, &activation_descriptor,
                                           CUSPARSELT_MAT_NUM_BATCHES,
-                                          &num_batches, sizeof(num_batches)) )
+                                          &num_batches, sizeof((int)num_batches)) )
   CHECK_CUSPARSE( cusparseLtMatDescSetAttribute(&handle, &matC,
                                           CUSPARSELT_MAT_NUM_BATCHES,
-                                          &num_batches, sizeof(num_batches)) )
+                                          &num_batches, sizeof((int)num_batches)) )
   //--------------------------------------------------------------------------
   // SET BATCH STRIDE
   // if batch_strideA = 0, the matrix multiplication performs a broadcast of
@@ -183,11 +187,10 @@ void CusparseLtLinear::init(int64_t gpu_index, const at::Tensor& activation, con
                                           compute_type) )
   //--------------------------------------------------------------------------
   // SET BIAS POINTER
-  void* dBias;
-  auto  hBias = bias.data_ptr<float>();
-  CHECK_CUDA( cudaMalloc((void**) &dBias, m * sizeof(float)) )
-  CHECK_CUDA( cudaMemcpy(dBias, hBias, m * sizeof(float),
-                          cudaMemcpyHostToDevice) )
+  auto  dBias = bias.data_ptr<c10::Half>();
+  // CHECK_CUDA( cudaMalloc((void**) &dBias, m * sizeof(float)) )
+  // CHECK_CUDA( cudaMemcpy(dBias, hBias, m * sizeof(float),
+                          // cudaMemcpyHostToDevice) )
   CHECK_CUSPARSE( cusparseLtMatmulDescSetAttribute(&handle, &matmul,
                                               CUSPARSELT_MATMUL_BIAS_POINTER,
                                               &dBias, sizeof(dBias)) )
@@ -269,14 +272,12 @@ void CusparseLtLinear::masked_mm() {
     // return D;
 // }
 
-
-
 TORCH_LIBRARY(cusparselt, m) {
   m.class_<CusparseLtLinear>("CusparseLtLinear")
+    .def(torch::init<const at::Tensor&>())
     .def("init", &CusparseLtLinear::init)
     .def("prune", &CusparseLtLinear::prune)
     .def("compress", &CusparseLtLinear::compress)
     .def("masked_mm", &CusparseLtLinear::masked_mm)
-    // TODO: add the other ops
   ;
 }
