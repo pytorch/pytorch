@@ -80,18 +80,6 @@ size_t collectMaxVectorizeSizeWithContigMerge(
     size_t max_vector_size_in_byte,
     ExpressionEvaluator& expression_evaluator,
     DataType index_type) {
-  // Maybe too conservative, but only handles fully contiguous tensors
-  // TODO: Relax the contiguity constraint to be similar to that in index
-  // computing. Just looking for all merged root domains in the right order,
-  // all merged root dimensions are contiguous, all merged root dimensions are
-  // next to eachother (exlcuding broadcast).
-  if (std::any_of(
-          tv->domain()->contiguity().begin(),
-          tv->domain()->contiguity().end(),
-          [](const auto contig) { return !contig; })) {
-    return 1;
-  }
-
   auto dtype_size = dataTypeSize(tv->dtype(), index_type);
   const size_t max_vector_size = max_vector_size_in_byte / dtype_size;
 
@@ -202,8 +190,16 @@ size_t expandVectorizationToContigMergedDomains(
 
   // Merge the domains right of the break point
   const auto& ref_root = reference_tv->getMaybeRFactorDomain();
-  const int num_merged_domains =
+  const int max_num_merged_domains =
       static_cast<int>(ref_root.size()) - static_cast<int>(break_point);
+  int64_t num_merged_domains = 0;
+  while (num_merged_domains < max_num_merged_domains) {
+    auto pos = (int64_t)ref_root.size() - 1 - num_merged_domains;
+    if (!reference_tv->domain()->contiguity()[pos]) {
+      break;
+    }
+    num_merged_domains++;
+  }
 
   // No expansion with no merged domain
   if (num_merged_domains == 0) {
@@ -242,14 +238,16 @@ size_t expandVectorizationToContigMergedDomains(
     const auto& tv_root = tv->getMaybeRFactorDomain();
 
     int tv_num_merged_domains = 0;
-    for (const auto i : c10::irange(num_merged_domains)) {
+    for (const auto i : c10::irange(max_num_merged_domains)) {
       if (i == tv_root.size()) {
         break;
       }
       auto ref_id = ref_root.at(ref_root.size() - 1 - i);
-      IterDomain* tv_id = tv_root.at(tv_root.size() - 1 - i);
+      auto pos = tv_root.size() - 1 - i;
+      IterDomain* tv_id = tv_root.at(pos);
       // If not mapped, stop expanding.
-      if (!ca_map.areMapped(ref_id, tv_id, IdMappingMode::EXACT)) {
+      if (!ca_map.areMapped(ref_id, tv_id, IdMappingMode::EXACT) ||
+          !tv->domain()->contiguity()[pos]) {
         break;
       } else {
         ++tv_num_merged_domains;

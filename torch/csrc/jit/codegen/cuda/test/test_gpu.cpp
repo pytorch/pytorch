@@ -19138,9 +19138,9 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
-  int64_t i171;
-  i171 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i171 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
+  int64_t i165;
+  i165 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i165 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
     __half T9[1];
     T9[0] = 0;
     T9[0]
@@ -19148,7 +19148,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     __half T8[1];
     T8[0] = 0;
     T8[0]
-       = T0[i171];
+       = T0[i165];
     float T3[1];
     T3[0]
        = __half2float(T9[0]);
@@ -19168,7 +19168,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     __half T10[1];
     T10[0]
        = __float2half(T6[0]);
-    T7[i171]
+    T7[i165]
        = T10[0];
   }
 }
@@ -26123,6 +26123,160 @@ TEST_F(NVFuserTest, FusionTrivialInputForwarding_CUDA) {
   // Second run to ensure cache hit handles trivial forwarding properly
   auto cg_outputs2 = fec.runFusionWithInputs({t0, t1});
   testValidate(fusion, cg_outputs2, {t0, t1}, {t0}, __LINE__, __FILE__);
+}
+
+namespace {
+
+size_t getVecSizeForPointwise(FusionExecutorCache& fec) {
+  auto most_recent_params =
+      fec.getMostRecentKernelRuntime()->getMostRecentExecutorLog().params;
+  auto params = dynamic_cast<PointwiseParams*>(most_recent_params.get());
+  if (params->vectorize) {
+    return params->unroll_factor;
+  }
+  return 1;
+}
+
+} // namespace
+
+TEST_F(NVFuserTest, FusionVectorizeStrideContiguity2D_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 =
+      TensorViewBuilder().ndims(2).contiguity({false, true}).build();
+  fusion->addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion->addOutput(tv1);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  fec.profile(true);
+
+  std::vector<std::pair<int, int>> size_and_vec{{17, 1}, {18, 2}, {32, 4}};
+
+  for (auto pair : size_and_vec) {
+    auto size = pair.first;
+    auto vec = pair.second;
+    auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({1000000, size}, options).narrow(1, 0, 16);
+    auto cg_outputs = fec.runFusionWithInputs({t0});
+
+    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+
+    testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionVectorizeStrideContiguity3D_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 =
+      TensorViewBuilder().ndims(3).contiguity({false, true, true}).build();
+  fusion->addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion->addOutput(tv1);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  fec.profile(true);
+
+  std::vector<std::pair<int, int>> size_and_vec{{17, 1}, {10, 2}, {16, 4}};
+
+  for (auto pair : size_and_vec) {
+    auto size = pair.first;
+    auto vec = pair.second;
+    auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({1000000, size, 3}, options).narrow(1, 0, 8);
+    auto cg_outputs = fec.runFusionWithInputs({t0});
+
+    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+
+    testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionVectorizeStrideContiguity5D_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = TensorViewBuilder()
+                        .ndims(5)
+                        .contiguity({false, true, false, true, true})
+                        .build();
+  fusion->addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion->addOutput(tv1);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  fec.profile(true);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+
+  std::vector<std::tuple<int, int, int>> sizes_and_vec{
+      {9, 17, 1}, {9, 10, 2}, {9, 16, 4}};
+
+  for (auto tup : sizes_and_vec) {
+    auto size1 = std::get<0>(tup);
+    auto size2 = std::get<1>(tup);
+    auto vec = std::get<2>(tup);
+    at::Tensor t0 = at::randn({4, size1, 12345, size2, 3}, options)
+                        .narrow(1, 0, 8)
+                        .narrow(3, 0, 4);
+    auto cg_outputs = fec.runFusionWithInputs({t0});
+
+    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+
+    testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
+  }
+}
+
+TEST_F(NVFuserTest, FusionVectorizeStrideContiguitySelfOverlapping_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
+
+  TensorView* tv0 = TensorViewBuilder()
+                        .ndims(5)
+                        .contiguity({false, true, false, true, true})
+                        .build();
+  fusion->addInput(tv0);
+  auto tv1 = set(tv0);
+  fusion->addOutput(tv1);
+
+  FusionExecutorCache fec(std::move(fusion_ptr));
+  fec.profile(true);
+
+  auto options = at::TensorOptions().dtype(kFloat).device(at::kCUDA, 0);
+
+  std::vector<std::tuple<int, int, int, int>> sizes_strides_and_vec{
+      {4, 4, 4, 4},
+      {4, 4, 2, 2},
+      {4, 2, 4, 2},
+      {2, 4, 4, 2},
+      {4, 4, 1, 1},
+      {4, 1, 4, 1},
+      {1, 4, 4, 1},
+      {2, 2, 2, 2},
+      {2, 2, 1, 1},
+      {2, 1, 2, 1},
+      {1, 2, 2, 1}};
+
+  for (auto tup : sizes_strides_and_vec) {
+    auto size = std::get<0>(tup);
+    auto stride1 = std::get<1>(tup);
+    auto stride2 = std::get<2>(tup);
+    auto vec = std::get<3>(tup);
+    std::vector<int64_t> shape = {4, 4, 12345, size, 3};
+    std::vector<int64_t> stride = {stride1, stride2 * 12345, stride2, 3, 1};
+    at::Tensor t0 = at::empty_strided(shape, stride, options);
+    t0.random_();
+    auto cg_outputs = fec.runFusionWithInputs({t0});
+    TORCH_CHECK(getVecSizeForPointwise(fec) == vec);
+    testValidate(fusion, cg_outputs, {t0}, {t0}, __LINE__, __FILE__);
+  }
 }
 
 } // namespace jit

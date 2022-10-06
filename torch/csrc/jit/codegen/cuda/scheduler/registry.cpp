@@ -463,6 +463,24 @@ void SchedulerRuntimeInfo::initialize(
       auto fusion_inp = complete_fusion_->inputs()[inp_i];
       auto data_ptr = tensor_arg_abstract->getPointer();
       input_ptrs_[fusion_inp] = (size_t)data_ptr;
+
+      // find and push discontiguous stride
+      auto dtype_size = dataTypeSize(tensor_arg_abstract->getDataType());
+      input_discontig_strides_[fusion_inp] = {};
+      auto dims = tensor_arg_abstract->getRank();
+      auto expected_stride = 1;
+      for (auto dim = dims - 1; dim >= 0; dim--) {
+        auto size = tensor_arg_abstract->getSize(dim);
+        if (size <= 1) {
+          continue;
+        }
+        auto stride = tensor_arg_abstract->getStride(dim);
+        if (stride != expected_stride) {
+          input_discontig_strides_[fusion_inp].push_back(stride * dtype_size);
+          expected_stride = stride;
+        }
+        expected_stride *= size;
+      }
     }
   }
 
@@ -529,6 +547,13 @@ size_t SchedulerRuntimeInfo::getAlignmentSize(TensorView* tv) {
   }
 
   auto alignment_size = SchedulerRuntimeInfo::computeAlignmentSize(ptrOf(tv));
+  auto strides_it = input_discontig_strides_.find(tv);
+  if (strides_it != input_discontig_strides_.end()) {
+    for (auto stride : strides_it->second) {
+      alignment_size = std::min(
+          alignment_size, SchedulerRuntimeInfo::computeAlignmentSize(stride));
+    }
+  }
   alignment_map_[tv] = alignment_size;
   return alignment_size;
 }
