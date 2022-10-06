@@ -6917,29 +6917,31 @@ for shape in [(1,), ()]:
         t3 = torch.rand(2, requires_grad=True)
         t4 = torch.rand(2, requires_grad=True)
 
+        res = [None] * 4
+        count = [0]
         def hook(grads):
-            print(f"Multi-hook called with {len(grads)} gradients")
-        torch.autograd.graph.register_multi_grad_hook((t2, t3), hook)
+            nonlocal res
+            count[0] += 1
+            res = [g is not None for g in grads]
 
-        def get_hook(name):
-            def hook(grad):
-                print(f"{name} hook called")
-            return hook
-        t1.register_hook(get_hook("t1"))
-        t3.register_hook(get_hook("t3"))
+        handle = torch.autograd.graph.register_multi_grad_hook((t1, t2, t3, t4), hook)
 
-        out = t1.clone()
-        out = out + t2
-        out = out + t3
-        out = out + t4
+        out = t2 * t3
 
-        out.sum().backward(inputs=(t2, t3))
-        # t3 hook called
-        # Multi-hook called with 2 gradients
-        # t1 hook called
+        out.sum().backward(inputs=(t2, t3), retain_graph=True)
+        self.assertEqual(count[0], 1)
+        self.assertEqual(res, [False, True, True, False])
 
-        out.sum().backward(inputs=(t1, t2))
-        # Multi-hook called with 1 gradient
+        out.sum().backward(inputs=(t1, t4), retain_graph=True)
+        self.assertEqual(count[0], 1)
+
+        out.sum().backward(inputs=(t1, t3), retain_graph=True)
+        self.assertEqual(count[0], 2)
+        self.assertEqual(res, [False, False, True, False])
+
+        handle.remove()
+        out.sum().backward(inputs=(t1, t3), retain_graph=True)
+        self.assertEqual(count[0], 2)
 
     def test_pynode_destruction_deadlock(self):
         script = """

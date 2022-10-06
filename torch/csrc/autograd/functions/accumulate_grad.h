@@ -58,8 +58,8 @@ struct TORCH_API AccumulateGrad : public Node {
     }
     if (!impl::hooks(variable).empty()) {
       pre_hooks_.push_back(
-        std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
-        hook_idx_ = pre_hooks_.size() - 1;
+          std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
+      hook_idx_ = pre_hooks_.size() - 1;
     }
     return pre_hooks_;
   }
