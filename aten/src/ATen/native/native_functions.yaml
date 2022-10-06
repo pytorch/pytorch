@@ -1779,10 +1779,12 @@
     CPU: ctc_loss_cpu
     CUDA: ctc_loss_gpu
   autogen: _ctc_loss.out
+  tags: dynamic_output_shape  # the shape of second output is data dependent
 
 - func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: ctc_loss_tensor
+  tags: dynamic_output_shape  # the shape of second output is data dependent
 
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
@@ -2107,7 +2109,7 @@
     CompositeExplicitAutogradNonFunctional: new_empty_strided_symint
   autogen: new_empty_strided.out
 
-- func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_full(Tensor self, SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2115,7 +2117,7 @@
     CompositeExplicitAutograd: new_full
   autogen: new_full.out
 
-- func: new_zeros(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_zeros(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2123,7 +2125,7 @@
     CompositeExplicitAutograd: new_zeros
   autogen: new_zeros.out
 
-- func: new_ones(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: new_ones(Tensor self, SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
     # NB: Although this composite mutates on the inside, it is
@@ -2147,7 +2149,7 @@
     QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
   autogen: _empty_per_channel_affine_quantized.out
 
-- func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
+- func: resize_(Tensor(a!) self, SymInt[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: method
   device_check: NoCheck
@@ -2462,11 +2464,11 @@
     CompositeExplicitAutograd: full
   autogen: full.names_out
 
-- func: full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: full(SymInt[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: full
 
-- func: full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
+- func: full.out(SymInt[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: full_out
 
@@ -3707,15 +3709,19 @@
   dispatch:
     CPU: narrow_copy_dense_cpu_out
 
-- func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
+- func: narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: narrow_symint
 
-- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
+- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: narrow_tensor_symint
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -3794,11 +3800,11 @@
     CompositeExplicitAutograd: ones
   autogen: ones.names_out
 
-- func: ones(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: ones(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CompositeExplicitAutograd: ones
 
-- func: ones.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
+- func: ones.out(SymInt[] size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: ones_out
 

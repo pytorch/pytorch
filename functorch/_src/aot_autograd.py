@@ -479,7 +479,7 @@ def create_aot_dispatcher_function(
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
-    with preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+    with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:

@@ -1727,6 +1727,8 @@ class TestRefsOpsInfo(TestCase):
     ref_db_names = set(ref_op.name for ref_op in python_ref_db)
     # ref aliases defined in PythonRefInfo
     ref_alias_names = set(alias.name for op in python_ref_db for alias in op.aliases)
+    # op aliases defined in OpInfo
+    op_alias_names = set(alias.name for op in op_db for alias in op.aliases)
 
     # TODO: References that do not have an entry in python_ref_db
     skip_ref_ops = {
@@ -1843,7 +1845,11 @@ class TestRefsOpsInfo(TestCase):
         err = f"{op} does not have an entry in python_ref_db"
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(err)
-        # skip aliases since we don't want them defined in the ref db
+        # Skip aliases since we don't want them to have dedicated RefInfo
+        # entries.  Instead, refs are expected to follow the same format as
+        # OpInfos, where each ref alias is part of its corresponding ref entry.
+        # If we had separate entries just for aliases, it would result in too
+        # much boilerplate for no good reason, e.g., due to handling skips.
         if op in self.ref_alias_names:
             return
         self.assertIn(op, self.ref_db_names, msg=err)
@@ -1859,32 +1865,60 @@ class TestRefsOpsInfo(TestCase):
             raise unittest.SkipTest(f"Skipping nvfuser ref: {op}")
         self.assertIn(op, self.ref_ops_names)
 
-    @parametrize("op", ref_db_names)
-    def test_ref_db_has_no_aliases(self, op):
-        self.assertNotIn(op, self.ref_alias_names,
-                         f"Alias {op} in python_ref_db, which is not allowed, "
-                         f"aliases are tested automatically")
+    def test_ref_db_has_no_aliases(self):
+        def _strip_ref_prefix(ref):
+            # TODO: maybe support other prefixes (like ops.nvprims for nvfuser)
+            prefix = "_refs."
+            if ref.startswith(prefix):
+                return ref[len(prefix):]
 
-    @parametrize("op", ref_ops_names)
-    def test_refs_are_in_decomp_table(self, op):
-        # skip aliases since those will be registered via their respective ops
-        if op in self.ref_alias_names:
-            # also make sure aliases are not added to the list of decomp skips
-            self.assertNotIn(op, self.not_in_decomp_table,
-                             f"Alias {op} in not_in_decomp_table, which is not "
-                             f"allowed, aliases must never register decomps")
-            return
-        path = op.split('.')
-        module_path = '.'.join(path[:-1])
-        op_name = path[-1]
-        op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
+        extra_aliases = []
+        for ref in self.ref_db_names:
+            ref_no_prefix = _strip_ref_prefix(ref)
+            if ref in self.ref_alias_names or ref_no_prefix in self.op_alias_names:
+                extra_aliases.append(ref)
+        self.assertTrue(extra_aliases == [],
+                        f"Found the following alias entries in python_ref_db, "
+                        f"which is not allowed; aliases are tested "
+                        f"automatically and must be defined via the 'aliases' "
+                        f"attribute of a RefInfo: {extra_aliases}")
 
-        if op in self.not_in_decomp_table:
-            self.assertNotIn(op_impl, torch._decomp.decomposition_table.values(),
-                             f"Unexpectedly found {op} in torch._decomp.decomposition_table.values()")
-        else:
-            self.assertIn(op_impl, torch._decomp.decomposition_table.values(),
-                          f"Did not find {op} in torch._decomp.decomposition_table.values()")
+    def test_refs_are_in_decomp_table(self):
+        extra_decomp_skips = []
+        extra_decomps = []
+        missing_decomps = []
+
+        for ref in self.ref_ops_names:
+            # skip aliases since those will be registered via their respective ops
+            if ref in self.ref_alias_names:
+                # also make sure aliases are not added to the list of decomp skips
+                if ref in self.not_in_decomp_table:
+                    extra_decomp_skips.append(ref)
+                continue
+            path = ref.split('.')
+            module_path = '.'.join(path[:-1])
+            op_name = path[-1]
+            op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
+
+            if ref in self.not_in_decomp_table:
+                if op_impl in torch._decomp.decomposition_table.values():
+                    extra_decomps.append(ref)
+            else:
+                if op_impl not in torch._decomp.decomposition_table.values():
+                    missing_decomps.append(ref)
+
+        self.assertTrue(extra_decomp_skips == [],
+                        f"Unexpectedly found these aliases in not_in_decomp_table, "
+                        f"which is not allowed, aliases must never register "
+                        f"decomps: {extra_decomp_skips}")
+        self.assertTrue(extra_decomps == [],
+                        f"Unexpectedly found these entries in "
+                        f"torch._decomp.decomposition_table.values(): "
+                        f"{extra_decomps}")
+        self.assertTrue(missing_decomps == [],
+                        f"Missing these entries in "
+                        f"torch._decomp.decomposition_table.values(): "
+                        f"{missing_decomps}")
 
 
 fake_skips = (
@@ -1998,6 +2032,8 @@ fake_backward_xfails = fake_tensor_stride_failing_ops | {
     "nn.functional.huber_loss",
     "nn.functional.logsigmoid",
     "nn.functional.multilabel_soft_margin_loss",
+    "unfold",  # fails an aliasing assert
+    "unfold_copy",  # fails an aliasing assert
     "pca_lowrank",
     "roll",
     "svd_lowrank",

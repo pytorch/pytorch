@@ -16,6 +16,8 @@ from torch._refs import (
 
 
 __all__ = [
+    "bessel_j0",
+    "bessel_j1",
     "digamma",
     "erf",
     "erfc",
@@ -39,8 +41,25 @@ __all__ = [
     "round",
     "sinc",
     "softmax",
+    "spherical_bessel_j0",
     "zeta",
 ]
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_bessel_j0,
+)
+def bessel_j0(a: TensorLikeType) -> TensorLikeType:
+    return prims.bessel_j0(a)
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_bessel_j1,
+)
+def bessel_j1(a: TensorLikeType) -> TensorLikeType:
+    return prims.bessel_j1(a)
 
 
 digamma = torch.digamma  # alias
@@ -79,21 +98,21 @@ i0 = torch.i0  # alias
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i0e
 )
-def i0e(a):
+def i0e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i0e(a)
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1
 )
-def i1(a):
+def i1(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1(a)
 
 
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=torch.ops.aten.special_i1e
 )
-def i1e(a):
+def i1e(a: TensorLikeType) -> TensorLikeType:
     return prims.bessel_i1e(a)
 
 
@@ -153,6 +172,14 @@ psi = torch.digamma  # alias
 
 
 round = torch.round  # alias
+
+
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=torch.ops.aten.special_spherical_bessel_j0,
+)
+def spherical_bessel_j0(a: TensorLikeType) -> TensorLikeType:
+    return prims.spherical_bessel_j0(a)
 
 
 zeta = _make_elementwise_binary_reference(
