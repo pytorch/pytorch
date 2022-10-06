@@ -1,5 +1,5 @@
 #include <ATen/ThreadLocalState.h>
-#include <c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>

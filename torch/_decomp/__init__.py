@@ -18,6 +18,8 @@ decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
+# decompositions which have been disabled as meta kernel implementations,
+# usually due to mismatching strides, aliasing, or other inconsistent property
 _disabled_meta_decomps = set()
 
 
@@ -102,6 +104,7 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 if op_overload in registry:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
                 registry[op_overload] = fn
+                op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
                 # TODO: factor this logic into OpOverload or Library API
                 name = op_overload._schema.name
                 if op_overload._schema.overload_name:

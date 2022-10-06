@@ -115,10 +115,11 @@ def get_schema_info(func):
     return torch._C._SchemaInfo(func._schema)  # type: ignore[attr-defined]
 
 
-# many of the prims do not at the moment model aliasing or strides,
-# but as an incremenetal step, enable aten-aten decomp. these decomps
-# are used for aot autograd tracing so we would like to unify and add
-# additional testing to them
+# many of the decompositions registered to torch/_prims do not at the moment model
+# aliasing or strides, so as an incremental step, just enable the decompositions in
+# torch/_decomp/decompositions.py.
+# decomps are used for aot autograd tracing so we would like to unify on their
+# implementation and add additional testing to them
 @functools.lru_cache(None)
 def aten_to_aten_decomp(func):
     from torch._decomp import decomposition_table
@@ -343,7 +344,7 @@ def to_copy(fake_mode, func, *args, **kwargs):
 
     input_device = new_kwargs.pop("device", None)
     out_device = input_device if input_device else new_kwargs["input"].device
-    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
+    with in_kernel_invocation_manager(fake_mode):
         input = new_kwargs.pop("input").to("meta")
         return FakeTensor(fake_mode, aten._to_copy(input, **new_kwargs), out_device)
 
@@ -380,7 +381,7 @@ def run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs):
     )
 
     out_device = new_kwargs["input"].device
-    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
+    with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
     return FakeTensor(fake_mode, out, out_device)
@@ -406,7 +407,7 @@ def index_put(fake_mode, func, *args, **kwargs):
 # same with index_put, but return the input
 @register_op_impl(aten.index_put_.default)
 def index_put_(fake_mode, func, *args, **kwargs):
-    with no_dispatch(), in_kernel_invocation_manager(fake_mode):
+    with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
 
     _, new_kwargs = normalize_function(
@@ -435,6 +436,7 @@ def in_kernel_invocation_manager(fake_mode):
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
     assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
 
+    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
     fake_mode.in_kernel_invocation = True
     torch._C._set_meta_in_tls_dispatch_include(True)
     try:
@@ -442,6 +444,7 @@ def in_kernel_invocation_manager(fake_mode):
     finally:
         fake_mode.in_kernel_invocation = prev_in_kernel
         torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
+        del guard
 
 
 class FakeTensor(torch.Tensor):
@@ -505,27 +508,6 @@ class FakeTensor(torch.Tensor):
         with in_kernel_invocation_manager(self.fake_mode):
             self_repr = super().__repr__()
         return f"FakeTensor({self_repr}, {self.fake_device})"
-
-    def new(self, *args, **kwargs):
-        # TODO: This doesn't work with sparse self
-
-        # torch.Tensor.new does not go through the normal dispatcher pattern
-        # so in order to use the same pattern as normal invocation of
-        # returning meta device within the kernel we need to intercept
-        # the call here
-        # because it doesn't go through the dispatcher, we run into errors
-        # when attempting to compute an output in meta, so
-        # we compute the real tensor then convert to meta
-        out_device = self.fake_device
-        with no_dispatch(), in_kernel_invocation_manager(self.fake_mode):
-            real_out = super().new(*args, **kwargs)
-
-        assert not isinstance(real_out, FakeTensor), real_out
-        assert real_out.device.type != "meta", real_out.device
-
-        with no_dispatch():
-            meta_out = MetaConverter()(real_out)
-            return FakeTensor(self.fake_mode, meta_out, out_device)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -605,6 +587,17 @@ class FakeTensor(torch.Tensor):
 
         tree_map(merge_devices, args)
         tree_map(merge_devices, kwargs)
+
+        # some functions that allow Python numbers to bind to Tensors
+        # if we have failed to find a device, and we're running one of these operators,
+        # we must have scalar only inputs
+        if (
+            torch._C._should_allow_numbers_as_tensors(
+                func.name().split("::")[-1].split(".")[0]
+            )
+            and common_device is None
+        ):
+            common_device = torch.device("cpu")
 
         assert common_device is not None, f"Could not find common device for {func}"
 
@@ -784,12 +777,12 @@ class FakeTensorMode(TorchDispatchMode):
                     return r
 
         # invoke aten-aten decomps
-        with self:
-            if (
-                func in decomposition_table
-                and aten_to_aten_decomp(func)
-                and func not in _disabled_meta_decomps
-            ):
+        if (
+            func in decomposition_table
+            and aten_to_aten_decomp(func)
+            and func not in _disabled_meta_decomps
+        ):
+            with self:
                 return decomposition_table[func](*args, **kwargs)
 
         # prims already wrap FakeTensor inputs to FakeTensor outputs
