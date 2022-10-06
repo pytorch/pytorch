@@ -480,7 +480,7 @@ class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
 
     def test_package_import_nn_intrinsic_quantized(self):
         r"""Tests the migration of the torch.nn.intrinsic.quantized"""
-        self._test_package_import('quanttized', base='nn.intrinsic')
+        self._test_package_import('quantized', base='nn.intrinsic')
         self._test_package_import('quantized.modules', base='nn.intrinsic')
 
     def test_modules_import_nn_intrinsic_quantized(self):
