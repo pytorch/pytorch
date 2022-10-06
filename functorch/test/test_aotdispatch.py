@@ -786,7 +786,6 @@ symbolic_aot_autograd_failures = {
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_copy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('index_put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('index_select', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -981,11 +980,7 @@ symbolic_aot_autograd_failures = {
     xfail('scatter_reduce', 'sum'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomp...
     xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('select', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('select_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('slice', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('slice_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sort', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.entr', ''),  # aten.special_entr.default - couldn't find symbolic meta function/decomposition
     xfail('special.erfcx', ''),  # aten.special_erfcx.default - couldn't find symbolic meta function/decompos...
@@ -998,7 +993,6 @@ symbolic_aot_autograd_failures = {
     xfail('split', 'list_args'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('split_with_sizes', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('squeeze', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('stack', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
