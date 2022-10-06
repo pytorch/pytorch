@@ -27,17 +27,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.ao.quantization.fuser_method_mappings": [
-    "Callable",
-    "Dict",
-    "MatchAllNode",
-    "Optional",
-    "Pattern",
-    "Tuple",
-    "Type",
-    "Union",
-    "get_combined_dict"
-  ],
   "torch.ao.quantization.backend_config.native": [
     "Any",
     "Dict",
