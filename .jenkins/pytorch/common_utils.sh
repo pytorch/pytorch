@@ -150,9 +150,9 @@ function install_deploy_deps_ubuntu() {
     software-properties-common \
     python-pip \
     python3-pip && \
-    sudo wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor -o /usr/share/keyrings/magic-key.gpg && \
-    sudo echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/magic-key.gpg] https://apt.kitware.com/ubuntu/ bionic main" | tee -a /etc/apt/sources.list && \
-    sudo echo "deb http://security.ubuntu.com/ubuntu focal-security main" | tee -a /etc/apt/sources.list && \
+    sudo wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | sudo gpg --dearmor -o /usr/share/keyrings/magic-key.gpg && \
+    sudo echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/magic-key.gpg] https://apt.kitware.com/ubuntu/ bionic main" | sudo tee -a /etc/apt/sources.list && \
+    sudo echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee -a /etc/apt/sources.list && \
     sudo apt update && \
     sudo apt install -y binutils && \
     rm -rf /var/lib/apt/lists/*
