@@ -291,8 +291,11 @@ CROSS_REF_EXCLUDE_SET = {
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
-    # Backward formula is not as precise as the custom CUDA kernel
+    # Decomposed backward formula is not as precise
+    ("cuda", torch.float16, "nn.functional.embedding"),
     ("cuda", torch.bfloat16, "nn.functional.embedding"),
+    ("cpu", torch.bfloat16, "nn.functional.hardswish"),
+    ("cuda", torch.float16, "nn.functional.cross_entropy"),
 }
 
 all_decomposed = set()

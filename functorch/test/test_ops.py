@@ -637,8 +637,6 @@ class TestOperators(TestCase):
         xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
-        xfail("masked.softmax", device_type='cuda'),  # Mismatch in values!
-        xfail("masked.softmin", device_type='cuda'),  # Mismatch in values!
         # got a batched tensor as input while the running_mean or running_var,
         # which will be updated in place, were not batched.
         xfail("nn.functional.batch_norm", 'without_cudnn'),
@@ -841,16 +839,14 @@ class TestOperators(TestCase):
     }
 
     @ops(op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @opsToleranceOverride('TestOperators', 'test_vmapjvpall', (
         tol1('nn.functional.conv_transpose3d',
              {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
         tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=9e-3)}, device_type='cuda'),
-        tol1('linalg.householder_product',
-             {torch.float32: tol(atol=2e-04, rtol=1e-4)}, device_type='cpu'),
+             {torch.float32: tol(atol=2e-04, rtol=9e-3)}),
     ))
     @skipOps('TestOperators', 'test_vmapjvpall', vmapjvpall_fail)
-    @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
     # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
     # because that coresponds to "batched forward-mode AD" testing in PyTorch core
@@ -1201,7 +1197,7 @@ class TestOperators(TestCase):
         tol1('masked.prod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}),
         tol1('masked.cumprod',
-             {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
+             {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
         tol1('cumprod',
              {torch.float32: tol(atol=1e-04, rtol=1.3e-05)}, device_type='cuda'),
         tol1('linalg.vander',
@@ -1284,11 +1280,6 @@ class TestOperators(TestCase):
         xfail('half'),  # required rank 4 tensor to use channels_last format
         xfail('index_reduce'),  # Forward AD not implemented and no decomposition
         xfail('linalg.eig'),  # vmap over torch.allclose isn't supported yet.
-        # AssertionError: Tensor-likes are not close!
-        # Mismatched elements: 2 / 120 (1.7%)
-        # Greatest absolute difference: 0.09438323974609375
-        # Greatest relative difference: 0.00115722746596277
-        xfail('linalg.householder_product', device_type='cuda'),
         xfail('logcumsumexp'),  # Forward AD not implemented and no decomposition
         xfail('mvlgamma', 'mvlgamma_p_1'),  # vmap: inplace into a regular tensor
         xfail('mvlgamma', 'mvlgamma_p_3'),  # vmap: inplace into a regular tensor
@@ -1355,7 +1346,7 @@ class TestOperators(TestCase):
         tol1('linalg.svd',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('linalg.householder_product',
-             {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
+             {torch.float32: tol(atol=5e-03, rtol=5e-03)}),
         tol1('linalg.multi_dot',
              {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
         tol1('svd',
@@ -1591,6 +1582,10 @@ class TestOperators(TestCase):
              {torch.float32: tol(atol=5e-04, rtol=9e-03)}, device_type='cuda'),
         tol1('linalg.householder_product',
              {torch.float32: tol(atol=1e-04, rtol=1e-04)}, device_type='cpu'),
+        tol1('linalg.multi_dot',
+             {torch.float32: tol(atol=2e-04, rtol=1e-04)}, device_type='cuda'),
+        tol2('linalg.pinv', 'hermitian',
+             {torch.float32: tol(atol=5e-06, rtol=5e-06)}),
     ))
     def test_vmap_autograd_grad(self, device, dtype, op):
         def is_differentiable(inp):
