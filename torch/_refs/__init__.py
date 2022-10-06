@@ -1913,8 +1913,8 @@ def _reduction(
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
-    a_converted = prims.convert_element_type(a, computation_dtype)
-    result = prim(a_converted, dims)
+    a = _maybe_convert_to_dtype(a, computation_dtype)  # type: ignore[assignment]
+    result = prim(a, dims)
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
         broadcast_dims = [i for i in range(a.ndim) if i not in dims]
@@ -3538,9 +3538,7 @@ def unfold(
 @register_decomposition(torch.ops.aten.unfold_copy)
 @out_wrapper()
 def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
-    return self.unfold(dimension, size, step).to(  # type: ignore[call-overload]
-        memory_format=torch.contiguous_format, copy=True
-    )
+    return self.unfold(dimension, size, step).clone()
 
 
 @register_decomposition(torch.ops.aten.cumsum)
