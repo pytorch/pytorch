@@ -262,7 +262,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto qkv_ = qkv.is_nested()
-    ? c10::MaybeOwned<Tensor>::owned(nested_to_padded_tensor(qkv, 0))
+    ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
     : c10::MaybeOwned<Tensor>::borrowed(qkv);
   auto B = qkv_->size(0);
   auto T = qkv_->size(1);
@@ -685,10 +685,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+        if (query_.requires_grad() || key.requires_grad() || value.requires_grad()){
+          return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+        }
+        return at::_scaled_dot_product_attention_forward(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+}
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
+        const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+        }
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
+        const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
     auto attn_mask = attn_mask_;
-    TORCH_CHECK(!attn_mask.has_value() || attn_mask->dtype() == at::kBool,
-            "_scaled_dot_product_attention: Only boolean attention masks are currently supported, but found: ",
-            attn_mask->dtype())
     // Naive, composite implementation defined here.
     const auto embed_size = query_.size(-1);
     const auto query = query_ * (1. / ::sqrt(static_cast<double>(embed_size)));
@@ -707,9 +719,12 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
                 "_scaled_dot_product_attention: Nested tensors for query / key are not supported "
                 "when an explicit attn_mask is set");
         // Convert boolean mask to additive mask; need to invert mask to indicate what to mask *out*.
-        auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
-        new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
-        attn_mask = new_attn_mask;
+        if (attn_mask->dtype() == at::kBool){
+          auto new_attn_mask = at::zeros_like(*attn_mask, query.dtype());
+          new_attn_mask.masked_fill_(attn_mask->logical_not(), -std::numeric_limits<double>::infinity());
+          attn_mask = new_attn_mask;
+        }
+        // Otherwise, attn_mask represents an additive attention tensor
     }
     auto attn = at::matmul(query, key.transpose(-2, -1));
     if (attn_mask.has_value()) {
@@ -717,10 +732,10 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
-        at::dropout_(attn, dropout_p, true);
+      attn = at::dropout(attn, dropout_p, true);
     }
     const auto output = at::matmul(attn, value);
-    return (need_attn_weights ? std::make_tuple(output, attn) : std::make_tuple(output, Tensor()));
+    return std::make_tuple(output, attn);
 }
 
 Tensor triton_multi_head_attention(
