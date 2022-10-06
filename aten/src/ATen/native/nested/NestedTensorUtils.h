@@ -9,6 +9,7 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/cat.h>
 #include <ATen/ops/ones_native.h>
