@@ -1,7 +1,7 @@
 
 import torch
 import torch.ao.nn.intrinsic
-import torch.nn.intrinsic.qat
+import torch.ao.nn.intrinsic.qat
 import torch.nn.functional as F
 import torch.ao.nn.quantized as nnq
 
@@ -48,7 +48,7 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_float(cls, mod):
-        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU1d:
+        if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU1d:
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
@@ -97,7 +97,7 @@ class ConvReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_float(cls, mod):
-        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU2d:
+        if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU2d:
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
@@ -147,7 +147,7 @@ class ConvReLU3d(nnq.Conv3d):
 
     @classmethod
     def from_float(cls, mod):
-        if type(mod) == torch.nn.intrinsic.qat.ConvBnReLU3d:
+        if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU3d:
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight,
                 mod.bias,
