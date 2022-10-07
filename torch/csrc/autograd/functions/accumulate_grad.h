@@ -52,7 +52,8 @@ struct TORCH_API AccumulateGrad : public Node {
     // before another node is able to keep AccumulateGrad alive.
     int64_t new_hooks_version = impl::_get_hooks_version(variable);
     bool first_run = hooks_version_ == -1;
-    bool need_refresh = hooks_version_ != -1 && hooks_version_ != new_hooks_version;
+    bool need_refresh =
+        hooks_version_ != -1 && hooks_version_ != new_hooks_version;
 
     if (need_refresh && hooks_idx_ != -1) {
       pre_hooks_.erase(pre_hooks_.begin() + hooks_idx_);
