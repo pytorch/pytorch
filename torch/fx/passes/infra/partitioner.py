@@ -152,10 +152,10 @@ class CapabilityBasedPartitioner:
             #    merge the other partitions with first partition, since user_partitions doesn't have depedency between
             #    each other.
             partitions_id_list = [partition.id for partition in user_partitions if partition.id is not None]
-            
+
             if merge_self and len(partitions_id_list) == 0:
                 # create a new partition
-                id = next(new_partition_id))
+                id = next(new_partition_id)
             elif len(partitions_id_list) == 1:
                 id = partitions_id_list[0]
             if len(partitions_id_list) > 1:
