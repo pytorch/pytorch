@@ -3408,10 +3408,6 @@ def sample_inputs_conv1d(op_info, device, dtype, requires_grad, **kwargs):
         ((1, 4, 5), (3, 4, 3), None, {}),
     )
 
-    # TODO: (@krshrimali), add error_inputs_func once https://github.com/pytorch/pytorch/pull/67354 is merged
-    # Should replace test_conv_modules_raise_error_on_incorrect_input_size and test_conv_shapecheck
-    # in test/test_nn.py
-
     for input_shape, weight, bias, kwargs in cases:
         # Batched
         yield SampleInput(make_arg(input_shape), args=(
@@ -3447,14 +3443,19 @@ def error_inputs_conv1d(opinfo, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 1, 3)), make_arg((2,)))),
                      error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for input.ndim == 3 should be weight.ndim == 3 not < 3
+    # error inputs for input.ndim != weight.ndim
     yield ErrorInput(SampleInput(make_arg((1, 1, 4)), args=(make_arg((1, 2)), make_arg((1,)))),
                      error_regex="weight should have at least three dimensions")
 
-    # error inputs for groups not divisible by the number of input channels
+    # error inputs for the weight[0] are less than the number of groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
+
+    # error inputs for the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4)), args=(make_arg((2, 2, 2)), make_arg((2,))),
+                    kwargs={'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
 
     # error inputs for invalid groups
     yield ErrorInput(
@@ -3489,12 +3490,17 @@ def error_inputs_conv2d(opinfo, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4)), args=(make_arg((1, 1, 3, 2)), make_arg((2,)))),
                      error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for input.ndim == 4 should be weight.ndim == 4 not < 4
+    # error inputs for input.ndim != weight.ndim
     yield ErrorInput(
         SampleInput(make_arg((1, 1, 4, 3)), args=(make_arg((1, 2, 2)), make_arg((1,))),
                     kwargs={'padding': 'same'}), error_regex="Expected 3-dimensional input for 3-dimensional weight")
 
-    # error inputs for groups not divisible by the number of input channels
+    # error inputs for the weight[0] are less than the number of groups
+    yield ErrorInput(
+        SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 1, 3)), make_arg((2,))),
+                    kwargs={'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
+
+    # error inputs for groups the weight[0] are less than the number of groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 4, 3)), args=(make_arg((2, 2, 1, 3)), make_arg((2,))),
                     kwargs={'padding': 'same', 'groups': 3}), error_regex="expected weight to be at least 3 at dimension 0")
@@ -3569,8 +3575,8 @@ def sample_inputs_conv3d(opinfo, device, dtype, requires_grad, **kwargs):
         ((1, 1, 10, 11, 12), (1, 1, 1, 2, 5), None, {'padding': 'same', 'dilation': 2}),
         ((1, 1, 10, 11, 12), (1, 1, 4, 4, 4), None, {'padding': 'same', 'dilation': 3}),
         ((1, 1, 1, 1, 10), (1, 1, 1, 1, 4), None, {'padding': 'valid'}),
-        ((18, 27, 9, 1, 9), (9, 9, 9, 1, 9), (9,), {'groups': 3}),
-        ((18, 27, 9, 1, 9), (9, 9, 9, 1, 9), (9,), {'stride': (2, 2, 2), 'dilation': 1, 'groups': 3}),
+        ((3, 9, 3, 1, 9), (3, 3, 3, 1, 9), (3,), {'groups': 3}),
+        ((3, 9, 3, 1, 9), (3, 3, 3, 1, 9), (3,), {'stride': (2, 2, 2), 'dilation': 1, 'groups': 3}),
     )
 
     for input_shape, weight, bias, kwargs in cases:
@@ -3608,17 +3614,18 @@ def error_inputs_conv3d(opinfo, device, **kwargs):
     yield ErrorInput(SampleInput(make_arg((1, 1, 4, 4, 4)), args=(make_arg((1, 1, 3, 3, 3)), make_arg((2,)))),
                      error_regex="expected bias to be 1-dimensional with 1 elements")
 
-    # error inputs for input.ndim == 5 should be weight.ndim == 5 not < 5
+    # error inputs for input.ndim != weight.ndim
     yield ErrorInput(
         SampleInput(make_arg((1, 1, 3, 4, 5)), args=(make_arg((1, 1, 4, 3)), make_arg((1,))),
                     kwargs={'padding': 'same'}), error_regex="Expected 4-dimensional input for 4-dimensional weight")
 
-    # error inputs for same dimensions of input and weight
+    # error inputs for the weight[0] are less than the number of groups
     yield ErrorInput(
-        SampleInput(make_arg((1, 1, 3, 4, 5)), args=(make_arg((1, 1, 4, 3, 3)), make_arg((1,))),
-                    kwargs={'padding': 'same', 'groups': 2}), error_regex="expected weight to be at least 2 at dimension 0")
+        SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
+                    make_arg((2,))), kwargs={'groups': 3}),
+        error_regex="expected weight to be at least 3 at dimension 0")
 
-    # error inputs for groups not divisible by the number of input channels
+    # error inputs for the weight[0] are less than the number of groups
     yield ErrorInput(
         SampleInput(make_arg((2, 2, 3, 4, 5)), args=(make_arg((2, 2, 4, 3, 3)),
                     make_arg((2,))), kwargs={'padding': 'same', 'groups': 3}),
