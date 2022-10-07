@@ -739,7 +739,7 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
     if (it == exec_info->end() || !it->second.should_execute()) {
       ret = false;
     } else {
-      THPUtils_assert(
+      TORCH_CHECK(
           !(node->topological_nr() == 0 && it->second.captures_),
           "A leaf node was passed to _will_engine_execute_node but we are "
           "currently running autograd.grad(). This is currently not supported.");
