@@ -95,7 +95,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-      IS_TAGGED_BUILD: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && github.event.ref != 'refs/heads/nightly'  && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+      IS_TAGGED_BUILD: ${{ true }}
       CHECKOUT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
