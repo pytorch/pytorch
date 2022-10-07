@@ -174,6 +174,39 @@ class CapabilityBasedPartitioner:
                 for other_node in reassignment:
                     assign(other_node, id)
 
+        # not very efficient, this handles sibling fusion of partitions that share inputs.
+        for node in self.graph_module.graph.nodes:
+            if node not in assignment:
+                # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
+                user_partitions: Dict[Partition, None] = {}
+                for user_node in node.users:
+                    if user_node in assignment:
+                        id = assignment[user_node]
+                        user_partitions[partitions_by_id[id]] = None
+
+                # Filter out all the partitions that has dependency on other users
+                # TODO: find a better way to do this, rather than pair-wise comparision
+                user_partitions_list = list(user_partitions.keys())
+                for i in range(len(user_partitions_list)):
+                    for j in range(i + 1, len(user_partitions_list)):
+                        pi = user_partitions_list[i]
+                        pj = user_partitions_list[j]
+                        dependency = self.__partition_depends_on(pi, pj)
+                        if dependency == 1 and pj in user_partitions:
+                            del user_partitions[pj]
+                        elif dependency == -1 and pi in user_partitions:
+                            del user_partitions[pi]
+                partitions_id_list = [partition.id for partition in user_partitions]
+                if len(partitions_id_list) > 1:
+                    first_id = partitions_id_list[0]
+
+                    reassignment: Dict[Node, int] = {}
+                    for other_id in partitions_id_list[1:]:
+                        for other_node in partitions_by_id[other_id].nodes:
+                            reassignment[other_node] = first_id
+                    for other_node in reassignment:
+                        assign(other_node, first_id)
+
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
         nodes_reassignment: Dict[Node, int] = {}
