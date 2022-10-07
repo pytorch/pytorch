@@ -343,7 +343,9 @@ const c10::VariableVersion& version_counter(const Variable& self) {
 void add_hook(
     const at::TensorBase& self,
     std::shared_ptr<FunctionPreHook> hook) {
-  materialize_autograd_meta(self)->hooks_.push_back(std::move(hook));
+  auto meta = materialize_autograd_meta(self);
+  meta->hooks_version_++;
+  meta->hooks_.push_back(std::move(hook));
 }
 
 namespace {
@@ -363,7 +365,13 @@ const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
 
 void clear_hooks(const at::TensorBase& self) {
   // This is a little goofy, but usually this should be a no oop
-  materialize_autograd_meta(self)->hooks_.clear();
+  auto meta = materialize_autograd_meta(self);
+  meta->hooks_version_++;
+  meta->hooks_.clear();
+}
+
+int64_t _get_hooks_version(const at::TensorBase& self) {
+  return materialize_autograd_meta(self)->hooks_version_;
 }
 
 void set_name(const Variable& self, const std::string& name) {

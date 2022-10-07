@@ -691,19 +691,21 @@ class TestAutograd(TestCase):
         b.grad_fn.register_prehook(hook2)
 
         # For accumulate grad, prehooks registered to grad_fn are always
-        # called before prehooks registered to the leaf tensor
+        # called after(?) prehooks registered to the leaf tensor
+        # users should not rely on this behavior
         acc = b.grad_fn.next_functions[0][0]
         a.register_hook(hook2)
         acc.register_prehook(hook1)
+        a.register_hook(hook2)
 
         b.sum().backward()
-        self.assertEqual(log, [2, 2, 1, 1, 2])
+        self.assertEqual(log, [2, 2, 1, 2, 2, 1])
 
         # grad also runs hooks on accumulate grad nodes, even though
         # the accumulate grad nodes are not actually executed
         log = []
         torch.autograd.grad(b.sum(), inputs=(a,))
-        self.assertEqual(log, [2, 2, 1, 1, 2])
+        self.assertEqual(log, [2, 2, 1, 2, 2, 1])
 
     def test_accumulate_grad_posthooks_can_observe_tensor_prehook(self):
         # Post hooks on accumulate should be able to observe changes to
@@ -733,10 +735,11 @@ class TestAutograd(TestCase):
         c = b.clone()
 
         prehook_count = [0]
+        posthook_count = [0]
+
         def prehook(g):
             prehook_count[0] += 1
 
-        posthook_count = [0]
         def posthook(gI, gO):
             posthook_count[0] += 1
 

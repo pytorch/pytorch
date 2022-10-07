@@ -50,16 +50,20 @@ struct TORCH_API AccumulateGrad : public Node {
     // We cannot directly store hooks registered to the tensor on this
     // AccumulateGrad node because someone can attempt to register a hook
     // before another node is able to keep AccumulateGrad alive.
-    //
-    // We could potentially make this smarter, e.g. have additional fields
-    // on the autograd meta that tell us whether hooks have been updated
-    if (hook_idx_ != -1) {
-      pre_hooks_.erase(pre_hooks_.begin() + hook_idx_);
+    int64_t new_hooks_version = impl::_get_hooks_version(variable);
+    bool first_run = hooks_version_ == -1;
+    bool need_refresh = hooks_version_ != -1 && hooks_version_ != new_hooks_version;
+
+    if (need_refresh && hooks_idx_ != -1) {
+      pre_hooks_.erase(pre_hooks_.begin() + hooks_idx_);
     }
-    if (!impl::hooks(variable).empty()) {
+    if ((need_refresh || first_run) && !impl::hooks(variable).empty()) {
       pre_hooks_.push_back(
           std::make_unique<CombinedFunctionPreHook>(impl::hooks(variable)));
-      hook_idx_ = pre_hooks_.size() - 1;
+      hooks_idx_ = pre_hooks_.size() - 1;
+    }
+    if (need_refresh || first_run) {
+      hooks_version_ = new_hooks_version;
     }
     return pre_hooks_;
   }
@@ -262,7 +266,8 @@ struct TORCH_API AccumulateGrad : public Node {
 
   Variable variable;
   std::vector<std::unique_ptr<FunctionPreHook>> hook_;
-  int hook_idx_ = -1;
+  int64_t hooks_version_ = -1;
+  int64_t hooks_idx_ = -1;
 };
 
 #undef CHECK_RESULT
