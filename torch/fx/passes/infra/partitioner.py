@@ -131,7 +131,7 @@ class CapabilityBasedPartitioner:
                     user_partitions[partitions_by_id[id]] = None
                 elif merge_self:
                     user_partitions[Partition(nodes=[user_node])] = None
-            
+
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
             user_partitions_list = list(user_partitions.keys())
@@ -152,7 +152,6 @@ class CapabilityBasedPartitioner:
             #    merge the other partitions with first partition, since user_partitions doesn't have depedency between
             #    each other.
             partitions_id_list = [partition.id for partition in user_partitions if partition.id is not None]
-            return partitions_id_list
             if merge_self:
                 if len(partitions_id_list) == 0:
                     # create a new partition
