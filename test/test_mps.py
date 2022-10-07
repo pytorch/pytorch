@@ -3969,12 +3969,13 @@ class TestNLLLoss(TestCase):
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
     def test_gelu_simple(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+        def helper(shape, dtype=torch.float):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             gelu_result = torch.nn.GELU()(x)
-            gelu_result_cpu = torch.nn.GELU()(cpu_x)
+            # GELU is not supported on CPU, so cast it to float
+            gelu_result_cpu = torch.nn.GELU()(cpu_x.to(torch.float))
 
             cpu_grad = torch.ones_like(gelu_result_cpu)
             grad = cpu_grad.to('mps')
@@ -3982,12 +3983,18 @@ class TestNLLLoss(TestCase):
             gelu_result.backward(gradient=grad)
             gelu_result_cpu.backward(gradient=cpu_grad)
 
-            self.assertEqual(gelu_result, gelu_result_cpu)
-            self.assertEqual(x.grad, cpu_x.grad)
+            atol = 1e-5 if dtype == torch.float else 1e-2
+            rtol = 1e-3 if dtype == torch.float else 1e-2
+            self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
+            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
-        for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
-            helper(shape)
+        for dtype in [torch.float, torch.half]:
+            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
+                helper(shape, dtype)
+        # Test that gelu would raise an assert for integral types
+        for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+            self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
 
     def test_gelu(self):
         def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
@@ -4672,6 +4679,10 @@ class TestNLLLoss(TestCase):
         helper((1, 1, 1), (1, 1, 4), (2, 3, 1))
         helper([], (1, 1, 4), (2, 3, 1))
         helper([], (2, 3, 4), [])
+        helper((5, 2, 3), (2, 3), (2, 3))
+        helper((2, 3), (5, 2, 3), (2, 3))
+        helper((2, 3), (2, 3), (5, 2, 3))
+        helper((2, 3), (5, 2, 3), (6, 5, 2, 3))
 
     # Test normal
     def test_normal(self):
@@ -5080,6 +5091,15 @@ class TestNNMPS(NNTestCase):
             input = torch.randn(1, 3, 4, 4).to(dtype)
             with self.assertRaisesRegex(RuntimeError, 'non-positive stride is not supported'):
                 module(input)
+
+            # Input and weights on different devices
+            self.assertRaisesRegex(RuntimeError,
+                                   'must be on the same device',
+                                   lambda: torch.conv2d(torch.rand(1, 3, 32, 32), torch.rand(1, 3, 3, 3, device='mps')))
+            self.assertRaisesRegex(RuntimeError,
+                                   'Input type \\(MPSFloatType\\) and weight type \\(torch\\.FloatTensor\\) should be the same',
+                                   lambda: torch.conv2d(torch.rand(1, 3, 32, 32, device='mps'), torch.rand(1, 3, 3, 3)))
+
 
     def test_conv2d_valid_padding(self, device='mps'):
         # Test F.conv2d padding='valid' is the same as no padding
