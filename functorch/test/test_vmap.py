@@ -8,7 +8,7 @@
 
 from typing import OrderedDict
 from unittest.case import skipIf
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_ARM64
+from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -30,8 +30,6 @@ from torch.testing._internal.common_device_type import \
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
-    expectedFailureIf,
-    decorate,
     xfail,
     skip,
     skipOps,
@@ -3252,7 +3250,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
         xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
-        decorate('nn.functional.conv2d', decorator=expectedFailureIf(IS_ARM64)),
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
@@ -3290,6 +3287,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.conv1d'),  # AssertionError: Exception not raised on ErrorInput
         xfail('nn.functional.conv2d'),  # AssertionError: Exception not raised on ErrorInput
         xfail('nn.functional.conv3d'),  # AssertionError: Exception not raised on ErrorInput
+        xfail('native_batch_norm'),
     }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
@@ -3309,6 +3307,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('cat'),
         xfail('complex'),
         xfail('copysign'),
+        xfail('native_batch_norm'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
