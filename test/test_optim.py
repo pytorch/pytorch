@@ -1218,6 +1218,9 @@ class TestLRScheduler(TestCase):
             gc.collect(), 0, msg="Optimizer should be garbage-collected on __del__")
 
     def test_no_cyclic_references_in_step(self):
+        import gc
+        import weakref
+
         def run():
             param = torch.empty(10, requires_grad=True)
             optim = SGD(params=[param], lr=0.5)
@@ -1226,11 +1229,15 @@ class TestLRScheduler(TestCase):
             optim.step()
             scheduler.step()
 
-        import gc
-        gc.collect()
-        run()
-        garbage = gc.collect()
-        self.assertEqual(garbage, 0)
+            return weakref.ref(scheduler)
+
+        # To ensure that there are no reference cycles in scheduler,
+        # we need to turn off the garbage collector. Since gc will
+        # automatically collect unreachable objects.
+        gc.disable()
+        ref = run()
+        assert ref() is None
+        gc.enable()  # restore
 
     def test_old_pattern_warning(self):
         epochs = 35
