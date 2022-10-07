@@ -458,9 +458,9 @@ def get_group_rank(group: ProcessGroup, global_rank: int) -> int:
     """
     if group is GroupMember.WORLD:
         return global_rank
-    if group not in _world._pg_group_ranks:
+    if group not in _world.pg_group_ranks:
         raise RuntimeError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
-    group_ranks = _world._pg_group_ranks[group]
+    group_ranks = _world.pg_group_ranks[group]
     if global_rank not in group_ranks:
         raise RuntimeError(f"Global rank {global_rank} is not part of group {group}")
 
@@ -483,9 +483,9 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
     """
     if group is GroupMember.WORLD:
         return group_rank
-    if group not in _world._pg_group_ranks:
+    if group not in _world.pg_group_ranks:
         raise RuntimeError(f"Group {group} is not registered, please create group with torch.distributed.new_group API")
-    for rank, grp_rank in _world._pg_group_ranks[group].items():
+    for rank, grp_rank in _world.pg_group_ranks[group].items():
         if grp_rank == group_rank:
             return rank
     raise RuntimeError(f"Group rank {group_rank} is not part of group {group}")
@@ -512,7 +512,7 @@ def get_process_group_ranks(group: ProcessGroup):
     Returns:
         List of global ranks ordered by group rank.
     """
-    return list(_world._pg_group_ranks[group].keys())
+    return list(_world.pg_group_ranks[group].keys())
 
 def _get_group_size(group):
     """
@@ -1031,8 +1031,8 @@ def _new_process_group_helper(
                 dist_backend_opts.global_ranks_in_group = global_ranks_in_group
 
                 pg = creator_fn(dist_backend_opts, pg_options)
-            _world._pg_map[pg] = (backend, store)
-            _world._pg_names[pg] = group_name
+            _world.pg_map[pg] = (backend, store)
+            _world.pg_names[pg] = group_name
 
     return pg
 
