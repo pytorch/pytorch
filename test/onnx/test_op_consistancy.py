@@ -313,11 +313,10 @@ class TestConsistency(common_utils.TestCase):
 
         if op.name not in ALLOWLIST_OP:
             self.skipTest(f"'{op.name}' is not in the allow list for test on ONNX")
-        else:
-            if common_utils.dtype_abbrs[dtype] not in ALLOWLIST_OP[op.name]:
-                self.skipTest(
-                    f"'{op.name}' is in the allow list for ONNX but dtype '{dtype}' is excluded"
-                )
+        if common_utils.dtype_abbrs[dtype] not in ALLOWLIST_OP[op.name]:
+            self.skipTest(
+                f"'{op.name}' is in the allow list for ONNX but dtype '{dtype}' is excluded"
+            )
 
         samples = op.sample_inputs(
             device,
