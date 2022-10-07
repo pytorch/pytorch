@@ -204,6 +204,7 @@ jobs:
     name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-test.yml
     needs: macos-12-py3-arm64-build
+    if: false
     with:
       build-environment: macos-12-py3-arm64
       test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
