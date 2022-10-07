@@ -146,7 +146,6 @@ bool dispatchIndexKernel(TensorIteratorBase& iter,
   return true;
 }
 
-
 static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const std::string& op, bool accumulate) {
   using namespace mps;
 
@@ -184,6 +183,43 @@ void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArray
     validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
     dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
   }
+}
+
+static Tensor & masked_select_out_mps_impl(Tensor & result, const Tensor & self, const Tensor & mask) {
+  NoNamesGuard guard;
+
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
+              "masked_select: expected BoolTensor or ByteTensor for mask");
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(),
+              "masked_select(): self and result must have the same scalar type");
+
+  auto mask_temp = (mask.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(mask.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(mask);
+  auto self_temp = (self.dim() == 0)
+    ? c10::MaybeOwned<Tensor>::owned(self.unsqueeze(0))
+    : c10::MaybeOwned<Tensor>::borrowed(self);
+
+  // Cannot reassign to mask_temp and self_temp here! if they are
+  // owning and expand_outplace returns a borrow, the returned borrow
+  // would dangle.
+  auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
+  at::index_out(
+      result, *std::get<1>(mask_self_expanded),
+      c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
+
+  return result;
+}
+
+Tensor masked_select_mps(const Tensor & self, const Tensor & mask) {
+  namedinference::compute_broadcast_outnames(self, mask);
+  Tensor result = at::empty({0}, self.options());
+  return masked_select_out_mps_impl(result, self, mask);
+}
+
+Tensor & masked_select_out_mps(const Tensor & self, const Tensor & mask, Tensor & result) {
+  namedinference::compute_broadcast_outnames(self, mask);
+  return masked_select_out_mps_impl(result, self, mask);
 }
 
 Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
@@ -343,12 +379,13 @@ TORCH_IMPL_FUNC(index_add_mps_out)(
     Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
     Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+    MPSScalar alpha_scalar = getMPSScalar(alpha_f, source.scalar_type());
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
       indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData(),
       sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData(),
-      cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_f, MPSDataTypeFloat32)
+      cachedGraph->alphaTensor_ : getMPSGraphTensorFromScalar(stream, alpha_scalar),
     };
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()

@@ -254,6 +254,11 @@ def stride(func, *args, **kwargs):
     return None
 
 
+@register_dispatch_func([torch.ops.aten.sym_stride])
+def sym_stride(func, *args, **kwargs):
+    return None
+
+
 @register_dispatch_func([torch.ops.prim.layout])
 def layout(func, *args, **kwargs):
     return _get_data(args[0]).layout
@@ -266,7 +271,27 @@ def is_contiguous(func, *args, **kwargs):
         raise ValueError(
             "MaskedTensors with sparse data do not have is_contiguous"
         )
-    return data.is_contiguous()
+    return func(data, *args[1:], **kwargs)
+
+
+@register_dispatch_func([torch.ops.aten.is_strides_like_format])
+def is_strides_like_format(func, *args, **kwargs):
+    data = _get_data(args[0])
+    if data.is_sparse:
+        raise ValueError(
+            "MaskedTensors with sparse data do not have is_strides_like_format"
+        )
+    return func(data, *args[1:], **kwargs)
+
+
+@register_dispatch_func([torch.ops.aten.is_non_overlapping_and_dense])
+def is_non_overlapping_and_dense(func, *args, **kwargs):
+    data = _get_data(args[0])
+    if data.is_sparse:
+        raise ValueError(
+            "MaskedTensors with sparse data do not have is_non_overlapping_and_dense"
+        )
+    return func(data, *args[1:], **kwargs)
 
 
 @register_dispatch_func([torch.ops.aten.contiguous])
@@ -313,8 +338,7 @@ def _softmax(func, *args, **kwargs):
     _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0)
     data = _get_data(args[0])
     mask = _maybe_get_mask(args[0])
-    input_data = data.masked_fill(~mask, float("-inf"))
-    result_data = func(input_data, args[1], args[2])
+    result_data = torch.ops.aten._masked_softmax(data, ~mask, args[1], 2)
     return MaskedTensor(result_data, mask)
 
 
@@ -332,9 +356,13 @@ def _softmax_backward_data(func, *args, **kwargs):
     if is_masked_tensor(grad) and is_masked_tensor(output):
         if not _masks_match(grad, output):
             raise ValueError("__torch_dispatch__, {func}: expected the masks of grad and output to match")
-        grad_data = _get_data(grad).masked_fill(~_maybe_get_mask(grad), 1)
-        output_data = _get_data(output).masked_fill(~_maybe_get_mask(output), 0)
-        new_grad_data = func(grad_data, output_data, dim, input_dtype)
+        grad_data = _get_data(grad)
+        new_grad_data = torch.ops.aten._masked_softmax_backward(
+            grad_data,
+            _get_data(output),
+            ~_maybe_get_mask(grad),
+            dim % grad_data.ndim,
+        )
         res = MaskedTensor(new_grad_data, _maybe_get_mask(grad))
         return res
     else:
