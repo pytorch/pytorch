@@ -9,20 +9,20 @@ from unittest.mock import patch
 
 # NOTE: Each of the tests in this module need to be run in a brand new process to ensure CUDA is uninitialized
 # prior to test initiation.
-# Before executing the desired tests, we need to disable CUDA initialization and fork_handler additions that would
-# otherwise be triggered by the `torch.testing._internal.common_utils` module import
-os.environ['PYTORCH_NVML_BASED_CUDA_CHECK'] = '1'
-from torch.testing._internal.common_utils import (parametrize, instantiate_parametrized_tests, run_tests, TestCase,
-                                                  IS_WINDOWS)
-# NOTE: Because `remove_device_and_dtype_suffixes` initializes CUDA context (triggered via the import of
-# `torch.testing._internal.common_device_type` which imports `torch.testing._internal.common_cuda`) we need
-# to bypass that method here which should be irrelevant to the parameterized tests in this module.
-torch.testing._internal.common_utils.remove_device_and_dtype_suffixes = lambda x: x
+with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
+    # Before executing the desired tests, we need to disable CUDA initialization and fork_handler additions that would
+    # otherwise be triggered by the `torch.testing._internal.common_utils` module import
+    from torch.testing._internal.common_utils import (parametrize, instantiate_parametrized_tests, run_tests, TestCase,
+                                                      IS_WINDOWS)
+    # NOTE: Because `remove_device_and_dtype_suffixes` initializes CUDA context (triggered via the import of
+    # `torch.testing._internal.common_device_type` which imports `torch.testing._internal.common_cuda`) we need
+    # to bypass that method here which should be irrelevant to the parameterized tests in this module.
+    torch.testing._internal.common_utils.remove_device_and_dtype_suffixes = lambda x: x
 
-TEST_CUDA = torch.cuda.is_available()
-if not TEST_CUDA:
-    print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # type: ignore[misc, assignment] # noqa: F811
+    TEST_CUDA = torch.cuda.is_available()
+    if not TEST_CUDA:
+        print('CUDA not available, skipping tests', file=sys.stderr)
+        TestCase = object  # type: ignore[misc, assignment] # noqa: F811
 
 
 class TestExtendedCUDAIsAvail(TestCase):
@@ -34,8 +34,6 @@ class TestExtendedCUDAIsAvail(TestCase):
     def setUp(self):
         super().setUp()
         torch.cuda.device_count.cache_clear()  # clear the lru_cache on this method before our test
-        if os.getenv('PYTORCH_NVML_BASED_CUDA_CHECK'):
-            del os.environ['PYTORCH_NVML_BASED_CUDA_CHECK']
 
     @staticmethod
     def in_bad_fork_test() -> bool:

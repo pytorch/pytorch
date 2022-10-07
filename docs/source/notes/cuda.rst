@@ -479,12 +479,16 @@ have a flag that can be used to disable CUDA, in combination with
 
     One can set ``PYTORCH_NVML_BASED_CUDA_CHECK=1`` in your environment before importing PyTorch modules that execute
     :meth:`~torch.cuda.is_available` (or before executing it directly) in order to direct
-    :meth:`~torch.cuda.is_available` to attempt an NVML-based assessement (`nvmlDeviceGetCount_v2`_). If the
+    :meth:`~torch.cuda.is_available` to attempt an NVML-based assessment (`nvmlDeviceGetCount_v2`_). If the
     NVML-based assessment is successful (i.e. NVML discovery/initialization does not fail),
     :meth:`~torch.cuda.is_available` calls will not poison subsequent forks.
 
-    Note that if NVML discovery/initialization fails, :meth:`~torch.cuda.is_available` will fallback to the standard
-    CUDA Runtime API assessment and the aforementioned fork constraint will apply.
+    If NVML discovery/initialization fails, :meth:`~torch.cuda.is_available` will fallback to the standard CUDA Runtime
+    API assessment and the aforementioned fork constraint will apply.
+
+    Note that the above NVML-based CUDA availability assessment provides a weaker guarantee than the default CUDA
+    Runtime API approach (which requires CUDA initialization to succeed). In some circumstances, the NVML-based check
+    may succeed while later CUDA initialization fails.
 
 Now that we have ``args.device``, we can use it to create a Tensor on the
 desired device.
