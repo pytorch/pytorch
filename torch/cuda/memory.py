@@ -615,7 +615,8 @@ def _record_memory_history(enabled: bool, record_context=True,
         stack trace collection; file an issue with us if you need it.
     """
     with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(enabled, record_context, _enable_expensive_cpp, trace_alloc_max_entries, trace_alloc_record_context)
+        _C._cuda_recordMemoryHistory(enabled, record_context, _enable_expensive_cpp,
+                                     trace_alloc_max_entries, trace_alloc_record_context)
 
 def _snapshot(device: Union[Device, int] = None):
     with torch.cuda.device(device):

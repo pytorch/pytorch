@@ -646,7 +646,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           history_entry[addr_s] = (int64_t)h.addr;
           history_entry[real_size_s] = h.real_size;
           if (h.context) {
-            auto sc = (StackContext*) h.context.get();
+            auto sc = (StackContext*)h.context.get();
             history_entry[frames_s] = get_frames(sc);
             if (!sc->cpp_frames.empty()) {
               history_entry[cpp_frames_s] = py::cast(sc->cpp_frames);
@@ -829,13 +829,21 @@ static void registerCudaDeviceProperties(PyObject* module) {
         return stream.str();
       });
 
-  m.def("_cuda_recordMemoryHistory", [](bool enabled, bool record_context, bool record_context_cpp, Py_ssize_t alloc_trace_max_entries, bool alloc_trace_record_context) {
-  c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled,
-      record_context ? (record_context_cpp ? StackContext::gather_with_cpp : StackContext::gather) : nullptr,
-      alloc_trace_max_entries,
-      alloc_trace_record_context);
-  });
+  m.def(
+      "_cuda_recordMemoryHistory",
+      [](bool enabled,
+         bool record_context,
+         bool record_context_cpp,
+         Py_ssize_t alloc_trace_max_entries,
+         bool alloc_trace_record_context) {
+        c10::cuda::CUDACachingAllocator::recordHistory(
+            enabled,
+            record_context ? (record_context_cpp ? StackContext::gather_with_cpp
+                                                 : StackContext::gather)
+                           : nullptr,
+            alloc_trace_max_entries,
+            alloc_trace_record_context);
+      });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
