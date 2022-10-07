@@ -22,8 +22,6 @@ struct TORCH_API PythonTorchFunctionTLS {
   // The mode TLS is split into
   //   - disabled_, which says whether or not to disable all torch function
   //   modes
-  //   - mode_, which is the C++ mode, that can only be the mode handling mode
-  //   or null
   //   - stack_, which is a vector of modes representing the stack of user
   //   defined modes
   bool disabled_;
