@@ -214,11 +214,13 @@ class UniformParamsBuffer final {
   UniformParamsBuffer(const UniformParamsBuffer&) = delete;
   UniformParamsBuffer& operator=(const UniformParamsBuffer&) = delete;
 
-  UniformParamsBuffer(UniformParamsBuffer&&) = delete;
-  UniformParamsBuffer& operator=(UniformParamsBuffer&&) = delete;
+  UniformParamsBuffer(UniformParamsBuffer&&) = default;
+  UniformParamsBuffer& operator=(UniformParamsBuffer&&) = default;
 
   ~UniformParamsBuffer() {
-    context_p_->register_buffer_cleanup(vulkan_buffer_);
+    if (vulkan_buffer_) {
+      context_p_->register_buffer_cleanup(vulkan_buffer_);
+    }
   }
 
   VulkanBuffer& buffer() {
@@ -374,7 +376,7 @@ inline void Context::submit_copy(
 
 template <typename... Arguments>
 inline void Context::submit_compute_job(
-    const ShaderSource& shader_descriptor,
+    const ShaderSource& shader,
     const PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_work_group,
     const utils::uvec3& local_work_group_size,
@@ -401,7 +403,7 @@ inline void Context::submit_compute_job(
   if (enable_op_profiling_) {
     log_idx = querypool_.shader_profile_begin(
         cmd_,
-        shader_descriptor.kernel_name,
+        shader.kernel_name,
         create_extent3d(global_work_group),
         create_extent3d(local_work_group_size));
   }
@@ -409,16 +411,23 @@ inline void Context::submit_compute_job(
 
   // Factor out template parameter independent code to minimize code bloat.
   DescriptorSet descriptor_set =
-      submit_compute_prologue(cmd_, shader_descriptor, local_work_group_size);
+      submit_compute_prologue(cmd_, shader, local_work_group_size);
 
   detail::bind(
       descriptor_set,
       std::index_sequence_for<Arguments...>{},
       std::forward<Arguments>(arguments)...);
 
+  // Adjust the global workgroup size based on the output tile size
+  const utils::uvec3 effective_global_wg = {
+      utils::div_up(global_work_group.data[0u], shader.out_tile_size.data[0u]),
+      utils::div_up(global_work_group.data[1u], shader.out_tile_size.data[1u]),
+      utils::div_up(global_work_group.data[2u], shader.out_tile_size.data[2u]),
+  };
+
   // Factor out template parameter independent code to minimize code bloat.
   submit_compute_epilogue(
-      cmd_, descriptor_set, pipeline_barrier, global_work_group);
+      cmd_, descriptor_set, pipeline_barrier, effective_global_wg);
 
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   if (enable_op_profiling_) {
