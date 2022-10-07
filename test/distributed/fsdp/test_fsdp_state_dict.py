@@ -92,11 +92,17 @@ class Model(Module):
         self.inner = Linear(*INNER_SHAPE)
         if register_buffers:
             self.inner.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
+            self.inner.register_buffer(
+                "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
+            )
         if wrap_fsdp:
             self.inner = FSDP(self.inner, ignored_modules=([self.inner] if ignore_inner else []))
         self.outer = Linear(*OUTER_SHAPE)
         if register_buffers:
             self.outer.register_buffer("buffer", torch.randn(BUFFER_SHAPE))
+            self.outer.register_buffer(
+                "non_persistent_buffer", torch.randn(BUFFER_SHAPE), persistent=False
+            )
 
     def forward(self, x):
         # Forward twice.
