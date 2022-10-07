@@ -10,19 +10,52 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-Tensor rearrange_weights_dw(const Tensor& weight_in);
-Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv);
-
 enum Conv2dMethod {
   Conv2dDepthwise,
   Conv2dPointwise,
   Conv2dSlidingWindow,
 };
 
+namespace conv2d {
+
+Tensor rearrange_weights_dw(const Tensor& weight_in);
+Tensor rearrange_weights_2d(const Tensor& weight_in, bool tconv);
+Tensor rearrange_bias(
+    const c10::optional<Tensor>& bias_in,
+    const at::Tensor& weight_in,
+    bool tconv);
+
+} // namespace conv2d
+
+namespace qconv2d_vk {
+
+struct QParams final {
+  api::utils::uvec3 out_extents;
+  int32_t ic4;
+  api::utils::ivec4 sizes_2d;
+  float output_scale;
+  float input_scale;
+  int32_t output_zero_point;
+  int32_t input_zero_point;
+  float weight_scale;
+  float bias_scale;
+  int32_t weight_zero_point;
+  int32_t bias_zero_point;
+  api::utils::ivec2 kernel_size;
+  api::utils::ivec2 stride;
+  api::utils::ivec2 padding;
+  api::utils::ivec2 dilate;
+  api::utils::vec2 clamp;
+  api::utils::ivec4 src_filter;
+};
+
+} // namespace qconv2d_vk
+
 class Conv2dPackedContext final : virtual public VulkanPackedContext,
                                   public torch::jit::CustomClassHolder {
  private:
   c10::impl::GenericList unpacked_;
+  api::ShaderSource compute_shader_{};
 
  public:
   Conv2dPackedContext(
@@ -63,7 +96,7 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
   struct Packed final {
     static constexpr uint32_t Weight = 0u;
     static constexpr uint32_t Bias = 1u;
-    static constexpr uint32_t FilterSizes = 2u;
+    static constexpr uint32_t OverlayRegion = 2u;
     static constexpr uint32_t Stride = 3u;
     static constexpr uint32_t Padding = 4u;
     static constexpr uint32_t OutputPadding = 5u;
@@ -85,6 +118,10 @@ class Conv2dPackedContext final : virtual public VulkanPackedContext,
     TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
 
     return unpacked_;
+  }
+
+  inline api::ShaderSource& compute_shader() {
+    return compute_shader_;
   }
 };
 

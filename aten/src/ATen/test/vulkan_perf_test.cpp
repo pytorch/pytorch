@@ -309,7 +309,7 @@ static void conv2d_op_q_benchmark(benchmark::State& state) {
       at::rand({1, 1, 64, 199}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   for (auto _ : state) {
     auto start = std::chrono::high_resolution_clock::now();
-    const auto vulkan_conv2d = at::native::vulkan::ops::conv2d(
+    const auto vulkan_conv2d = at::native::vulkan::ops::quantized_conv2d(
         out_vulkan1,
         weight_q,
         bias_q,
@@ -502,7 +502,7 @@ static void conv2dpw_op_q_benchmark(benchmark::State& state) {
       at::rand({1, 29, 127, 397}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   for (auto _ : state) {
     auto start = std::chrono::high_resolution_clock::now();
-    const auto vulkan_conv2d = at::native::vulkan::ops::conv2d(
+    const auto vulkan_conv2d = at::native::vulkan::ops::quantized_conv2d(
         out_vulkan1,
         weight_q,
         bias_q,
@@ -693,7 +693,7 @@ static void conv2ddw_op_q_benchmark(benchmark::State& state) {
       at::rand({1, 7, 45, 67}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
   for (auto _ : state) {
     auto start = std::chrono::high_resolution_clock::now();
-    const auto vulkan_conv2d = at::native::vulkan::ops::conv2d(
+    const auto vulkan_conv2d = at::native::vulkan::ops::quantized_conv2d(
         out_vulkan1,
         weight_q,
         bias_q,
