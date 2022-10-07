@@ -4600,8 +4600,12 @@ class MyFunction(Function):
     def backward(ctx, grad):
         return grad
 
+# Run on cuda if it is available to ensure that the worker thread
+# is properly initialized by the time we exit.
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 for shape in [(1,), ()]:
-    v = torch.ones(shape, requires_grad=True)
+    v = torch.ones(shape, requires_grad=True, device=device)
     MyFunction.apply(v).backward()
 """
         s = TestCase.runWithPytorchAPIUsageStderr(code)
