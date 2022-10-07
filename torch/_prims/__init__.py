@@ -1274,7 +1274,10 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
         msg = "Attempting to view a collapsed tensor, but no such view exists!"
         raise ValueError(msg)
 
-    return a.as_strided(shape, new_strides)
+    if new_strides is None:
+        return a.view(new_shape)
+    else:
+        return a.as_strided(new_shape, new_strides)
 
 
 def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
