@@ -186,7 +186,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-tsan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-clang7-tsan* ]]; then
   export PYTORCH_TEST_WITH_TSAN=1
 fi
 
