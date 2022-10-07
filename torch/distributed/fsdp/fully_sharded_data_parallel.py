@@ -824,6 +824,15 @@ class FullyShardedDataParallel(nn.Module):
         same FSDP unit. If enhanced shared parameter support is needed for your
         use case, please ping https://github.com/pytorch/pytorch/issues/77724
 
+    .. note:
+        Attempting to run the forward pass of a submodule that is contained in an
+        FSDP instance is not supported and will result in errors. This is because the
+        submodule's parameters will be sharded, but it itself is not an FSDP instance,
+        so its forward pass will not all-gather the full parameters appropriately.
+        This could potentially happen when attempting to run only the encoder of a
+        encoder-decoder model, and the encoder is not wrapped in its own FSDP instance. To
+        resolve this, please wrap the submodule in its own FSDP unit.
+
     .. note::
         Inputs into FSDP ``forward`` function will be moved to compute device
         (same device FSDP module is on) before running ``forward``, so user does
@@ -3601,7 +3610,10 @@ class FullyShardedDataParallel(nn.Module):
             will only be offloaded right after the eventual sync.
         """
         self._lazy_init()
-        assert self._is_root, "`no_sync()` on inner FSDP instances is not supported"
+        if not self._is_root:
+            raise RuntimeError(
+                "`no_sync()` on inner FSDP instances is not supported. Please call `no_sync()` on root FSDP module."
+            )
         self._assert_state(TrainingState_.IDLE)
         old_flags = []
         for m in self.modules():
@@ -3669,7 +3681,7 @@ class FullyShardedDataParallel(nn.Module):
             dist.all_reduce(total_norm, group=self.process_group)
             total_norm = total_norm ** (1.0 / norm_type)
 
-        if self.cpu_offload:
+        if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
 
         clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)

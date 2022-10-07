@@ -121,7 +121,7 @@ def get_schema_info(func):
 # decomps are used for aot autograd tracing so we would like to unify on their
 # implementation and add additional testing to them
 @functools.lru_cache(None)
-def aten_to_aten_decomp(func):
+def torch_decomp_decompositions(func):
     from torch._decomp import decomposition_table
 
     decompositions = torch._decomp.decompositions
@@ -776,10 +776,9 @@ class FakeTensorMode(TorchDispatchMode):
                 if r is not NotImplemented:
                     return r
 
-        # invoke aten-aten decomps
         if (
             func in decomposition_table
-            and aten_to_aten_decomp(func)
+            and torch_decomp_decompositions(func)
             and func not in _disabled_meta_decomps
         ):
             with self:
