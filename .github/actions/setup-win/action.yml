@@ -37,10 +37,10 @@ runs:
       run: |
         Add-MpPreference -ExclusionPath $(Get-Location).tostring() -ErrorAction Ignore
 
-    - name: Install Visual Studio 2019 toolchain
+    - name: Install Visual Studio 2022 toolchain
       shell: powershell
       env:
-        VS_VERSION: "16.8.6"
+        VS_VERSION: "17.4.1"
         INSTALL_WINDOWS_SDK: "1"
       run: |
         .\.circleci\scripts\vs_install.ps1

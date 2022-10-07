@@ -229,11 +229,11 @@ jobs:
       docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.test-matrix }}
 
-  win-vs2019-cpu-py3-build:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-build:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       test-matrix: |
         { include: [
@@ -242,21 +242,21 @@ jobs:
           { config: "functorch", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
-  win-vs2019-cpu-py3-test:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-test:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cpu-py3-build
+    needs: win-vs2022-cpu-py3-build
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
 
-  win-vs2019-cuda11_6-py3-build:
+  win-vs2022-cuda11_6-py3-build:
     if: github.event_name == 'pull_request'
-    name: win-vs2019-cuda11.6-py3
+    name: win-vs2022-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cuda11.6-py3
+      build-environment: win-vs2022-cuda11.6-py3
       cuda-version: "11.6"
       sync-tag: win-cuda-build
       test-matrix: |

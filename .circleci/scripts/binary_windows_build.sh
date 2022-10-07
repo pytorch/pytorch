@@ -8,7 +8,7 @@ export CUDA_VERSION="${DESIRED_CUDA/cu/}"
 export USE_SCCACHE=1
 export SCCACHE_BUCKET=ossci-compiler-cache
 export SCCACHE_IGNORE_SERVER_IO_ERROR=1
-export VC_YEAR=2019
+export VC_YEAR=2022
 
 if [[ "${DESIRED_CUDA}" == *"cu11"* ]]; then
     export BUILD_SPLIT_CUDA=ON
@@ -18,8 +18,8 @@ fi
 echo "Free Space for CUDA DEBUG BUILD"
 if [[ "${CIRCLECI:-}" == 'true' ]]; then
     export NIGHTLIES_PYTORCH_ROOT="$PYTORCH_ROOT"
-    if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
-        rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
+    if [[ -d "C:\\Program Files\\Microsoft Visual Studio\\$VC_YEAR\\Community" ]]; then
+        rm -rf "C:\\Program Files\\Microsoft Visual Studio\\$VC_YEAR\\Community"
     fi
 
     if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0" ]]; then

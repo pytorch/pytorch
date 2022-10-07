@@ -143,8 +143,12 @@ class CMake:
             os.environ["CMAKE_GENERATOR"] = "Ninja"
             args.append("-GNinja")
         elif IS_WINDOWS:
-            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 15 2017")
-            supported = ["Visual Studio 15 2017", "Visual Studio 16 2019"]
+            generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 17 2022")
+            supported = [
+                "Visual Studio 15 2017",
+                "Visual Studio 16 2019",
+                "Visual Studio 17 2022",
+            ]
             if generator not in supported:
                 print("Unsupported `CMAKE_GENERATOR`: " + generator)
                 print("Please set it to one of the following values: ")

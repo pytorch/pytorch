@@ -1,5 +1,5 @@
 # https://developercommunity.visualstudio.com/t/install-specific-version-of-vs-component/1142479
-# Where to find the links: https://docs.microsoft.com/en-us/visualstudio/releases/2019/history#release-dates-and-build-numbers
+# Where to find the links: https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-history#fixed-version-bootstrappers
 
 # BuildTools from S3
 $VS_DOWNLOAD_LINK = "https://s3.amazonaws.com/ossci-windows/vs${env:VS_VERSION}_BuildTools.exe"
@@ -31,7 +31,7 @@ if (Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswher
 echo "Downloading VS installer from S3."
 curl.exe --retry 3 --retry-all-errors -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
-    echo "Download of the VS 2019 Version ${env:VS_VERSION} installer failed"
+    echo "Download of the VS ${env:VC_YEAR} Version ${env:VS_VERSION} installer failed"
     exit 1
 }
 
@@ -42,9 +42,9 @@ if ($pathToRemove -ne $null) {
     $exitCode = $process.ExitCode
     if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
         echo "Original BuildTools uninstall failed with code $exitCode"
-        exit 1
+    } else {
+        echo "Other versioned BuildTools uninstalled."
     }
-    echo "Other versioned BuildTools uninstalled."
 }
 
 echo "Installing Visual Studio version ${env:VS_VERSION}."
@@ -52,7 +52,7 @@ $process = Start-Process "${PWD}\vs_installer.exe" -ArgumentList $VS_INSTALL_ARG
 Remove-Item -Path vs_installer.exe -Force
 $exitCode = $process.ExitCode
 if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
-    echo "VS 2019 installer exited with code $exitCode, which should be one of [0, 3010]."
+    echo "VS ${env:VC_YEAR} installer exited with code $exitCode, which should be one of [0, 3010]."
     curl.exe --retry 3 -kL $COLLECT_DOWNLOAD_LINK --output Collect.exe
     if ($LASTEXITCODE -ne 0) {
         echo "Download of the VS Collect tool failed."
