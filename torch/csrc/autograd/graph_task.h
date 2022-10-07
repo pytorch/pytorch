@@ -15,6 +15,10 @@ struct ReadyQueue;
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
 
+namespace {
+std::atomic<uint64_t> graph_task_id{0};
+}
+
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask : std::enable_shared_from_this<GraphTask> {
   std::atomic<uint64_t> outstanding_tasks_{0};
@@ -152,6 +156,8 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
 
   utils::DelayWarningHandler warning_handler_;
 
+  uint64_t id_;
+
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphTask(
       bool keep_graph,
@@ -165,7 +171,8 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
         exit_on_error_(exit_on_error),
         cpu_ready_queue_(std::move(cpu_ready_queue)),
         future_result_(c10::make_intrusive<at::ivalue::Future>(
-            c10::ListType::create(c10::TensorType::get()))) {
+            c10::ListType::create(c10::TensorType::get()))),
+        id_(graph_task_id.fetch_add(1, std::memory_order_relaxed)) {
     thread_locals_.set_grad_mode(grad_mode);
   }
 
@@ -191,6 +198,7 @@ get_current_graph_task_exec_info();
 TORCH_API const std::unordered_set<Node*>*
 get_current_graph_task_nodes_in_graph();
 TORCH_API bool get_current_graph_task_keep_graph();
+TORCH_API int get_current_graph_task_id();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
 } // namespace autograd

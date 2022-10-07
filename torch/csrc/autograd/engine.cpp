@@ -386,6 +386,10 @@ const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
   return current_graph_task ? &current_graph_task->nodes_in_graph_ : nullptr;
 }
 
+int get_current_graph_task_id() {
+  return current_graph_task ? current_graph_task->id_ : -1;
+}
+
 bool get_current_graph_task_keep_graph() {
   return current_graph_task ? current_graph_task->keep_graph_ : true;
 }
