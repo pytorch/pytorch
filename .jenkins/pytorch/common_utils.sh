@@ -141,6 +141,39 @@ function checkout_install_torchdynamo() {
   popd
 }
 
+function setup_torchdeploy_deps(){
+  conda install -y cmake
+  conda install -y -c conda-forge libpython-static=3.10
+  sudo wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | sudo gpg --dearmor -o /usr/share/keyrings/magic-key.gpg && \
+  sudo echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/magic-key.gpg] https://apt.kitware.com/ubuntu/ bionic main" | sudo tee -a /etc/apt/sources.list && \
+  sudo echo "deb http://security.ubuntu.com/ubuntu focal-security main" | sudo tee -a /etc/apt/sources.list && \
+  sudo apt update && \
+  sudo apt install -y binutils && \
+  sudo rm -rf /var/lib/apt/lists/*
+  export CC=$(which gcc)
+  export CXX=$(which g++)
+}
+
+function checkout_install_torchdeploy() {
+  local commit
+  setup_torchdeploy_deps()
+  pushd ..
+  git clone https://github.com/pytorch/multipy
+  pushd multipy
+  # with ABI flag change
+  git checkout 46aee77f35359962df637b2628fca0474cdc6609
+  python multipy/runtime/example/generate_examples.py
+  git submodule update --init --recursive
+  time python -m pip install --abi-cxx e .
+  popd
+  popd
+}
+
+function test_torch_deploy(){
+ pushd ../multipy
+ bash multipy/runtime/build3/test_deploy
+}
+
 function test_functorch() {
   python test/run_test.py --functorch --verbose
 }
