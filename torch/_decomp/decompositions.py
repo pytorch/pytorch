@@ -899,7 +899,7 @@ def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
 
-@register_decomposition(aten.unfold_backward, disable_meta=True)
+@register_decomposition(aten.unfold_backward)
 def unfold_backward(
     grad: Tensor, input_size: List[int], dimension: int, size: int, step: int
 ) -> Tensor:
