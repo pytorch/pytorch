@@ -29,7 +29,6 @@ from torchgen.api.types import (
     SpecialArgName,
     stringT,
     symIntArrayRefT,
-    SymIntT,
     tensorGeometryT,
     tensorOptionsT,
     typeAndSizeT,
@@ -847,16 +846,6 @@ def saved_variables(
                 "suffix": "_args_sizes",
                 "nctype": lambda name: NamedCType(
                     name, VectorCType(VectorCType(BaseCType(longT)))
-                ),
-            },
-        ),
-        # replace to_args_sizes_symint(self) with self_args_sizes
-        (
-            r"to_args_sizes_symint\({}\)",
-            {
-                "suffix": "_args_sizes_symint",
-                "nctype": lambda name: NamedCType(
-                    name, VectorCType(VectorCType(BaseCType(SymIntT)))
                 ),
             },
         ),

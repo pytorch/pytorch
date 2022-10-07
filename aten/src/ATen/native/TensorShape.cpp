@@ -11,7 +11,6 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
-#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
@@ -723,19 +722,19 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   TORCH_CHECK(chunks > 0,
            "chunk expects `chunks` to be greater than 0, got: ", chunks);
 
-  const auto dim_size = self.size(dim);
-  int64_t split_size = (dim_size + chunks - 1) / chunks;
+  const auto dim_size = self.sym_size(dim);
+  auto split_size = (dim_size + chunks - 1) / chunks;
 
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
   // eventually we will do this for all cases.
   if (split_size == 0 && dim_size == 0) {
-    std::vector<int64_t> split_sizes(chunks, split_size);
+    std::vector<c10::SymInt> split_sizes(chunks, split_size);
     split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size);
-    return self.split_with_sizes(split_sizes, dim);
+    return self.split_with_sizes_symint(split_sizes, dim);
   } else {
-    return self.split(split_size, dim);
+    return self.split_symint(split_size, dim);
   }
 }
 
@@ -1137,24 +1136,11 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
-Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
-  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  auto cur_size = self.sym_size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
-  }
-  TORCH_CHECK(length >= 0 && start <= cur_size - length,
-           "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
-  return at::slice_symint(self, dim, start, start + length, 1);
-}
-
-// This overload exists purely for XLA, because they wanted to pass in "symbolic"
-// start via Tensor.
-Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start, SymInt length) {
+Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
-  return at::narrow_symint(self, dim, c10::SymInt(st), length);
+  return at::narrow(self, dim, st, length);
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
@@ -2273,8 +2259,8 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
-std::vector<Tensor> split(const Tensor& self, IntArrayRef sizes, int64_t dim) {
-  return at::split_with_sizes(self, sizes, dim);
+std::vector<Tensor> split_symint(const Tensor& self, c10::SymIntArrayRef sizes, int64_t dim) {
+  return at::split_with_sizes_symint(self, sizes, dim);
 }
 
 std::vector<Tensor> unsafe_split(const Tensor& self, int64_t split_size, int64_t dim) {
@@ -3901,6 +3887,14 @@ at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
   auto tmp = self.alias();
   out.copy_(tmp);
   return out;
+}
+
+int64_t sparse_dim_strided(const at::Tensor& self) {
+  return 0;
+}
+
+int64_t dense_dim_strided(const at::Tensor& self) {
+  return self.dim();
 }
 
 } // namespace native
