@@ -537,13 +537,15 @@ struct Frame {
 
 struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   std::vector<Frame> frames;
+  // Empty if cpp traces weren't enabled
+  std::string cpp_frames;
   ~StackContext() {
     py::gil_scoped_acquire acquire;
     for (auto& f : frames) {
       Py_XDECREF((PyObject*)f.code);
     }
   }
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+  static std::shared_ptr<StackContext> _gather() {
     py::gil_scoped_acquire acquire;
     auto r = std::make_shared<StackContext>();
     PyFrameObject* f = PyEval_GetFrame();
@@ -555,6 +557,15 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
       f = f_back;
     }
     return r;
+  }
+  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+    return _gather();
+  }
+  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context>
+  gather_with_cpp() {
+    auto r = _gather();
+    r->cpp_frames = c10::get_backtrace();
+    return std::move(r);
   }
 };
 
@@ -585,6 +596,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str name_s = "name";
   py::str line_s = "line";
   py::str frames_s = "frames";
+  py::str cpp_frames_s = "cpp_frames";
   py::str history_s = "history";
   py::str blocks_s = "blocks";
 
@@ -634,8 +646,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
           history_entry[addr_s] = (int64_t)h.addr;
           history_entry[real_size_s] = h.real_size;
           if (h.context) {
-            history_entry[frames_s] =
-                get_frames((StackContext*)h.context.get());
+            auto sc = (StackContext*) h.context.get();
+            history_entry[frames_s] = get_frames(sc);
+            if (!sc->cpp_frames.empty()) {
+              history_entry[cpp_frames_s] = py::cast(sc->cpp_frames);
+            }
           }
           history.append(std::move(history_entry));
         }
@@ -694,7 +709,11 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       py::dict trace_entry;
       if (te.context_) {
         // without further compression frames can get really large on dump
-        trace_entry[frames_s] = get_frames((StackContext*)te.context_.get());
+        auto sc = (StackContext*)te.context_.get();
+        trace_entry[frames_s] = get_frames(sc);
+        if (!sc->cpp_frames.empty()) {
+          trace_entry[cpp_frames_s] = py::cast(sc->cpp_frames);
+        }
       }
       trace_entry[action_s] = action_to_str(te.action_);
       trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
@@ -711,30 +730,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["device_traces"] = traces;
 
   return result.release().ptr();
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject* THCPModule_recordMemoryHistory(PyObject* _unused, PyObject* args) {
-  HANDLE_TH_ERRORS
-  int enabled;
-  int record_context;
-  Py_ssize_t alloc_trace_max_entries;
-  int alloc_trace_record_context;
-  if (!PyArg_ParseTuple(
-          args,
-          "ppnp",
-          &enabled,
-          &record_context,
-          &alloc_trace_max_entries,
-          &alloc_trace_record_context)) {
-    return nullptr;
-  }
-  c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled,
-      record_context ? StackContext::gather : nullptr,
-      alloc_trace_max_entries,
-      alloc_trace_record_context);
-  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -833,6 +828,14 @@ static void registerCudaDeviceProperties(PyObject* module) {
                << ")";
         return stream.str();
       });
+
+  m.def("_cuda_recordMemoryHistory", [](bool enabled, bool record_context, bool record_context_cpp, Py_ssize_t alloc_trace_max_entries, bool alloc_trace_record_context) {
+  c10::cuda::CUDACachingAllocator::recordHistory(
+      enabled,
+      record_context ? (record_context_cpp ? StackContext::gather_with_cpp : StackContext::gather) : nullptr,
+      alloc_trace_max_entries,
+      alloc_trace_record_context);
+  });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
@@ -1017,15 +1020,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_O,
      nullptr},
     {"_cuda_memorySnapshot", THCPModule_memorySnapshot, METH_NOARGS, nullptr},
-    {"_cuda_recordMemoryHistory",
-     THCPModule_recordMemoryHistory,
-     METH_VARARGS,
-     nullptr},
     {"_cuda_attach_out_of_memory_observer",
      THCPModule_attachOutOfMemoryObserver,
      METH_O,
      nullptr},
-
     {"_cuda_cudaHostAllocator",
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
