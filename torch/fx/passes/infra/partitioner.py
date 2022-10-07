@@ -122,7 +122,7 @@ class CapabilityBasedPartitioner:
 
         logging.debug("Proposing partitions...")
 
-        def getIndependentUserPartitions(node, merge_self = True):
+        def getIndependentUserPartitions(node, merge_self=True):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             user_partitions: Dict[Partition, None] = {}
             for user_node in node.users:
