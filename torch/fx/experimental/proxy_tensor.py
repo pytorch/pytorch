@@ -241,7 +241,7 @@ def proxy_call(proxy_mode, func, args, kwargs):
             with maybe_disable_fake_tensor_mode():
                 return func(*const_args, **const_kwargs)
         raise RuntimeError(
-            "It appears that you're trying to get value out of a tracing tensor - erroring out! "
+            f"It appears that you're trying to get value out of a tracing tensor with {func} - erroring out! "
             "It's likely that this is caused by data-dependent control flow or similar."
         )
     proxy_args, proxy_kwargs = pytree.tree_map_only(
