@@ -1,4 +1,3 @@
-#!/usr/bin/env pytest
 # Owner(s): ["module: cuda graphs"]
 
 import functools
@@ -200,7 +199,3 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
 
         x = torch.empty(20, device="cuda:0")
         fn(x)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,4 +1,3 @@
-#!/usr/bin/env pytest
 # Owner(s): ["module: dynamo"]
 from unittest.mock import patch
 
