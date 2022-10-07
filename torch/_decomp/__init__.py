@@ -18,6 +18,10 @@ decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
+# decompositions which have been disabled as meta kernel implementations,
+# usually due to mismatching strides, aliasing, or other inconsistent property
+_disabled_meta_decomps = set()
+
 
 def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False):
     """
@@ -105,6 +109,11 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 name = op_overload._schema.name
                 if op_overload._schema.overload_name:
                     name += "." + op_overload._schema.overload_name
+
+                if disable_meta:
+                    global _disabled_meta_decomps
+                    _disabled_meta_decomps.add(op_overload)
+
                 if (
                     not disable_meta
                     # TorchScript dumps a bunch of extra nonsense overloads

@@ -464,6 +464,15 @@ class FakeTensorConstHandling(TestCase):
                 inputs = [a, b]
                 ref = fn(inputs)
 
+    def test_fake_tensor_batch_norm_cpu(self):
+        with torch._subclasses.CrossRefFakeMode():
+            m = torch.nn.Sequential(
+                torch.nn.BatchNorm2d(10),
+                torch.nn.ReLU(),
+            )
+            m.eval()
+            out = m(torch.randn([2, 10, 8, 8]))
+
     def test_shared_storage_invalidation(self):
         with FakeTensorMode():
             x = torch.tensor([1.])
