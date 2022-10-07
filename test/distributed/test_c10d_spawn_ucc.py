@@ -90,7 +90,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
         @requires_ucc()
         @skip_if_lt_x_gpu(2)
         @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
-        @sandcastle_skip("runs into illegal memory access on self.assertEqual(t, torch.ones(5, 5, device=device) + i) when run locally")
+        @sandcastle_skip("runs into illegal memory access on first assertEqual check when run locally")
         def test_all_gather(self):
             self._test_all_gather("ucc")
 
