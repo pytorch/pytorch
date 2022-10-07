@@ -1,6 +1,6 @@
 import torch
 import contextlib
-from typing import Callable, Any, Tuple, Optional, Sequence, List
+from typing import Callable, Any, Dict, Tuple, Optional, Sequence, List
 from torch.utils.hooks import RemovableHandle
 
 
@@ -248,7 +248,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
                 del buffer[id]
         return inner_hook
 
-    class Handle():
+    class Handle(RemovableHandle):
         handles: Tuple[RemovableHandle, ...]
 
         def __init__(self, handles: Tuple[RemovableHandle, ...]):
@@ -257,6 +257,12 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
         def remove(self):
             for handle in self.handles:
                 handle.remove()
+
+        def __getstate__(self):
+            return self.handles
+
+        def __setstate__(self, state):
+            self.handles = state
 
     handles: List[RemovableHandle] = []
     for i, t in enumerate(tensors):
