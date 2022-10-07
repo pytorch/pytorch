@@ -290,8 +290,6 @@ auto handle_torch_function_no_python_arg_parser(
   py::object ret;
   PyObject* mode_obj = nullptr;
 
-  // Disable mode on the inside; this makes for a more user-friendly
-  // experience if you try to, e.g., print your tensors.
   const bool is_torch_function =
       torch_function_name == TorchFunctionName::TorchFunction;
   auto get_stack_len = [&]() {
@@ -316,6 +314,9 @@ auto handle_torch_function_no_python_arg_parser(
     if (!torch_function) {
       TORCH_INTERNAL_ASSERT(0);
     }
+    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
+    TORCH_INTERNAL_ASSERT(args != nullptr);
+
     TORCH_CHECK(
         PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
             .is(py::reinterpret_borrow<py::object>(mode_obj)),
@@ -323,8 +324,6 @@ auto handle_torch_function_no_python_arg_parser(
         torch_function_name_str,
         "` as a classmethod is not supported, please make it a plain method");
 
-    TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
-    TORCH_INTERNAL_ASSERT(args != nullptr);
     // Blegh.  This accidentally works in PyObject_CallFunctionObjArgs below
     // because the nullptr terminates the argument list ick ick ick.
     if (kwargs == nullptr) {
