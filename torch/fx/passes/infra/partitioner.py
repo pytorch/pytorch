@@ -152,18 +152,16 @@ class CapabilityBasedPartitioner:
             #    merge the other partitions with first partition, since user_partitions doesn't have depedency between
             #    each other.
             partitions_id_list = [partition.id for partition in user_partitions if partition.id is not None]
-            if merge_self:
-                if len(partitions_id_list) == 0:
-                    # create a new partition
-                    assign(node, next(new_partition_id))
-                elif len(partitions_id_list) == 1:
-                    id = partitions_id_list[0]
-                    assign(node, id)
+            
+            if merge_self and len(partitions_id_list) == 0:
+                # create a new partition
+                id = next(new_partition_id))
+            elif len(partitions_id_list) == 1:
+                id = partitions_id_list[0]
             if len(partitions_id_list) > 1:
                 # users are assigned to more than one partition, since user_partitions doesn't have
                 # dependency on each other, they can be fused into a single partition
                 id = partitions_id_list[0]
-                assign(node, id)
 
                 reassignment: Dict[Node, int] = {}
                 for other_id in partitions_id_list[1:]:
@@ -171,6 +169,9 @@ class CapabilityBasedPartitioner:
                         reassignment[other_node] = id
                 for other_node in reassignment:
                     assign(other_node, id)
+
+            if merge_self:
+                assign(node, id)
 
         print("prior to merge0")
         print(assignment)
