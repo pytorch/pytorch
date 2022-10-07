@@ -101,10 +101,6 @@ jobs:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
         run: |
-          if [[ $IS_TAGGED_BUILD ]]; then
-            echo "Setting Tagged build SHA"
-            echo "CHECKOUT_SHA=''" >> "${GITHUB_ENV}"
-          fi
           {
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
             echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
@@ -129,6 +125,7 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
             echo "IS_TAGGED_BUILD=${{ env.IS_TAGGED_BUILD }}"
+            echo "IS_TAGGED_BUILD=${{ env.CHECKOUT_SHA }}"
           } >> "${GITHUB_ENV} }}"
       - name: List the env
         shell: bash
@@ -149,7 +146,15 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      - name: Checkout PyTorch to pytorch dir
+      - name: Checkout PyTorch to pytorch dir non tagged builds
+        if: ${{ env.IS_TAGGED_BUILD }}
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          submodules: recursive
+          path: pytorch
+
+      - name: Checkout PyTorch to pytorch dir non tagged builds
+        if: ${{ !env.IS_TAGGED_BUILD }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           ref: ${{ env.CHECKOUT_SHA }}
