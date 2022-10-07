@@ -2,7 +2,7 @@ from collections.abc import Iterable
 import torch
 
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.qat as nniqat
 from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn.utils.parametrize import type_before_parametrizations
