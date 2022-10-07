@@ -296,16 +296,16 @@ then be quantized.
     BNReLU2d
     BNReLU3d
 
-torch.nn.intrinsic.qat
-~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.intrinsic.qat
-.. automodule:: torch.nn.intrinsic.qat.modules
+torch.ao.nn.intrinsic.qat
+~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.intrinsic.qat
+.. automodule:: torch.ao.nn.intrinsic.qat.modules
 
 
 This module implements the versions of those fused operations needed for
 quantization aware training.
 
-.. currentmodule:: torch.nn.intrinsic.qat
+.. currentmodule:: torch.ao.nn.intrinsic.qat
 
 .. autosummary::
     :toctree: generated
@@ -597,3 +597,6 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
    :noindex:
 .. automodule:: torch.ao.nn.quantized.reference.modules
    :noindex:
+
+.. py:module:: torch.nn.intrinsic.qat
+.. py:module:: torch.nn.intrinsic.qat.modules
