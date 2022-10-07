@@ -432,6 +432,13 @@ op_db: List[OpInfo] = [
         "special.hermite_polynomial_h",
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
+        ),
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
