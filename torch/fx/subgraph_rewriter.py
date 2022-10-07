@@ -63,6 +63,7 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     gm.graph.lint()
 
+
 @compatibility(is_backward_compatible=True)
 def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
     """
@@ -181,6 +182,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
     """
     return _replace_pattern(gm, pattern, replacement)
 
+
 # Experimental API, not backward compatible
 @compatibility(is_backward_compatible=False)
 def replace_pattern_with_filter(
@@ -201,8 +203,12 @@ def replace_pattern_with_filter(
     return _replace_pattern(gm, pattern, replacement, match_filter)
 
 
-def _replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable,
-                     match_filter: Optional[Callable[["InternalMatch", Graph, Graph], bool]] = None) -> List[Match]:  # type: ignore[name-defined]
+def _replace_pattern(
+    gm: GraphModule,
+    pattern: Callable,
+    replacement: Callable,
+    match_filter: Optional[Callable[["InternalMatch", Graph, Graph], bool]] = None  # type: ignore[name-defined]
+) -> List[Match]:
 
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
 
