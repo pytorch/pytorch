@@ -830,7 +830,6 @@ symbolic_aot_autograd_failures = {
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('bernoulli', ''),  # aten.bernoulli.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('broadcast_tensors', ''),  # 'int' and 'torch._C.SymIntNode'
     xfail('cartesian_prod', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
@@ -854,7 +853,6 @@ symbolic_aot_autograd_failures = {
     xfail('dist', ''),  # aten.dist.default - couldn't find symbolic meta function/decomposition
     xfail('dsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('einsum', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('expand_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.fftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -875,7 +873,6 @@ symbolic_aot_autograd_failures = {
     xfail('fft.rfft2', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.rfft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fft.rfftn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('flatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('fmax', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('fmin', ''),  # aten.logical_or_.default - couldn't find symbolic meta function/decomposition
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
@@ -1062,7 +1059,6 @@ symbolic_aot_autograd_failures = {
     xfail('renorm', ''),  # aten.renorm.default - couldn't find symbolic meta function/decomposition
     xfail('repeat_interleave', ''),  # aten.repeat_interleave.Te...
     xfail('reshape_as', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('reshape', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('roll', ''),  # narrow() received an invalid combination of arguments - got (FakeTensor, int, torch._C...
     xfail('round', ''),  # aten.round.default - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
