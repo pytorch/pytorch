@@ -1,7 +1,7 @@
 
 import torch
 import torch.ao.nn.intrinsic
-import torch.nn.intrinsic.qat
+import torch.ao.nn.intrinsic.qat
 import torch.ao.nn.quantized as nnq
 
 

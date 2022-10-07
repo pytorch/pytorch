@@ -11,6 +11,7 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -778,7 +779,8 @@ void validate_outputs(
       // Strided when metadata is SparseCsr
       if (!grad.is_sparse() &&
           !(grad.layout() == at::kStrided &&
-            metadata.layout() == at::kSparseCsr)) {
+            (at::sparse_csr::is_sparse_compressed(metadata.layout()) ||
+             metadata.layout() == at::kSparse))) {
         std::stringstream ss;
         ss << "invalid gradient at index " << i << " - expected layout ";
         ss << metadata.layout() << " but got " << grad.layout();
@@ -1255,7 +1257,9 @@ void Engine::init_local_ready_queue(std::shared_ptr<ReadyQueue> ready_queue) {
 auto Engine::ready_queue(
     std::shared_ptr<ReadyQueue> cpu_ready_queue,
     at::Device device) -> std::shared_ptr<ReadyQueue> {
-  if (should_run_in_cpu_ready_queue(device.type())) {
+  bool multithreading_disabled =
+      !c10::AutogradState::get_tls_state().get_multithreading_enabled();
+  if (multithreading_disabled || should_run_in_cpu_ready_queue(device.type())) {
     // return the cpu ready queue passed in
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
