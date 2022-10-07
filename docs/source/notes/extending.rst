@@ -362,28 +362,28 @@ Extending :mod:`torch` with a :class:`Tensor`-like type
           more details.
 
 To make this concrete, let's begin with a simple example that illustrates the
-API dispatch mechanism. We'll create a custom type that represents a 2D diagonal
+API dispatch mechanism. We'll create a custom type that represents a 2D scalar
 tensor, parametrized by the order ``N`` and value along the diagonal entries,
 ``value``::
 
-     class DiagonalTensor(object):
+     class ScalarTensor(object):
         def __init__(self, N, value):
             self._N = N
             self._value = value
 
         def __repr__(self):
-            return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+            return "ScalarTensor(N={}, value={})".format(self._N, self._value)
 
         def tensor(self):
             return self._value * torch.eye(self._N)
 
 This first iteration of the design isn't very useful. The main functionality of
-``DiagonalTensor`` is to provide a more compact string representation of a
-diagonal tensor than in the base tensor class::
+``ScalarTensor`` is to provide a more compact string representation of a scalar
+tensor than in the base tensor class::
 
-  >>> d = DiagonalTensor(5, 2)
+  >>> d = ScalarTensor(5, 2)
   >>> d
-  DiagonalTensor(N=5, value=2)
+  ScalarTensor(N=5, value=2)
   >>> d.tensor()
   tensor([[2., 0., 0., 0., 0.],
           [0., 2., 0., 0., 0.],
@@ -396,20 +396,20 @@ into issues::
 
   >>> import torch
   >>> torch.mean(d)
-  TypeError: mean(): argument 'input' (position 1) must be Tensor, not DiagonalTensor
+  TypeError: mean(): argument 'input' (position 1) must be Tensor, not ScalarTensor
 
-Adding a ``__torch_function__`` implementation to ``DiagonalTensor`` makes it
+Adding a ``__torch_function__`` implementation to ``ScalarTensor`` makes it
 possible for the above operation to succeed. Let's re-do our implementation,
 this time adding a ``__torch_function__`` implementation::
 
   HANDLED_FUNCTIONS = {}
-  class DiagonalTensor(object):
+  class ScalarTensor(object):
       def __init__(self, N, value):
           self._N = N
           self._value = value
 
       def __repr__(self):
-          return "DiagonalTensor(N={}, value={})".format(self._N, self._value)
+          return "ScalarTensor(N={}, value={})".format(self._N, self._value)
 
       def tensor(self):
           return self._value * torch.eye(self._N)
@@ -419,7 +419,7 @@ this time adding a ``__torch_function__`` implementation::
           if kwargs is None:
               kwargs = {}
           if func not in HANDLED_FUNCTIONS or not all(
-              issubclass(t, (torch.Tensor, DiagonalTensor))
+              issubclass(t, (torch.Tensor, ScalarTensor))
               for t in types
           ):
               return NotImplemented
@@ -432,21 +432,21 @@ tuple of arguments passed to the function, and ``kwargs``, the dict of keyword
 arguments passed to the function. It uses a global dispatch table named
 ``HANDLED_FUNCTIONS`` to store custom implementations. The keys of this
 dictionary are functions in the ``torch`` namespace and the values are
-implementations for ``DiagonalTensor``.
+implementations for ``ScalarTensor``.
 
 .. note:: Using a global dispatch table is not a mandated part of the
           ``__torch_function__`` API, it is just a useful design pattern for
           structuring your override implementations.
 
 This class definition isn't quite enough to make ``torch.mean`` do the right
-thing when we pass it a ``DiagonalTensor`` -- we also need to define an
-implementation for ``torch.mean`` for ``DiagonalTensor`` operands and add the
+thing when we pass it a ``ScalarTensor`` -- we also need to define an
+implementation for ``torch.mean`` for ``ScalarTensor`` operands and add the
 implementation to the ``HANDLED_FUNCTIONS`` dispatch table dictionary. One way
 of doing this is to define a decorator::
 
   import functools
   def implements(torch_function):
-      """Register a torch function override for DiagonalTensor"""
+      """Register a torch function override for ScalarTensor"""
       @functools.wraps(torch_function)
       def decorator(func):
           HANDLED_FUNCTIONS[torch_function] = func
@@ -459,9 +459,9 @@ which can be applied to the implementation of our override::
   def mean(input):
       return float(input._value) / input._N
 
-With this change we can now use ``torch.mean`` with ``DiagonalTensor``::
+With this change we can now use ``torch.mean`` with ``ScalarTensor``::
 
-  >>> d = DiagonalTensor(5, 2)
+  >>> d = ScalarTensor(5, 2)
   >>> torch.mean(d)
   0.4
 
@@ -472,7 +472,7 @@ a tensor or tensor-like that defines ``__torch_function__``, for example for
 :func:`torch.add`::
 
   def ensure_tensor(data):
-      if isinstance(data, DiagonalTensor):
+      if isinstance(data, ScalarTensor):
           return data.tensor()
       return torch.as_tensor(data)
 
@@ -480,21 +480,21 @@ a tensor or tensor-like that defines ``__torch_function__``, for example for
   def add(input, other):
      try:
          if input._N == other._N:
-             return DiagonalTensor(input._N, input._value + other._value)
+             return ScalarTensor(input._N, input._value + other._value)
          else:
              raise ValueError("Shape mismatch!")
      except AttributeError:
          return torch.add(ensure_tensor(input), ensure_tensor(other))
 
-This version has a fast path for when both operands are ``DiagonalTensor``
+This version has a fast path for when both operands are ``ScalarTensor``
 instances and also a slower path which degrades to converting the data to
-tensors when either operand is not a ``DiagonalTensor``. That makes the override
-function correctly when either operand is a ``DiagonalTensor`` or a regular
+tensors when either operand is not a ``ScalarTensor``. That makes the override
+function correctly when either operand is a ``ScalarTensor`` or a regular
 :class:`Tensor`::
 
-  >>> s = DiagonalTensor(2, 2)
+  >>> s = ScalarTensor(2, 2)
   >>> torch.add(s, s)
-  DiagonalTensor(N=2, value=4)
+  ScalarTensor(N=2, value=4)
   >>> t = torch.tensor([[1, 1,], [1, 1]])
   >>> torch.add(s, t)
   tensor([[3., 1.],
@@ -522,7 +522,7 @@ of such a type is passed::
 
   >>> torch.mul(s, 3)
   TypeError: no implementation found for 'torch.mul' on types that
-  implement __torch_function__: [DiagonalTensor]
+  implement __torch_function__: [ScalarTensor]
 
 In practice this means that if you would like to implement your overrides using
 a ``__torch_function__`` implementation along these lines, you will need to
@@ -533,14 +533,14 @@ that you care about for your use case. This may be a tall order as the full
 Another option is to not return ``NotImplemented`` for operations that are not
 handled but to instead pass a :class:`Tensor` to the original :mod:`torch`
 function when no override is available. For example, if we change our
-implementation of ``__torch_function__`` for ``DiagonalTensor`` to the one below::
+implementation of ``__torch_function__`` for ``ScalarTensor`` to the one below::
 
   @classmethod
   def __torch_function__(cls, func, types, args=(), kwargs=None):
       if kwargs is None:
           kwargs = {}
       if func not in HANDLED_FUNCTIONS or not all(
-              issubclass(t, (torch.Tensor, DiagonalTensor))
+              issubclass(t, (torch.Tensor, ScalarTensor))
               for t in types
           ):
           args = [a.tensor() if hasattr(a, 'tensor') else a for a in args]
@@ -548,10 +548,10 @@ implementation of ``__torch_function__`` for ``DiagonalTensor`` to the one below
       return HANDLED_FUNCTIONS[func](*args, **kwargs)
 
 Then :func:`torch.mul` will work correctly, although the return type will always
-be a :class:`Tensor` rather than a :class:`DiagonalTensor`, even if both operands
-are :class:`DiagonalTensor` instances::
+be a :class:`Tensor` rather than a :class:`ScalarTensor`, even if both operands
+are :class:`ScalarTensor` instances::
 
-  >>> s = DiagonalTensor(2, 2)
+  >>> s = ScalarTensor(2, 2)
   >>> torch.mul(s, s)
   tensor([[4., 0.],
           [0., 4.]])
