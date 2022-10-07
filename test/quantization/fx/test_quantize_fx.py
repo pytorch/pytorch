@@ -2622,8 +2622,13 @@ class TestQuantizeFx(QuantizationTestCase):
         original_ref_m.linear2.weight = torch.nn.Parameter(original_m.custom.linear.weight.detach())
         original_ref_m.linear2.bias = torch.nn.Parameter(original_m.custom.linear.bias.detach())
 
+        a16_qconfig = QConfig(
+            activation=MinMaxObserver.with_args(dtype=torch.qint32, quant_min=0, quant_max=65536),
+            weight=default_weight_observer,
+        )
         test_configs = {
             "static": (default_qconfig, StaticQuantCustomModule, 3),
+            "static_a16": (a16_qconfig, StaticQuantCustomModule, 3),
             "dynamic": (default_dynamic_qconfig, DynamicQuantCustomModule, 0)
         }
 
