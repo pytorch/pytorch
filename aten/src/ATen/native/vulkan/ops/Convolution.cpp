@@ -321,42 +321,6 @@ static api::ShaderSource get_shader(
   }
 }
 
-static api::ShaderSource get_quantized_shader(
-    const vTensor& v_input,
-    const IntArrayRef kernel_size,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef dilation,
-    const Conv2dMethod method,
-    const bool transposed) {
-  api::ShaderSource shader;
-
-  if (transposed) {
-    TORCH_CHECK(false, "Quantized TConv not supported!");
-  }
-
-  switch (method) {
-    case Conv2dSlidingWindow:
-      shader = VK_KERNEL(quantized_conv2d);
-      return shader;
-    case Conv2dDepthwise:
-      shader = VK_KERNEL(quantized_conv2d_dw);
-      return shader;
-    case Conv2dPointwise:
-      shader = VK_KERNEL(quantized_conv2d_pw_2x2);
-      // Set explicitly for now. In the future, this will be set automatically
-      // by shader codegen.
-      shader.out_tile_size = {2u, 2u, 1u};
-      return shader;
-  }
-}
-
-api::utils::uvec3 get_shader_local_size(
-    api::utils::uvec3& global_size,
-    api::ShaderSource& kernel) {
-  return adaptive_work_group_size(global_size);
-}
-
 //
 // Op Recording
 //

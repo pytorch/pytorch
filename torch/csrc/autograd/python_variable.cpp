@@ -188,42 +188,22 @@ void pushPyOutToStack(
 
 namespace {
 
-template <const char* func_name, typename... Ts>
-void concrete_trace_cuda(Ts... args) {
-  pybind11::gil_scoped_acquire gil;
-  at::impl::MaybeSetTLSOnEntryGuard guard;
-
-  if (Py_IsInitialized()) {
-    try {
-      py::module mod = py::module::import("torch.utils._cuda_trace");
-      py::object hook = mod.attr(func_name).attr("fire_callbacks");
-      hook(args...);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what();
-    }
+// NB: This is a macro and not a template function (like it was before)
+// because passing in constexpr char* as template argument breaks some
+// versions of MSVC that are being used internally at Meta.
+// MSVC 14.16.27023 (vs2017_15.9)
+#define CONCRETE_TRACE_CUDA(func_name, ...)                           \
+  at::impl::MaybeSetTLSOnEntryGuard guard;                            \
+  if (Py_IsInitialized()) {                                           \
+    pybind11::gil_scoped_acquire gil;                                 \
+    try {                                                             \
+      py::module mod = py::module::import("torch.utils._cuda_trace"); \
+      py::object hook = mod.attr(func_name).attr("fire_callbacks");   \
+      hook(__VA_ARGS__);                                              \
+    } catch (const std::exception& e) {                               \
+      LOG(ERROR) << "CUDA trace hook execution failed: " << e.what(); \
+    }                                                                 \
   }
-}
-
-static constexpr char trace_cuda_event_creation_fn_name[] =
-    "CUDAEventCreationCallbacks";
-static constexpr char trace_cuda_event_deletion_fn_name[] =
-    "CUDAEventDeletionCallbacks";
-static constexpr char trace_cuda_event_record_fn_name[] =
-    "CUDAEventRecordCallbacks";
-static constexpr char trace_cuda_event_wait_fn_name[] =
-    "CUDAEventWaitCallbacks";
-static constexpr char trace_cuda_memory_allocation_fn_name[] =
-    "CUDAMemoryAllocationCallbacks";
-static constexpr char trace_cuda_memory_deallocation_fn_name[] =
-    "CUDAMemoryDeallocationCallbacks";
-static constexpr char trace_cuda_stream_creation_fn_name[] =
-    "CUDAStreamCreationCallbacks";
-static constexpr char trace_cuda_device_synchronization_fn_name[] =
-    "CUDADeviceSynchronizationCallbacks";
-static constexpr char trace_cuda_stream_synchronization_fn_name[] =
-    "CUDAStreamSynchronizationCallbacks";
-static constexpr char trace_cuda_event_synchronization_fn_name[] =
-    "CUDAEventSynchronizationCallbacks";
 
 struct ConcretePyInterpreterVTable final
     : public c10::impl::PyInterpreterVTable {
@@ -254,35 +234,35 @@ struct ConcretePyInterpreterVTable final
   c10::SymInt sym_storage_offset(const TensorImpl* self) const override;
 
   void trace_gpu_event_creation(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_creation_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventCreationCallbacks", event);
   }
   void trace_gpu_event_deletion(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_deletion_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventDeletionCallbacks", event);
   }
   void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
       const override {
-    concrete_trace_cuda<trace_cuda_event_record_fn_name>(event, stream);
+    CONCRETE_TRACE_CUDA("CUDAEventRecordCallbacks", event, stream);
   }
   void trace_gpu_event_wait(uintptr_t event, uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_event_wait_fn_name>(event, stream);
+    CONCRETE_TRACE_CUDA("CUDAEventWaitCallbacks", event, stream);
   }
   void trace_gpu_memory_allocation(uintptr_t ptr) const override {
-    concrete_trace_cuda<trace_cuda_memory_allocation_fn_name>(ptr);
+    CONCRETE_TRACE_CUDA("CUDAMemoryAllocationCallbacks", ptr);
   }
   void trace_gpu_memory_deallocation(uintptr_t ptr) const override {
-    concrete_trace_cuda<trace_cuda_memory_deallocation_fn_name>(ptr);
+    CONCRETE_TRACE_CUDA("CUDAMemoryDeallocationCallbacks", ptr);
   }
   void trace_gpu_stream_creation(uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_stream_creation_fn_name>(stream);
+    CONCRETE_TRACE_CUDA("CUDAStreamCreationCallbacks", stream);
   }
   void trace_gpu_device_synchronization() const override {
-    concrete_trace_cuda<trace_cuda_device_synchronization_fn_name>();
+    CONCRETE_TRACE_CUDA("CUDADeviceSynchronizationCallbacks");
   }
   void trace_gpu_stream_synchronization(uintptr_t stream) const override {
-    concrete_trace_cuda<trace_cuda_stream_synchronization_fn_name>(stream);
+    CONCRETE_TRACE_CUDA("CUDAStreamSynchronizationCallbacks", stream);
   }
   void trace_gpu_event_synchronization(uintptr_t event) const override {
-    concrete_trace_cuda<trace_cuda_event_synchronization_fn_name>(event);
+    CONCRETE_TRACE_CUDA("CUDAEventSynchronizationCallbacks", event);
   }
 
   static ConcretePyInterpreterVTable* instance() {
