@@ -185,7 +185,6 @@ def get_test_only_legacy_native_backend_config_dict():
 
 __all__ = [
     "get_test_only_legacy_native_backend_config",
-    "weighted_op_int8_dtype_config",
     "default_op_quint8_dtype_config",
     "default_op_fp16_dtype_config",
     "default_dynamic_int8_dtype_config",

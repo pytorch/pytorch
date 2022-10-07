@@ -3710,19 +3710,15 @@
   dispatch:
     CPU: narrow_copy_dense_cpu_out
 
-- func: narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
+- func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
-  dispatch:
-    CompositeImplicitAutograd: narrow_symint
 
-- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
+- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
-  dispatch:
-    CompositeImplicitAutograd: narrow_tensor_symint
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -13200,6 +13196,11 @@
   variants: function
   dispatch:
     CUDA: flash_scaled_dot_product_attention
+
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _efficient_attention_forward
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function
