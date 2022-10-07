@@ -1779,10 +1779,12 @@
     CPU: ctc_loss_cpu
     CUDA: ctc_loss_gpu
   autogen: _ctc_loss.out
+  tags: dynamic_output_shape  # the shape of second output is data dependent
 
 - func: _ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank=0, bool zero_infinity=False) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: ctc_loss_tensor
+  tags: dynamic_output_shape  # the shape of second output is data dependent
 
 - func: _ctc_loss_backward(Tensor grad, Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, Tensor neg_log_likelihood, Tensor log_alpha, int blank, bool zero_infinity=False) -> Tensor
   dispatch:
@@ -2887,6 +2889,7 @@
     CUDA: layer_norm_cuda
     MPS: layer_norm_mps
     CompositeExplicitAutograd: math_native_layer_norm
+    NestedTensorCPU, NestedTensorCUDA: nested_layer_norm
   autogen: native_layer_norm.out
 
 - func: native_layer_norm_backward(Tensor grad_out, Tensor input, SymInt[] normalized_shape, Tensor mean, Tensor rstd, Tensor? weight, Tensor? bias, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
@@ -3707,15 +3710,19 @@
   dispatch:
     CPU: narrow_copy_dense_cpu_out
 
-- func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
+- func: narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: narrow_symint
 
-- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
+- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: narrow_tensor_symint
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
@@ -4775,7 +4782,7 @@
     CUDA: softmax_backward_cuda_out
     MPS: softmax_backward_mps_out
 
-- func: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+- func: unsafe_split.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4783,18 +4790,20 @@
     CompositeExplicitAutograd: unsafe_split
   autogen: unsafe_split.Tensor_out
 
-- func: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
+- func: split.Tensor(Tensor(a -> *) self, SymInt split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split
 
-- func: split.sizes(Tensor(a -> *) self, int[] split_size, int dim=0) -> Tensor(a)[]
+- func: split.sizes(Tensor(a -> *) self, SymInt[] split_size, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: split_symint
 
-- func: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4802,7 +4811,7 @@
     CompositeExplicitAutograd: unsafe_split_with_sizes
   autogen: unsafe_split_with_sizes.out
 
-- func: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+- func: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
   variants: function, method
   device_check: NoCheck
   device_guard: False
@@ -4937,6 +4946,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sum
+    SparseCPU, SparseCUDA: sum_coo
     SparseCsrCPU, SparseCsrCUDA: sum_csr
   autogen: sum.out
 
@@ -6236,6 +6246,7 @@
 - func: sparse_dim(Tensor self) -> int
   variants: method
   dispatch:
+    CPU, CUDA: sparse_dim_strided
     SparseCPU, SparseCUDA, SparseMeta: sparse_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: sparse_dim_sparse_csr
   device_check: NoCheck
@@ -6252,6 +6263,7 @@
 - func: dense_dim(Tensor self) -> int
   variants: method
   dispatch:
+    CPU, CUDA: dense_dim_strided
     SparseCPU, SparseCUDA, SparseMeta: dense_dim_sparse
     SparseCsrCPU, SparseCsrCUDA: dense_dim_sparse_csr
   device_check: NoCheck
@@ -12800,13 +12812,13 @@
     CompositeExplicitAutogradNonFunctional: slice_copy_Tensor
   tags: view_copy
 
-- func: split_copy.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+- func: split_copy.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: split_copy_Tensor
   tags: view_copy
 
-- func: split_with_sizes_copy(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- func: split_with_sizes_copy(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
   variants: function
   dispatch:
     CompositeExplicitAutogradNonFunctional: split_with_sizes_copy
@@ -13012,13 +13024,13 @@
     CompositeExplicitAutograd: slice_copy_Tensor_out
 
 
-- func: split_copy.Tensor_out(Tensor self, int split_size, int dim=0, *, Tensor(a!)[] out) -> ()
+- func: split_copy.Tensor_out(Tensor self, SymInt split_size, int dim=0, *, Tensor(a!)[] out) -> ()
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_copy_Tensor_out
 
 
-- func: split_with_sizes_copy.out(Tensor self, int[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()
+- func: split_with_sizes_copy.out(Tensor self, SymInt[] split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()
   variants: function
   dispatch:
     CompositeExplicitAutograd: split_with_sizes_copy_out
@@ -13131,12 +13143,6 @@
     NestedTensorCPU: NestedTensor_softmax_dropout
     NestedTensorCUDA: NestedTensor_softmax_dropout_cuda
 
-- func: _nested_tensor_layer_norm(Tensor self, Tensor? weight, Tensor? bias, float eps) -> Tensor
-  variants: method
-  dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_layer_norm
-  autogen: _nested_tensor_layer_norm.out
-
 # Apparently, putting "forward" in the name will cause Python bindings to be skipped, so "fwd" it is.
 - func: _transformer_encoder_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, int? mask_type=None) -> Tensor
   variants: function
@@ -13196,6 +13202,11 @@
   variants: function
   dispatch:
     CUDA: flash_scaled_dot_product_attention
+
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CUDA: _efficient_attention_forward
 
 - func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
   variants: function

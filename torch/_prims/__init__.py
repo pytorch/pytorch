@@ -210,17 +210,7 @@ def TensorMeta(
     strides: Optional[StrideType] = None,
     dtype: Optional[torch.dtype] = None,
     device: Optional[Union[torch.device, str]] = None,
-    alias: bool = False,
 ):
-    if alias:
-        # For view ops, need to return an alias.
-        assert isinstance(tensorlike, torch.Tensor)
-        assert dtype is None
-        assert device is None
-        shape_ = shape if shape is not None else tensorlike.shape
-        strides_ = strides if strides is not None else tensorlike.stride()
-        return tensorlike.as_strided(shape_, strides_)
-
     if isinstance(tensorlike, Number):
         assert not shape and (shape is None or isinstance(shape, Sequence))
         assert not strides and (strides is None or isinstance(strides, Sequence))
@@ -1183,7 +1173,7 @@ def _broadcast_in_dim_meta(
         else:
             new_strides.append(0)
 
-    return TensorMeta(a, shape=shape, strides=new_strides, alias=True)
+    return a.as_strided(shape, new_strides)
 
 
 def _broadcast_in_dim_aten(a, shape, broadcast_dimensions):
@@ -1284,7 +1274,7 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
         msg = "Attempting to view a collapsed tensor, but no such view exists!"
         raise ValueError(msg)
 
-    return TensorMeta(a, shape=new_shape, strides=new_strides, alias=True)
+    return a.as_strided(shape, new_strides)
 
 
 def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
@@ -1332,7 +1322,7 @@ collapse_view = _make_prim(
 def _conj_meta(a: TensorLikeType) -> TensorLikeType:
     if not a.dtype.is_complex:
         raise RuntimeError("Expected complex dtype in prims.conj")
-    return TensorMeta(a, alias=True)
+    return a.as_strided(a.shape, a.stride())
 
 
 _conj_doc = """
@@ -1458,7 +1448,7 @@ def _slice_meta(
     for x, y in zip(a.stride(), _strides):
         new_strides.append(x * y)
 
-    return TensorMeta(a, shape=new_shape, strides=new_strides, alias=True)
+    return a.as_strided(new_shape, new_strides)
 
 
 def _slice_aten(
@@ -1606,7 +1596,7 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
             new_shape.append(a.shape[idx])
             new_strides.append(a.stride()[idx])
 
-    return TensorMeta(a, shape=new_shape, strides=new_strides, alias=True)
+    return a.as_strided(new_shape, new_strides)
 
 
 def _split_dim_aten(a: Tensor, dim: int, outer_length: int) -> Tensor:
@@ -1649,7 +1639,7 @@ def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
         new_shape.append(a.shape[idx])
         new_strides.append(a.stride()[idx])
 
-    return TensorMeta(a, shape=new_shape, strides=new_strides, alias=True)
+    return a.as_strided(new_shape, new_strides)
 
 
 def _squeeze_aten(a: Tensor, dimensions: Sequence) -> Tensor:
@@ -1691,7 +1681,7 @@ def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorL
         new_shape[idx] = a.shape[dim]
         new_strides[idx] = a.stride()[dim]
 
-    return TensorMeta(a, shape=tuple(new_shape), strides=tuple(new_strides), alias=True)
+    return a.as_strided(tuple(new_shape), tuple(new_strides))
 
 
 def _transpose_aten(a: Tensor, permutation: DimsSequenceType) -> Tensor:
@@ -1716,7 +1706,7 @@ transpose = _make_prim(
 
 
 def _view_of_meta(a: TensorLikeType) -> TensorLikeType:
-    return TensorMeta(a, alias=True)
+    return a.as_strided(a.shape, a.stride())
 
 
 def _view_of_aten(a: Tensor) -> Tensor:
