@@ -670,6 +670,90 @@ class TestAutograd(TestCase):
         x.sum().backward()
         # Should run fine
 
+    def test_prehook_ordering(self):
+        a = torch.tensor(1., requires_grad=True)
+
+        log = []
+
+        def hook1(g):
+            log.append(1)
+
+        def hook2(g):
+            log.append(2)
+
+        # For normal nodes whether prehooks registered
+        # to the grad_fn is ordered before or after hooks registered
+        # to the tensor depends on which type of hook was registered first
+        # TODO: document this
+        b = a.clone()
+        b.grad_fn.register_prehook(hook2)
+        b.register_hook(hook1)
+        b.grad_fn.register_prehook(hook2)
+
+        # For accumulate grad, prehooks registered to grad_fn are always
+        # called before prehooks registered to the leaf tensor
+        acc = b.grad_fn.next_functions[0][0]
+        a.register_hook(hook2)
+        acc.register_prehook(hook1)
+
+        b.sum().backward()
+        self.assertEqual(log, [2, 2, 1, 1, 2])
+
+        # grad also runs hooks on accumulate grad nodes, even though
+        # the accumulate grad nodes are not actually executed
+        log = []
+        torch.autograd.grad(b.sum(), inputs=(a,))
+        self.assertEqual(log, [2, 2, 1, 1, 2])
+
+    def test_accumulate_grad_posthooks_can_observe_tensor_prehook(self):
+        # Post hooks on accumulate should be able to observe changes to
+        # grad made by tensor prehooks
+        a = torch.tensor(1., requires_grad=True)
+
+        def tensor_prehook(g):
+            return g * 2
+
+        def posthook(gI, gO):
+            self.assertTrue(torch.allclose(gO[0], a * 2))
+            self.assertEqual(len(gI), 0)
+
+        b = a.clone()
+        acc = b.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+        a.register_hook(tensor_prehook)
+
+        b.backward()
+        torch.autograd.grad(b, inputs=(a,))
+
+    def test_hook_edge_case_when_called_with_grad(self):
+        # grad executes the prehooks of the next node but not
+        # the post hooks
+        a = torch.tensor(1., requires_grad=True)
+        b = a.clone()
+        c = b.clone()
+
+        prehook_count = [0]
+        def prehook(g):
+            prehook_count[0] += 1
+
+        posthook_count = [0]
+        def posthook(gI, gO):
+            posthook_count[0] += 1
+
+        a.register_hook(prehook)
+        b.register_hook(prehook)
+        acc = b.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+        b.grad_fn.register_hook(posthook)
+
+        torch.autograd.grad(c, inputs=(b))
+        self.assertEqual(prehook_count[0], 1)
+        self.assertEqual(posthook_count[0], 0)
+
+        torch.autograd.grad(c, inputs=(a, b))
+        self.assertEqual(prehook_count[0], 3)
+        self.assertEqual(posthook_count[0], 1)
+
     def test_sharded_grad(self):
         leaves = [torch.zeros(5, 5, requires_grad=True) for _ in range(10)]
         intermediates = [l * i + l * l for i, l in enumerate(leaves)]
@@ -3071,6 +3155,24 @@ class TestAutograd(TestCase):
         run_test((10,), torch.zeros(10))
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
+
+    def test_current_graph_task_id(self):
+        id = [-1]
+
+        def hook(_):
+            id[0] = (torch._C._current_graph_task_id())
+
+        t = torch.tensor(1., requires_grad=True).clone()
+        t.register_hook(hook)
+
+        t.backward(retain_graph=True)
+        base = id[0]
+        t.backward(retain_graph=True)
+        self.assertEqual(id[0] - base, 1)
+        t.backward(retain_graph=True)
+        self.assertEqual(id[0] - base, 2)
+
+        self.assertEqual(torch._C._current_graph_task_id(), -1)
 
     def test_profiler(self):
         x = torch.randn(10, 10)
