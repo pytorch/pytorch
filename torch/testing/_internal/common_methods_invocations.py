@@ -7386,12 +7386,12 @@ def sample_inputs_triplet_margin_loss(op_info, device, dtype, requires_grad, wit
 
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
 
-    N, N_prime, L, S, E = 5, 2, 4, 3, 6
-    dim_3_q_shape = (N, L, E)
-    dim_3_kv_shape = (N, S, E)
-    dim_4_q_shape = (N, N_prime, L, E)
-    dim_4_kv_shape = (N, N_prime, S, E)
+    dim_3_q_shape = (batch, seq_q, head_dim)
+    dim_3_kv_shape = (batch, seq_kv, head_dim)
+    dim_4_q_shape = (batch, num_heads, seq_q, head_dim)
+    dim_4_kv_shape = (batch, num_heads, seq_kv, head_dim)
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape)]
     shapes_and_kwargs = []
@@ -11882,11 +11882,12 @@ op_db: List[OpInfo] = [
                          'test_schema_correctness', device_type='cuda', dtypes=(torch.bfloat16,)),
             # Doesn't support autocasting
             DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensorNonErroring', 'test_fake_autocast', device_type='cpu'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast', device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake_autocast'),
             # No meta function
             DecorateInfo(unittest.skip("Skipped!"), 'TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-            DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),),
+            DecorateInfo(unittest.skip("Skipped"), 'TestDecomp', 'test_comprehensive'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),),
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
