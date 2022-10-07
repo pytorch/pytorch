@@ -280,6 +280,11 @@ def requires_nccl():
         "c10d was not compiled with the NCCL backend",
     )
 
+def requires_ucc():
+    return sandcastle_skip_if(
+        not c10d.is_ucc_available(),
+        "c10d was not compiled with the UCC backend",
+    )
 
 def requires_mpi():
     return sandcastle_skip_if(
