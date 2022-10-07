@@ -651,7 +651,8 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  PYTORCH_TEST_WITH_DYNAMO=0 pytest test/test_torchinductor.py -o log_cli=True -o log_cli_level=DEBUG
+  pytest test/dynamo
+  PYTORCH_TEST_WITH_DYNAMO=0 pytest test/inductor
   popd
 }
 
