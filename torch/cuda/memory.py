@@ -416,7 +416,7 @@ def memory_snapshot():
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot()
+    return torch._C._cuda_memorySnapshot()['segments']
 
 
 def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False) -> str:
@@ -595,7 +595,10 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
 
-def _record_memory_history(enabled: bool, device: Union[Device, int] = None, *, _enable_expensive_cpp: bool = False):
+def _record_memory_history(enabled: bool, record_context=True,
+                           trace_alloc_max_entries=1,
+                           trace_alloc_record_context=False, device: Union[Device, int] = None,
+                           _enable_expensive_cpp=False):
     """Enables recording of Python stack traces to be associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.memory_snapshot`.
@@ -612,7 +615,8 @@ def _record_memory_history(enabled: bool, device: Union[Device, int] = None, *, 
         stack trace collection; file an issue with us if you need it.
     """
     with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(enabled, _enable_expensive_cpp)
+        _C._cuda_recordMemoryHistory(enabled, record_context, _enable_expensive_cpp,
+                                     trace_alloc_max_entries, trace_alloc_record_context)
 
 def _snapshot(device: Union[Device, int] = None):
     with torch.cuda.device(device):
@@ -620,13 +624,13 @@ def _snapshot(device: Union[Device, int] = None):
 
 def _save_segment_usage(filename='output.svg', snapshot=None):
     if snapshot is None:
-        snapshot = memory_snapshot()
+        snapshot = _snapshot()
     with open(filename, 'w') as f:
         f.write(_segments(snapshot))
 
 def _save_memory_usage(filename='output.svg', snapshot=None):
     if snapshot is None:
-        snapshot = memory_snapshot()
+        snapshot = _snapshot()
     with open(filename, 'w') as f:
         f.write(_memory(snapshot))
 

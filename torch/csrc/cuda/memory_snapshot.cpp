@@ -13,11 +13,6 @@ using c10::cuda::CUDACachingAllocator::History;
 using c10::cuda::CUDACachingAllocator::SegmentInfo;
 
 namespace {
-std::unique_ptr<c10::cuda::CUDACachingAllocator::Context> blank_context() {
-  // in the future the C++-only version of context gathering could include C++
-  // or torchscript frames.
-  return std::make_unique<c10::cuda::CUDACachingAllocator::Context>();
-}
 std::string write_pickle(const IValue& v) {
   std::vector<char> result;
   {
@@ -38,9 +33,9 @@ c10::List<IValue> new_list() {
   return List<IValue>(c10::AnyType::get());
 }
 } // namespace
-void _record_memory_history(bool enabled) {
-  c10::cuda::CUDACachingAllocator::setContextRecorder(
-      enabled ? blank_context : nullptr);
+void _record_memory_history(bool enabled, int64_t alloc_trace_max_entries) {
+  c10::cuda::CUDACachingAllocator::recordHistory(
+      enabled, nullptr, alloc_trace_max_entries, false);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -89,17 +84,15 @@ std::string _memory_snapshot_pickled() {
           (blockInfo.allocated
                ? active_allocated_s
                : (blockInfo.active ? active_pending_free_s : inactive_s)));
-      if (blockInfo.history) {
+      if (blockInfo.history.size()) {
         auto history = new_list();
-        History* h = blockInfo.history;
-        while (h) {
+        for (const History& h : blockInfo.history) {
           auto history_entry = new_dict();
-          history_entry.insert(addr_s, (int64_t)h->addr);
-          history_entry.insert(real_size_s, (int64_t)h->real_size);
-          if (h->context) {
+          history_entry.insert(addr_s, (int64_t)h.addr);
+          history_entry.insert(real_size_s, (int64_t)h.real_size);
+          if (h.context) {
             history_entry.insert(frames_s, empty_frames);
           }
-          h = h->next.get();
           history.push_back(std::move(history_entry));
         }
         blockDict.insert(history_s, std::move(history));
@@ -111,14 +104,63 @@ std::string _memory_snapshot_pickled() {
     return segmentDict;
   };
 
-  const std::vector<SegmentInfo>& snapshot =
-      c10::cuda::CUDACachingAllocator::snapshot();
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
 
-  auto result = new_list();
-  for (const auto& segmentInfo : snapshot) {
-    result.push_back(segmentInfoToDict(segmentInfo));
+  auto segments = new_list();
+  for (const auto& segmentInfo : snapshot.segments) {
+    segments.push_back(segmentInfoToDict(segmentInfo));
   }
 
+  auto traces = new_list();
+  IValue action_s = "action";
+  IValue alloc_s = "alloc";
+  IValue free_requested_s = "free_requested";
+  IValue free_completed_s = "free_completed";
+  IValue segment_alloc_s = "segment_alloc";
+  IValue segment_free_s = "segment_free";
+  IValue snapshot_s = "snapshot";
+  IValue oom_s = "oom";
+  IValue device_free_s = "device_free";
+
+  using namespace c10::cuda::CUDACachingAllocator;
+
+  auto action_to_str = [&](TraceEntry::Action action) {
+    switch (action) {
+      case TraceEntry::ALLOC:
+        return alloc_s;
+      case TraceEntry::FREE_REQUESTED:
+        return free_requested_s;
+      case TraceEntry::FREE_COMPLETED:
+        return free_completed_s;
+      case TraceEntry::SEGMENT_ALLOC:
+        return segment_alloc_s;
+      case TraceEntry::SEGMENT_FREE:
+        return segment_free_s;
+      case TraceEntry::OOM:
+        return oom_s;
+      case TraceEntry::SNAPSHOT:
+        return snapshot_s;
+    }
+    throw std::runtime_error("unreachable");
+  };
+
+  for (const auto& traceInfo : snapshot.device_traces) {
+    auto trace = new_list();
+    for (const auto& te : traceInfo) {
+      auto trace_entry = new_dict();
+      trace_entry.insert(action_s, action_to_str(te.action_));
+      trace_entry.insert(
+          TraceEntry::OOM == te.action_ ? device_free_s : addr_s, te.addr_);
+      trace_entry.insert(size_s, (int64_t)te.size_);
+      trace_entry.insert(stream_s, int64_t(te.stream_));
+      trace.push_back(trace_entry);
+    }
+    traces.push_back(trace);
+  }
+
+  auto result = new_dict();
+  result.insert("segments", segments);
+  result.insert("device_traces", traces);
   return write_pickle(result);
 }
 } // namespace cuda
