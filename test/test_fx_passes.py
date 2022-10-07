@@ -160,6 +160,18 @@ class TestPartitionFunctions:
         out = torch.stack([add_1, add_2, add_3])
         return out
 
+    @staticmethod
+    def forward12(a):
+        b0 = a + 1.0
+        c0 = a + 1.5
+        x0 = b0.relu()
+        x1 = c0.relu()
+        b1 = b0 + x1
+        c1 = c0 + 1.2
+        # c2 has dependency on x0 & b0, when we merge {c0, c1, c2}, this dependency should be updated to the fusion group and reflected on the decision to not fuse b0 & b1, which forms a cyclic dependency in the new graph
+        c2 = x0 + c0
+        return b1, c2
+
 # A mock OperatorSupport class, where only operator.add is supported
 class MockOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
@@ -204,6 +216,17 @@ class TestFXGraphPasses(JitTestCase):
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
 
+    @parametrize("fn, expected_partition", [
+        (TestPartitionFunctions.forward12, [["add_2", "add_1", "add"]]),
+    ])
+    def test_partitioner_no_cyclic_dependency(self, fn, expected_partition):
+        traced = symbolic_trace(fn)
+
+        supported_ops = MockOperatorSupport()
+        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
+        partitions = partitioner.propose_partitions()
+
+        fused_graph = fuse_by_partitions(gm, partitions)
 
     @parametrize("fn, expected_partition", [
         # horizontal fusion without a common downstream node, not supported yet
