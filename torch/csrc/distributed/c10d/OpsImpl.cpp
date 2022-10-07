@@ -149,6 +149,42 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_cuda_(
       std::move(tensor_vec), work);
 }
 
+std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
+allgather_cpu_(
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t timeout) {
+  auto work = process_group->allgather(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
+      AllgatherOptions{std::chrono::milliseconds(timeout)});
+
+  // Copy output tensors (not storage) so that this can be used in a functional
+  // manner
+  return std::
+      tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>(
+          output_tensors, work);
+}
+
+std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
+allgather_cuda_(
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t timeout) {
+  auto work = process_group->allgather(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
+      AllgatherOptions{std::chrono::milliseconds(timeout)});
+
+  // Copy output tensors (not storage) so that this can be used in a functional
+  // manner
+  return std::
+      tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>(
+          output_tensors, work);
+}
+
 // register functions to dispatcher
 namespace {
 TORCH_LIBRARY_IMPL(c10d, CPU, m) {
@@ -199,6 +235,14 @@ TORCH_LIBRARY_IMPL(c10d, SparseCUDA, m) {
 
 TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
   m.impl("allreduce_", allreduce_cuda_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CPU, m) {
+  m.impl("allgather_", allgather_cpu_);
+}
+
+TORCH_LIBRARY_IMPL(c10d, CUDA, m) {
+  m.impl("allgather_", allgather_cuda_);
 }
 } // namespace
 
