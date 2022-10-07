@@ -231,7 +231,6 @@ c10::intrusive_ptr<Work> gather_cpu_(
       GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
 }
 
-
 c10::intrusive_ptr<Work> gather_cuda_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
     const std::vector<at::Tensor>& input_tensors,
@@ -243,7 +242,6 @@ c10::intrusive_ptr<Work> gather_cuda_(
       const_cast<std::vector<at::Tensor>&>(input_tensors),
       GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
 }
-
 
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> scatter_cpu_(
     const std::vector<at::Tensor>& output_tensors,

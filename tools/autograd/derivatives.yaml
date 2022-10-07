@@ -1472,20 +1472,20 @@
   output_differentiability: [True, False]
   values: gather_with_keepdimed_indices(self_t, dim, indices, true)
 
-- name: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
-  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+- name: split.Tensor(Tensor(a -> *) self, SymInt split_size, int dim=0) -> Tensor(a)[]
+  self: split_backward(grads, split_size, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
-  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+- name: unsafe_split.Tensor(Tensor self, SymInt split_size, int dim=0) -> Tensor[]
+  self: split_backward(grads, split_size, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+- name: split_with_sizes(Tensor(a -> *) self, SymInt[] split_sizes, int dim=0) -> Tensor(a)[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
-- name: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
-  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+- name: unsafe_split_with_sizes(Tensor self, SymInt[] split_sizes, int dim=0) -> Tensor[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sym_sizes(), self.options())
   result: auto_linear
 
 - name: sqrt(Tensor self) -> Tensor
