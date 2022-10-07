@@ -3879,5 +3879,13 @@ at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
   return out;
 }
 
+int64_t sparse_dim_strided(const at::Tensor& self) {
+  return 0;
+}
+
+int64_t dense_dim_strided(const at::Tensor& self) {
+  return self.dim();
+}
+
 } // namespace native
 } // namespace at

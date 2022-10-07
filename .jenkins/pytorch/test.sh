@@ -651,18 +651,9 @@ test_vec256() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest test
+  pytest test/dynamo
+  PYTORCH_TEST_WITH_DYNAMO=0 pytest test/inductor
   popd
-}
-
-test_torch_deploy() {
-  python torch/csrc/deploy/example/generate_examples.py
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  "$TORCH_BIN_DIR"/test_deploy
-  "$TORCH_BIN_DIR"/test_deploy_gpu
-  assert_git_not_dirty
 }
 
 test_docs_test() {
@@ -673,10 +664,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *deploy* ]]; then
-  install_torchdynamo
-  test_torch_deploy
-elif [[ "${TEST_CONFIG}" == *backward* ]]; then
+if [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
@@ -706,8 +694,7 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
   install_torchvision
   checkout_install_torchdynamo
   test_dynamo_shard 2
-  # Skip running test in the dynamo repo to unblock the dynamo pin update
-  # test_dynamo
+  test_dynamo
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
