@@ -50,6 +50,8 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
+  IS_TAGGED_BUILD: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && github.event.ref != 'refs/heads/nightly'  && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+  CHECKOUT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -62,7 +64,11 @@ jobs:
     steps:
       !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      {%- if branches == "nightly" %}
+        !{{ common.checkout(deep_clone=False, directory="pytorch", checkout_pr_head=False) }}
+      {%- else %}
+        !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      {%- endif %}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
       - name: Populate binary env
         shell: bash

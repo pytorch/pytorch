@@ -93,6 +93,8 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      IS_TAGGED_BUILD: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/') && github.event.ref != 'refs/heads/nightly'  && !startsWith(github.event.ref, 'refs/tags/ciflow/') }}
+      CHECKOUT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -120,6 +122,8 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
+            echo "IS_TAGGED_BUILD=${{ env.IS_TAGGED_BUILD }}"
+            echo "CHECKOUT_SHA=${{ env.CHECKOUT_SHA }}"
           } >> "${GITHUB_ENV} }}"
 
         # Setup the environment
@@ -139,12 +143,21 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-      - name: Checkout PyTorch to pytorch dir
+      - name: Checkout PyTorch for tagged builds (release)
+        if: env.IS_TAGGED_BUILD == 'true'
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
+
+      - name: Checkout PyTorch for regular builds (with sha)
+        if: env.IS_TAGGED_BUILD == 'false'
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+        with:
+          ref: ${{ env.CHECKOUT_SHA }}
+          submodules: recursive
+          path: pytorch
+
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
