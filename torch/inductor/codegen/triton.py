@@ -6,31 +6,32 @@ import itertools
 import logging
 import math
 import operator
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import sympy
+
 import torch
 
-from .. import config
-from .. import ir
-from .. import scheduler
+from .. import config, ir, scheduler
 from ..ir import ReductionHint
-from ..utils import free_symbol_startswith
-from ..utils import has_triton_libdevice
-from ..utils import instance_descriptor
-from ..utils import sympy_product
-from ..utils import sympy_subs
-from ..virtualized import V
-from ..virtualized import ops
-from .common import DeferredLine
-from .common import ExprPrinter
-from .common import IndentedBuffer
-from .common import Kernel
-from .common import OpOverrides
-from .common import SizeArg
-from .common import TensorArg
-from .common import index_prevent_reordering
+from ..utils import (
+    free_symbol_startswith,
+    has_triton_libdevice,
+    instance_descriptor,
+    sympy_product,
+    sympy_subs,
+)
+from ..virtualized import ops, V
+from .common import (
+    DeferredLine,
+    ExprPrinter,
+    IndentedBuffer,
+    index_prevent_reordering,
+    Kernel,
+    OpOverrides,
+    SizeArg,
+    TensorArg,
+)
 
 log = logging.getLogger(__name__)
 

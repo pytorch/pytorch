@@ -1,8 +1,11 @@
-import torch
 import triton
 import triton._C.libtriton.triton as _triton
-from triton.ops.matmul_perf_model import get_dram_gbps as get_dram_gbps
-from triton.ops.matmul_perf_model import get_tflops as get_tflops
+from triton.ops.matmul_perf_model import (
+    get_dram_gbps as get_dram_gbps,
+    get_tflops as get_tflops,
+)
+
+import torch
 
 
 def estimate_matmul_time(

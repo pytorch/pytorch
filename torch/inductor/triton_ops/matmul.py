@@ -1,9 +1,9 @@
-import torch
 import triton
 import triton.language as tl
 
-from .autotune import mm_autotune
-from .autotune import mm_heuristics
+import torch
+
+from .autotune import mm_autotune, mm_heuristics
 
 
 @mm_heuristics()

@@ -2,8 +2,7 @@ import collections
 import dataclasses
 import functools
 import inspect
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import torch
 
@@ -11,11 +10,9 @@ from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..eval_frame import skip_code
 from ..exc import unimplemented
-from ..source import AttrSource
-from ..source import GlobalWeakRefSource
+from ..source import AttrSource, GlobalWeakRefSource
 from ..utils import global_key_name
-from .base import MutableLocal
-from .base import VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .tensor import TensorVariable
 
@@ -57,8 +54,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable
-        from . import TupleVariable
+        from . import ConstantVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         val = self.items
@@ -214,8 +210,7 @@ class DefaultDictVariable(ConstDictVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ListVariable
-        from . import TupleVariable
+        from . import ListVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 

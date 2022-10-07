@@ -13,8 +13,7 @@ from torch.fx.operator_schemas import get_signature_for_torch_op
 
 from .. import config
 from ..allowed_functions import torch_get_name
-from ..utils import clone_inputs
-from ..utils import counters
+from ..utils import clone_inputs, counters
 from .analysis import ShapeAliasingAndMutationProp
 
 log = logging.getLogger(__name__)

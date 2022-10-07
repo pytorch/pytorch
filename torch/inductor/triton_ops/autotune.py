@@ -8,25 +8,24 @@ import os.path
 import threading
 from typing import List
 
-import torch
 import triton
-from triton import Config
-from triton import cdiv
-from triton import heuristics
-from triton import next_power_of_2
+from triton import cdiv, Config, heuristics, next_power_of_2
 from triton.ops.matmul import get_configs_io_bound
 from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
-from triton.runtime.jit import KernelInterface
-from triton.runtime.jit import get_cuda_stream
+from triton.runtime.jit import get_cuda_stream, KernelInterface
 from triton.testing import do_bench
+
+import torch
 
 from .. import config
 from ..codecache import AsyncCompile
 from ..ir import ReductionHint
 from ..triton_ops.mm_perf_model import estimate_matmul_time
 from ..utils import conditional_product
-from .conv_perf_model import early_config_prune as conv_early_config_prune
-from .conv_perf_model import estimate_conv_time
+from .conv_perf_model import (
+    early_config_prune as conv_early_config_prune,
+    estimate_conv_time,
+)
 
 log = logging.getLogger(__name__)
 

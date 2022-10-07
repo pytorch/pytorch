@@ -16,17 +16,11 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel.distributed import DistributedDataParallel
 
-from . import config
-from . import convert_frame
-from . import skipfiles
-from . import utils
+from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
 from .optimizations.distributed import DDPOptimizer
-from .utils import checkpoint_params
-from .utils import clone_inputs
-from .utils import compile_times
-from .utils import same
+from .utils import checkpoint_params, clone_inputs, compile_times, same
 
 log = logging.getLogger(__name__)
 

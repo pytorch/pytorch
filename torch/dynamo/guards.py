@@ -8,32 +8,26 @@ import re
 import textwrap
 import types
 import weakref
-from inspect import currentframe
-from inspect import getframeinfo
-from typing import Any
-from typing import Callable
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Set
+from inspect import currentframe, getframeinfo
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import numpy as np
+
 import torch
 
-from . import config
-from . import convert_frame
-from . import mutation_guard
-from .eval_frame import set_guard_error_hook
-from .eval_frame import set_guard_fail_hook
+from . import config, convert_frame, mutation_guard
+from .eval_frame import set_guard_error_hook, set_guard_fail_hook
 from .exc import unimplemented
-from .utils import dict_const_keys
-from .utils import dict_param_key_ids
-from .utils import guard_failures
-from .utils import istype
-from .utils import orig_code_map
-from .utils import rename_implicit
-from .utils import tuple_iterator_getitem
-from .utils import tuple_iterator_len
+from .utils import (
+    dict_const_keys,
+    dict_param_key_ids,
+    guard_failures,
+    istype,
+    orig_code_map,
+    rename_implicit,
+    tuple_iterator_getitem,
+    tuple_iterator_len,
+)
 
 log = logging.getLogger(__name__)
 TensorGuards = torch._C._dynamo.guards.TensorGuards

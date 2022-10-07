@@ -6,7 +6,7 @@
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
-#include "internal/pycore_pystate.h"
+#include <internal/pycore_pystate.h>
 #undef Py_BUILD_CORE
 #endif
 

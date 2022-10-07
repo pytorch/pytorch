@@ -5,12 +5,10 @@ from typing import Any
 
 import torch.nn
 
-from . import utils
-from . import variables
+from . import utils, variables
 from .bytecode_transformation import create_instruction
 from .codegen import PyCodegen
-from .source import LocalSource
-from .source import Source
+from .source import LocalSource, Source
 from .utils import object_new
 from .variables.base import VariableTracker
 

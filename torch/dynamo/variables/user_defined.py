@@ -5,22 +5,16 @@ import importlib
 import inspect
 import random
 import types
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import torch.nn
 
 from .. import variables
 from ..exc import unimplemented
-from ..guards import Guard
-from ..guards import GuardBuilder
-from ..source import AttrSource
-from ..source import ODictGetItemSource
-from ..source import RandomValueSource
-from ..utils import is_namedtuple_cls
-from ..utils import namedtuple_fields
-from .base import MutableLocal
-from .base import VariableTracker
+from ..guards import Guard, GuardBuilder
+from ..source import AttrSource, ODictGetItemSource, RandomValueSource
+from ..utils import is_namedtuple_cls, namedtuple_fields
+from .base import MutableLocal, VariableTracker
 from .misc import AutogradProfilerContextWrapperVariable
 
 
@@ -160,9 +154,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable
-        from . import TupleVariable
-        from . import UserMethodVariable
+        from . import ConstantVariable, TupleVariable, UserMethodVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 

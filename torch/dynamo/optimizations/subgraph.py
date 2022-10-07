@@ -10,10 +10,7 @@ import os
 import torch
 
 from .. import config
-from ..utils import check_is_cuda
-from ..utils import checkpoint_params
-from ..utils import is_jit_model
-from ..utils import torchscript
+from ..utils import check_is_cuda, checkpoint_params, is_jit_model, torchscript
 
 log = logging.getLogger(__name__)
 

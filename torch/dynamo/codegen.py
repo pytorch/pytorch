@@ -7,20 +7,18 @@ from typing import List
 
 import torch.nn
 
-from .bytecode_transformation import Instruction
-from .bytecode_transformation import create_instruction
+from .bytecode_transformation import create_instruction, Instruction
 from .exc import unimplemented
-from .source import AttrSource
-from .source import Source
-from .utils import is_safe_constant
-from .utils import istype
-from .utils import rot_n_helper
+from .source import AttrSource, Source
+from .utils import is_safe_constant, istype, rot_n_helper
 from .variables.base import VariableTracker
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
-from .variables.tensor import TensorWithTFOverrideVariable
-from .variables.tensor import UnspecializedNumpyVariable
-from .variables.tensor import UnspecializedPythonVariable
+from .variables.tensor import (
+    TensorVariable,
+    TensorWithTFOverrideVariable,
+    UnspecializedNumpyVariable,
+    UnspecializedPythonVariable,
+)
 
 
 @dataclasses.dataclass

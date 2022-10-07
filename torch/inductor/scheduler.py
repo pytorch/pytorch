@@ -6,28 +6,22 @@ import logging
 import os
 import pprint
 import textwrap
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Set
-from typing import Union
+from typing import Dict, List, Optional, Set, Union
 
 import numpy as np
 import sympy
+
 import torch
 
-from . import config
-from . import dependencies
-from . import ir
-from .codegen.triton_template import should_use_template
-from .codegen.triton_template import template_can_fuse
-from .codegen.triton_template import template_codegen
-from .dependencies import MemoryDep
-from .dependencies import StarDep
+from . import config, dependencies, ir
+from .codegen.triton_template import (
+    should_use_template,
+    template_can_fuse,
+    template_codegen,
+)
+from .dependencies import MemoryDep, StarDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self
-from .utils import cmp
-from .utils import dynamo_utils
+from .utils import cache_on_self, cmp, dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)

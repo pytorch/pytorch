@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 
 import numpy as np
+
 import torch
 
 from ..utils import identity
@@ -323,11 +324,9 @@ def fx2trt(subgraph, **kwargs):
         # TensorRT fails violently with an abort() on this
         return None
 
-    from torch_tensorrt.fx.fx2trt import InputTensorSpec
-    from torch_tensorrt.fx.fx2trt import TRTInterpreter
+    from torch_tensorrt.fx.fx2trt import InputTensorSpec, TRTInterpreter
     from torch_tensorrt.fx.passes.lower_basic_pass import transform_setitem
-    from torch_tensorrt.fx.tools.trt_splitter import TRTSplitter
-    from torch_tensorrt.fx.tools.trt_splitter import TRTSplitterSetting
+    from torch_tensorrt.fx.tools.trt_splitter import TRTSplitter, TRTSplitterSetting
     from torch_tensorrt.fx.tracer.acc_tracer import acc_tracer
     from torch_tensorrt.fx.trt_module import TRTModule
     from torch_tensorrt.fx.utils import LowerPrecision
@@ -449,6 +448,7 @@ def onnx2tensorrt_alt(subgraph):
         return None
 
     import tensorrt as trt
+
     from torch.fx.experimental.fx2trt.trt_module import TRTModule
 
     inputs = subgraph.example_inputs

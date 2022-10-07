@@ -1,3 +1,5 @@
+import _collections_abc
+import _weakrefset
 import abc
 import collections
 import contextlib
@@ -27,21 +29,19 @@ import typing
 import unittest
 import weakref
 
-import _collections_abc
-import _weakrefset
 import torch
 
 try:
     import torch._prims
-    import torch._refs
-    import torch._refs.nn
-    import torch._refs.nn.functional
-    import torch._refs.special
 
     # isort: split
     # TODO: Hack to unblock simultaneous landing changes. Fix after https://github.com/pytorch/pytorch/pull/81088 lands
     import torch._prims.utils
     import torch._prims.wrappers
+    import torch._refs
+    import torch._refs.nn
+    import torch._refs.nn.functional
+    import torch._refs.special
 
     HAS_PRIMS_REFS = True
 except ImportError:

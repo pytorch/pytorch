@@ -21,11 +21,11 @@ import types
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Any
-from typing import Dict
+from typing import Any, Dict
 
 import numpy as np
 import tabulate
+
 import torch
 from torch import fx
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -705,8 +705,10 @@ def rename_implicit(v):
 # to allow pytorch 1.12 to work
 fake_tensors_available = True
 try:
-    from torch._subclasses import FakeTensorMode  # noqa: F401
-    from torch._subclasses import UnsupportedFakeTensorException
+    from torch._subclasses import (  # noqa: F401
+        FakeTensorMode,
+        UnsupportedFakeTensorException,
+    )
 
     def wrap_fake_exception(fn):
         try:

@@ -8,37 +8,22 @@ import textwrap
 from collections import OrderedDict
 from enum import Enum
 from functools import partial
-from typing import Any
-from typing import Callable
-from typing import ClassVar
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Set
-from typing import Tuple
-from typing import Union
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Union
 from unittest.mock import patch
 
 import numpy
 import sympy
+from sympy import Expr, Integer
+
 import torch.fx
 import torch.utils._pytree as pytree
-from sympy import Expr
-from sympy import Integer
-from torch._prims_common import is_boolean_dtype
-from torch._prims_common import is_float_dtype
+from torch._prims_common import is_boolean_dtype, is_float_dtype
 
-from . import config
-from . import dependencies
+from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .dependencies import extract_read_writes
-from .dependencies import var_builder
-from .utils import cache_on_self
-from .utils import sympy_dot
-from .utils import sympy_product
-from .utils import sympy_subs
-from .virtualized import V
-from .virtualized import ops
+from .dependencies import extract_read_writes, var_builder
+from .utils import cache_on_self, sympy_dot, sympy_product, sympy_subs
+from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")

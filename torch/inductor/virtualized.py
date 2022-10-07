@@ -3,8 +3,8 @@ from itertools import chain
 from threading import local
 
 import sympy
-from torch.fx.graph import inplace_methods
-from torch.fx.graph import magic_methods
+
+from torch.fx.graph import inplace_methods, magic_methods
 
 from .utils import sympy_str
 

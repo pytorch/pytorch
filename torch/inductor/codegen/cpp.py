@@ -2,25 +2,25 @@ import contextlib
 import dataclasses
 import functools
 from pathlib import Path
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import sympy
+
 import torch
 from torch._prims_common import is_float_dtype
 
-from .. import codecache
-from .. import config
+from .. import codecache, config
 from ..utils import sympy_product
-from ..virtualized import V
-from ..virtualized import ops
-from .common import BracesBuffer
-from .common import DeferredIndentedBuffer
-from .common import ExprPrinter
-from .common import IndentedBuffer
-from .common import Kernel
-from .common import KernelArgs
-from .common import OpOverrides
+from ..virtualized import ops, V
+from .common import (
+    BracesBuffer,
+    DeferredIndentedBuffer,
+    ExprPrinter,
+    IndentedBuffer,
+    Kernel,
+    KernelArgs,
+    OpOverrides,
+)
 
 DTYPE_TO_CPP = {
     torch.float32: "float",

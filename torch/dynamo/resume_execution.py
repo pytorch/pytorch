@@ -2,13 +2,13 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any
-from typing import Dict
-from typing import List
+from typing import Any, Dict, List
 
-from .bytecode_transformation import Instruction
-from .bytecode_transformation import create_instruction
-from .bytecode_transformation import transform_code_object
+from .bytecode_transformation import (
+    create_instruction,
+    Instruction,
+    transform_code_object,
+)
 from .codegen import PyCodegen
 from .utils import ExactWeakKeyDictionary
 

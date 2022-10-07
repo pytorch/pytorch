@@ -1,19 +1,10 @@
 import collections
-from typing import Any
-from typing import Callable
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from .. import variables
 from ..exc import unimplemented
-from ..source import AttrSource
-from ..source import Source
-from ..utils import dict_values
-from ..utils import identity
-from ..utils import istype
-from ..utils import odict_values
+from ..source import AttrSource, Source
+from ..utils import dict_values, identity, istype, odict_values
 
 
 class MutableLocal:

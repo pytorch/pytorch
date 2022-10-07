@@ -3,22 +3,12 @@ import dataclasses
 import itertools
 import logging
 import typing
-from typing import Callable
-from typing import Dict
-from typing import List
-from typing import Optional
-from typing import Set
-from typing import Tuple
-from typing import Union
-from typing import cast
+from typing import Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
 from .codegen.common import index_prevent_reordering
-from .utils import VarRanges
-from .utils import sympy_product
-from .utils import sympy_str
-from .utils import sympy_subs
+from .utils import sympy_product, sympy_str, sympy_subs, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)

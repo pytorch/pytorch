@@ -11,39 +11,41 @@ from typing import Callable
 import torch
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
-from . import config
-from . import exc
+from . import config, exc
 from .allowed_functions import is_allowed
-from .bytecode_analysis import remove_dead_code
-from .bytecode_analysis import remove_pointless_jumps
-from .bytecode_transformation import is_generator
-from .bytecode_transformation import transform_code_object
-from .eval_frame import TorchPatcher
-from .eval_frame import WrapperBackend
-from .eval_frame import always_optimize_code_objects
-from .eval_frame import skip_code
-from .exc import BackendCompilerFailed
-from .exc import InternalTorchDynamoError
-from .exc import TorchRuntimeError
-from .exc import Unsupported
-from .exc import unimplemented
-from .guards import CheckFunctionManager
-from .guards import GuardedCode
+from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
+from .bytecode_transformation import is_generator, transform_code_object
+from .eval_frame import (
+    always_optimize_code_objects,
+    skip_code,
+    TorchPatcher,
+    WrapperBackend,
+)
+from .exc import (
+    BackendCompilerFailed,
+    InternalTorchDynamoError,
+    TorchRuntimeError,
+    unimplemented,
+    Unsupported,
+)
+from .guards import CheckFunctionManager, GuardedCode
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
-from .utils import CleanupManager
-from .utils import counters
-from .utils import dynamo_timed
-from .utils import filter_stack
-from .utils import format_bytecode
-from .utils import gen_record_file_name
-from .utils import guard_failures
-from .utils import init_logging
-from .utils import is_namedtuple
-from .utils import istype
-from .utils import orig_code_map
-from .utils import troubleshooting_url
-from .utils import write_record_to_file
+from .utils import (
+    CleanupManager,
+    counters,
+    dynamo_timed,
+    filter_stack,
+    format_bytecode,
+    gen_record_file_name,
+    guard_failures,
+    init_logging,
+    is_namedtuple,
+    istype,
+    orig_code_map,
+    troubleshooting_url,
+    write_record_to_file,
+)
 
 log = logging.getLogger(__name__)
 

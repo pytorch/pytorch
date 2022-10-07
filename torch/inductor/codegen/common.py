@@ -14,12 +14,8 @@ import sympy
 from sympy.printing.printer import Printer
 
 from .. import metrics
-from ..utils import free_symbol_startswith
-from ..utils import sympy_dot
-from ..utils import sympy_subs
-from ..utils import unique
-from ..virtualized import V
-from ..virtualized import ops
+from ..utils import free_symbol_startswith, sympy_dot, sympy_subs, unique
+from ..virtualized import ops, V
 
 log = logging.getLogger(__name__)
 
@@ -321,8 +317,7 @@ class KernelArgs:
         )
 
     def cpp_argdefs(self):
-        from .cpp import DTYPE_TO_CPP
-        from .cpp import INDEX_TYPE
+        from .cpp import DTYPE_TO_CPP, INDEX_TYPE
 
         # TODO(jansel): replace this with data from scheduler
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}

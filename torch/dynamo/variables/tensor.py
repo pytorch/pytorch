@@ -5,8 +5,7 @@ import itertools
 import math
 import numbers
 import operator
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import torch.fx
 import torch.random
@@ -15,34 +14,32 @@ from ..utils import fake_tensors_available
 
 if fake_tensors_available:
     from torch._subclasses import FakeTensor
-    from ..utils import wrap_to_fake_tensor
-    from ..utils import deepcopy_to_fake_tensor
-    from torch._subclasses.fake_tensor import DataDependentOutputException
-    from torch._subclasses.fake_tensor import DynamicOutputShapeException
+    from torch._subclasses.fake_tensor import (
+        DataDependentOutputException,
+        DynamicOutputShapeException,
+    )
+    from ..utils import deepcopy_to_fake_tensor, wrap_to_fake_tensor
 
 import torch.utils._python_dispatch as py_dispatch
 from torch.fx.immutable_collections import immutable_list
 from torch.utils._pytree import tree_map
 
-from .. import config
-from .. import variables
-from ..exc import TorchRuntimeError
-from ..exc import unimplemented
+from .. import config, variables
+from ..exc import TorchRuntimeError, unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
-from ..utils import clone_input
-from ..utils import is_lazy_module
-from ..utils import istype
-from ..utils import preserve_rng_state
-from ..utils import product
-from ..utils import proxy_args_kwargs
-from ..utils import tensortype_to_dtype
-from .base import MutableLocal
-from .base import VariableTracker
-from .base import typestr
+from ..utils import (
+    clone_input,
+    is_lazy_module,
+    istype,
+    preserve_rng_state,
+    product,
+    proxy_args_kwargs,
+    tensortype_to_dtype,
+)
+from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
-from .lists import ShapeVariable
-from .lists import SizeVariable
+from .lists import ShapeVariable, SizeVariable
 
 
 class TensorVariable(VariableTracker):
@@ -338,8 +335,7 @@ class TensorVariable(VariableTracker):
         return props
 
     def var_getattr(self, tx, name):
-        from . import ConstantVariable
-        from . import TorchVariable
+        from . import ConstantVariable, TorchVariable
 
         result = None
         options = VariableTracker.propagate(self)
@@ -398,8 +394,7 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import ConstantVariable
-        from . import TupleVariable
+        from . import ConstantVariable, TupleVariable
 
         kwargs = dict(kwargs)
 
@@ -608,8 +603,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
         The caller is responsible for wrapping the return value, if needed.
         """
         from . import UserDefinedClassVariable
-        from .builder import TupleVariable
-        from .builder import VariableBuilder
+        from .builder import TupleVariable, VariableBuilder
 
         source = AttrSource(
             AttrSource(tensor_with_tf_override_source, "__torch_function__"),

@@ -4,25 +4,22 @@ import os
 import time
 
 import sympy
+from sympy import Integer
+
 import torch
 import torch.fx
-from sympy import Integer
 from torch._decomp import get_decompositions
 from torch.utils._mode_utils import no_dispatch
 
-from . import config
-from . import ir
+from . import config, ir
 from .codegen.wrapper import WrapperCodeGen
-from .exc import LoweringException
-from .exc import MissingOperatorWithDecomp
-from .exc import MissingOperatorWithoutDecomp
-from .ir import Constant
-from .ir import FixedLayout
-from .ir import InputBuffer
-from .ir import TensorBox
-from .lowering import lowerings
-from .lowering import make_fallback
-from .lowering import needs_realized_inputs
+from .exc import (
+    LoweringException,
+    MissingOperatorWithDecomp,
+    MissingOperatorWithoutDecomp,
+)
+from .ir import Constant, FixedLayout, InputBuffer, TensorBox
+from .lowering import lowerings, make_fallback, needs_realized_inputs
 from .sizevars import SizeVarAllocator
 from .utils import dynamo_utils
 from .virtualized import V

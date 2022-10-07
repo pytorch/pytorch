@@ -3,17 +3,14 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..source import AttrSource
-from ..source import GetItemSource
+from ..source import AttrSource, GetItemSource
 from ..utils import make_cell
-from .base import VariableTracker
-from .base import typestr
+from .base import typestr, VariableTracker
 
 
 def wrap_bound_arg(val, options):

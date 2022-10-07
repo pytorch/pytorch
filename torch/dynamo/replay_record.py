@@ -1,9 +1,7 @@
 import dataclasses
 from dataclasses import field
-from types import CodeType
-from types import ModuleType
-from typing import Any
-from typing import Dict
+from types import CodeType, ModuleType
+from typing import Any, Dict
 
 import dill
 

@@ -10,17 +10,14 @@ import subprocess
 import sysconfig
 import tempfile
 import types
-from concurrent.futures import Future
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from ctypes import cdll
-from typing import Any
-from typing import Dict
+from typing import Any, Dict
 
 import torch
 from torch.utils import cpp_extension
 
-from . import config
-from . import exc
+from . import config, exc
 
 log = logging.getLogger(__name__)
 

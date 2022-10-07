@@ -3,13 +3,13 @@ import logging
 import math
 import numbers
 
+from functorch._src.aot_autograd import aot_autograd_decompositions
+
 import torch
 import torch._decomp as decomp
-from functorch._src.aot_autograd import aot_autograd_decompositions
 from torch import Tensor
 from torch._decomp import get_decompositions
-from torch._prims_common import is_boolean_dtype
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import is_boolean_dtype, is_integer_dtype
 
 from . import config
 

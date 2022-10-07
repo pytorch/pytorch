@@ -1,8 +1,7 @@
 import logging
 import os
 import sys
-from os.path import abspath
-from os.path import dirname
+from os.path import abspath, dirname
 from types import ModuleType
 
 import torch

@@ -453,9 +453,7 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False):
     """
     Runs a forward and possibly backward iteration for a given mod and args.
     """
-    from .testing import collect_results
-    from .testing import reduce_to_scalar_loss
-    from .testing import requires_bwd_pass
+    from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
     new_args = clone_inputs(args)

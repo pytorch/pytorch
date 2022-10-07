@@ -4,8 +4,7 @@ from typing import Any
 
 from . import utils
 from .bytecode_transformation import create_instruction
-from .guards import Guard
-from .guards import GuardSource
+from .guards import Guard, GuardSource
 from .utils import rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {

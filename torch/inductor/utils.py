@@ -3,15 +3,13 @@ import functools
 import operator
 import time
 from importlib import import_module
-from typing import Any
-from typing import Dict
-from typing import List
+from typing import Any, Dict, List
 
 import numpy as np
 import sympy
+
 import torch
-from torch.fx.immutable_collections import immutable_dict
-from torch.fx.immutable_collections import immutable_list
+from torch.fx.immutable_collections import immutable_dict, immutable_list
 
 from . import config
 
@@ -194,9 +192,7 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv
-    from .ir import IndexingDiv
-    from .ir import ModularIndexing
+    from .ir import CleanDiv, IndexingDiv, ModularIndexing
 
     if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"

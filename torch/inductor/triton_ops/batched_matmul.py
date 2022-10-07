@@ -1,6 +1,7 @@
-import torch
 import triton
 import triton.language as tl
+
+import torch
 
 # from triton.ops.matmul_perf_model import early_config_prune
 # from triton.ops.matmul_perf_model import estimate_matmul_time

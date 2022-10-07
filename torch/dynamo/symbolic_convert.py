@@ -12,69 +12,66 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any
-from typing import Dict
-from typing import Iterable
-from typing import List
+from typing import Any, Dict, Iterable, List
 from unittest.mock import patch
 
 import torch
 
-from . import config
-from . import exc
-from . import side_effects
-from . import skipfiles
-from . import variables
-from .allowed_functions import is_allowed
-from .allowed_functions import is_builtin_callable
-from .allowed_functions import is_builtin_constant
+from . import config, exc, side_effects, skipfiles, variables
+from .allowed_functions import is_allowed, is_builtin_callable, is_builtin_constant
 from .bytecode_analysis import livevars_analysis
-from .bytecode_transformation import Instruction
-from .bytecode_transformation import cleaned_instructions
-from .bytecode_transformation import create_instruction
-from .bytecode_transformation import is_generator
-from .bytecode_transformation import unique_id
+from .bytecode_transformation import (
+    cleaned_instructions,
+    create_instruction,
+    Instruction,
+    is_generator,
+    unique_id,
+)
 from .codegen import PyCodegen
-from .exc import Unsupported
-from .exc import unimplemented
+from .exc import unimplemented, Unsupported
 from .guards import GuardBuilder
-from .output_graph import GraphCompileReason
-from .output_graph import OutputGraph
-from .replay_record import DummyModule
-from .replay_record import ExecutionRecorder
-from .resume_execution import ContinueExecutionCache
-from .resume_execution import ReenterWith
-from .source import AttrSource
-from .source import GetItemSource
-from .source import GlobalSource
-from .source import GlobalWeakRefSource
-from .source import LocalSource
-from .utils import counters
-from .utils import fake_tensors_available
-from .utils import graph_break_dup_warning_checker
-from .utils import istype
-from .variables.base import MutableLocal
-from .variables.base import VariableTracker
-from .variables.base import typestr
+from .output_graph import GraphCompileReason, OutputGraph
+from .replay_record import DummyModule, ExecutionRecorder
+from .resume_execution import ContinueExecutionCache, ReenterWith
+from .source import (
+    AttrSource,
+    GetItemSource,
+    GlobalSource,
+    GlobalWeakRefSource,
+    LocalSource,
+)
+from .utils import (
+    counters,
+    fake_tensors_available,
+    graph_break_dup_warning_checker,
+    istype,
+)
+from .variables.base import MutableLocal, typestr, VariableTracker
 from .variables.builder import VariableBuilder
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.dicts import ConstDictVariable
-from .variables.functions import BaseUserFunctionVariable
-from .variables.functions import NestedUserFunctionVariable
-from .variables.functions import UserFunctionVariable
-from .variables.lists import BaseListVariable
-from .variables.lists import ListIteratorVariable
-from .variables.lists import ListVariable
-from .variables.lists import SliceVariable
-from .variables.lists import TupleVariable
-from .variables.misc import ClosureVariable
-from .variables.misc import ContextWrappingVariable
-from .variables.misc import GetAttrVariable
-from .variables.misc import GradModeVariable
-from .variables.misc import PythonModuleVariable
-from .variables.misc import UnknownVariable
-from .variables.misc import WithExitFunctionVariable
+from .variables.functions import (
+    BaseUserFunctionVariable,
+    NestedUserFunctionVariable,
+    UserFunctionVariable,
+)
+from .variables.lists import (
+    BaseListVariable,
+    ListIteratorVariable,
+    ListVariable,
+    SliceVariable,
+    TupleVariable,
+)
+from .variables.misc import (
+    ClosureVariable,
+    ContextWrappingVariable,
+    GetAttrVariable,
+    GradModeVariable,
+    PythonModuleVariable,
+    UnknownVariable,
+    WithExitFunctionVariable,
+)
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import TensorVariable
 from .variables.torch import TorchVariable
@@ -1335,10 +1332,12 @@ class InstructionTranslatorBase(object):
         self.random_calls: List[tuple] = []
 
         if sys.version_info >= (3, 10):
-            from .resume_execution import CO_ASYNC_GENERATOR
-            from .resume_execution import CO_COROUTINE
-            from .resume_execution import CO_GENERATOR
-            from .resume_execution import CO_ITERABLE_COROUTINE
+            from .resume_execution import (
+                CO_ASYNC_GENERATOR,
+                CO_COROUTINE,
+                CO_GENERATOR,
+                CO_ITERABLE_COROUTINE,
+            )
 
             if f_code.co_flags & (
                 CO_GENERATOR | CO_COROUTINE | CO_ITERABLE_COROUTINE | CO_ASYNC_GENERATOR

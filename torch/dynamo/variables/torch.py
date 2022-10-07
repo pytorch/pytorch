@@ -1,31 +1,29 @@
 import logging
 import re
 import types
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import numpy
+
 import torch._C
 import torch.nn
 
-from .. import config
-from .. import variables
+from .. import config, variables
 from ..allowed_functions import torch_get_name
 from ..exc import unimplemented
-from ..source import GetItemSource
-from ..source import NNModuleSource
-from ..utils import check_constant_args
-from ..utils import check_unspec_python_args
-from ..utils import istype
-from ..utils import product
-from ..utils import proxy_args_kwargs
-from ..utils import specialize_args_kwargs
-from ..utils import tensortype_to_dtype
+from ..source import GetItemSource, NNModuleSource
+from ..utils import (
+    check_constant_args,
+    check_unspec_python_args,
+    istype,
+    product,
+    proxy_args_kwargs,
+    specialize_args_kwargs,
+    tensortype_to_dtype,
+)
 from .base import VariableTracker
-from .lists import ListVariable
-from .lists import TupleVariable
-from .misc import AutocastModeVariable
-from .misc import AutogradProfilerContextWrapperVariable
+from .lists import ListVariable, TupleVariable
+from .misc import AutocastModeVariable, AutogradProfilerContextWrapperVariable
 from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
@@ -159,9 +157,7 @@ class TorchVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ConstantVariable
-        from . import GradModeVariable
-        from . import TensorVariable
+        from . import ConstantVariable, GradModeVariable, TensorVariable
 
         constant_args = check_constant_args(args, kwargs)
         unspec_python_args = check_unspec_python_args(args, kwargs)
@@ -487,9 +483,7 @@ class TorchPyOperator(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from . import ListVariable
-        from . import TensorVariable
-        from . import UserFunctionVariable
+        from . import ListVariable, TensorVariable, UserFunctionVariable
 
         assert kwargs is None or len(kwargs) == 0, "kwargs are not supported, yet"
 

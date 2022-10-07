@@ -1,5 +1,6 @@
-import torch
 import triton
+
+import torch
 
 
 class _conv1x1:

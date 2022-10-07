@@ -6,76 +6,78 @@ import inspect
 import re
 import types
 from abc import ABCMeta
-from typing import Any
-from typing import List
+from typing import Any, List
 
 import numpy as np
-import torch
 from functorch.experimental.ops import PyOperator
 
-from .. import config
-from .. import mutation_guard
-from .. import replay_record
-from .. import skipfiles
-from ..allowed_functions import is_allowed
-from ..allowed_functions import is_builtin_callable
-from ..allowed_functions import is_numpy
+import torch
+
+from .. import config, mutation_guard, replay_record, skipfiles
+from ..allowed_functions import is_allowed, is_builtin_callable, is_numpy
 from ..exc import unimplemented
-from ..guards import GuardBuilder
-from ..guards import GuardSource
+from ..guards import GuardBuilder, GuardSource
 from ..side_effects import SideEffects
-from ..source import AttrSource
-from ..source import ConstantSource
-from ..source import GetItemSource
-from ..source import GlobalSource
-from ..source import GlobalWeakRefSource
-from ..source import RandomValueSource
-from ..source import Source
-from ..source import TupleIteratorGetItemSource
-from ..source import is_constant_source
-from ..utils import getfile
-from ..utils import global_key_name
-from ..utils import is_namedtuple
-from ..utils import is_numpy_int_type
-from ..utils import istensor
-from ..utils import istype
-from ..utils import odict_values
-from ..utils import tuple_iterator
-from ..utils import tuple_iterator_getitem
-from ..utils import tuple_iterator_len
+from ..source import (
+    AttrSource,
+    ConstantSource,
+    GetItemSource,
+    GlobalSource,
+    GlobalWeakRefSource,
+    is_constant_source,
+    RandomValueSource,
+    Source,
+    TupleIteratorGetItemSource,
+)
+from ..utils import (
+    getfile,
+    global_key_name,
+    is_namedtuple,
+    is_numpy_int_type,
+    istensor,
+    istype,
+    odict_values,
+    tuple_iterator,
+    tuple_iterator_getitem,
+    tuple_iterator_len,
+)
 from .base import MutableLocal
 from .builtin import BuiltinVariable
-from .constant import ConstantVariable
-from .constant import EnumVariable
-from .dicts import ConstDictVariable
-from .dicts import DataClassVariable
-from .dicts import DefaultDictVariable
-from .dicts import HFPretrainedConfigVariable
+from .constant import ConstantVariable, EnumVariable
+from .dicts import (
+    ConstDictVariable,
+    DataClassVariable,
+    DefaultDictVariable,
+    HFPretrainedConfigVariable,
+)
 from .functions import UserFunctionVariable
-from .lists import ListIteratorVariable
-from .lists import ListVariable
-from .lists import NamedTupleVariable
-from .lists import RangeVariable
-from .lists import SliceVariable
-from .lists import TupleVariable
-from .misc import AutogradFunctionVariable
-from .misc import GetAttrVariable
-from .misc import InspectSignatureVariable
-from .misc import LambdaVariable
-from .misc import NumpyVariable
-from .misc import PythonModuleVariable
-from .misc import SkipFilesVariable
-from .misc import TypingVariable
+from .lists import (
+    ListIteratorVariable,
+    ListVariable,
+    NamedTupleVariable,
+    RangeVariable,
+    SliceVariable,
+    TupleVariable,
+)
+from .misc import (
+    AutogradFunctionVariable,
+    GetAttrVariable,
+    InspectSignatureVariable,
+    LambdaVariable,
+    NumpyVariable,
+    PythonModuleVariable,
+    SkipFilesVariable,
+    TypingVariable,
+)
 from .nn_module import UnspecializedNNModuleVariable
-from .tensor import TensorVariable
-from .tensor import TensorWithTFOverrideVariable
-from .tensor import UnspecializedNumpyVariable
-from .tensor import UnspecializedPythonVariable
-from .torch import TorchPyOperator
-from .torch import TorchVariable
-from .torch import tensor_dunder_fns
-from .user_defined import UserDefinedClassVariable
-from .user_defined import UserDefinedObjectVariable
+from .tensor import (
+    TensorVariable,
+    TensorWithTFOverrideVariable,
+    UnspecializedNumpyVariable,
+    UnspecializedPythonVariable,
+)
+from .torch import tensor_dunder_fns, TorchPyOperator, TorchVariable
+from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
 
 
 @dataclasses.dataclass

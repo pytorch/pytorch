@@ -8,29 +8,28 @@ import os.path
 import pstats
 import shutil
 import subprocess
-from typing import Any
-from typing import List
+from typing import Any, List
+
+from functorch.compile import draw_graph, get_graph_being_compiled
 
 import torch
-from functorch.compile import draw_graph
-from functorch.compile import get_graph_being_compiled
 from torch import fx as fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
 
-from . import config
-from . import ir
+from . import config, ir
 from .codecache import cache_dir
-from .scheduler import BaseSchedulerNode
-from .scheduler import ExternKernelSchedulerNode
-from .scheduler import FusedSchedulerNode
-from .scheduler import NopKernelSchedulerNode
-from .scheduler import OutputNode
-from .scheduler import SchedulerNode
-from .scheduler import TemplateSchedulerNode
-from .utils import dynamo_debug_utils
-from .utils import dynamo_utils
+from .scheduler import (
+    BaseSchedulerNode,
+    ExternKernelSchedulerNode,
+    FusedSchedulerNode,
+    NopKernelSchedulerNode,
+    OutputNode,
+    SchedulerNode,
+    TemplateSchedulerNode,
+)
+from .utils import dynamo_debug_utils, dynamo_utils
 from .virtualized import V
 
 log = logging.getLogger(__name__)

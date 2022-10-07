@@ -3,22 +3,12 @@ import dataclasses
 import functools
 import hashlib
 from itertools import count
-from typing import Any
-from typing import Dict
-from typing import List
+from typing import Any, Dict, List
 
-from .. import codecache
-from .. import config
-from .. import ir
-from ..utils import dynamo_utils
-from ..utils import has_triton
-from ..utils import sympy_dot
-from ..utils import sympy_product
+from .. import codecache, config, ir
+from ..utils import dynamo_utils, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import CodeGen
-from .common import DeferredLine
-from .common import IndentedBuffer
-from .common import Kernel
+from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
 from .triton import texpr
 
 pexpr = texpr

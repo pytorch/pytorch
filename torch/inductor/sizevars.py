@@ -3,20 +3,14 @@ import dataclasses
 import functools
 import itertools
 import logging
-from typing import Callable
-from typing import Dict
-from typing import List
-from typing import Tuple
+from typing import Callable, Dict, List, Tuple
 
 import sympy
-from sympy import Expr
-from sympy import Integer
-from sympy import Symbol
+from sympy import Expr, Integer, Symbol
 
 from . import ir
 from .codegen.common import IndentedBuffer
-from .utils import VarRanges
-from .utils import sympy_subs
+from .utils import sympy_subs, VarRanges
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -119,8 +113,7 @@ class SizeVarAllocator(object):
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
         """
-        from .ir import IndexingDiv
-        from .ir import ModularIndexing
+        from .ir import IndexingDiv, ModularIndexing
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
@@ -519,8 +512,7 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
 
     This type of pattern can come from view operations
     """
-    from .ir import IndexingDiv
-    from .ir import ModularIndexing
+    from .ir import IndexingDiv, ModularIndexing
 
     assert isinstance(expr, sympy.Add)
 

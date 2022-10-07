@@ -1,12 +1,11 @@
 import builtins
 
-import torch
 import triton
 
-from .. import config
-from .. import triton_ops
-from ..triton_ops.autotune import mm_autotune
-from ..triton_ops.autotune import mm_heuristics
+import torch
+
+from .. import config, triton_ops
+from ..triton_ops.autotune import mm_autotune, mm_heuristics
 from ..utils import dynamo_testing
 from ..virtualized import V
 

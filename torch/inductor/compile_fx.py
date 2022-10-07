@@ -4,20 +4,17 @@ import logging
 from typing import List
 
 import functorch
+from functorch.compile import make_boxed_compiler, min_cut_rematerialization_partition
+
 import torch.fx
-from functorch.compile import make_boxed_compiler
-from functorch.compile import min_cut_rematerialization_partition
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
-from . import config
-from . import overrides
+from . import config, overrides
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
-from .utils import dynamo_optimizations
-from .utils import dynamo_utils
-from .utils import has_incompatible_cudagraph_ops
+from .utils import dynamo_optimizations, dynamo_utils, has_incompatible_cudagraph_ops
 from .virtualized import V
 
 log = logging.getLogger(__name__)

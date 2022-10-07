@@ -4,28 +4,18 @@ import itertools
 import re
 import types
 from contextlib import contextmanager
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import torch.nn
 
-from .. import skipfiles
-from .. import variables
+from .. import skipfiles, variables
 from ..allowed_functions import is_allowed
-from ..exc import RestartAnalysis
-from ..exc import unimplemented
+from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
-from ..source import AttrSource
-from ..source import GetItemSource
-from ..source import NNModuleSource
-from ..source import NotNNModuleSource
-from ..utils import is_lazy_module
-from ..utils import istype
-from ..utils import proxy_args_kwargs
-from .base import MutableLocal
-from .base import VariableTracker
-from .base import typestr
+from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
+from ..utils import is_lazy_module, istype, proxy_args_kwargs
+from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
 from .lists import SliceVariable
 from .user_defined import UserDefinedObjectVariable
@@ -230,9 +220,7 @@ class NNModuleVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
         constant=False,
     ) -> "VariableTracker":
-        from . import ConstantVariable
-        from . import ListIteratorVariable
-        from . import TupleVariable
+        from . import ConstantVariable, ListIteratorVariable, TupleVariable
 
         options = VariableTracker.propagate(self, args, kwargs.values())
         key = self.module_key

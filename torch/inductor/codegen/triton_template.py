@@ -2,12 +2,9 @@ import logging
 import os
 
 import sympy
-from jinja2 import Environment
-from jinja2 import FileSystemLoader
-from jinja2 import StrictUndefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from .. import config
-from .. import ir
+from .. import config, ir
 from ..virtualized import V
 from .common import IndentedBuffer
 from .triton import TritonKernel

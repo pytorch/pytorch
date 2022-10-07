@@ -3,36 +3,33 @@ import itertools
 import logging
 import operator
 from collections.abc import Iterable
-from typing import List
-from typing import Optional
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 import sympy
+
 import torch
 import torch.fx
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch._prims_common import Number
-from torch._prims_common import elementwise_dtypes
-from torch._prims_common import is_boolean_dtype
-from torch._prims_common import is_integer_dtype
+from torch._prims_common import (
+    elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    is_boolean_dtype,
+    is_integer_dtype,
+    Number,
+)
 
-from . import config
-from . import ir
-from . import overrides
-from .decomposition import decompositions
-from .decomposition import get_decompositions
-from .ir import ExpandView
-from .ir import PermuteView
-from .ir import Pointwise
-from .ir import Reduction
-from .ir import SqueezeView
-from .ir import TensorBox
-from .ir import View
-from .utils import ceildiv
-from .utils import has_torchvision_roi_align
-from .utils import sympy_product
-from .virtualized import V
-from .virtualized import ops
+from . import config, ir, overrides
+from .decomposition import decompositions, get_decompositions
+from .ir import (
+    ExpandView,
+    PermuteView,
+    Pointwise,
+    Reduction,
+    SqueezeView,
+    TensorBox,
+    View,
+)
+from .utils import ceildiv, has_torchvision_roi_align, sympy_product
+from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
 lowerings = {}

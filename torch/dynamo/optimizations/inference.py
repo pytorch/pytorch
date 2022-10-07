@@ -11,13 +11,14 @@ from collections import defaultdict
 import torch
 
 from .. import config
-from ..utils import check_is_cuda
-from ..utils import checkpoint_params
-from ..utils import clone_inputs
-from ..utils import count_calls
-from ..utils import counters
-from .normalize import long_name
-from .normalize import normalize_ir
+from ..utils import (
+    check_is_cuda,
+    checkpoint_params,
+    clone_inputs,
+    count_calls,
+    counters,
+)
+from .normalize import long_name, normalize_ir
 
 log = logging.getLogger(__name__)
 

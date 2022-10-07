@@ -5,32 +5,28 @@ import logging
 import math
 import operator
 import types
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import numpy as np
+
 import torch
 
-from .. import config
-from .. import variables
+from .. import config, variables
 from ..allowed_functions import is_allowed
-from ..exc import Unsupported
-from ..exc import unimplemented
+from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..replay_record import DummyModule
-from ..source import AttrSource
-from ..source import TypeSource
-from ..source import is_constant_source
-from ..utils import check_constant_args
-from ..utils import check_unspec_python_args
-from ..utils import istype
-from ..utils import proxy_args_kwargs
-from ..utils import specialize_args_kwargs
-from .base import MutableLocal
-from .base import VariableTracker
+from ..source import AttrSource, is_constant_source, TypeSource
+from ..utils import (
+    check_constant_args,
+    check_unspec_python_args,
+    istype,
+    proxy_args_kwargs,
+    specialize_args_kwargs,
+)
+from .base import MutableLocal, VariableTracker
 from .dicts import ConstDictVariable
-from .tensor import DynamicShapeVariable
-from .tensor import FakeItemVariable
+from .tensor import DynamicShapeVariable, FakeItemVariable
 
 log = logging.getLogger(__name__)
 
@@ -623,11 +619,13 @@ class BuiltinVariable(VariableTracker):
     def call_getattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, default=None
     ):
-        from . import ConstantVariable
-        from . import GetAttrVariable
-        from . import PythonModuleVariable
-        from . import TorchVariable
-        from . import UserFunctionVariable
+        from . import (
+            ConstantVariable,
+            GetAttrVariable,
+            PythonModuleVariable,
+            TorchVariable,
+            UserFunctionVariable,
+        )
         from .builder import VariableBuilder
 
         options = VariableTracker.propagate(self, obj, name_var)

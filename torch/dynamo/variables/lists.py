@@ -1,18 +1,14 @@
-from typing import Dict
-from typing import List
-from typing import Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.fx
 
-from .. import config
-from .. import variables
+from .. import config, variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
 from ..utils import namedtuple_fields
-from .base import MutableLocal
-from .base import VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 

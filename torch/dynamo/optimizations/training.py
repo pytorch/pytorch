@@ -15,9 +15,7 @@ from torch.utils._pytree import tree_map
 
 from .. import config
 from ..debug_utils import wrap_compiler_debug
-from ..utils import clone_inputs
-from ..utils import count_calls
-from ..utils import counters
+from ..utils import clone_inputs, count_calls, counters
 from .analysis import has_mutation
 from .backends import BACKENDS
 from .normalize import normalize_ir
@@ -182,9 +180,11 @@ aot_print = AotPrint.compile_fn
 
 
 def mem_efficient_fusion_kwargs(use_decomps):
-    from functorch.compile import default_decompositions
-    from functorch.compile import min_cut_rematerialization_partition
-    from functorch.compile import ts_compile
+    from functorch.compile import (
+        default_decompositions,
+        min_cut_rematerialization_partition,
+        ts_compile,
+    )
 
     kwargs = {
         # these are taken from memory_efficient_fusion()
@@ -222,8 +222,7 @@ class AotInductorDebug(AotAutogradStrategy):
     """
 
     def candidate(self):
-        from functorch.compile import min_cut_rematerialization_partition
-        from functorch.compile import nop
+        from functorch.compile import min_cut_rematerialization_partition, nop
 
         decompositions = import_module(
             f"{config.inductor_import}.compile_fx"
@@ -271,6 +270,7 @@ class AotPrimsNvfuser(AotAutogradStrategy):
         super(AotPrimsNvfuser, self).__init__(gm, example_inputs)
 
         from functorch.compile import min_cut_rematerialization_partition
+
         from torch.fx.passes.backends.nvfuser import NvFuserBackend
 
         self.nvfuser = NvFuserBackend()

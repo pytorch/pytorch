@@ -10,17 +10,14 @@ from unittest.mock import patch
 import torch
 from torch import fx
 
-from . import config
-from . import eval_frame
-from . import optimize_assert
-from . import reset
-from . import utils
-from .bytecode_transformation import create_instruction
-from .bytecode_transformation import debug_checks
-from .bytecode_transformation import is_generator
-from .bytecode_transformation import transform_code_object
-from .guards import CheckFunctionManager
-from .guards import GuardedCode
+from . import config, eval_frame, optimize_assert, reset, utils
+from .bytecode_transformation import (
+    create_instruction,
+    debug_checks,
+    is_generator,
+    transform_code_object,
+)
+from .guards import CheckFunctionManager, GuardedCode
 from .utils import same
 
 unsupported = eval_frame.unsupported

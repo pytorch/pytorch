@@ -1,25 +1,23 @@
 import inspect
 import sys
 import types
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import torch._C
 
 from .. import variables
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
-from ..guards import Guard
-from ..guards import GuardBuilder
-from ..guards import GuardSource
+from ..guards import Guard, GuardBuilder, GuardSource
 from ..source import AttrSource
-from ..utils import identity
-from ..utils import proxy_args_kwargs
+from ..utils import identity, proxy_args_kwargs
 from .base import VariableTracker
-from .functions import UserFunctionVariable
-from .functions import UserMethodVariable
-from .functions import WrappedUserFunctionVariable
-from .functions import WrappedUserMethodVariable
+from .functions import (
+    UserFunctionVariable,
+    UserMethodVariable,
+    WrappedUserFunctionVariable,
+    WrappedUserMethodVariable,
+)
 
 
 class SuperVariable(VariableTracker):
@@ -532,8 +530,7 @@ class GetAttrVariable(VariableTracker):
         if is_original_tensor_torch_function:
             # Instead of tracing inside torch.Tensor.__torch_function__,
             # record the `call_function` or `call_method` call into the graph.
-            from . import TensorVariable
-            from . import TorchVariable
+            from . import TensorVariable, TorchVariable
 
             original_torch_or_getattr_variable = args[0]
             new_args = args[2].items

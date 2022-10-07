@@ -6,39 +6,33 @@ import re
 import sys
 import traceback
 from dataclasses import dataclass
-from typing import Any
-from typing import Callable
-from typing import Dict
-from typing import List
-from typing import Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import torch.nn
 from torch import fx
 
-from . import config
-from . import variables
-from .bytecode_transformation import Instruction
-from .bytecode_transformation import create_instruction
-from .bytecode_transformation import unique_id
+from . import config, variables
+from .bytecode_transformation import create_instruction, Instruction, unique_id
 from .codegen import PyCodegen
-from .exc import BackendCompilerFailed
-from .exc import unimplemented
+from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
-from .source import ConstantSource
-from .source import LocalSource
-from .source import Source
-from .utils import CleanupHook
-from .utils import count_calls
-from .utils import counters
-from .utils import fake_tensors_available
-from .utils import format_graph_tabular
+from .source import ConstantSource, LocalSource, Source
+from .utils import (
+    CleanupHook,
+    count_calls,
+    counters,
+    fake_tensors_available,
+    format_graph_tabular,
+)
 from .variables.builder import VariableBuilder
 from .variables.nn_module import NNModuleVariable
-from .variables.tensor import TensorVariable
-from .variables.tensor import UnspecializedNumpyVariable
-from .variables.tensor import UnspecializedPythonVariable
+from .variables.tensor import (
+    TensorVariable,
+    UnspecializedNumpyVariable,
+    UnspecializedPythonVariable,
+)
 
 log = logging.getLogger(__name__)
 

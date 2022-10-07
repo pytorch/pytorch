@@ -8,11 +8,10 @@ import math
 import operator
 import types
 import warnings
-from typing import Dict
-from typing import Optional
-from typing import Set
+from typing import Dict, Optional, Set
 
 import numpy
+
 import torch
 
 from . import config

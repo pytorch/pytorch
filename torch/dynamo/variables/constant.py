@@ -1,14 +1,12 @@
 import operator
-from typing import Dict
-from typing import List
+from typing import Dict, List
 
 import torch
 
 from .. import variables
 from ..exc import unimplemented
 from ..utils import istype
-from .base import VariableTracker
-from .base import typestr
+from .base import typestr, VariableTracker
 
 
 class ConstantVariable(VariableTracker):

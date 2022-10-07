@@ -1,5 +1,4 @@
-from typing import Any
-from typing import List
+from typing import Any, List
 
 import torch
 import torch.fx.traceback as fx_traceback
