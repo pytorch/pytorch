@@ -56,8 +56,8 @@ proxy_slot = object()
 no_default = object()
 
 def is_sym_node(node):
-    assert hasattr(node, 'meta') and "val" in node.meta, "All nodes traced with proxy_tensor should have meta['val']"
-    return (
+    assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
+    return "val" in node.meta and (
         isinstance(node.meta['val'], PySymInt)
         or isinstance(node.meta['val'], PySymFloat)
     )
