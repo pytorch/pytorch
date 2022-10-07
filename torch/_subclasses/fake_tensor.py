@@ -780,6 +780,7 @@ class FakeTensorMode(TorchDispatchMode):
             func in decomposition_table
             and torch_decomp_decompositions(func)
             and func not in _disabled_meta_decomps
+            and all(not e.is_sparse for e in flat_arg_fake_tensors)
         ):
             with self:
                 return decomposition_table[func](*args, **kwargs)
