@@ -102,7 +102,7 @@ jobs:
         shell: bash
         run: |
           if [[ $IS_TAGGED_BUILD ]]; then
-            export CHECKOUT_SHA = ''
+            export CHECKOUT_SHA=''
           fi
           {
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
