@@ -174,15 +174,20 @@ class CapabilityBasedPartitioner:
                 for other_node in reassignment:
                     assign(other_node, id)
 
+        print("print graph")
+        print(self.graph_module.graph)
+        print(assignment)
         # not very efficient, this handles sibling fusion of partitions that share inputs.
         for node in self.graph_module.graph.nodes:
             if node not in assignment:
+                print("check unassigned nodes:", node)
                 # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
                 user_partitions: Dict[Partition, None] = {}
                 for user_node in node.users:
                     if user_node in assignment:
                         id = assignment[user_node]
                         user_partitions[partitions_by_id[id]] = None
+                print("all users:", user_partitions)
 
                 # Filter out all the partitions that has dependency on other users
                 # TODO: find a better way to do this, rather than pair-wise comparision
