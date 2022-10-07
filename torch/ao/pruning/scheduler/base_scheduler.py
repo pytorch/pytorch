@@ -1,5 +1,5 @@
 
-from torch.ao.sparsity import BaseSparsifier
+from torch.ao.pruning import BaseSparsifier
 
 from functools import wraps
 import warnings
@@ -13,7 +13,7 @@ class BaseScheduler(object):
 
         # Attach sparsifier
         if not isinstance(sparsifier, BaseSparsifier):
-            raise TypeError('{} is not an instance of torch.ao.sparsity.BaseSparsifier'.format(
+            raise TypeError('{} is not an instance of torch.ao.pruning.BaseSparsifier'.format(
                 type(sparsifier).__name__))
         self.sparsifier = sparsifier
 

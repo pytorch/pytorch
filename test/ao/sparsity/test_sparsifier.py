@@ -7,7 +7,7 @@ import re
 
 import torch
 from torch import nn
-from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier, FakeSparsity, NearlyDiagonalSparsifier
+from torch.ao.pruning import BaseSparsifier, WeightNormSparsifier, FakeSparsity, NearlyDiagonalSparsifier
 from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase

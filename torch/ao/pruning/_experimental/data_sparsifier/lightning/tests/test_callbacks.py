@@ -1,14 +1,14 @@
-from torch.ao.sparsity._experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
-from torch.ao.sparsity._experimental.data_scheduler.base_data_scheduler import BaseDataScheduler
+from torch.ao.pruning._experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
+from torch.ao.pruning._experimental.data_scheduler.base_data_scheduler import BaseDataScheduler
 import torch
 import torch.nn as nn
 from typing import List
-from torch.ao.sparsity._experimental.data_sparsifier.lightning.callbacks.data_sparsity import (
+from torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks.data_sparsity import (
     PostTrainingDataSparsity,
     TrainingAwareDataSparsity
 )
-from torch.ao.sparsity._experimental.data_sparsifier.lightning.callbacks._data_sparstity_utils import _get_valid_name
-from torch.ao.sparsity._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
+from torch.ao.pruning._experimental.data_sparsifier.lightning.callbacks._data_sparstity_utils import _get_valid_name
+from torch.ao.pruning._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import run_tests
 import importlib

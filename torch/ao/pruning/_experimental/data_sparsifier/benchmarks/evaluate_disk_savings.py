@@ -1,7 +1,7 @@
 from typing import Dict, List
 import torch
 import time
-from torch.ao.sparsity._experimental.data_sparsifier import DataNormSparsifier
+from torch.ao.pruning._experimental.data_sparsifier import DataNormSparsifier
 import os
 from dlrm_utils import get_dlrm_model, get_valid_name  # type: ignore[import]
 import copy

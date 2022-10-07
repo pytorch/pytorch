@@ -11,8 +11,8 @@ from torch.nn.modules.container import ModuleDict, ModuleList
 
 from .parametrization import PruningParametrization, ZeroesParametrization, ActivationReconstruction, BiasHook
 
-from torch.ao.sparsity import BaseSparsifier, module_to_fqn, fqn_to_module
-from torch.ao.sparsity.sparsifier.utils import get_arg_info_from_tensor_fqn
+from torch.ao.pruning import BaseSparsifier, module_to_fqn, fqn_to_module
+from torch.ao.pruning.sparsifier.utils import get_arg_info_from_tensor_fqn
 
 __all__ = ["BasePruner"]
 
