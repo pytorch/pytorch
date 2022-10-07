@@ -88,7 +88,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -203,7 +203,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -323,7 +322,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -438,7 +437,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -558,7 +556,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -673,7 +671,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -793,7 +790,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -908,7 +905,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -1029,7 +1025,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -1145,7 +1141,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -1267,7 +1262,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -1383,7 +1378,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -1505,7 +1499,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -1621,7 +1615,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -1743,7 +1736,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -1859,7 +1852,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -1981,7 +1973,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -2097,7 +2089,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -2219,7 +2210,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -2335,7 +2326,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -2457,7 +2447,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -2573,7 +2563,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
@@ -2695,7 +2684,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-        - name: Checkout PyTorch
+      - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           submodules: recursive
@@ -2811,7 +2800,6 @@ jobs:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
       - name: Clean PyTorch checkout
