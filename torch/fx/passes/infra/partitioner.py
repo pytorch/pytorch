@@ -198,7 +198,7 @@ class CapabilityBasedPartitioner:
                 id = assignment.get(node, None)     # type: ignore[arg-type]
                 for user in node.users:
                     if assignment.get(user, None) != id:    # type: ignore[arg-type]
-                        nodes_reassignment[user] = id
+                        nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             assign(node, id)
 
