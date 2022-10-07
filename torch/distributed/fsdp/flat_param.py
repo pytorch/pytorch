@@ -1411,7 +1411,8 @@ class FlatParamHandle:
         When ``use_orig_params=True``, sets the underlying ``flat_param.grad``
         to ``None`` if *all* of the original parameters' ``.grad`` are
         ``None``. This is targeting ``optim.zero_grad(set_to_none=True)``, in
-        which case we want to free the gradients early before the pre-unshard.
+        which case we want to free the gradients as soon after the
+        ``zero_grad()`` call as possible.
         """
         if not self._use_orig_params:
             return
