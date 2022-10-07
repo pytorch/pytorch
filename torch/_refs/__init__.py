@@ -3525,7 +3525,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
 swap_axes = transpose
 
 
-@register_decomposition(torch.ops.aten.unfold, disable_meta=True)
+@register_decomposition(torch.ops.aten.unfold)
 def unfold(
     self: TensorLikeType, dimension: int, size: int, step: int
 ) -> TensorLikeType:
