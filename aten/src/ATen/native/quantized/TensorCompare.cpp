@@ -15,7 +15,7 @@ Tensor max_quantized_cpu(const Tensor& self) {
 }
 
 Tensor& max_quantized_unary_out(const Tensor& self, Tensor& out) {
-  // First check if the devices match (CPU vs GPU)
+  // TODO this implementation is inefficient for now.
   TORCH_CHECK(self.device() == out.device());
 
   TORCH_CHECK(canCast(
