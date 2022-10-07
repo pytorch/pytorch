@@ -40,6 +40,23 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
       std::move(tensor_vec), work);
 }
 
+c10::intrusive_ptr<Work> reduce_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->reduce(
+      tensor_vec,
+      ReduceOptions{
+          *reduce_op.get(),
+          root_rank,
+          root_tensor,
+          std::chrono::milliseconds(timeout)});
+}
+
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
 allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
@@ -72,23 +89,6 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors, work);
-}
-
-c10::intrusive_ptr<Work> reduce_(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
-    int64_t root_rank,
-    int64_t root_tensor,
-    int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  return process_group->reduce(
-      tensor_vec,
-      ReduceOptions{
-          *reduce_op.get(),
-          root_rank,
-          root_tensor,
-          std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<Work> gather_(
