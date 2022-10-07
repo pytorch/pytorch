@@ -41,7 +41,7 @@ cross_compile_arm64() {
 }
 
 compile_x86_64() {
-  USE_DISTRIBUTED=1 WERROR=1 python setup.py bdist_wheel
+  USE_DISTRIBUTED=0 WERROR=1 python setup.py bdist_wheel
 }
 
 build_lite_interpreter() {
