@@ -949,9 +949,10 @@ class FlatParamHandle:
         gradient to the ``.grad`` attribute.
         """
         def cast_grad_to_param_dtype_if_needed(flat_param):
-            # This is meaningful when `param_dtype` is a low precision dtype.
             if self._config.keep_low_precision_grads:
                 assert flat_param.grad is not None  # mypy
+                # This cast is meaningful when `param_dtype` is a low precision
+                # dtype.
                 flat_param.grad.data = flat_param.grad.to(self._config.param_dtype)
 
         flat_param = self.flat_param
