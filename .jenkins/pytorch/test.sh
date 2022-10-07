@@ -655,16 +655,6 @@ test_dynamo() {
   popd
 }
 
-test_torch_deploy() {
-  python torch/csrc/deploy/example/generate_examples.py
-  ln -sf "$TORCH_LIB_DIR"/libtorch* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libshm* "$TORCH_BIN_DIR"
-  ln -sf "$TORCH_LIB_DIR"/libc10* "$TORCH_BIN_DIR"
-  "$TORCH_BIN_DIR"/test_deploy
-  "$TORCH_BIN_DIR"/test_deploy_gpu
-  assert_git_not_dirty
-}
-
 test_docs_test() {
   .jenkins/pytorch/docs-test.sh
 }
@@ -673,10 +663,7 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${TEST_CONFIG}" == *deploy* ]]; then
-  install_torchdynamo
-  test_torch_deploy
-elif [[ "${TEST_CONFIG}" == *backward* ]]; then
+if [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
