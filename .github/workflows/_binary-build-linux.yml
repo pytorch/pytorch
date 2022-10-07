@@ -102,7 +102,8 @@ jobs:
         shell: bash
         run: |
           if [[ $IS_TAGGED_BUILD ]]; then
-            export CHECKOUT_SHA=''
+            echo "Setting Tagged build SHA"
+            echo "CHECKOUT_SHA=''" >> "${GITHUB_ENV}"
           fi
           {
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
@@ -128,7 +129,6 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
             echo "IS_TAGGED_BUILD=${{ env.IS_TAGGED_BUILD }}"
-            echo "CHECKOUT_SHA=${{ env.CHECKOUT_SHA }}"
           } >> "${GITHUB_ENV} }}"
       - name: List the env
         shell: bash
