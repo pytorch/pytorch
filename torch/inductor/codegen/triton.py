@@ -299,8 +299,10 @@ class IterationRangesRoot(IterationRanges):
         prefix: str,
         index: int,
         kernel: "Kernel",
-        pid_cache={},
+        pid_cache=None,
     ):
+        if pid_cache is None:
+            pid_cache = {}
         super(IterationRangesRoot, self).__init__(
             name=name,
             var_list=[],
@@ -454,7 +456,9 @@ class TritonKernel(Kernel):
     overrides = TritonOverrides
     sexpr = texpr
 
-    def __init__(self, *groups, pid_cache={}, reduction_hint=ReductionHint.DEFAULT):
+    def __init__(self, *groups, pid_cache=None, reduction_hint=ReductionHint.DEFAULT):
+        if pid_cache is None:
+            pid_cache = {}
         super(TritonKernel, self).__init__()
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.range_trees = []

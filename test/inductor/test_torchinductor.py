@@ -41,7 +41,7 @@ try:
     assert get_decompositions([torch.ops.aten.trace])
     # Requires functorch
     from torch.inductor.compile_fx import compile_fx_inner
-except (ImportError, ModuleNotFoundError, AssertionError) as e:
+except (ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     raise unittest.SkipTest("requires sympy/functorch")
 
@@ -64,7 +64,7 @@ if torch.cuda.is_available():
     try:
         importlib.import_module("triton")
         HAS_CUDA = True
-    except (ImportError, ModuleNotFoundError):
+    except ImportError:
         pass
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
@@ -141,7 +141,7 @@ def check_model(
     self: TestCase,
     model,
     example_inputs,
-    kwargs={},
+    kwargs=None,
     *,
     atol=None,
     rtol=None,
@@ -152,6 +152,7 @@ def check_model(
     reference_in_float=True,
     assert_equal=True,
 ):
+    kwargs = kwargs or {}
     torch.dynamo.reset()
 
     ref_inputs = example_inputs
@@ -250,7 +251,7 @@ def check_model_cuda(
     self: TestCase,
     model,
     example_inputs,
-    kwargs={},
+    kwargs=None,
     *,
     atol=None,
     rtol=None,
@@ -261,6 +262,7 @@ def check_model_cuda(
     reference_in_float=True,
     assert_equal=True,
 ):
+    kwargs = kwargs or {}
     if hasattr(model, "to"):
         model = model.to("cuda")
 
@@ -483,7 +485,7 @@ class TestIndexingSimplification(unittest.TestCase):
 
 class CommonTemplate:
     @classmethod
-    def install(my_cls, other_cls, suffix):
+    def install(my_cls, other_cls, suffix):  # noqa: B902
         for name, value in my_cls.__dict__.items():
             if name.startswith("test_"):
                 setattr(other_cls, f"{name}_{suffix}", value)

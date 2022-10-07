@@ -357,7 +357,7 @@ class SliceVariable(BaseListVariable):
         elif len(items) == 3:
             start, stop, step = items
         else:
-            assert False
+            raise AssertionError()
 
         # Avoids a .item() call in the tensor slice that would attempt to get a
         # value out fake tensors, and which would determine the output shape of

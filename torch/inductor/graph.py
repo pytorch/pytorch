@@ -269,10 +269,10 @@ class GraphLowering(torch.fx.Interpreter):
         return self.add_tensor_constant(value)
 
     def call_module(self, target, args, kwargs):
-        assert False
+        raise AssertionError()
 
     def call_method(self, target, args, kwargs):
-        assert False
+        raise AssertionError()
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)

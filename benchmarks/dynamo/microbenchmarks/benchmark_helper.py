@@ -1,7 +1,8 @@
 from torch.utils.benchmark import Timer
 
 
-def time_with_torch_timer(fn, args, kwargs={}, iters=100):
+def time_with_torch_timer(fn, args, kwargs=None, iters=100):
+    kwargs = kwargs or {}
     env = {"args": args, "kwargs": kwargs, "fn": fn}
     fn_call = "fn(*args, **kwargs)"
 

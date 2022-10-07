@@ -14,7 +14,10 @@ from torch.dynamo.eval_frame import unsupported
 from torch.dynamo.mutation_guard import GenerationTracker
 from torch.dynamo.testing import same
 
-from . import test_functions
+try:
+    from . import test_functions
+except ImportError:
+    import test_functions
 
 
 class BasicModule(torch.nn.Module):
@@ -485,7 +488,7 @@ class ComplicatedSuperParent(torch.nn.Module):
 
 class SuperChildCallsClassMethod(ComplicatedSuperParent):
     @classmethod
-    def child_func(self, x):
+    def child_func(cls, x):
         x = super().custom_add(x)
         return x
 

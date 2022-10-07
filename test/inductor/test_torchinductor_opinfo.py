@@ -20,8 +20,12 @@ from torch.testing._internal.common_utils import suppress_warnings
 
 import torch.dynamo
 
-from .test_torchinductor import check_model
-from .test_torchinductor import check_model_cuda
+try:
+    from .test_torchinductor import check_model
+    from .test_torchinductor import check_model_cuda
+except ImportError:
+    from test_torchinductor import check_model
+    from test_torchinductor import check_model_cuda
 
 bf16 = torch.bfloat16  # not tested
 f64 = torch.float64

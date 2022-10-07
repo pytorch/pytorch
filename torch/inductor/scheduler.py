@@ -318,7 +318,7 @@ class SchedulerNode(BaseSchedulerNode):
             return super().allocate()
 
         if config.inplace_buffers:
-            assert False, "https://github.com/pytorch/torchdynamo/issues/823"
+            raise AssertionError("https://github.com/pytorch/torchdynamo/issues/823")
             """
             for read in self.read_writes.reads:
                 input_node: BaseSchedulerNode = self.scheduler.name_to_node.get(
@@ -494,7 +494,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         raise NotImplementedError
 
 
-def pick_loop_order(stride_lengths, sizes, priority_idx=[]):
+def pick_loop_order(stride_lengths, sizes, priority_idx=()):
     """
     A heuristic to decide loop iteration orders.  This has not been well
     tuned and may be something we should autotune.
@@ -565,7 +565,7 @@ class Scheduler:
             elif isinstance(node, ir.ExternKernel):
                 self.nodes.append(ExternKernelSchedulerNode(self, node))
             else:
-                assert False, node
+                raise NotImplementedError(node)
         # some new constants could have been created above
         self.available_buffer_names.update(V.graph.constants.keys())
         for node in self.nodes:

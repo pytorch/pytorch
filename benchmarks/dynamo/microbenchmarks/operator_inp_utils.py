@@ -85,7 +85,7 @@ def serialize_sparse_tensor(e):
 
 
 def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
-    assert False, "NYI"
+    raise NotImplementedError()
 
 
 def deserialize_tensor(size, dtype, stride=None):

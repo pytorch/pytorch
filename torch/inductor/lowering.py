@@ -884,7 +884,7 @@ def bernoulli_(x, *args):
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
-    assert False
+    raise AssertionError()
 
 
 @functools.lru_cache(1)
@@ -1734,7 +1734,7 @@ def scatter_(self, dim: int, index, src, *, reduce: str = None):
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
-        assert False, "TODO: multiply not supported"
+        raise NotImplementedError("TODO: multiply not supported")
         reduce = "prod"
     else:
         assert reduce is None
@@ -2569,7 +2569,7 @@ def upsample_nearest2d_backward(
 def avg_pool2d(
     x,
     kernel_size,
-    stride=[],
+    stride=(),
     padding=0,
     ceil_mode=False,
     count_include_pad=True,

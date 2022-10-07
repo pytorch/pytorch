@@ -28,7 +28,7 @@ def has_triton():
         import triton
 
         return triton is not None
-    except (ImportError, ModuleNotFoundError):
+    except ImportError:
         return False
 
 
@@ -40,7 +40,7 @@ def has_torchvision_roi_align():
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
-    except (ImportError, ModuleNotFoundError):
+    except ImportError:
         return False
 
 

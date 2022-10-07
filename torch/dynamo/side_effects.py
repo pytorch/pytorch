@@ -326,7 +326,7 @@ class SideEffects(object):
                         cg(var.mutable_local.source)
                         suffixes.append([create_instruction("STORE_ATTR", name)])
             else:
-                assert False, type(var)
+                raise AssertionError(type(var))
 
         # do all the actual mutations at the very end to handle dependencies
         for suffix in reversed(suffixes):

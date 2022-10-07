@@ -118,7 +118,7 @@ class TorchVariable(VariableTracker):
             # some _C functions have __self__ as a null capsule
             pass
         else:
-            assert False, f"{value} found with __self__ set"
+            raise AssertionError(f"{value} found with __self__ set")
 
     def __repr__(self):
         return f"TorchVariable({self.value})"
@@ -202,7 +202,7 @@ class TorchVariable(VariableTracker):
             elif self.value is torch.is_complex:
                 return ConstantVariable(args[0].dtype.is_complex, **options)
             else:
-                assert False
+                raise AssertionError()
         elif (
             self.value is torch.numel
             and isinstance(args[0], TensorVariable)

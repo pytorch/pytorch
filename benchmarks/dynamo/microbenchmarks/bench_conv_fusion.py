@@ -1,3 +1,4 @@
+# flake8: noqa
 import model
 import torch
 import triton

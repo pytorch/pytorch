@@ -196,7 +196,3 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
         self.assert_single_log_contains(
             logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"
         )
-
-
-if __name__ == "__main__":
-    unittest.main()

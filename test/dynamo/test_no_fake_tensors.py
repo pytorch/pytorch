@@ -1,11 +1,18 @@
 # Owner(s): ["module: dynamo"]
 from torch.dynamo.testing import make_test_cls_with_patches
 
-from . import test_functions
-from . import test_misc
-from . import test_modules
-from . import test_repros
-from . import test_unspec
+try:
+    from . import test_functions
+    from . import test_misc
+    from . import test_modules
+    from . import test_repros
+    from . import test_unspec
+except ImportError:
+    import test_functions
+    import test_misc
+    import test_modules
+    import test_repros
+    import test_unspec
 
 
 def make_no_fake_cls(cls):

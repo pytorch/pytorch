@@ -164,11 +164,7 @@ def has_tensor_in_frame(frame):
         elif is_namedtuple(obj):
             seen_ids[obj_id] = any([has_tensor(getattr(obj, v)) for v in obj._fields])
             return seen_ids[obj_id]
-        elif (
-            not is_allowed(obj)
-            and hasattr(obj, "__dict__")
-            and len(getattr(obj, "__dict__"))
-        ):
+        elif not is_allowed(obj) and hasattr(obj, "__dict__") and len(obj.__dict__):
             seen_ids[obj_id] = any([has_tensor(v) for v in obj.__dict__.values()])
             return seen_ids[obj_id]
         else:

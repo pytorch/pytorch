@@ -1139,7 +1139,7 @@ class SqueezeView(BaseView):
         return new_size, reindex
 
     def __init__(self, data):
-        assert False, "use SqueezeView.create()"
+        raise AssertionError("use SqueezeView.create()")
 
 
 @dataclasses.dataclass
@@ -1271,7 +1271,7 @@ class View(BaseView):
                     size_old = size_old * modulus
                 V.graph.sizevars.guard_equals(size_new, size_old)
             else:
-                assert False
+                raise AssertionError()
 
         while stack_old:
             size_old = stack_old.pop()
@@ -2006,12 +2006,15 @@ class ComputedBuffer(Buffer):
 
     @staticmethod
     def _apply_loop_reordering(
-        index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=[]
+        index_vars, sizes, memory_addrs, reordering_reindex=None, priority_idx=None
     ):
         """
         Shuffle the order of loops around to hopefully improve performance.
         """
         from .scheduler import pick_loop_order
+
+        if priority_idx is None:
+            priority_idx = []
 
         try:
             strides = numpy.array(
@@ -2402,9 +2405,9 @@ class ExternKernelOut(ExternKernel):
             args.append(f"out={self.codegen_reference()}")
         wrapper.writeline(f"{self.kernel}({', '.join(args)})")
 
-    def __init__(self, layout, inputs, constant_args=(), kwargs={}, output_view=None):
+    def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
         super().__init__(
-            None, layout, self.unwrap_storage(inputs), constant_args, kwargs
+            None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.output_view = output_view
         self.name = V.graph.register_buffer(self)
@@ -2612,8 +2615,8 @@ class MatrixMultiply(ExternKernelOut):
 
 
 class MatrixMultiplyAdd(ExternKernelOut):
-    def __init__(self, layout, inputs, constant_args=(), kwargs={}, output_view=None):
-        super().__init__(layout, inputs, constant_args, kwargs, output_view)
+    def __init__(self, layout, inputs, constant_args=(), kwargs=None, output_view=None):
+        super().__init__(layout, inputs, constant_args, kwargs or {}, output_view)
         self.kernel = "aten.addmm.out"
 
     @classmethod

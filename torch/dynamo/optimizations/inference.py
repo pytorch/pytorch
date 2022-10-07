@@ -80,7 +80,7 @@ def record_graph_stats(gm):
         elif node.op in ("placeholder", "output", "get_attr"):
             pass
         else:
-            assert False, node.op
+            raise AssertionError(node.op)
 
 
 def check_requires_grad(gm, example_inputs):

@@ -4,10 +4,13 @@ import torch
 import torch.dynamo.testing
 from torch.dynamo.testing import same
 
-from . import test_global_declaration
+try:
+    from . import test_global_declaration
+except ImportError:
+    import test_global_declaration
 
 
-class Pair(object):
+class Pair(object):  # noqa: B903
     def __init__(self, x, y):
         self.x = x
         self.y = y

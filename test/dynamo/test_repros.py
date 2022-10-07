@@ -43,7 +43,7 @@ def has_detectron2():
         from detectron2.layers.mask_ops import _paste_masks_tensor_shape
 
         return _paste_masks_tensor_shape is not None
-    except (ImportError, ModuleNotFoundError):
+    except ImportError:
         return False
 
 

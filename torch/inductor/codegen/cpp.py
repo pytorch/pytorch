@@ -61,7 +61,7 @@ def reduction_init(reduction_type, dtype):
             if is_float_dtype(dtype)
             else f"std::numeric_limits<{DTYPE_TO_CPP[dtype]}>::max()"
         )
-    assert False, reduction_type
+    raise AssertionError(reduction_type)
 
 
 def reduction_combine(reduction_type, var, next_value):

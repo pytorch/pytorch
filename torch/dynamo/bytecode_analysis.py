@@ -85,7 +85,7 @@ def livevars_analysis(instructions, instruction):
                 elif "STORE" in inst.opname:
                     state.writes.add(inst.argval)
                 else:
-                    assert False, f"unhandled {inst.opname}"
+                    raise NotImplementedError(f"unhandled {inst.opname}")
             if inst.opcode in JUMP_OPCODES:
                 walk(may, indexof[id(inst.target)])
                 state = may
