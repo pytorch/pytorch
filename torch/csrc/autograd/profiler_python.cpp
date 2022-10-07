@@ -209,8 +209,7 @@ struct Config<CallType::PyModuleCall> {
   using key_t = PyModuleSelf;
   using cls_t = PyModuleCls;
   using ephemeral_t = PyFrameObject*;
-  using info_t =
-      std::pair<cls_t, std::vector<std::pair<std::string, TensorMetadata>>>;
+  using info_t = std::pair<cls_t, std::vector<ParameterInfo>>;
   struct cache_t {
     c10::optional<CodeLocation> location_; // nn.Module.forward;
     ska::flat_hash_map<key_t, info_t> modules_and_params_;
@@ -269,6 +268,28 @@ class Callsite {
   key_t value_;
   Config<CallType::PyCall>::key_t caller_;
 };
+
+void check_and_store(
+    const pybind11::handle& name,
+    const pybind11::handle& param_handle,
+    std::vector<ParameterInfo>& storeroom) {
+  auto param_ptr = param_handle.ptr();
+  if (py::isinstance<py::str>(name) && THPVariable_CheckExact(param_ptr)) {
+    const auto& param = THPVariable_Unpack(param_ptr);
+    auto grad_ptr = py::getattr(param_handle, "grad", py::none()).ptr();
+    c10::optional<TensorMetadata> grad_metadata;
+
+    if (THPVariable_CheckExact(grad_ptr)) {
+      grad_metadata = c10::optional<TensorMetadata>(
+          TensorMetadata(THPVariable_Unpack(grad_ptr)));
+    } else {
+      grad_metadata = c10::nullopt;
+    }
+
+    storeroom.push_back(
+        {name.cast<std::string>(), TensorMetadata(param), grad_metadata});
+  }
+}
 
 void check_and_store(
     const pybind11::handle& name,
@@ -381,7 +402,7 @@ void ValueCache::store<CallType::PyModuleCall>(
     auto cls = set_class<CallType::PyModuleCall>(this, cache, key, frame);
 
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
-    std::vector<std::pair<std::string, TensorMetadata>> params_;
+    std::vector<ParameterInfo> params_;
     for (auto& it : params) {
       check_and_store(it.first, it.second, params_);
     }
