@@ -1,17 +1,18 @@
 # flake8: noqa: F403
+# type: ignore[no-redef]
 
-from .fake_quantize import *  # noqa: F403
-from .fuse_modules import fuse_modules  # noqa: F403
-from .fuse_modules import fuse_modules_qat  # noqa: F403
-from .fuser_method_mappings import *  # noqa: F403
-from .observer import *  # noqa: F403
-from .qconfig import *  # noqa: F403
-from .qconfig_mapping import *  # noqa: F403
-from .quant_type import *  # noqa: F403
-from .quantization_mappings import *  # noqa: F403
-from .quantize import *  # noqa: F403
-from .quantize_jit import *  # noqa: F403
-from .stubs import *  # noqa: F403
+from .fake_quantize import *
+from .fuse_modules import fuse_modules
+from .fuse_modules import fuse_modules_qat
+from .fuser_method_mappings import *
+from .observer import *
+from .qconfig import *
+from .qconfig_mapping import *
+from .quant_type import *
+from .quantization_mappings import *
+from .quantize import *
+from .quantize_jit import *
+from .stubs import *
 
 def default_eval_fn(model, calib_data):
     r"""
