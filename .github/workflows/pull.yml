@@ -279,11 +279,11 @@ jobs:
       docker-image: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-py3_8-clang9-xla-build.outputs.test-matrix }}
 
-  win-vs2019-cpu-py3-build:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-build:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
       test-matrix: |

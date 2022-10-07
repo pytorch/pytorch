@@ -134,11 +134,11 @@ jobs:
       test-matrix: ${{ needs.macos-12-py3-arm64-build.outputs.test-matrix }}
       arch: arm64
 
-  win-vs2019-cpu-py3-build:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-build:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
       test-matrix: |
@@ -148,20 +148,20 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "windows.4xlarge.nonephemeral" },
         ]}
 
-  win-vs2019-cpu-py3-test:
-    name: win-vs2019-cpu-py3
+  win-vs2022-cpu-py3-test:
+    name: win-vs2022-cpu-py3
     uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cpu-py3-build
+    needs: win-vs2022-cpu-py3-build
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      test-matrix: ${{ needs.win-vs2019-cpu-py3-build.outputs.test-matrix }}
+      test-matrix: ${{ needs.win-vs2022-cpu-py3-build.outputs.test-matrix }}
 
-  win-vs2019-cuda11_8-py3-build:
-    name: win-vs2019-cuda11.8-py3
+  win-vs2022-cuda11_8-py3-build:
+    name: win-vs2022-cuda11.8-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cuda11.8-py3
+      build-environment: win-vs2022-cuda11.8-py3
       cuda-version: "11.8"
       sync-tag: win-cuda-build
       test-matrix: |
