@@ -228,8 +228,7 @@ class TestFXGraphPasses(JitTestCase):
 
         print(traced.graph)
         print(partitions)
-
-        fused_graph = fuse_by_partitions(traced, partitions)
+        fused_graph = partitioner.fuse_partitions(partitions)
 
     @parametrize("fn, expected_partition", [
         # horizontal fusion without a common downstream node, not supported yet
