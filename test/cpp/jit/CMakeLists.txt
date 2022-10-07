@@ -115,8 +115,10 @@ add_executable(test_jit
   ${JIT_TEST_SRCS}
 )
 
-target_compile_options(test_jit PRIVATE "-fsanitize=undefined")
-target_link_libraries(test_jit PRIVATE "-fsanitize=undefined")
+if (USE_ASAN)
+  target_compile_options(test_jit PRIVATE "-fsanitize=undefined")
+  target_link_libraries(test_jit PRIVATE "-fsanitize=undefined")
+endif()
 
 target_link_libraries(
   test_jit PRIVATE flatbuffers)
