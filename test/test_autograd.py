@@ -9052,19 +9052,38 @@ class TestMultithreadAutograd(TestCase):
         # be accumulate to the same place and should be the same
         self._run_py_multithread_fn(train_fn_grad, (x,))
 
-    def test_multithread_saved_tensors_hooks(self):
-        def pack(x):
-            warnings.warn("pack")
-            return x
+    def test_multi_grad_hooks(self):
+        # Multihooks should behave independently per execution of backward
+        # Test that the hook fired the number of times we ran backward
+        # even if those executions occur concurrently on different threads
+        t1 = torch.rand(2, requires_grad=True)
+        t2 = torch.rand(2, requires_grad=True)
+        t3 = torch.rand(2, requires_grad=True)
+        t4 = torch.rand(2, requires_grad=True)
 
-        def registers_hooks_for_each_thread():
-            with torch.autograd.graph.saved_tensors_hooks(pack, lambda x: x):
-                x = torch.ones(5, 5, requires_grad=True)
-                with warnings.catch_warnings(record=True) as w:
-                    y = x * x
-                    # should raise two warnings from x being saved twice
-                    self.assertEqual(len(w), 2)
-            y.sum().backward()
+        res = None
+        count = [0]
+
+        def hook(grads):
+            nonlocal res
+            count[0] += 1
+            grad_is_none = [g is not None for g in grads]
+            if res is None:
+                res = grad_is_none
+            else:
+                self.assertEqual(res, grad_is_none)
+
+        torch.autograd.graph.register_multi_grad_hook((t1, t2, t3, t4), hook)
+
+        out = (t2 * t3).sum()
+
+        def backward_retain_graph(out, t2, t3):
+            out.backward(inputs=(t2, t3), retain_graph=True)
+
+        self._run_py_multithread_fn(backward_retain_graph, (out, t2, t3), num_threads=5)
+
+        self.assertEqual(count[0], 5)
+        self.assertEqual(res, [False, True, True, False])
 
     def test_dataparallel_saved_tensors_hooks(self):
         def pack(x):
