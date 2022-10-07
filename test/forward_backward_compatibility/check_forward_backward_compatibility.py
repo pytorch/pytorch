@@ -58,6 +58,8 @@ ALLOW_LIST = [
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
     ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
     ("aten::select_backward", datetime.date(9999, 1, 1)),
+    ("aten::lstsq", datetime.date(9999, 1, 1)),
+    ("aten::lstsq.X", datetime.date(9999, 1, 1)),
     ("aten::slice_backward", datetime.date(9999, 1, 1)),
     ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
@@ -65,6 +67,8 @@ ALLOW_LIST = [
     ("aten::eig.e", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
+    ("aten::matrix_rank", datetime.date(9999, 1, 1)),
+    ("aten::matrix_rank.tol", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
     ("aten::linalg_solve", datetime.date(2022, 8, 31)),
     ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
@@ -89,6 +93,8 @@ ALLOW_LIST = [
     ("aten::_linalg_inv_out_helper.out", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper_", datetime.date(2022, 10, 1)),
     ("aten::_linalg_inv_out_helper", datetime.date(2022, 10, 1)),
+    ("aten::col2im_backward", datetime.date(2022, 12, 1)),
+    ("aten::im2col_backward", datetime.date(2022, 12, 1)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
@@ -275,10 +281,16 @@ ALLOW_LIST = [
     ("aten::vsplit.int", datetime.date(2022, 9, 1)),
     ("c10d::allreduce_", datetime.date(2022, 10, 1)),
     ("aten::sym_numel", datetime.date(2022, 10, 1)),
+    ("aten::_flash_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
+    ("aten::_scaled_dot_product_attention", datetime.date(2022, 11, 1)),
     # Distributed c10d ops are all going to be updated
     ("c10d::.*", datetime.date(2022, 10, 31)),
     ("c10d::allgather_", datetime.date(2022, 10, 1)),
     ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
+    ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
+    ("aten::nested_tensor", datetime.date(2022, 10, 15)),
+    ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
+
 ]
 
 ALLOW_LIST_COMPILED = [

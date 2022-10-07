@@ -69,7 +69,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
     # so we have to modify the weight observer to default_weight_observer or another
     # per tensor supported observer.
     # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
+    if backend in ("fbgemm", "x86"):
         qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight)
     else:
         qconfig_transpose = qconfig
@@ -120,25 +120,25 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
 
     return qconfig_mapping
 
-def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
+def get_default_qconfig_mapping(backend="x86", version=0) -> QConfigMapping:
     """
     Return the default QConfigMapping for post training quantization.
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86" (default), "fbgemm", "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     # TODO: add assert for backend choices
     return _get_default_qconfig_mapping(False, backend, version)
 
-def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMapping:
+def get_default_qat_qconfig_mapping(backend="x86", version=1) -> QConfigMapping:
     """
     Return the default QConfigMapping for quantization aware training.
 
     Args:
       * ``backend`` : the quantization backend for the default qconfig mapping, should be
-         one of ["fbgemm", "qnnpack"]
+         one of ["x86" (default), "fbgemm", "qnnpack", "onednn"]
       * ``version`` : the version for the default qconfig mapping
     """
     return _get_default_qconfig_mapping(True, backend, version)
@@ -151,9 +151,13 @@ class QConfigMapping:
     The user can specify QConfigs using the following methods (in increasing match priority):
 
         ``set_global`` : sets the global (default) QConfig
+
         ``set_object_type`` : sets the QConfig for a given module type, function, or method name
+
         ``set_module_name_regex`` : sets the QConfig for modules matching the given regex string
+
         ``set_module_name`` : sets the QConfig for modules matching the given module name
+
         ``set_module_name_object_type_order`` : sets the QConfig for modules matching a combination
         of the given module name, object type, and the index at which the module appears
 

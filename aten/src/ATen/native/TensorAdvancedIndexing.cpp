@@ -416,6 +416,7 @@ DEFINE_DISPATCH(put_stub);
 DEFINE_DISPATCH(take_stub);
 DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_with_sort_stub);
+REGISTER_NO_CPU_DISPATCH(index_put_with_sort_quantized_stub);
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
 DEFINE_DISPATCH(masked_scatter_stub);
@@ -1364,7 +1365,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  auto result = grad.new_zeros(self.sizes());
+  auto result = grad.new_zeros_symint(self.sym_sizes());
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if index tensor is a Tensor Subclass.
   if (isTensorSubclassLike(index)) {
