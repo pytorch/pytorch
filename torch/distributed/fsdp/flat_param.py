@@ -847,6 +847,37 @@ class FlatParamHandle:
         self._check_low_precision_shard()
         _free_storage(self.flat_param._mp_shard)  # type: ignore[attr-defined]
 
+    @torch.no_grad()
+    def unshard_grad(self):
+        if not self.uses_sharded_strategy:
+            self._use_unsharded_grad_views()
+            return
+        flat_param = self.flat_param
+        self._check_unsharded(flat_param)
+        padded_unsharded_grad = torch.empty(
+            flat_param._padded_unsharded_size,  # type: ignore[attr-defined]
+            device=self.device,
+        )
+        if flat_param.grad is None:
+            flat_param._saved_grad_shard = None  # type: ignore[attr-defined]
+            sharded_grad = torch.zeros_like(flat_param)  # type: ignore[attr-defined]
+        else:
+            self._check_sharded(flat_param.grad)
+            flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
+            sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+        dist._all_gather_base(padded_unsharded_grad, sharded_grad, self.process_group)
+        unsharded_size = self.flat_param._unpadded_unsharded_size
+        flat_param.grad = padded_unsharded_grad[:unsharded_size.numel()].view(unsharded_size)
+        self._use_unsharded_grad_views()
+
+    def reshard_grad(self):
+        if self._use_orig_params:
+            self._use_sharded_grad_views()
+        if not self.uses_sharded_strategy:
+            return
+        self.flat_param.grad = self.flat_param._saved_grad_shard  # type: ignore[attr-defined]
+        delattr(self.flat_param, "_saved_grad_shard")
+
     def prepare_gradient_for_backward(self):
         """
         Prepares the gradient for the backward computation by saving and
@@ -1096,7 +1127,7 @@ class FlatParamHandle:
                 be used during forward/backward computation and when hiding the
                 original parameters from :meth:`nn.Module.named_parameters`.
         """
-        self._check_unsharded()
+        self._check_unsharded(self.flat_param)
         views = self._get_unflat_views(self.flat_param)
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
@@ -1141,6 +1172,41 @@ class FlatParamHandle:
                 module.register_parameter(param_name, prim_param)
             else:
                 setattr(module, param_name, prim_param)
+
+    def _use_unsharded_grad_views(self) -> None:
+        """
+        Unflattens the unsharded flattened parameter's gradient by setting the
+        original module parameter variables' gradients to be views into it.
+        """
+        # Expects the gradient to be in `flat_param.grad`
+        if self.flat_param.grad is None:
+            return
+        self._check_unsharded(self.flat_param.grad)
+        views = self._get_unflat_views(self.flat_param, self.flat_param.grad)
+        for i, (view, (param_name, module, _)) in enumerate(
+            zip(views, self.flat_param._param_infos)
+        ):
+            p_assert(
+                hasattr(module, param_name),
+                f"{self.flat_param._prefixed_param_names[i]} is missing",
+            )
+            param = getattr(module, param_name)
+            param.grad = view
+        for i, (
+            param_name,
+            module,
+            module_name,
+            prim_param_name,
+            prim_module,
+            _,
+        ) in enumerate(self.flat_param._shared_param_infos):
+            p_assert(
+                hasattr(module, param_name),
+                f"{module_name + '.' + param_name if module_name else param_name} is missing",
+            )  # did not save prefixed name
+            param = getattr(module, param_name)
+            prim_param = getattr(prim_module, prim_param_name)
+            param.grad = prim_param.grad
 
     @contextlib.contextmanager
     def unflatten_as_params(self) -> Generator:
@@ -1226,16 +1292,7 @@ class FlatParamHandle:
         """
         flat_param = self.flat_param
         self._check_sharded(flat_param)
-        # Priority: `_cpu_grad` > `_saved_grad_shard` > `grad`
-        # - CPU offloading: `_cpu_grad`
-        # - No CPU offloading + sharded strategies: `_saved_grad_shard`
-        # - No CPU offloading + `NO_SHARD`: `grad`
-        if hasattr(flat_param, "_cpu_grad"):
-            grad = flat_param._cpu_grad  # type: ignore[attr-defined]
-        elif hasattr(flat_param, "_saved_grad_shard"):
-            grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
-        else:
-            grad = flat_param.grad
+        grad = self.sharded_grad
         if grad is None:
             return  # no-op
         self._check_sharded(grad)
@@ -1477,6 +1534,26 @@ class FlatParamHandle:
         ):
             yield (param_name, module_name)
 
+    @property
+    def sharded_grad(self) -> Optional[Tensor]:
+        """Returns the handle's sharded gradient."""
+        flat_param = self.flat_param
+        # Priority for non-`None`: `_cpu_grad` > `_saved_grad_shard` > `grad`
+        # - CPU offloading: `_cpu_grad`
+        # - No CPU offloading + sharded strategies: `_saved_grad_shard`
+        # - No CPU offloading + `NO_SHARD`: `grad`
+        if hasattr(flat_param, "_cpu_grad"):
+            grad = flat_param._cpu_grad  # type: ignore[attr-defined]
+        elif hasattr(flat_param, "_saved_grad_shard"):
+            grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+        else:
+            p_assert(
+                flat_param.grad is None or not self.uses_sharded_strategy,
+                "Sharded strategies should use `_cpu_grad` or `_saved_grad_shard`",
+            )
+            grad = flat_param.grad
+        return grad
+
     #######################
     # CHECKS & INVARIANTS #
     #######################
@@ -1523,13 +1600,13 @@ class FlatParamHandle:
             f"Expects the low precision shard to be on {self.device} but got {device}",
         )
 
-    def _check_unsharded(self):
-        msg_prefix = "Expects the flattened parameter to be unsharded "
-        p_assert(self.flat_param is not None, msg_prefix + "but got `None`")
+    def _check_unsharded(self, tensor: Tensor):
+        msg_prefix = "Expects tensor to be unsharded "
+        p_assert(tensor is not None, msg_prefix + "but got `None`")
         unsharded_size = self.flat_param._unpadded_unsharded_size
         p_assert(
-            self.flat_param.size() == unsharded_size,
-            msg_prefix + f"with size {unsharded_size} but got {self.flat_param.size()}",
+            tensor.size() == unsharded_size,
+            msg_prefix + f"with size {unsharded_size} but got {tensor.size()}",
         )
 
     def _check_sharded(self, tensor: Tensor):
