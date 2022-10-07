@@ -144,8 +144,8 @@ jobs:
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
-          VS_VERSION: "16.8.6"
-          VC_YEAR: "2019"
+          VS_VERSION: "17.4.1"
+          VC_YEAR: "2022"
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}

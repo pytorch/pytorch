@@ -285,7 +285,7 @@ jobs:
     name: win-vs2019-cpu-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cpu-py3
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       sync-tag: win-cpu-build
       test-matrix: |
