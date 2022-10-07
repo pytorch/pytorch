@@ -5,14 +5,14 @@
 #include <torch/csrc/dynamo/guards.h>
 
 static struct PyModuleDef _module =
-    {PyModuleDef_HEAD_INIT, "torch._C.dynamo", "", -1, NULL};
+    {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, NULL};
 
 namespace torch {
 namespace dynamo {
 
 void initDynamoBindings(PyObject* torch) {
   PyObject* dynamo = PyModule_Create(&_module);
-  if (dynamo == NULL || PyModule_AddObject(torch, "dynamo", dynamo) != 0) {
+  if (dynamo == NULL || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
     throw python_error();
   }
 

@@ -553,7 +553,7 @@ static PyMethodDef _methods[] = {
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
-    "torch._C.dynamo.eval_frame",
+    "torch._C._dynamo.eval_frame",
     "Module containing hooks to override eval_frame",
     -1,
     _methods};

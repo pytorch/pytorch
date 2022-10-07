@@ -340,7 +340,7 @@ static PyMethodDef _methods[] = {
 
 static struct PyModuleDef _module = {
     PyModuleDef_HEAD_INIT,
-    "torch._C.dynamo.guards",
+    "torch._C._dynamo.guards",
     "Module containing checks on tensors",
     -1,
     _methods};
