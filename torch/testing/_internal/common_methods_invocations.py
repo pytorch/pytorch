@@ -8606,7 +8606,9 @@ op_db: List[OpInfo] = [
                # NVIDIA only assures that bfloat16 is supported by bmm if SM >= 5.3
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
-                            "TestCommon", "test_out")
+                            "TestCommon", "test_out"),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                            "TestCommon", "test_compare_cpu"),
            ),
            sample_inputs_func=sample_inputs_bmm),
     OpInfo('mv',
@@ -11076,6 +11078,10 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
+               ),
+               DecorateInfo(
+                   toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
+                   'TestCommon', 'test_compare_cpu',
                ),
            ),
            skips=(

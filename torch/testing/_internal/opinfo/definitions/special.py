@@ -226,7 +226,7 @@ op_db: List[OpInfo] = [
         supports_one_python_scalar=True,
         skips=(
             # Greatest absolute difference: nan
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
     # TODO: FIXME
@@ -385,7 +385,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -397,7 +401,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -438,12 +446,18 @@ op_db: List[OpInfo] = [
         "special.hermite_polynomial_h",
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
+        ),
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: inf
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
-
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -455,7 +469,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -467,7 +485,11 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -484,7 +506,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -585,7 +611,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -602,7 +632,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -619,7 +653,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -636,7 +674,11 @@ op_db: List[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
-            DecorateInfo(unittest.skip("testing takes an unreasonably long time, #79528"), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip("testing takes an unreasonably long time, #79528"),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -708,7 +750,7 @@ python_ref_db: List[OpInfo] = [
         op_db=op_db,
         skips=(
             # Greatest absolute difference: nan at index
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
         ),
     ),
 ]
