@@ -432,6 +432,7 @@ class TestAOTAutograd(AOTTestCase):
 
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
+    @skipIfNoSympy
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -556,6 +557,7 @@ class TestPartitioning(AOTTestCase):
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @skipIfNoSympy
     def test_min_cut_partitioner_save_shape(self):
 
         def f(x):
@@ -580,8 +582,9 @@ class TestPartitioning(AOTTestCase):
         ]
 
         def f(a, b, c):
-            # ensure we still do the right thing (save individual size vars) when sizes
-            # exist as tuples first.  (TODO: they don't actually exist as tuples in the trace, even here.)
+            # tried to test what happens if we save a size tuple in the graph;
+            # turns out we never will due to how we trace, but this is probably
+            # still a good test case for various size manipulations
             sb = torch.ops.aten.sym_size(b)
             sc = c.size()
             x = sb[0] + sc[0]
@@ -596,6 +599,7 @@ class TestPartitioning(AOTTestCase):
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    @skipIfNoSympy
     def test_min_cut_partitioner_output_tensor_shape_tensor(self):
 
         inp = [
