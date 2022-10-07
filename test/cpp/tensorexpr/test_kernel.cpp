@@ -30,6 +30,29 @@ class Kernel : public ::testing::Test {
   }
 };
 
+TEST_F(Kernel, ParallelExternalCallBuf) {
+  const auto graph_string = R"IR(
+    graph(%0 : Float(1000, 5000, strides=[5000, 1], device=cpu),
+          %1 : Float(1000, 5000, strides=[5000, 1], device=cpu),
+          %2 : Float(5000, 1000, strides=[5000, 1], device=cpu)):
+      %3 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::mul(%0, %1)
+      %4 : Float(1000, 5000, strides=[5000, 1], device=cpu) = aten::matmul(%3, %2)
+      return (%4))IR";
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, &*graph);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int64_t i = 0ll; i < 5000ll; i++)  /* parallel */{)IR";
+
+#ifdef TORCH_ENABLE_LLVM
+  TensorExprKernel k(graph);
+  StmtPtr s = k.getCodeGenStmt();
+  std::ostringstream oss;
+  oss << *s;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+#endif
+}
+
 TEST_F(Kernel, InliningIntermediates) {
   // here, each mul has only one use, so it should be completely inlined
   {
