@@ -3072,6 +3072,24 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    def test_current_graph_task_id(self):
+        id = [-1]
+
+        def hook(_):
+            id[0] = (torch._C._current_graph_task_id())
+
+        t = torch.tensor(1., requires_grad=True).clone()
+        t.register_hook(hook)
+
+        t.backward(retain_graph=True)
+        base = id[0]
+        t.backward(retain_graph=True)
+        self.assertEqual(id[0] - base, 1)
+        t.backward(retain_graph=True)
+        self.assertEqual(id[0] - base, 2)
+
+        self.assertEqual(torch._C._current_graph_task_id(), -1)
+
     def test_profiler(self):
         x = torch.randn(10, 10)
 
