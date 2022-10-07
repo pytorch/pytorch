@@ -214,9 +214,9 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
         [True, False, True, False]
         >>>
     """
-    count = 0
+    count: Dict[int, int] = dict()
     nb_calls = None
-    buffer = [None] * len(tensors)
+    buffer: Dict[int, List[Optional[torch.Tensor]]] = dict()
 
     def get_grad_fn(t):
         # or grad accumulator
@@ -230,19 +230,22 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     def get_inner_hook(idx):
         def inner_hook(grad: torch.Tensor):
             nonlocal count, nb_calls, buffer
+            id = torch._C._current_graph_task_id()
+            assert id != -1
+            count[id] = count.get(id, 0)
+            buffer[id] = buffer.get(id, [None] * len(tensors))
 
-            if count == 0:
+            if count[id] == 0:
                 # On the first call, compute the actual nb_calls and buffer
-                nb_calls = sum(1 for g in grad_fns if torch._C._will_engine_execute_node(g))  # type: ignore[attr-defined]
+                nb_calls = sum(torch._C._will_engine_execute_node(g) for g in grad_fns)  # type: ignore[attr-defined]
 
-            buffer[idx] = grad
-            count += 1
+            buffer[id][idx] = grad
+            count[id] += 1
 
-            if count == nb_calls:
-                fn(buffer)
-                # Reset hook so we can perform backward multiple times
-                count = 0
-                buffer = [None] * len(tensors)
+            if count[id] == nb_calls:
+                fn(buffer[id])
+                del count[id]
+                del buffer[id]
         return inner_hook
 
     class Handle():
