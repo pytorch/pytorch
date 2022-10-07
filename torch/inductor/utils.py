@@ -35,21 +35,11 @@ def has_triton():
 @functools.lru_cache(None)
 def has_torchvision_roi_align():
     try:
-        from torchvision.ops import roi_align  # noqa
+        from torchvision.ops import roi_align  # noqa: F401
 
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
-    except (ImportError, ModuleNotFoundError):
-        return False
-
-
-@functools.lru_cache(None)
-def has_triton_libdevice():
-    try:
-        from triton.language import libdevice
-
-        return libdevice is not None
     except (ImportError, ModuleNotFoundError):
         return False
 

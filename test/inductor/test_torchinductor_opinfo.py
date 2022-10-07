@@ -1,3 +1,4 @@
+# Owner(s): ["module: inductor"]
 import atexit
 import os
 from collections import defaultdict
@@ -120,15 +121,10 @@ inductor_skips["cuda"] = {
     "broadcast_tensors": {f32},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
-    "cos": {f64},
     "erf": {f64},
-    "exp": {f64},
     "logsumexp": {f64},
     "lu_unpack": {f32, f64},  # RuntimeError: CUDA error
-    "nn.functional.binary_cross_entropy": {f64},
     "nn.functional.binary_cross_entropy_with_logits": {f64},
-    "nn.functional.cross_entropy": {f64},
-    "nn.functional.elu": {f64},
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
     "nn.functional.poisson_nll_loss": {f64},
@@ -137,27 +133,18 @@ inductor_skips["cuda"] = {
     "nn.functional.tanhshrink": {f16, f64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.softmin": {f64},  # segfault
     "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
-    "sigmoid": {f64},
-    "sin": {f64},
     "special.log_ndtr": {f64},
     "special.ndtr": {f64},
-    "tanh": {f64},
-    "masked.log_softmax": {f64},  # segfault
-    "masked.softmax": {f64},  # segfault
-    "masked.softmin": {f64},  # segfault
     "scatter_add": {b8, f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.amax": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.amin": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.mean": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.prod": {f16, f32, f64, i32, i64},  # segfault
     "scatter_reduce.sum": {b8, i64},  # segfault
-    "softmax": {f64},  # segfault
     "softmax.with_dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     "nn.functional.kl_div": {f64},  # segfault
-    "log_softmax": {f64},  # segfault
     "log_softmax.dtype": {b8, f16, f32, f64, i32, i64},  # segfault
     # Jiterator kernel is not expected to work with inductor
     "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
@@ -381,7 +368,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
     "nn.functional.rrelu": {f16, f32, f64},
-    "nn.functional.triplet_margin_loss": {f16},
     "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero": {b8, f16, f32, f64, i32, i64},
     "normal": {f16, f32, f64},

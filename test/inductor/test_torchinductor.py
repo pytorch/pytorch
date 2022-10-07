@@ -1,4 +1,5 @@
 #!/usr/bin/env pytest
+# Owner(s): ["module: inductor"]
 import contextlib
 import dataclasses
 import functools
@@ -54,7 +55,7 @@ try:
 
     CppCodeCache.load("")
     HAS_CPU = True
-except (CalledProcessError, OSError):
+except (CalledProcessError, OSError, torch.inductor.exc.InvalidCxxCompiler):
     pass
 
 aten = torch.ops.aten

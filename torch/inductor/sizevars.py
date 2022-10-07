@@ -419,7 +419,7 @@ class SizeVarAllocator(object):
 
     def stride_hints(self, index: Expr, vars: List[sympy.Symbol]) -> List[int]:
         for v in index.free_symbols:
-            if v.name.startswith("indirect"):  # type: ignore
+            if v.name.startswith("indirect"):
                 index = sympy_subs(index, {v: 0})
         result = []
         for s in self.stride_vars(index, vars):

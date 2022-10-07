@@ -191,7 +191,7 @@ def {{kernel_name}}(
 
 {% if pointwise_code %}
 {{ pointwise_code | indent(4, true) }}
-    {# 
+    {#
     z = tl.load(z_ptrs, mask=mask_z)
     acc += z
     #}

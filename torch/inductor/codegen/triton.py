@@ -16,7 +16,6 @@ from .. import config, ir, scheduler
 from ..ir import ReductionHint
 from ..utils import (
     free_symbol_startswith,
-    has_triton_libdevice,
     instance_descriptor,
     sympy_product,
     sympy_subs,
@@ -114,15 +113,15 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def abs(x):
-        return f"tl.abs({x})"
+        return f"tl.libdevice.abs({x}) if ({x}).dtype is tl.float64 else tl.abs({x})"
 
     @staticmethod
     def exp(x):
-        return f"tl.exp({x})"
+        return f"tl.libdevice.exp({x}) if ({x}).dtype is tl.float64 else tl.exp({x})"
 
     @staticmethod
     def sqrt(x):
-        return f"tl.sqrt({x})"
+        return f"tl.libdevice.sqrt({x}) if ({x}).dtype is tl.float64 else tl.sqrt({x})"
 
     @staticmethod
     def relu(x):
@@ -154,11 +153,11 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def cos(x):
-        return f"tl.cos({x})"
+        return f"tl.libdevice.cos({x}) if ({x}).dtype is tl.float64 else tl.cos({x})"
 
     @staticmethod
     def sin(x):
-        return f"tl.sin({x})"
+        return f"tl.libdevice.sin({x}) if ({x}).dtype is tl.float64 else tl.sin({x})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -199,7 +198,7 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def signbit(x):
         # XX: This is wrong for the value -0.0 in floating point
-        return f"tl.libdevice.signbitf({x}) if {x}.dtype is tl.float32 else {x} < 0"
+        return f"tl.libdevice.signbitf({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
     def fmod(a, b):
@@ -211,40 +210,23 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def log(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.log({x}) if {x}.dtype is tl.float64 else tl.log({x})"
-        else:
-            # workaround https://github.com/openai/triton/issues/543
-            return f"tl.log({x}.to(tl.float32))"
+        return f"tl.libdevice.log({x}) if ({x}).dtype is tl.float64 else tl.log({x})"
 
     @staticmethod
     def isinf(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.isinfd({x}) if {x}.dtype is tl.float64 else tl.libdevice.isinff({x})"
-        else:
-            return f"{x}+1 == {x}"
+        return f"tl.libdevice.isinfd({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isinff({x})"
 
     @staticmethod
     def isnan(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.isnand({x}) if {x}.dtype is tl.float64 else tl.libdevice.isnanf({x})"
-        else:
-            return f"{x} != {x}"
+        return f"tl.libdevice.isnand({x}) if ({x}).dtype is tl.float64 else tl.libdevice.isnanf({x})"
 
     @staticmethod
     def round(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.nearbyint({x})"
-        else:
-            return f"tl.where({x}<0, {x}-0.5, {x}+0.5).to(tl.int32).to(tl.float32)"
+        return f"tl.libdevice.nearbyint({x})"
 
     @staticmethod
     def floor(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.floor({x})"
-        else:
-            tmp = ops.trunc(x)
-            return f"tl.where({tmp}>{x}, {tmp}-1, {tmp})"
+        return f"tl.libdevice.floor({x})"
 
     @staticmethod
     def floordiv(a, b):
@@ -257,10 +239,7 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def trunc(x):
-        if has_triton_libdevice():
-            return f"tl.libdevice.trunc({x})"
-        else:
-            return f"{x}.to(tl.int32).to(tl.float32)"
+        return f"tl.libdevice.trunc({x})"
 
     @staticmethod
     def truncdiv(a, b):
