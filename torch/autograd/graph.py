@@ -231,7 +231,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
         def inner_hook(grad: torch.Tensor):
             nonlocal count, nb_calls, buffer
             id = torch._C._current_graph_task_id()
-            assert id != -1
+            assert id != -1, "expected this hook to be called inside a backward call"
             count[id] = count.get(id, 0)
             buffer[id] = buffer.get(id, [None] * len(tensors))
 
