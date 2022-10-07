@@ -173,6 +173,10 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
         (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]]),
 
+        # 1 horizontal fusion with common producer
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
+
         # 2 branches cases
         (TestPartitionFunctions.forward5, [["add_1", "add"]]),
         (TestPartitionFunctions.forward6, [["add"]]),
@@ -203,24 +207,6 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
-
-
-    @parametrize("fn, expected_partition", [
-        # horizontal fusion without a common downstream node, not supported yet
-        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
-        # horizontal fusion with a common downstream node, not supported yet
-        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
-    ])
-    def test_partitioner_xfail(self, fn, expected_partition):
-        traced = symbolic_trace(fn)
-
-        supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
-        partitions = partitioner.propose_partitions()
-
-        partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
-        with self.assertRaises(Exception):
-            assert len(partitions_name) == len(expected_partition)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],
