@@ -1744,7 +1744,7 @@ def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
 
-@register_meta(aten.scatter.value)
+@register_meta(aten.scatter.value, register_dispatcher=False)
 def scatter_value(self, dim, index, value):
     scatter_meta_impl(self, dim, index)
     return self.new_empty(self.shape)
