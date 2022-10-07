@@ -60,7 +60,6 @@ class C10_API SymFloatNodeImpl : public c10::intrusive_ptr_target {
     TORCH_CHECK(false, "NYI");
   };
   virtual SymIntNode ceil();
-  virtual SymIntNode floor();
   virtual std::string str() {
     TORCH_CHECK(false, "NYI");
   };
