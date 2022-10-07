@@ -778,7 +778,9 @@ def im2col(
         input_w, kernel_w, dilation_w, padding_w, stride_w, input.device
     )
 
-    padded_input = F.pad(input, (padding_h, padding_h, padding_w, padding_w))
+    # Note that F.pad takes (padding_left, padding_right, padding_top, padding_bottom)
+    # ugh
+    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
 
     blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
     output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
@@ -886,7 +888,7 @@ def col2im(
     )
     idx = (None, None, indices_row, indices_col)
     output = torch.ops.aten.index_put(output, idx, input, accumulate=True)
-    output = F.pad(output, (-padding_h, -padding_h, -padding_w, -padding_w))
+    output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
         output = output.squeeze(0)
@@ -904,7 +906,7 @@ def unfold_backward(
     grad: Tensor, input_size: List[int], dimension: int, size: int, step: int
 ) -> Tensor:
     if len(input_size) == 0:
-        return grad.squeeze(0)
+        return torch.squeeze_copy(grad, 0)
     dim = utils.canonicalize_dim(len(input_size), dimension)
     idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
     idx = idx.unfold(0, size, step).flatten()
@@ -947,7 +949,8 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
         return (input, torch.ones_like(input, dtype=torch.bool))
 
 
-@register_decomposition(aten._softmax.default)
+@register_decomposition(aten._softmax)
+@out_wrapper()
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager softmax returns a contiguous tensor. Ensure that decomp also returns
     # a contiguous tensor.
@@ -967,6 +970,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten._log_softmax)
+@out_wrapper()
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
@@ -987,7 +991,8 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 # Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
-@register_decomposition(aten.addcmul.default)
+@register_decomposition(aten.addcmul)
+@out_wrapper()
 @pw_cast_for_opmath
 def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
     if self.is_floating_point() or self.is_complex():
@@ -1091,7 +1096,8 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
 
 
 # TODO: this doesn't appear to have enough precision in bfloat16
-@register_decomposition(aten.addmm.default)
+@register_decomposition(aten.addmm)
+@out_wrapper()
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
@@ -1774,10 +1780,11 @@ def index_add_(
     alpha: NumberType = 1,
 ):
     dim = utils.canonicalize_dims(x.ndim, dim)
-    utils.check(
-        index.ndim <= 1,
-        lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
-    )
+    # Fails incorrectly for bool tensor
+    # utils.check(
+        # index.ndim <= 1,
+        # lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
+    # )
     if alpha != 1:
         python_type = utils.dtype_to_type(x.dtype)
         utils.check(
@@ -1785,7 +1792,7 @@ def index_add_(
             lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
         )
         tensor = tensor * alpha
-    idx = (slice(None),) * dim + (index,)
+    idx = (None,) * dim + (index,)
     torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
     return x
 
@@ -2172,6 +2179,7 @@ def grid_sampler_2d(
 
 
 @register_decomposition(aten.mv)
+@out_wrapper()
 @pw_cast_for_opmath
 def mv(self, vec):
     utils.check(
@@ -2185,7 +2193,8 @@ def mv(self, vec):
     return (self * vec).sum(dim=1)
 
 
-@register_decomposition(aten.dot.default, disable_meta=True)
+@register_decomposition(aten.dot, disable_meta=True)
+@out_wrapper()
 @pw_cast_for_opmath
 def dot(self, other):
     if self.is_complex():

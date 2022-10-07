@@ -906,7 +906,6 @@ class TestMeta(TestCase):
                     func(*args, **kwargs, out=expected)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyCUDA
     @skipIfCrossRef
     @suppress_warnings
     @ops(op_db)
