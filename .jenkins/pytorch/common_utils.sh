@@ -156,7 +156,7 @@ function setup_torchdeploy_deps(){
 
 function checkout_install_torchdeploy() {
   local commit
-  setup_torchdeploy_deps()
+  setup_torchdeploy_deps
   pushd ..
   git clone https://github.com/pytorch/multipy
   pushd multipy
@@ -170,8 +170,11 @@ function checkout_install_torchdeploy() {
 }
 
 function test_torch_deploy(){
- pushd ../multipy
+ pushd ..
+ pushd multipy
  bash multipy/runtime/build3/test_deploy
+ popd
+ popd
 }
 
 function test_functorch() {
