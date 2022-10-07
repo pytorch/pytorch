@@ -1,3 +1,4 @@
+import torch
 from .linear_relu import LinearReLU
 
 __all__ = [

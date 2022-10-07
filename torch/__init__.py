@@ -873,12 +873,12 @@ from torch import profiler as profiler
 
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
-import torch.nn.intrinsic
 from torch import ao as ao
 # nn.quant* depends on ao -- so should be after those.
 import torch.nn.quantizable
 import torch.nn.quantized
 import torch.nn.qat
+import torch.nn.intrinsic
 
 _C._init_names(list(torch._storage_classes))
 

@@ -324,17 +324,17 @@ quantization aware training.
     update_bn_stats
     freeze_bn_stats
 
-torch.nn.intrinsic.quantized
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.intrinsic.quantized
-.. automodule:: torch.nn.intrinsic.quantized.modules
+torch.ao.nn.intrinsic.quantized
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.intrinsic.quantized
+.. automodule:: torch.ao.nn.intrinsic.quantized.modules
 
 
 This module implements the quantized implementations of fused operations
 like conv + relu. No BatchNorm variants as it's usually folded into convolution
 for inference.
 
-.. currentmodule:: torch.nn.intrinsic.quantized
+.. currentmodule:: torch.ao.nn.intrinsic.quantized
 
 .. autosummary::
     :toctree: generated
@@ -348,15 +348,15 @@ for inference.
     ConvReLU3d
     LinearReLU
 
-torch.nn.intrinsic.quantized.dynamic
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-.. automodule:: torch.nn.intrinsic.quantized.dynamic
-.. automodule:: torch.nn.intrinsic.quantized.dynamic.modules
+torch.ao.nn.intrinsic.quantized.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. automodule:: torch.ao.nn.intrinsic.quantized.dynamic
+.. automodule:: torch.ao.nn.intrinsic.quantized.dynamic.modules
 
 This module implements the quantized dynamic implementations of fused operations
 like linear + relu.
 
-.. currentmodule:: torch.nn.intrinsic.quantized.dynamic
+.. currentmodule:: torch.ao.nn.intrinsic.quantized.dynamic
 
 .. autosummary::
     :toctree: generated
@@ -600,3 +600,7 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 
 .. py:module:: torch.nn.intrinsic.qat
 .. py:module:: torch.nn.intrinsic.qat.modules
+.. py:module:: torch.nn.intrinsic.quantized
+.. py:module:: torch.nn.intrinsic.quantized.modules
+.. py:module:: torch.nn.intrinsic.quantized.dynamic
+.. py:module:: torch.nn.intrinsic.quantized.dynamic.modules
