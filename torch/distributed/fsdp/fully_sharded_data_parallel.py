@@ -730,8 +730,8 @@ class _ExecOrderData:
 class _FreeEventQueue:
     """
     This tracks all pending frees corresponding to inflight all-gathers. The
-    queueing pattern is iterative enqueues followed by a flush, and the current
-    heuristic for the flush is based on the number of inflight all-gathers.
+    queueing pattern is iterative enqueues with a single dequeue per iteration
+    once the limit ``_max_num_inflight_all_gathers`` is reached.
     """
 
     def __init__(self) -> None:
@@ -742,19 +742,11 @@ class _FreeEventQueue:
         """Enqueues a free event."""
         self._queue.append(free_event)
 
-    def flush_if_needed(self) -> List[torch.cuda.Event]:
-        """
-        If the queue should be flushed (based on an internal criteria), then
-        this returns a non-empty :class:`list` of free events. Otherwise, this
-        returns an empty :class:`list`.
-        """
-        events: List[torch.cuda.Event] = []
+    def dequeue_if_needed(self) -> Optional[torch.cuda.Event]:
+        """Dequeues a single event if the limit is reached."""
         if len(self._queue) >= self._max_num_inflight_all_gathers:
-            while self._queue:
-                event = self._dequeue()
-                assert event is not None
-                events.append(event)
-        return events
+            return self._dequeue()
+        return None
 
     def _dequeue(self) -> Optional[torch.cuda.Event]:
         """Dequeues a free event if possible."""
@@ -831,6 +823,15 @@ class FullyShardedDataParallel(nn.Module):
         particular, modules that share parameters must be wrapped as part of the
         same FSDP unit. If enhanced shared parameter support is needed for your
         use case, please ping https://github.com/pytorch/pytorch/issues/77724
+
+    .. note:
+        Attempting to run the forward pass of a submodule that is contained in an
+        FSDP instance is not supported and will result in errors. This is because the
+        submodule's parameters will be sharded, but it itself is not an FSDP instance,
+        so its forward pass will not all-gather the full parameters appropriately.
+        This could potentially happen when attempting to run only the encoder of a
+        encoder-decoder model, and the encoder is not wrapped in its own FSDP instance. To
+        resolve this, please wrap the submodule in its own FSDP unit.
 
     .. note::
         Inputs into FSDP ``forward`` function will be moved to compute device
@@ -1558,10 +1559,9 @@ class FullyShardedDataParallel(nn.Module):
         if not handles:
             return
         if self.limit_all_gathers:
-            events = self._free_event_queue.flush_if_needed()
-            if events:
-                # As a minor optimization, only synchronize the latest event
-                events[-1].synchronize()
+            event = self._free_event_queue.dequeue_if_needed()
+            if event:
+                event.synchronize()
         any_ran_pre_unshard = False
         with torch.cuda.stream(self._streams["pre_all_gather"]):
             for handle in handles:
@@ -3610,7 +3610,10 @@ class FullyShardedDataParallel(nn.Module):
             will only be offloaded right after the eventual sync.
         """
         self._lazy_init()
-        assert self._is_root, "`no_sync()` on inner FSDP instances is not supported"
+        if not self._is_root:
+            raise RuntimeError(
+                "`no_sync()` on inner FSDP instances is not supported. Please call `no_sync()` on root FSDP module."
+            )
         self._assert_state(TrainingState_.IDLE)
         old_flags = []
         for m in self.modules():
@@ -3678,7 +3681,7 @@ class FullyShardedDataParallel(nn.Module):
             dist.all_reduce(total_norm, group=self.process_group)
             total_norm = total_norm ** (1.0 / norm_type)
 
-        if self.cpu_offload:
+        if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
 
         clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)
