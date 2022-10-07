@@ -6,18 +6,6 @@ namespace impl {
 
 static thread_local PythonTorchFunctionTLS pythonTorchFunctionState;
 
-void PythonTorchFunctionTLS::set_mode(std::shared_ptr<c10::SafePyObject> mode) {
-  pythonTorchFunctionState.mode_ = std::move(mode);
-}
-
-const std::shared_ptr<c10::SafePyObject>& PythonTorchFunctionTLS::get_mode() {
-  return pythonTorchFunctionState.mode_;
-}
-
-void PythonTorchFunctionTLS::swap_mode(std::shared_ptr<c10::SafePyObject>& mode) {
-  pythonTorchFunctionState.mode_.swap(mode);
-}
-
 void PythonTorchFunctionTLS::push_onto_stack(std::shared_ptr<SafePyObject> mode) {
   pythonTorchFunctionState.stack_.push_back(std::move(mode));
 }
@@ -55,7 +43,7 @@ const PythonTorchFunctionTLS& PythonTorchFunctionTLS::get_state() {
 }
 
 bool function_mode_enabled() {
-  return static_cast<bool>(PythonTorchFunctionTLS::get_mode());
+  return PythonTorchFunctionTLS::stack_len() > 0;
 }
 
 } // namespace impl

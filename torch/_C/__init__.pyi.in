@@ -944,6 +944,9 @@ class _InferenceMode(object):
 class _DisableFuncTorch:
     def __init__(self) -> None: ...
 
+class StashTorchFunctionStackGuard:
+    def __init__(self) -> None: ...
+
 class _EnableTorchFunction:
     def __init__(self) -> None: ...
 
