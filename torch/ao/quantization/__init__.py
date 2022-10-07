@@ -1,5 +1,4 @@
 # flake8: noqa: F403
-# type: ignore[no-redef]
 
 from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules  # noqa: F403
@@ -9,7 +8,7 @@ from .observer import *  # noqa: F403
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
-from .quantization_mappings import *  # noqa: F403
+from .quantization_mappings import *  # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
