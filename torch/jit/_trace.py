@@ -1009,7 +1009,7 @@ def trace_module(
                 if isinstance(example_inputs, dict):
                     warnings.warn(
                         "Directly using python dict as a `single` value(with unpack_input_dict=False) to "
-                        "example_inputs is deprecated and will be removed in upcoming PyTorch release(2.1)."
+                        "example_inputs is deprecated and will be removed in upcoming PyTorch release(1.16)."
                         "Instead, users should wrap the dict with python tuple first, and then assign to "
                         "example_inputs for the deprecated behavior. In the future, passing a dict to example_inputs"
                         "will represent a pack of keyword parameters which will be unpacked according to the "
