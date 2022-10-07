@@ -1,5 +1,5 @@
 import logging
-from torch.ao.sparsity._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
+from torch.ao.pruning._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
 
 logger: logging.Logger = logging.getLogger(__name__)
 
