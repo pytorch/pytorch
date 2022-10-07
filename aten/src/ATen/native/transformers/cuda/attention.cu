@@ -16,7 +16,6 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 
-#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 
