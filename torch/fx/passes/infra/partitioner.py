@@ -173,22 +173,14 @@ class CapabilityBasedPartitioner:
             if merge_self:
                 assign(node, id)
 
-        print("prior to merge0")
-        print(assignment)
         # visit candidates in reversed topological order
         for node in reversed(candidates):
             getIndependentUserPartitions(node, True)
-
-        print("prior to merge sibling")
-        print(assignment)
 
         # not very efficient, this handles sibling fusion of partitions that share inputs.
         for node in self.graph_module.graph.nodes:
             if node not in assignment:
                 getIndependentUserPartitions(node, False)
-
-        print("after merge sibling")
-        print(assignment)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
@@ -210,9 +202,6 @@ class CapabilityBasedPartitioner:
         for node, id in nodes_reassignment.items():
             assign(node, id)
 
-        print("after reassignment")
-        print(assignment)
-
         # filter out single node partitions
         if not self.allows_single_node_partition:
             logger.debug("Filtering out single node partitions...")
@@ -228,9 +217,6 @@ class CapabilityBasedPartitioner:
                     partitions_to_remove.append(id)
             for id in partitions_to_remove:
                 del partitions_by_id[id]
-
-        print("after single node")
-        print(assignment)
 
         logging.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
