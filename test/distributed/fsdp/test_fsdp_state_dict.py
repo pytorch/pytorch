@@ -234,7 +234,8 @@ class TestFSDPStateDict(FSDPTest):
                 self._compare_models(model, model_new, self.assertEqual)
 
     @skip_if_lt_x_gpu(2)
-    def test_state_dict_rank0_offload_save_load_flow(self):
+    @parametrize("use_orig_params", [False, True])
+    def test_state_dict_rank0_offload_save_load_flow(self, use_orig_params: bool):
         """Tests saving a model checkpoint only on rank 0 and loading it only
         on rank 0 with ``sync_module_states=True`` to emulate the workflow to
         avoid redundant CPU memory usage."""
@@ -242,7 +243,10 @@ class TestFSDPStateDict(FSDPTest):
             transformer_auto_wrap_policy,
             transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer},
         )
-        fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
+        fsdp_kwargs = {
+            "auto_wrap_policy": auto_wrap_policy,
+            "use_orig_params": use_orig_params,
+        }
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -301,20 +305,29 @@ class TestFSDPStateDict(FSDPTest):
     )
     @parametrize("fp16", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
+    @parametrize("use_orig_params", [False, True])
     def test_basic_save_and_load_state_dict(
-        self, state_dict_type, cpu_offload, fp16, state_dict_rank0_and_offload
+        self,
+        state_dict_type: StateDictType,
+        cpu_offload: bool,
+        fp16: bool,
+        state_dict_rank0_and_offload: bool,
+        use_orig_params: bool,
     ):
         """
         Tests that we can save a state_dict and load it into a blank model
         with various configs such as fp16 and cpu offload and parameters
         match as expected.
         """
-        if state_dict_rank0_and_offload and state_dict_type != "state_dict":
-            return
+        if (
+            (state_dict_rank0_and_offload and state_dict_type != "state_dict")
+            or (use_orig_params and state_dict_type not in _UNFLATTENED_STATE_DICT_IMPLS)
+        ):
+            return  # not supported
         for model_call in [
-            partial(self._get_non_fsdp_root_module, cpu_offload=cpu_offload),
-            partial(self._get_simple_nested_model, cpu_offload=cpu_offload),
-            partial(self._get_simple_model, cpu_offload=cpu_offload),
+            partial(self._get_non_fsdp_root_module, cpu_offload=cpu_offload, use_orig_params=use_orig_params),
+            partial(self._get_simple_nested_model, cpu_offload=cpu_offload, use_orig_params=use_orig_params),
+            partial(self._get_simple_model, cpu_offload=cpu_offload, use_orig_params=use_orig_params),
         ]:
             model = model_call()
 

@@ -68,7 +68,7 @@ class TestParityWithDDP(FSDPTest):
     def _get_cuda_init_modes(self, cpu_offload: CPUOffload) -> List[CUDAInitMode]:
         modes = [
             CUDAInitMode.CUDA_AFTER,
-            CUDAInitMode.CUDA_BEFORE
+            CUDAInitMode.CUDA_BEFORE,
         ]
         # Note that CUDAInitMode.CUDA_NEVER works currently only with CPU
         # offload as we explicitly bring the param back to CUDA device. In
@@ -90,6 +90,7 @@ class TestParityWithDDP(FSDPTest):
                 BackwardPrefetch.BACKWARD_POST,
             ],
             "forward_prefetch": [False, True],
+            "use_orig_params": [False, True],
         }
 
     @skip_if_lt_x_gpu(2)

@@ -3,19 +3,20 @@
 import bisect
 import sys
 from enum import Enum, auto
-from typing import Any, Dict, List, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 import torch
 from torch import distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX, apply_activation_checkpointing
+    _CHECKPOINT_PREFIX,
+    apply_activation_checkpointing,
 )
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
     StateDictType,
 )
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -29,7 +30,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
-
 
 STATE_DICT_TYPE = [
     StateDictType.FULL_STATE_DICT, StateDictType.SHARDED_STATE_DICT
@@ -156,33 +156,46 @@ class NestedModel(torch.nn.Module):
         loss.backward()
 
     @staticmethod
-    def wrap(model, group=None, ignore_modules: bool = False) -> torch.nn.Module:
+    def wrap(
+        model: torch.nn.Module,
+        group: Optional[dist.ProcessGroup] = None,
+        ignore_modules: bool = False,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> torch.nn.Module:
+        if fsdp_kwargs is None:
+            fsdp_kwargs = {}
         # Flatten Bias0; then flatten weight and Bias1 together into `block1`
         model.block1.bias_module0 = FSDP(
-            model.block1.bias_module0, process_group=group,
+            model.block1.bias_module0, process_group=group, **fsdp_kwargs,
         )
-        model.block1 = FSDP(model.block1, process_group=group)
+        model.block1 = FSDP(model.block1, process_group=group, **fsdp_kwargs)
         # Flatten Bias0; flatten Bias1; then flatten weight into `block2[1]`
         model.block2[1].bias_module0 = FSDP(
-            model.block2[1].bias_module0, process_group=group,
+            model.block2[1].bias_module0, process_group=group, **fsdp_kwargs,
         )
         model.block2[1].bias_module1 = FSDP(
-            model.block2[1].bias_module1, process_group=group,
+            model.block2[1].bias_module1, process_group=group, **fsdp_kwargs,
         )
-        model.block2[1] = FSDP(model.block2[1], process_group=group)
+        model.block2[1] = FSDP(model.block2[1], process_group=group, **fsdp_kwargs)
         # Flatten weight, Bias, bias into `block2[2]`
         ignored_modules = [model.block2[2].bias_module0] if ignore_modules else None
         model.block2[2] = FSDP(
-            model.block2[2], process_group=group, ignored_modules=ignored_modules,
+            model.block2[2], process_group=group, ignored_modules=ignored_modules, **fsdp_kwargs,
         )
         return model
 
     @staticmethod
-    def wrap_alt(model, group=None) -> torch.nn.Module:
+    def wrap_alt(
+        model: torch.nn.Module,
+        group: Optional[dist.ProcessGroup] = None,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
+    ) -> torch.nn.Module:
+        if fsdp_kwargs is None:
+            fsdp_kwargs = {}
         model.block0.bias_module0 = FSDP(
-            model.block0.bias_module0, process_group=group,
+            model.block0.bias_module0, process_group=group, **fsdp_kwargs,
         )
-        model.block0 = FSDP(model.block0, process_group=group)
+        model.block0 = FSDP(model.block0, process_group=group, **fsdp_kwargs)
         return model
 
     @staticmethod
@@ -264,11 +277,12 @@ class TestFSDPOptimState(FSDPTest):
         optim_class: Type[torch.optim.Optimizer] = torch.optim.Adam,
         use_multiple_param_groups: bool = False,
         use_diff_optim_inputs: bool = False,
+        fsdp_kwargs: Optional[Dict[str, Any]] = None,
     ):
         model = NestedModel().to(device)
         if wrap:
-            model = NestedModel.wrap_alt(model, group) if wrap_alt \
-                else NestedModel.wrap(model, group)
+            model = NestedModel.wrap_alt(model, group, fsdp_kwargs) if wrap_alt \
+                else NestedModel.wrap(model, group, fsdp_kwargs=fsdp_kwargs)
         if not use_multiple_param_groups:
             optim_input = list(model.parameters())
         else:
@@ -1139,10 +1153,9 @@ class TestFSDPOptimState(FSDPTest):
     def test_optim_input_warning(self):
         """Tests that passing the ``optim_input`` argument into optimizer state
         checkpointing APIs issues a warning."""
-        wrapped_model, wrapped_optim, wrapped_optim_input = (
-            self._init_nested_model(wrap=True, use_multiple_param_groups=False)
-        )
-        self._step_model(wrapped_model, wrapped_optim, num_iters=2)
+        def should_check_method(method_name: str):
+            # Check every method since they all accept `optim_input`
+            return True
 
         def get_warning_context():
             warning_regex = "`optim_input` argument is deprecated"
@@ -1150,43 +1163,101 @@ class TestFSDPOptimState(FSDPTest):
                 expected_warning=UserWarning, expected_regex=warning_regex
             )
 
-        # Sharded optim state dict
-        with get_warning_context():
-            fsdp_osd = FSDP.sharded_optim_state_dict(wrapped_model, wrapped_optim, optim_input=wrapped_optim_input)
-        with get_warning_context():
-            FSDP.flatten_sharded_optim_state_dict(fsdp_osd, wrapped_model, optim_input=wrapped_optim_input)
-        # Full optim state dict
-        with get_warning_context():
-            fsdp_osd = FSDP.full_optim_state_dict(
-                wrapped_model,
-                wrapped_optim,
-                optim_input=wrapped_optim_input,
-                rank0_only=False,
+        self._run_on_all_optim_state_apis(should_check_method, get_warning_context, fsdp_kwargs=None)
+
+    @skip_if_lt_x_gpu(2)
+    def test_use_orig_params_error(self):
+        """Tests that the optimizer state checkpointing APIs raise an error
+        when ``use_orig_params=True``."""
+        def should_check_method(method_name: str):
+            # Skip `rekey_optim_state_dict` since that does not depend on
+            # `use_orig_params=True`
+            return method_name != "rekey_optim_state_dict"
+
+        def get_error_context():
+            error_regex = "Optimizer state checkpointing is not supported yet for `use_orig_params=True`"
+            return self.assertRaisesRegex(
+                expected_exception=NotImplementedError, expected_regex=error_regex
             )
-        with get_warning_context():
-            FSDP.shard_full_optim_state_dict(fsdp_osd, wrapped_model, optim_input=wrapped_optim_input)
-        with get_warning_context():
-            FSDP.scatter_full_optim_state_dict(fsdp_osd, wrapped_model, optim_input=wrapped_optim_input)
+
+        fsdp_kwargs = {"use_orig_params": True}
+        self._run_on_all_optim_state_apis(should_check_method, get_error_context, fsdp_kwargs)
+
+    def _run_on_all_optim_state_apis(
+        self,
+        should_check_method_fn: Callable[[str], bool],
+        context_fn: Callable,
+        fsdp_kwargs: Optional[Dict[str, Any]],
+    ):
+        """
+        Runs through all optimizer state checkpointing APIs with a context
+        manager instantiated by ``context_fn``. Certain APIs can be skipped
+        via ``should_check_method_fn``, which gets passed the string name of
+        the method.
+        """
+        wrapped_model, wrapped_optim, wrapped_optim_input = (
+            self._init_nested_model(
+                wrap=True,
+                use_multiple_param_groups=False,
+                fsdp_kwargs=fsdp_kwargs,
+            )
+        )
+        self._step_model(wrapped_model, wrapped_optim, num_iters=2)
+
+        # Sharded optim state dict
+        if should_check_method_fn("sharded_optim_state_dict"):
+            with context_fn():
+                fsdp_osd = FSDP.sharded_optim_state_dict(
+                    wrapped_model, wrapped_optim, optim_input=wrapped_optim_input,
+                )
+        if "fsdp_osd" not in locals():
+            fsdp_osd = {}  # may not be defined due to previous method erroring
+        if should_check_method_fn("flatten_sharded_optim_state_dict"):
+            with context_fn():
+                FSDP.flatten_sharded_optim_state_dict(
+                    fsdp_osd, wrapped_model, optim_input=wrapped_optim_input,
+                )
+        # Full optim state dict
+        if should_check_method_fn("full_optim_state_dict"):
+            with context_fn():
+                fsdp_osd = FSDP.full_optim_state_dict(
+                    wrapped_model,
+                    wrapped_optim,
+                    optim_input=wrapped_optim_input,
+                    rank0_only=False,
+                )
+        if should_check_method_fn("shard_full_optim_state_dict"):
+            with context_fn():
+                FSDP.shard_full_optim_state_dict(
+                    fsdp_osd, wrapped_model, optim_input=wrapped_optim_input,
+                )
+        if should_check_method_fn("scatter_full_optim_state_dict"):
+            with context_fn():
+                FSDP.scatter_full_optim_state_dict(
+                    fsdp_osd, wrapped_model, optim_input=wrapped_optim_input,
+                )
         # Rekey optim state dict
         nonwrapped_model, nonwrapped_optim, nonwrapped_optim_input = (
             self._init_nested_model(wrap=False, use_multiple_param_groups=False)
         )
-        with get_warning_context():
-            rekeyed_osd = FSDP.rekey_optim_state_dict(
-                fsdp_osd,  # from `full_optim_state_dict()`
-                OptimStateKeyType.PARAM_ID,
-                nonwrapped_model,
-                optim_input=nonwrapped_optim_input,
-            )
+        if should_check_method_fn("rekey_optim_state_dict"):
+            with context_fn():
+                rekeyed_osd = FSDP.rekey_optim_state_dict(
+                    fsdp_osd,  # from `full_optim_state_dict()`
+                    OptimStateKeyType.PARAM_ID,
+                    nonwrapped_model,
+                    optim_input=nonwrapped_optim_input,
+                )
         self._step_model(nonwrapped_model, nonwrapped_optim, num_iters=2)
         osd = nonwrapped_optim.state_dict()
-        with get_warning_context():
-            FSDP.rekey_optim_state_dict(
-                osd,
-                OptimStateKeyType.PARAM_NAME,
-                nonwrapped_model,
-                optim_input=nonwrapped_optim_input,
-            )
+        if should_check_method_fn("rekey_optim_state_dict"):
+            with context_fn():
+                FSDP.rekey_optim_state_dict(
+                    osd,
+                    OptimStateKeyType.PARAM_NAME,
+                    nonwrapped_model,
+                    optim_input=nonwrapped_optim_input,
+                )
 
 
 instantiate_parametrized_tests(TestFSDPOptimState)

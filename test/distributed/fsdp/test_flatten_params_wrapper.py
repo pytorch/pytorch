@@ -90,6 +90,7 @@ class TestFlattenParams(TestCase):
             params_to_flatten,
             torch.device("cuda"),
             self._get_default_config(),
+            False,
         )
         flat_num_params = sum(p.numel() for p in flat_module.parameters())
 
@@ -105,6 +106,7 @@ class TestFlattenParams(TestCase):
             params_to_flatten,
             torch.device("cuda"),
             self._get_default_config(),
+            False,
         )
         flat_output = self._get_output(flat_module)
         self.assertEqual(ref_output, flat_output)
@@ -123,6 +125,7 @@ class TestFlattenParams(TestCase):
             params_to_flatten,
             torch.device("cuda"),
             self._get_default_config(),
+            False,
         )
         self.assertEqual(module.flat_param.numel(), num_params_to_flatten)
         self.assertEqual(sum(p.numel() for p in module.parameters()), num_params)
@@ -155,6 +158,7 @@ class TestFlattenParams(TestCase):
             [],
             torch.device("cuda"),
             self._get_default_config(),
+            False,
         )
         self.assertIsNone(module.flat_param)
 
@@ -167,6 +171,7 @@ class TestFlattenParams(TestCase):
             [],
             torch.device("cuda"),
             self._get_default_config(),
+            False,
         )
         self.assertEqual(len(list(module.parameters())), 0)
         self.assertIsNone(module.flat_param)
@@ -202,6 +207,7 @@ class TestFlattenParams(TestCase):
             params_to_flatten,
             torch.device("cuda"),
             self._get_default_config(),
+            False,
         )
         flat_pnorm_after_step = self._get_pnorm_after_step(flat_module)
 
@@ -222,6 +228,7 @@ class TestFlattenParams(TestCase):
             params_to_flatten,
             torch.device("cuda"),
             self._get_default_config(),
+            False,
         )
         flat_param_handle = flat_module.handle
 
