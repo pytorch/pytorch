@@ -55,13 +55,6 @@ def decompose(decomposition_table):
 proxy_slot = object()
 no_default = object()
 
-def is_sym_node(node):
-    assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
-    return "val" in node.meta and (
-        isinstance(node.meta['val'], PySymInt)
-        or isinstance(node.meta['val'], PySymFloat)
-    )
-
 def set_proxy_slot(obj, tracer, proxy):
     d = obj.__dict__.setdefault(proxy_slot, weakref.WeakKeyDictionary())
     assert isinstance(d, weakref.WeakKeyDictionary)

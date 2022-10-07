@@ -38,7 +38,6 @@ from common_utils import (
     skipOps,
 )
 from torch._subclasses.fake_tensor import DynamicOutputShapeException
-from torch.fx.experimental.proxy_tensor import is_sym_node
 
 USE_TORCHVISION = False
 try:
@@ -430,9 +429,9 @@ class TestAOTAutograd(AOTTestCase):
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
 
+    @unittest.expectedFailure  # RuntimeError: Cannot call sizes() on tensor with symbolic sizes/strides
     @patch("functorch.compile.config.use_dynamic_shapes", True)
     @patch("functorch.compile.config.use_fake_tensor", True)
-    @skipIfNoSympy
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -553,103 +552,6 @@ class TestPartitioning(AOTTestCase):
                                              partitioner=default_partition)
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 4))
         self.assertEqual(get_num_ins_outs(bw_graph), (4, 3))
-
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    @skipIfNoSympy
-    def test_min_cut_partitioner_save_shape(self):
-
-        def f(x):
-            s = x.sum(dim=1)
-            return s
-
-        inp = [torch.ones([10, 10], requires_grad=True)]
-        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
-        _, fw_output = get_ins_outs(fw_graph)
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
-        self.assertEqual(str(fw_output[0]), "sum_1")
-        # make sure we don't do the suboptimal thing of saving the bigger primals input to sum,
-        # rather than saving the sizes of the primals input for use in backward expand
-        self.assertEqual(str(fw_output[1]), "sym_size")
-        self.assertEqual(str(fw_output[2]), "sym_size_1")
-
-        inp = [
-            torch.randn(10, requires_grad=True),
-            torch.randn((3, 10), requires_grad=True),
-            torch.randn((2, 10), requires_grad=True),
-        ]
-
-        def f(a, b, c):
-            # tried to test what happens if we save a size tuple in the graph;
-            # turns out we never will due to how we trace, but this is probably
-            # still a good test case for various size manipulations
-            sb = torch.ops.aten.sym_size(b)
-            sc = c.size()
-            x = sb[0] + sc[0]
-            a_sz = (x, a.size(0))
-            return torch.cat([a.expand(a_sz), b, c])
-        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
-        self.assertEqual(get_num_ins_outs(fw_graph), (3, 5))
-        self.assertEqual(get_num_ins_outs(bw_graph), (5, 3))
-        _, outs = get_ins_outs(fw_graph)
-        self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
-
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    @skipIfNoSympy
-    def test_min_cut_partitioner_output_tensor_shape_tensor(self):
-
-        inp = [
-            torch.randn(10, requires_grad=True),
-            torch.randn((3, 10), requires_grad=True),
-            torch.randn((2, 10), requires_grad=True),
-        ]
-
-        def f(a, b, c):
-            # Try to force symints intermixed with outputs in the function's returns
-            sb = b.size()
-            sc = c.size()
-            x = sb[0] + sc[0]
-            a_sz = (x, a.size(0))
-            cat = torch.cat([a.expand(a_sz), b, c])
-            return cat, sb, c
-
-        fw_graph_cell = [None]
-        bw_graph_cell = [None]
-        compiled_outs = aot_function(
-            f,
-            fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
-            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
-            partition_fn=min_cut_rematerialization_partition,
-            decompositions=default_decompositions)(*inp)
-        fw_graph = fw_graph_cell[0]
-        (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
-        bw_graph = bw_graph_cell[0]
-
-        # TODO(whc) 8 outputs from forward
-        # 2 are user-output tensors
-        # 2 more are individual symints from single user-output 'sizes'
-        # 4 are save-for-backward sizes values
-        #   one of these saved symint sizes duplicates a returned user output
-        # what behavior do we want here?
-        self.assertEqual(get_num_ins_outs(fw_graph), (3, 8))
-        self.assertEqual(get_num_ins_outs(bw_graph), (8, 3))
-        _, fw_graph_out_nodes = get_ins_outs(fw_graph)
-        # self.assertTrue(is_tensor_node(outs[0])) # helper doesn't exist
-        self.assertTrue(is_sym_node(fw_graph_out_nodes[1]))
-        self.assertTrue(is_sym_node(fw_graph_out_nodes[2]))
-        # self.assertTrue(is_tensor_node(outs[3]))
-        self.assertTrue(all([is_sym_node(n) for n in fw_graph_out_nodes[4:]]))
-
-        real_outs = f(*inp)
-        self.assertEqual(compiled_outs, real_outs)
-        self.assertTrue(isinstance(real_outs[1], torch.Size))
-
-        # TODO(whc) we should learn to return torch.Sizes
-        self.assertFalse(isinstance(compiled_outs[1], torch.Size))
 
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner(self):

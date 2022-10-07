@@ -1,4 +1,3 @@
-from torch.fx.experimental.proxy_tensor import is_sym_node
 import torch
 import torch.fx as fx
 import operator
@@ -149,21 +148,17 @@ def default_partition(
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
-
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
         # Since we can't save tuple of tensor values, we need to flatten out what we're saving
-        if (
-            'tensor_meta' not in node.meta
-            and node.op == 'call_function'
-            and not is_sym_node(node)
-        ):
-            users = node.users
-            assert all(user.target == operator.getitem for user in users)
-            for user in users:
-                saved_values.append(user)
-        else:
+        # if 'tensor_meta' not in node.meta and node.op == 'call_function':
+        #     users = node.users
+        #     assert all(user.target == operator.getitem for user in users)
+        #     for user in users:
+        #         saved_values.append(user)
+        # else:
+        if 'tensor_meta' in node.meta:
             saved_values.append(node)
     saved_values = list(set(saved_values))
 
@@ -193,14 +188,7 @@ def _size_of(metadata):
         torch.bool: 1,
     }
 
-    def to_size_hint(s):
-        if isinstance(s, torch.SymIntNode):
-            py_s = s.get_pyobj()
-            return py_s.shape_env.size_hint(py_s.expr)
-        assert isinstance(s, int)
-        return s
-
-    numel = _prod(map(to_size_hint, metadata.shape))
+    numel = _prod(metadata.shape)
     dtype = metadata.dtype
 
     if dtype not in sizes:
@@ -380,10 +368,7 @@ def min_cut_rematerialization_partition(
         if ban_recomputation(node) and node in required_fw_nodes:
             nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
 
-        if is_sym_node(node):
-            weight = 1
-        # TODO(whc) try changing this to isTensor(node.meta['val'])?
-        elif 'tensor_meta' not in node.meta:
+        if 'tensor_meta' not in node.meta:
             weight = math.inf
         else:
             weight = get_node_weight(node)
