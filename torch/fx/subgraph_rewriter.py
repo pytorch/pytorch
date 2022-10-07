@@ -8,7 +8,7 @@ import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
 
-__all__ = ['Match', 'replace_pattern']
+__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filter']
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
@@ -63,6 +63,7 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     gm.graph.lint()
 
+
 @compatibility(is_backward_compatible=True)
 def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -> List[Match]:
     """
@@ -75,6 +76,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
         ``gm``: The GraphModule that wraps the Graph to operate on
         ``pattern``: The subgraph to match in ``gm`` for replacement
         ``replacement``: The subgraph to replace ``pattern`` with
+        ``match_filter``: A function that takes in (`InternalMatch`, original_graph, pattern_graph)
 
     Returns:
         List[Match]: A list of ``Match`` objects representing the places
@@ -178,6 +180,36 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
             add_2 = add_1 + max_2
             return add_2
     """
+    return _replace_pattern(gm, pattern, replacement)
+
+
+# Experimental API, not backward compatible
+@compatibility(is_backward_compatible=False)
+def replace_pattern_with_filter(
+    gm: GraphModule,
+    pattern: Callable,
+    replacement: Callable,
+    match_filter: Callable[["InternalMatch", Graph, Graph], bool],  # type: ignore[name-defined]
+) -> List[Match]:
+    """
+    See replace_pattern for documentation. This function is an overload with an additional match_filter argument.
+
+    Args:
+        ``match_filter``: A function that takes in (match: InternalMatch, original_graph: Graph, pattern_graph: Graph)
+            and returns a boolean indicating whether the match satisfies the condition. See matcher_utils.py for
+            definition of InternalMatch.
+    """
+
+    return _replace_pattern(gm, pattern, replacement, match_filter)
+
+
+def _replace_pattern(
+    gm: GraphModule,
+    pattern: Callable,
+    replacement: Callable,
+    match_filter: Optional[Callable[["InternalMatch", Graph, Graph], bool]] = None  # type: ignore[name-defined]
+) -> List[Match]:
+
     from torch.fx.passes.utils.matcher_utils import SubgraphMatcher, InternalMatch
 
     # Get the graphs for `gm`, `pattern`, `replacement`
@@ -188,6 +220,10 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
     matcher = SubgraphMatcher(pattern_graph, match_output=False, match_placeholder=False,
                               remove_overlapping_matches=True)
     _matches: List[InternalMatch] = matcher.match(original_graph)
+
+    # Filter out matches that don't match the filter
+    if match_filter:
+        _matches = [m for m in _matches if match_filter(m, original_graph, pattern_graph)]
 
     replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
 
