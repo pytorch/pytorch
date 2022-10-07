@@ -904,7 +904,7 @@ def unfold_backward(
     grad: Tensor, input_size: List[int], dimension: int, size: int, step: int
 ) -> Tensor:
     if len(input_size) == 0:
-        return grad.squeeze(0)
+        return torch.squeeze_copy(grad, 0)
     dim = utils.canonicalize_dim(len(input_size), dimension)
     idx = torch.arange(input_size[dim], device=grad.device, dtype=torch.int32)
     idx = idx.unfold(0, size, step).flatten()
