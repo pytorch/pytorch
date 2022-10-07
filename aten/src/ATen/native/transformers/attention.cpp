@@ -262,7 +262,7 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto qkv_ = qkv.is_nested()
-    ? c10::MaybeOwned<Tensor>::owned(nested_to_padded_tensor(qkv, 0))
+    ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
     : c10::MaybeOwned<Tensor>::borrowed(qkv);
   auto B = qkv_->size(0);
   auto T = qkv_->size(1);
@@ -683,6 +683,21 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 //     L: Target sequence length
 //     E: Embedding dimension
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
+        const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
+        if (query_.requires_grad() || key.requires_grad() || value.requires_grad()){
+          return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+        }
+        return at::_scaled_dot_product_attention_forward(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+}
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_forward_math(
+        const Tensor& query_, const Tensor& key, const Tensor& value,
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal){
+        return at::_scaled_dot_product_attention_math(query_, key, value, attn_mask_, dropout_p, need_attn_weights, is_causal);
+        }
+
+std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
         const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal) {
     auto attn_mask = attn_mask_;

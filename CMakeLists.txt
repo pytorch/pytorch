@@ -345,9 +345,6 @@ cmake_dependent_option(
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(BUILD_LIBTORCH_CPU_WITH_DEBUG "Enable RelWithDebInfo for libtorch_cpu target only" OFF)
-cmake_dependent_option(
-    USE_DEPLOY "Build embedded torch::deploy interpreter.  See torch/csrc/deploy/README.md for more info." OFF
-    "BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
@@ -725,7 +722,10 @@ set(BUILD_ONEDNN_GRAPH OFF)
 include(cmake/Dependencies.cmake)
 
 # Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
-option(USE_FLASH_ATTENTION "Whether to build the flash_attention kernel for scaled dot product attention" OFF)
+cmake_dependent_option(
+  USE_FLASH_ATTENTION
+  "Whether to build the flash_attention kernel for scaled dot product attention" ON
+  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
 if(USE_FLASH_ATTENTION)
     ADD_DEFINITIONS(-DUSE_FLASH_ATTENTION)
 ENDIF()
@@ -824,21 +824,19 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
   string(APPEND CMAKE_CXX_FLAGS " -Wextra")
   append_cxx_flag_if_supported("-Werror=return-type" CMAKE_CXX_FLAGS)
-  if(NOT USE_CUDNN)
-    # Temporary fix to ignore non virtual dtor error if cudnn is used. A
-    # separate PR to cudnn_frontend is needed to address this later on
-    append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
-  endif()
+  append_cxx_flag_if_supported("-Werror=non-virtual-dtor" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wunused-local-typedefs" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-overflow" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-strict-aliasing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=deprecated-declarations" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-Wvla-extension" CMAKE_CXX_FLAGS)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
@@ -894,6 +892,8 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-c++14-extensions" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
+    append_cxx_flag_if_supported("-Wunused-local-typedef" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
     if(${USE_COLORIZE_OUTPUT})
     endif()
@@ -1135,6 +1135,10 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
 
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
@@ -1173,11 +1177,6 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
-
-# ---[ Torch Deploy
-if(USE_DEPLOY)
-  add_subdirectory(torch/csrc/deploy)
-endif()
 
 if(BUILD_FUNCTORCH)
   add_subdirectory(functorch)
