@@ -1744,6 +1744,10 @@ def meta_scatter_add(self, dim, index, src):
     scatter_meta_impl(self, dim, index, src, "add")
     return self.new_empty(self.shape)
 
+@register_meta(aten.scatter.value)
+def scatter_value(self, dim, index, value):
+    scatter_meta_impl(self, dim, index)
+    return self.new_empty(self.shape)
 
 # hacky: Please remove after math.ceil works with arange
 @register_meta(aten.arange.default)

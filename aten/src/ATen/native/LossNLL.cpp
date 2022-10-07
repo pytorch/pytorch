@@ -585,7 +585,7 @@ Tensor cross_entropy_loss(
     int64_t ignore_index,
     double label_smoothing) {
   Tensor ret;
-  if (self.sizes() == target.sizes()) {
+  if (self.sym_sizes() == target.sym_sizes()) {
     // Assume soft targets when input and target shapes are the same
     TORCH_CHECK(at::isFloatingType(target.scalar_type()),
         "Expected floating point type for target with class probabilities, got ", target.scalar_type());
@@ -642,7 +642,7 @@ Tensor nll_loss_nd(
         false, "Expected 1 or more dimensions (got ", self.dim(), ")");
   }
 
-  if (self.dim() != 1 && self.sizes()[0] != target.sizes()[0]) {
+  if (self.dim() != 1 && self.sym_sizes()[0] != target.sym_sizes()[0]) {
     TORCH_CHECK_VALUE(
         false,
         "Expected input batch_size (",
@@ -661,11 +661,11 @@ Tensor nll_loss_nd(
     ret = at::nll_loss2d(input_, target_, weight, reduction, ignore_index);
   } else {
     // dim == 3 or dim > 4
-    auto n = input_.sizes()[0];
-    auto c = input_.sizes()[1];
+    auto n = input_.size(0);
+    auto c = input_.size(1);
     auto out_size = input_.sizes().slice(2).vec();
     out_size.insert(out_size.begin(), n);
-    if (target_.sizes().slice(1) != input_.sizes().slice(2)) {
+    if (target_.sym_sizes().slice(1) != input_.sym_sizes().slice(2)) {
       TORCH_CHECK(
           false,
           "Expected target size ",
