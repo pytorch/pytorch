@@ -1127,6 +1127,27 @@ class TestOptim(TestCase):
                 [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)],
             )
 
+    def test_empty_grad(self):
+        optimizers = [torch.optim.Adadelta, torch.optim.Adagrad, torch.optim.Adam, torch.optim.AdamW,
+                      torch.optim.Adamax, torch.optim.ASGD, torch.optim.NAdam, torch.optim.RAdam,
+                      torch.optim.RMSprop, torch.optim.Rprop, torch.optim.SGD, torch.optim.SparseAdam]
+
+        for optimizer in optimizers:
+            net = torch.nn.Embedding(5, 1, padding_idx=0, sparse=optimizer is torch.optim.SparseAdam)
+            original_params = (param.detach().clone() for param in net.parameters())
+            # Simulate a batch that only indexes the embedding at padding_idx
+            x = torch.tensor([[0, 0]]).int()
+            y = torch.tensor([[[3.0], [4.0]]])
+            opt = optimizer(net.parameters(), lr=1e-5)
+            torch.nn.MSELoss()(net.forward(x), y).backward()
+
+            opt.step()
+
+            for original_param, param in zip(original_params, net.parameters()):
+                # assert that the parameters have not changed
+                self.assertEqual(original_param, param)
+
+
 
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
