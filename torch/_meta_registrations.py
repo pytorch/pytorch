@@ -106,10 +106,12 @@ def meta_index_select_out(self, dim, index, out):
 
 
 @register_meta([aten.max.default, aten.min.default])
-@out_wrapper()
 def meta_max(self):
     return self.new_empty(())
 
+@register_meta([aten.max.unary_out])
+def meta_max(self, out):
+    return out.copy_(torch.max(self))
 
 @register_meta(aten.angle.default)
 def meta_angle(self):
