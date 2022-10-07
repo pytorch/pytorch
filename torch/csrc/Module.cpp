@@ -753,6 +753,12 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyLong_FromLong(torch::autograd::get_current_graph_task_id());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setDefaultMobileCPUAllocator(
     PyObject* _unused,
     PyObject* noargs) {
@@ -936,6 +942,10 @@ static PyMethodDef TorchMethods[] = {
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,
+     nullptr},
+    {"_current_graph_task_id",
+     THPModule_getCurrentGraphTaskId,
+     METH_NOARGS,
      nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
