@@ -1365,7 +1365,7 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
   if (sparse_grad) {
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
-  auto result = grad.new_zeros(self.sizes());
+  auto result = grad.new_zeros_symint(self.sym_sizes());
   // for composite compliance, use out-of-place variant of
   // `scatter_add` if index tensor is a Tensor Subclass.
   if (isTensorSubclassLike(index)) {
@@ -1956,12 +1956,12 @@ int64_t count_nonzero_impl(TensorIteratorBase& iter, Range range) {
   return num_nonzero;
 }
 
-Tensor count_nonzero_cuda(const Tensor& self, OptionalIntArrayRef dims){
+Tensor count_nonzero_cuda(const Tensor& self, IntArrayRef dims){
   return (self != 0).sum(dims);
 }
 
-Tensor count_nonzero_cpu(const Tensor& self, OptionalIntArrayRef dims){
-  if (dims.has_value() && dims.value().size() > 0) {
+Tensor count_nonzero_cpu(const Tensor& self, IntArrayRef dims){
+  if (dims.size() > 0) {
     return (self != 0).sum(dims);
   }
 
