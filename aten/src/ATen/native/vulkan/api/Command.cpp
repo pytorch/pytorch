@@ -188,11 +188,7 @@ void CommandBuffer::copy_buffer_to_buffer(
   };
 
   vkCmdCopyBuffer(
-      handle_,
-      source.handle(),
-      destination.handle(),
-      1u,
-      &copy_details);
+      handle_, source.handle(), destination.handle(), 1u, &copy_details);
 
   state_ = CommandBuffer::State::RECORDING;
 }

@@ -403,8 +403,8 @@ void record_op(
       api::utils::make_ivec4(overlay_region, /*reverse=*/true),
       api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
       api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*revers=*/true),
-      api::utils::make_ivec2(dilation, /*revers=*/true),
+      api::utils::make_ivec2(padding, /*reverse=*/true),
+      api::utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
@@ -488,8 +488,8 @@ void record_quantized_op(
       api::utils::make_ivec4(overlay_region, /*reverse=*/true),
       api::utils::make_ivec2({kernel_size[3], kernel_size[2]}),
       api::utils::make_ivec2(stride, /*reverse=*/true),
-      api::utils::make_ivec2(padding, /*revers=*/true),
-      api::utils::make_ivec2(dilation, /*revers=*/true),
+      api::utils::make_ivec2(padding, /*reverse=*/true),
+      api::utils::make_ivec2(dilation, /*reverse=*/true),
       {output_min, output_max},
   };
   api::UniformParamsBuffer params(context, block);
