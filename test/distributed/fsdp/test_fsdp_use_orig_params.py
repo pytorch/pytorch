@@ -533,6 +533,9 @@ class TestFSDPUseOrigParamsParamAccess(FSDPTest):
         self,
         sharding_strategy: ShardingStrategy,
     ):
+        # NOTE: This test needs to be changed if the FSDP sharding algorithm
+        # changes. It is still valuable until such a change to sanity check the
+        # `use_orig_params=True` implementation.
         class Model(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -777,15 +780,11 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_writeback_shape_mismatch(self):
-        ddp_model = DDP(
-            TestFSDPUseOrigParamsWriteback.Model().cuda(), device_ids=[self.rank]
-        )
         fsdp_model = FSDP(
             TestFSDPUseOrigParamsWriteback.Model().cuda(), use_orig_params=True
         )
         # Check that writing back with mismatched shape errors
-        ddp = ddp_model.module  # for brevity
-        fsdp = fsdp_model.module
+        fsdp = fsdp_model.module  # for brevity
         assert self.rank in (0, 1), f"Expects world size of 2 but got {self.world_size}"
         with self.assertRaisesRegex(RuntimeError, "Cannot writeback"):
             # Change the gradient to a new one with 1 added to each dimension
