@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 A wrapper over the benchmark infrastructure to generate commonly used commands,
