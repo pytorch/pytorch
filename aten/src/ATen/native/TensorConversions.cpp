@@ -456,6 +456,15 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
   }
+  if (at::sparse_csr::is_sparse_compressed(input_)) {
+    // TODO: implement sparse_compressed_mask
+    switch(input_.layout()) {
+    case kSparseCsr: return grad.sparse_mask(input_.to_sparse()).to_sparse_csr();
+    case kSparseCsc: return grad.sparse_mask(input_.to_sparse()).to_sparse_csc();
+      // BSR and BSC should be handled via implement sparse_compressed_mask
+    default: ; // fall back to unsupported input layout error
+    }
+  }
   if (input_.layout() == c10::kMkldnn) {
     return grad.to_mkldnn(input_.scalar_type());
   }

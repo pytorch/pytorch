@@ -6,7 +6,7 @@ __all__ = [
     "nn",
     "ns",
     "quantization",
-    "sparsity",
+    "pruning",
 ]
 
 def __getattr__(name):
