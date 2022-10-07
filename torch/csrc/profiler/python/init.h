@@ -8,6 +8,7 @@
 namespace pybind11 {
 namespace detail {
 using torch::profiler::impl::StorageImplData;
+using torch::profiler::impl::TensorID;
 using torch::profiler::impl::TensorImplAddress;
 
 template <>
@@ -17,6 +18,9 @@ struct type_caster<StorageImplData>
 template <>
 struct type_caster<TensorImplAddress>
     : public strong_pointer_type_caster<TensorImplAddress> {};
+
+template <>
+struct type_caster<TensorID> : public strong_uint_type_caster<TensorID> {};
 } // namespace detail
 } // namespace pybind11
 
