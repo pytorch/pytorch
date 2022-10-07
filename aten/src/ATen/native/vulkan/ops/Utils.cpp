@@ -127,6 +127,27 @@ void copy_buffer_to_vtensor(
       VK_NULL_HANDLE);
 }
 
+void copy_buffer_to_buffer(
+    api::Context* const context,
+    api::StorageBuffer& src,
+    api::StorageBuffer& dst,
+    VkFence fence_handle) {
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_copy<api::VulkanBuffer, api::VulkanBuffer>(
+      // pipeline barrier
+      pipeline_barrier,
+      // resources
+      src.buffer(),
+      dst.buffer(),
+      // copy details
+      {static_cast<uint32_t>(src.buffer().mem_size()), 0u, 0u},
+      {0u, 0u, 0u},
+      {0u, 0u, 0u},
+      // fence handle
+      fence_handle);
+}
+
 void copy_vtensor_to_buffer(
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer,

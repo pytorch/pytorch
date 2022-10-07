@@ -294,6 +294,18 @@ inline void record_copy(
     const api::utils::uvec3& dst_offset) = delete;
 
 template <>
+inline void record_copy<VulkanBuffer, VulkanBuffer>(
+    CommandBuffer& cmd,
+    const VulkanBuffer& source,
+    const VulkanBuffer& destination,
+    const api::utils::uvec3& copy_range,
+    const api::utils::uvec3& src_offset,
+    const api::utils::uvec3& dst_offset) {
+  cmd.copy_buffer_to_buffer(
+      source, destination, copy_range, src_offset, dst_offset);
+}
+
+template <>
 inline void record_copy<VulkanImage, VulkanImage>(
     CommandBuffer& cmd,
     const VulkanImage& source,
