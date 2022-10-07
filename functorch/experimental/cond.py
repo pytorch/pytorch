@@ -4,7 +4,7 @@ from torch._ops import PyOperator
 from torch.utils._pytree import tree_flatten
 from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule, get_proxy_slot
 import torch.utils._pytree as pytree
-from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode
+from torch.utils._python_dispatch import _get_current_dispatch_mode, _pop_mode_temporarily
 from torch.fx.experimental.proxy_tensor import track_tensor_tree
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
@@ -13,21 +13,7 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 We're going to define a `cond` operation.
 In order to do this, we need implementations for each of the dispatch keys.
 """
-from contextlib import contextmanager
-
 cond = PyOperator('cond')
-
-
-# TODO(voz): Move out somewhere else once other py dispatched ops need it
-@contextmanager
-def suspend_mode(mode):
-    assert(mode is not None), "Cannot suspend None mode"
-    assert(isinstance(mode, TorchDispatchMode)), f"Unexpected mode type {mode.__class__}"
-    torch._C._set_torch_dispatch_mode(None)
-    try:
-        yield
-    finally:
-        torch._C._set_torch_dispatch_mode(mode)
 
 
 def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
@@ -118,7 +104,7 @@ def cond_autograd(pred, true_fn, false_fn, *operands):
 def inner(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is not None), "Mode should always be enabled for python fallback key"
-    with suspend_mode(mode):
+    with _pop_mode_temporarily() as mode:
         res = trace_cond(mode, cond, pred, true_fn, false_fn, operands)
     return res
 
