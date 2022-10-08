@@ -1,14 +1,19 @@
 #pragma once
 
+#include <torch/csrc/distributed/c10d/Store.hpp>
+
 #include <chrono>
 #include <cstdint>
 
+#include <ATen/core/ivalue.h>
 #include <ATen/core/Tensor.h>
+
+#include <c10/util/intrusive_ptr.h>
 
 namespace c10d {
 
 // Base class for supplementary data potentially needed by ReduceOps
-struct _SupplementBase {
+struct TORCH_API _SupplementBase : torch::CustomClassHolder {
   virtual ~_SupplementBase() {}
 };
 
@@ -23,8 +28,7 @@ struct NCCLPreMulSumSupplement : _SupplementBase {
 
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
-// TODO(crcrpar): Make `ReduceOp` compatible with TorchScript Compiler.
-struct ReduceOp {
+struct TORCH_API ReduceOp : torch::CustomClassHolder {
   enum RedOpType : uint8_t {
     SUM = 0,
     AVG = 1,
@@ -45,7 +49,7 @@ struct ReduceOp {
       op_ != PREMUL_SUM, "PREMUL_SUM requires a scale factor tensor or scalar argument");
   }
 
-  ReduceOp(RedOpType op, std::shared_ptr<_SupplementBase> optional_supplement) {
+  ReduceOp(RedOpType op, c10::intrusive_ptr<_SupplementBase> optional_supplement) {
     if (optional_supplement.get()) {
       op_ = op;
     } else {
@@ -87,13 +91,13 @@ struct ReduceOp {
   // Right now, only PREMUL_SUM needs supplementary data, but the same
   // mechanism could extend to support other nontrivial reduce ops with
   // different supplementary payloads.
-  std::shared_ptr<_SupplementBase> supplement_;
+  c10::intrusive_ptr<_SupplementBase> supplement_;
 };
 
 template<typename T> ReduceOp makeNCCLPreMulSum(const T& factor) {
   ReduceOp rop;
   rop.op_ = ReduceOp::PREMUL_SUM;
-  rop.supplement_ = std::make_shared<NCCLPreMulSumSupplement>(factor);
+  rop.supplement_ = c10::make_intrusive<NCCLPreMulSumSupplement>(factor);
   return rop;
 }
 
@@ -145,6 +149,15 @@ struct AllToAllOptions {
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+};
+
+struct DistributedBackendOptions {
+  c10::intrusive_ptr<::c10d::Store> store;
+  int group_rank;
+  int group_size;
+  std::chrono::duration<float> timeout;
+  std::string group_id;
+  std::vector<int64_t> global_ranks_in_group;
 };
 
 } // namespace c10d

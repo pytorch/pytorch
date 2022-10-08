@@ -1,10 +1,11 @@
+#include <c10/core/SymFloat.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymIntNodeImpl.h>
 #include <array>
 
 namespace c10 {
 
-std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
+static std::array<SymIntNode, 2> normalize_symints(SymInt a_, SymInt b_) {
   SymIntNode a, b;
   if (a_.is_symbolic())
     a = a_.toSymIntNodeImpl();
@@ -36,11 +37,35 @@ c10::SymInt SymInt::toSymInt(SymIntNode sin_sp) {
   return c10::SymInt(UNCHECKED, static_cast<int64_t>(rep));
 }
 
+int64_t SymInt::guard_int(const char* file, int64_t line) const {
+  if (!is_symbolic()) {
+    return data_;
+  }
+  SymIntNode a = toSymIntNodeImpl();
+  return a->guard_int(file, line);
+}
+
+SymInt::operator SymFloat() const {
+  if (!is_symbolic()) {
+    return SymFloat(double(data_));
+  }
+  return SymFloat::toSymFloat(toSymIntNodeImpl()->sym_float());
+}
+
 SymInt SymInt::operator+(SymInt sci) const {
-  TORCH_CHECK(
-      !this->is_symbolic() && !sci.is_symbolic(),
-      "Symbolic Add isn't supported yet");
-  return SymInt(data_ + sci.data_);
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return SymInt(data_ + sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->add(res[1]));
+}
+
+SymInt SymInt::operator-(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return SymInt(data_ - sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->sub(res[1]));
 }
 
 SymInt SymInt::operator*(SymInt sci) const {
@@ -59,6 +84,14 @@ SymInt SymInt::operator/(SymInt sci) const {
   return SymInt::toSymInt(res[0]->floordiv(res[1]));
 }
 
+SymInt SymInt::operator%(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return SymInt(data_ % sci.data_);
+  }
+  auto res = normalize_symints(*this, sci);
+  return SymInt::toSymInt(res[0]->mod(res[1]));
+}
+
 bool SymInt::operator==(SymInt sci) const {
   if (!is_symbolic() && !sci.is_symbolic()) {
     return data_ == sci.data_;
@@ -72,22 +105,59 @@ bool SymInt::operator!=(SymInt sci) const {
 }
 
 bool SymInt::operator<(SymInt sci) const {
-  TORCH_CHECK(
-      !this->is_symbolic() && !sci.is_symbolic(),
-      "Symbolic lt isn't supported yet");
-  return data_ < sci.data_;
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ < sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->lt(res[1])->bool_();
+}
+
+bool SymInt::operator<=(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ <= sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->le(res[1])->bool_();
+}
+
+bool SymInt::operator>(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ > sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->gt(res[1])->bool_();
+}
+
+bool SymInt::operator>=(SymInt sci) const {
+  if (!is_symbolic() && !sci.is_symbolic()) {
+    return data_ >= sci.data_;
+  }
+  auto res = normalize_symints(*this, sci);
+  return res[0]->ge(res[1])->bool_();
 }
 
 void SymInt::operator*=(SymInt sci) {
-  TORCH_CHECK(
-      !this->is_symbolic() && !sci.is_symbolic(),
-      "Symbolic mul_ isn't supported yet");
-  data_ = data_ * sci.data_;
+  *this = *this * sci;
+}
+
+void SymInt::operator+=(SymInt sci) {
+  *this = *this + sci;
 }
 
 bool SymInt::operator<(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic lt isn't supported yet");
-  return data_ < sci;
+  return *this < c10::SymInt(sci);
+}
+
+bool SymInt::operator<=(int64_t sci) const {
+  return *this <= c10::SymInt(sci);
+}
+
+bool SymInt::operator>(int64_t sci) const {
+  return *this > c10::SymInt(sci);
+}
+
+bool SymInt::operator>=(int64_t sci) const {
+  return *this >= c10::SymInt(sci);
 }
 
 bool SymInt::operator==(int64_t sci) const {
@@ -99,8 +169,16 @@ bool SymInt::operator!=(int64_t sci) const {
 }
 
 SymInt SymInt::operator*(int64_t sci) const {
-  TORCH_CHECK(!this->is_symbolic(), "Symbolic mul isn't supported yet");
-  return SymInt(data_ * sci);
+  return *this * c10::SymInt(sci);
+}
+
+std::ostream& operator<<(std::ostream& os, SymInt s) {
+  if (s.is_symbolic()) {
+    os << s.toSymIntNodeImpl()->str();
+  } else {
+    os << s.as_int_unchecked();
+  }
+  return os;
 }
 
 } // namespace c10

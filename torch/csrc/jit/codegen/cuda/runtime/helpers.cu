@@ -27,6 +27,18 @@ __device__ constexpr int64_t ceilDiv(int a, int64_t b) {
   return ceilDiv((int64_t)a, b);
 }
 
+__device__ constexpr double ceilDiv(double a, double b) {
+  return std::ceil(a / b);
+}
+
+__device__ constexpr double ceilDiv(double a, int64_t b) {
+  return std::ceil(a / b);
+}
+
+__device__ constexpr double ceilDiv(int64_t a, double b) {
+  return std::ceil(a / b);
+}
+
 // Monotonic and precise lerp is described here:
 // https://math.stackexchange.com/a/1798323
 __device__ double lerp(double start, double end, double weight) {
@@ -297,14 +309,6 @@ __device__ int64_t where(bool c, int64_t a, int b) {
 
 __device__ int64_t where(bool c, int a, int64_t b) {
   return c ? a : b;
-}
-
-__device__ double randLike(Philox& rnd) {
-  return uniform(rnd(), rnd());
-}
-
-__device__ float randLikef(Philox& rnd) {
-  return uniformf(rnd());
 }
 
 __device__ constexpr int64_t remainder(int64_t a, int64_t b) {
@@ -630,3 +634,8 @@ __device__ __bfloat print_impl(const char* name, __bfloat value) {
 #endif
 
 #define print(...) print_impl(#__VA_ARGS__, (__VA_ARGS__))
+
+template <typename OutT, typename IndexT, typename InputT>
+__device__ OutT arange(IndexT index, InputT start, InputT step) {
+  return start + step * index;
+}

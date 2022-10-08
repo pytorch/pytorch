@@ -84,8 +84,8 @@ if [[ "$image" == *xenial* ]] || [[ "$image" == *bionic* ]]; then
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
-UCX_COMMIT=v1.13.x
-UCC_COMMIT=a7bda274b10f8adf5bb729f01da064f4e735fb23
+_UCX_COMMIT=31e74cac7bee0ef66bef2af72e7d86d9c282e5ab
+_UCC_COMMIT=12944da33f911daf505d9bbc51411233d0ed85e1
 
 # It's annoying to rename jobs every time you want to rewrite a
 # configuration, so we hardcode everything here rather than do it
@@ -149,8 +149,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${UCX_COMMIT}
-    UCC_COMMIT=${UCC_COMMIT}
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
     ;;
   pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7)
     CUDA_VERSION=11.7.0
@@ -161,8 +161,8 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
-    UCX_COMMIT=${UCX_COMMIT}
-    UCC_COMMIT=${UCC_COMMIT}
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
     ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.7
@@ -283,8 +283,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    UCX_COMMIT=${UCX_COMMIT}
-    UCC_COMMIT=${UCC_COMMIT}
     ;;
   pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
@@ -294,8 +292,6 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
-    UCX_COMMIT=${UCX_COMMIT}
-    UCC_COMMIT=${UCC_COMMIT}
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -383,7 +379,7 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx900;gfx906}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx906}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \

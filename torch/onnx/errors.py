@@ -6,13 +6,28 @@ from typing import Optional
 
 from torch import _C
 from torch.onnx import _constants
+from torch.onnx._internal import diagnostics
 
 __all__ = [
     "OnnxExporterError",
+    "OnnxExporterWarning",
+    "CallHintViolationWarning",
     "CheckerError",
     "UnsupportedOperatorError",
     "SymbolicValueError",
 ]
+
+
+class OnnxExporterWarning(UserWarning):
+    """Base class for all warnings in the ONNX exporter."""
+
+    pass
+
+
+class CallHintViolationWarning(OnnxExporterWarning):
+    """Warning raised when a type hint is violated during a function call."""
+
+    pass
 
 
 class OnnxExporterError(RuntimeError):
@@ -31,7 +46,11 @@ class UnsupportedOperatorError(OnnxExporterError):
     """Raised when an operator is unsupported by the exporter."""
 
     def __init__(
-        self, domain: str, op_name: str, version: int, supported_version: Optional[int]
+        self,
+        domain: str,
+        op_name: str,
+        version: int,
+        supported_version: Optional[int],
     ):
         if domain in {"", "aten", "prim", "quantized"}:
             msg = f"Exporting the operator '{domain}::{op_name}' to ONNX opset version {version} is not supported. "
@@ -40,14 +59,37 @@ class UnsupportedOperatorError(OnnxExporterError):
                     f"Support for this operator was added in version {supported_version}, "
                     "try exporting with this version."
                 )
+                diagnostics.context.diagnose(
+                    diagnostics.rules.operator_supported_in_newer_opset_version,
+                    diagnostics.levels.ERROR,
+                    message_args=(
+                        f"{domain}::{op_name}",
+                        version,
+                        supported_version,
+                    ),
+                )
             else:
                 msg += "Please feel free to request support or submit a pull request on PyTorch GitHub: "
                 msg += _constants.PYTORCH_GITHUB_ISSUES_URL
+                diagnostics.context.diagnose(
+                    diagnostics.rules.missing_standard_symbolic_function,
+                    diagnostics.levels.ERROR,
+                    message_args=(
+                        f"{domain}::{op_name}",
+                        version,
+                        _constants.PYTORCH_GITHUB_ISSUES_URL,
+                    ),
+                )
         else:
             msg = (
                 f"ONNX export failed on an operator with unrecognized namespace '{domain}::{op_name}'. "
                 "If you are trying to export a custom operator, make sure you registered "
                 "it with the right domain and version."
+            )
+            diagnostics.context.diagnose(
+                diagnostics.rules.missing_custom_symbolic_function,
+                diagnostics.levels.ERROR,
+                message_args=(f"{domain}::{op_name}",),
             )
         super().__init__(msg)
 

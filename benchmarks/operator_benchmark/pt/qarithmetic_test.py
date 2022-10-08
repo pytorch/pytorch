@@ -29,7 +29,7 @@ qarithmetic_binary_scalar_ops = op_bench.op_list(
 
 class _QFunctionalBinaryArithmeticBenchmarkBase(op_bench.TorchBenchmarkBase):
     def setup(self, N, dtype, contig):
-        self.qfunctional = torch.nn.quantized.QFunctional()
+        self.qfunctional = torch.ao.nn.quantized.QFunctional()
 
         # TODO: Consider more diverse shapes
         f_input = (torch.rand(N, N) - 0.5) * 256

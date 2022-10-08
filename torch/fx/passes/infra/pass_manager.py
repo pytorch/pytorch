@@ -28,9 +28,10 @@ def inplace_wrapper(fn: Callable) -> Callable:
 
     @wraps(fn)
     def wrapped_fn(gm):
-        fn(gm)
-        return PassResult(gm, True)
+        return fn(gm) or PassResult(gm, True)
 
+    if wrapped_fn.__name__ == 'wrapped_fn':
+        wrapped_fn.__name__ = str(fn)
     return wrapped_fn
 
 @compatibility(is_backward_compatible=False)
@@ -285,8 +286,8 @@ class PassManager:
                     res = fn(module)
                 except Exception as e:
                     prev_pass_names = [p.__name__ for p in self.passes[:i]]
-                    msg = f"An error occured when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
-                    raise RuntimeError(msg) from e
+                    msg = f"An error occurred when running the \'{fn.__name__}\' pass after the following passes: {prev_pass_names}"
+                    raise type(e)(msg) from e
 
                 module = res.graph_module
                 modified = modified or res.modified

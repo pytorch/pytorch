@@ -8,6 +8,7 @@ from torchgen.api.types import (
     CType,
     DispatcherSignature,
     FunctionalizationLambda,
+    iTensorListRefT,
     NativeSignature,
     tensorListT,
     tensorT,
@@ -84,12 +85,10 @@ def gen_composite_view_copy_kernel(g: NativeFunctionsViewGroup) -> Optional[str]
     # clone() calls in their graph (which is normally needed by reshape).
     if str(g.view_copy.func.name) == "view_copy":
         return """\
-at::Tensor view_copy(const at::Tensor & self, at::SymIntArrayRef size) {
-  // TODO: don't cast to int array ref
-  auto int_size = c10::asIntArrayRefSlow(size);
-  DimVector shape = infer_size_dv(int_size, self.numel());
-  if (!at::detail::computeStride(self.sizes(), self.strides(), shape).has_value()) {
-    return self.reshape(int_size);
+at::Tensor view_copy_symint(const at::Tensor & self, at::SymIntArrayRef size) {
+  c10::SymDimVector shape = infer_size_dv(size, self.sym_numel());
+  if (!at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape).has_value()) {
+    return self.reshape_symint(size);
   } else {
     auto output = at::_ops::view::call(self, size);
     return output.clone();
@@ -98,7 +97,9 @@ at::Tensor view_copy(const at::Tensor & self, at::SymIntArrayRef size) {
 """
     # view_copy is a native signature, since we're generating an at::native:: kernel
     # Functionalization always operates on symints though
-    view_copy_sig = NativeSignature(g.view_copy.func, symint=True)
+    view_copy_sig = NativeSignature(
+        g.view_copy.func, symint=False
+    )  # TODO: flag day this True
 
     # view is a dispatcher signature, since we're calling into the at::_ops API
     view_sig = DispatcherSignature(g.view.func)
@@ -173,6 +174,8 @@ def is_tensor_like(a: Union[Argument, TensorOptionsArguments, SelfArgument]) -> 
 def get_owning_type(t: CType) -> Tuple[CType, Callable[[str], str]]:
     if t == BaseCType(tensorListT):
         return VectorCType(BaseCType(tensorT)), lambda x: f"{x}.vec()"
+    if t == BaseCType(iTensorListRefT):
+        return VectorCType(BaseCType(tensorT)), lambda x: f"{{{x}.begin(), {x}.end()}}"
     # There are technically other non-owning types out there (like IntArrayRef),
     # but functionalization only actually cares about the ones involving tensors.
     return t, lambda x: x
@@ -641,7 +644,7 @@ def gen_functionalization_registration(
             metadata = composite_implicit_autograd_index.get_kernel(f)
             assert metadata is not None
             native_api_name = metadata.kernel
-            sig = DispatcherSignature.from_schema(f.func)
+            sig = NativeSignature(f.func, symint=metadata.supports_symint())
             # Note [Composite view ops in the functionalization pass]
             # We don't need to worry about implemententing functionalization kernels for views with
             # CompositeImplicitAutograd kernels, because we can just decompose them into their base operators.
