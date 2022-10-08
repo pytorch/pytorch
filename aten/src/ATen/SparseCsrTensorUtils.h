@@ -127,6 +127,22 @@ namespace sparse_csr {
 
 using SparseCsrTensor = Tensor;
 
+inline bool is_sparse_compressed(const Layout& layout) {
+  switch (layout) {
+    case kSparseCsr:
+    case kSparseCsc:
+    case kSparseBsr:
+    case kSparseBsc:
+      return true;
+    default:;
+  }
+  return false;
+}
+
+inline bool is_sparse_compressed(const Tensor& self) {
+  return is_sparse_compressed(self.layout());
+}
+
 inline SparseCsrTensorImpl* get_sparse_csr_impl(const SparseCsrTensor& self) {
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(
       self.layout(), "get_sparse_csr_impl", [&] {});
