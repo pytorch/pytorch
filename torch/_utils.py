@@ -577,8 +577,9 @@ def _get_devices_properties(device_ids):
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
 
+# can be used in JIT script.
 def is_backend_available(device_type) -> bool:
-    if device_type.lower() == "xpu":
+    if device_type == "xpu":
         return torch._C._is_hooks_available("xpu") and torch.xpu.device_count() > 0  # type: ignore[attr-defined]
     # add more available device types here
     return False
