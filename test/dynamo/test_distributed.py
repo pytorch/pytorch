@@ -195,3 +195,9 @@ class TestDistributed(torch._dynamo.testing.TestCase):
         opt_outputs = opt_fn(inputs)
         opt_outputs.sum().backward()
         self.assertTrue(same(correct_outputs, opt_outputs))
+
+
+# TODO(jansel): debug issues running this in CI
+# if __name__ == "__main__":
+#     from torch._dynamo.testing import run_tests
+#     run_tests()

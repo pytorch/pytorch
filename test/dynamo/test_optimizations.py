@@ -199,3 +199,9 @@ class NormalizeIRTests(torch._dynamo.testing.TestCase):
         optimized_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

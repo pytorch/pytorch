@@ -71,3 +71,9 @@ class AotAutogradFallbackTests(torch._dynamo.testing.TestCase):
         aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
         aot_fn(x, y)
         self.assertTrue(is_safe[0])
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

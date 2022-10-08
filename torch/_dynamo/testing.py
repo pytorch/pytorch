@@ -1,6 +1,7 @@
 import contextlib
 import dis
 import functools
+import importlib
 import logging
 import os.path
 import types
@@ -8,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+import torch.testing._internal.common_utils
 from torch import fx
 
 from . import config, eval_frame, optimize_assert, reset, utils
@@ -26,21 +28,24 @@ three = 3
 log = logging.getLogger(__name__)
 
 
-def run_tests(needs_triton=False):
+def run_tests(argv=None, needs=()):
     from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
 
     if TEST_WITH_TORCHDYNAMO:
         return  # cant dynamo dynamo
 
-    if needs_triton:
-        if not torch.cuda.is_available():
+    if isinstance(needs, str):
+        needs = (needs,)
+    for need in needs:
+        if need == "cuda" and not torch.cuda.is_available():
             return
-        try:
-            import triton  # noqa: F401
-        except ImportError:
-            return
+        else:
+            try:
+                importlib.import_module(need)
+            except ImportError:
+                return
 
-    run_tests()
+    run_tests(argv)
 
 
 def clone_me(x):
@@ -212,8 +217,7 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         self.assertEqual(actual.op_count, expected_ops)
 
 
-# class TestCase(torch.testing._internal.common_utils.TestCase):
-class TestCase(unittest.TestCase):
+class TestCase(torch.testing._internal.common_utils.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()

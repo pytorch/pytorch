@@ -280,3 +280,9 @@ class TestPythonAutograd(TestCase):
         self.assertTrue(same(grad1, grad2))
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 8)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

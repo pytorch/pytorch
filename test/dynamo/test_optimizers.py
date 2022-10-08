@@ -95,3 +95,8 @@ optimizers = [
 
 for opt in optimizers:
     setattr(OptimizerTests, "test_" + opt.__name__.lower(), make_test(opt))
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

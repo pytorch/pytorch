@@ -1583,10 +1583,20 @@ class ReproTests(torch._dynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_relative_import(self):
-        def fn(x):
-            from .test_functions import tensor_for_import_testing
+        try:
+            from . import test_functions as _  # noqa: F401
 
-            return x * 2 * tensor_for_import_testing
+            def fn(x):
+                from .test_functions import tensor_for_import_testing
+
+                return x * 2 * tensor_for_import_testing
+
+        except ImportError:
+
+            def fn(x):
+                from test_functions import tensor_for_import_testing
+
+                return x * 2 * tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)
@@ -1596,10 +1606,20 @@ class ReproTests(torch._dynamo.testing.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_relative_import_no_modulename(self):
-        def fn(x):
-            from . import test_functions
+        try:
+            from . import test_functions as _  # noqa: F401
 
-            return x * 2 * test_functions.tensor_for_import_testing
+            def fn(x):
+                from . import test_functions
+
+                return x * 2 * test_functions.tensor_for_import_testing
+
+        except ImportError:
+
+            def fn(x):
+                import test_functions
+
+                return x * 2 * test_functions.tensor_for_import_testing
 
         x = torch.randn(10)
         fn(x)
@@ -1688,3 +1708,9 @@ class ReproTests(torch._dynamo.testing.TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
         self.assertTrue(same_two_models(mod, opt_mod, args))
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

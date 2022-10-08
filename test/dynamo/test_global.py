@@ -224,3 +224,9 @@ class TestGlobals(torch._dynamo.testing.TestCase):
         v0, s0 = opt_fn(a, b)
         self.assertEqual(s0, "v0v1")
         reset_name()
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

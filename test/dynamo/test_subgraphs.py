@@ -525,3 +525,9 @@ class SubGraphTests(torch._dynamo.testing.TestCase):
             return b
 
         self._common(fn, 1, 2)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

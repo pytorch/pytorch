@@ -13,7 +13,6 @@ import torch
 import torch._dynamo
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
-from torch._inductor.utils import timed
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import TestCase as TorchTestCase
@@ -31,7 +30,7 @@ try:
     from torch._inductor.compile_fx import compile_fx
     from torch._inductor.ir import IndexingDiv, ModularIndexing
     from torch._inductor.sizevars import SizeVarAllocator
-    from torch._inductor.utils import has_torchvision_roi_align
+    from torch._inductor.utils import has_torchvision_roi_align, timed
 
     # This will only pass on pytorch builds newer than roughly 5/15/2022
     assert get_decompositions([torch.ops.aten.trace])
@@ -39,6 +38,8 @@ try:
     from torch._inductor.compile_fx import compile_fx_inner
 except (ImportError, AssertionError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
+    if __name__ == "__main__":
+        sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch")
 
 
@@ -85,6 +86,7 @@ def requires_decomp(fn):
 class TestCase(TorchTestCase):
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         cls._stack = contextlib.ExitStack()
         cls._stack.enter_context(patch.object(config, "debug", True))
         cls._stack.enter_context(patch.object(config.cpp, "min_chunk_size", 1))
@@ -92,6 +94,7 @@ class TestCase(TorchTestCase):
     @classmethod
     def tearDownClass(cls):
         cls._stack.close()
+        super().tearDownClass()
 
 
 class ToTuple(torch.nn.Module):
@@ -359,7 +362,7 @@ class SweepInputsCpuTest(SweepInputs2, TestCase):
 SweepInputsCpuTest.populate()
 
 
-class TestIndexingSimplification(unittest.TestCase):
+class TestIndexingSimplification(TorchTestCase):
     def test_indexing_simplification(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0")
@@ -3803,3 +3806,8 @@ if HAS_CUDA:
             ]
             with torch.cuda.amp.autocast(enabled=False):
                 assert same_two_models(mod, opt_mod, args), "Dynamo failed"
+
+
+# if __name__ == "__main__":
+#     from torch._dynamo.testing import run_tests
+#     run_tests()

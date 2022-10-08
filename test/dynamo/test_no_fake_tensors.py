@@ -22,3 +22,8 @@ NoFakeTensorsMiscTests = make_no_fake_cls(test_misc.MiscTests)
 NoFakeTensorsReproTests = make_no_fake_cls(test_repros.ReproTests)
 NoFakeTensorsNNModuleTests = make_no_fake_cls(test_modules.NNModuleTests)
 NoFakeTensorsUnspecTests = make_no_fake_cls(test_unspec.UnspecTests)
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

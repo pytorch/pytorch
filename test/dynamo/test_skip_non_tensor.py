@@ -104,3 +104,9 @@ class SkipNonTensorTests(torch._dynamo.testing.TestCase):
             fn(x)
 
         assert counter.op_count == 0
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

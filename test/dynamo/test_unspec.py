@@ -218,3 +218,9 @@ class UnspecTests(torch._dynamo.testing.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

@@ -63,3 +63,9 @@ class NopTests(torch._dynamo.testing.TestCase):
         b = torch.ones(1)
         fn = with_debug_nops(fn)
         self.assertEqual(fn(a, b).sum(), 513)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

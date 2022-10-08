@@ -667,3 +667,9 @@ class FunctionTests(torch._dynamo.testing.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()

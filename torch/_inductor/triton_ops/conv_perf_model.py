@@ -93,6 +93,8 @@ def estimate_conv_time(
 
 
 def early_config_prune(configs, named_args):
+    import triton._C.libtriton.triton as _triton
+
     backend = _triton.runtime.backend.CUDA
     device = torch.cuda.current_device()
     cc = _triton.runtime.cc(backend, device)

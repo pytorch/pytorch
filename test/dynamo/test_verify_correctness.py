@@ -180,3 +180,9 @@ class TestVerifyCorrectness(torch._dynamo.testing.TestCase):
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertEqual(r2.dtype, torch.bfloat16)
+
+
+if __name__ == "__main__":
+    from torch._dynamo.testing import run_tests
+
+    run_tests()
