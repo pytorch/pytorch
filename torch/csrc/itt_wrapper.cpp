@@ -1,6 +1,6 @@
 #include <c10/macros/Export.h>
 #include <ittnotify.h>
-#include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/stubs/base.h>
 
 namespace torch {
 namespace profiler {
