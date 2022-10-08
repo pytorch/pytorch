@@ -164,7 +164,8 @@ function checkout_install_torchdeploy() {
   git checkout 46aee77f35359962df637b2628fca0474cdc6609
   python multipy/runtime/example/generate_examples.py
   git submodule update --init --recursive
-  time python -m pip install --abi-cxx e .
+  time python -m pip install e .
+  # time python -m pip install --abi-cxx e .
   popd
   popd
 }
