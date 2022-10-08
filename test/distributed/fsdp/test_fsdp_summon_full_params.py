@@ -3,6 +3,7 @@ import itertools
 import math
 import sys
 from copy import deepcopy
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -76,22 +77,21 @@ class TestSummonFullParamsNoShard(FSDPTest):
         return 1  # does not shard
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("writeback", [True, False])
-    @parametrize("modify_outer", [True, False])
-    @parametrize("mixed_precision", [True, False])
     # TODO: CPUOffload summon + writeback does not
     # work when param is not sharded
     # (currently when world_size == 1)
-    def test_summon_full_param_writeback(
-        self, writeback, modify_outer, mixed_precision
-    ):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
-        return _run_test_summon_full_param_writeback(
-            self,
-            writeback,
-            modify_outer=modify_outer,
+    def test_summon_full_param_writeback(self):
+        subtest_config = {
+            "writeback": [True, False],
+            "modify_outer": [True, False],
+            "mixed_precision": [MixedPrecision(param_dtype=torch.float16), None],
+            "use_orig_params": [True, False],
+        }
+        self.run_subtests(
+            subtest_config,
+            _run_test_summon_full_param_writeback,
+            cls=self,
             cpu_offload=CPUOffload(offload_params=False),
-            mixed_precision=mixed_precision,
         )
 
 
@@ -108,23 +108,21 @@ class TestSummonFullParams(FSDPTest):
         return int(math.ceil(global_size / self.world_size))
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("writeback", [True, False])
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
-    )
-    @parametrize("mixed_precision", [True, False])
-    @parametrize("modify_outer", [True, False])
-    def test_summon_full_param_writeback(
-        self, writeback, cpu_offload, mixed_precision, modify_outer
-    ):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
-        return _run_test_summon_full_param_writeback(
-            self,
-            writeback,
-            modify_outer,
-            cpu_offload=cpu_offload,
-            mixed_precision=mixed_precision,
+    def test_summon_full_param_writeback(self):
+        subtest_config = {
+            "writeback": [True, False],
+            "modify_outer": [True, False],
+            "mixed_precision": [MixedPrecision(param_dtype=torch.float16), None],
+            "cpu_offload": [
+                CPUOffload(offload_params=False),
+                CPUOffload(offload_params=True),
+            ],
+            "use_orig_params": [True, False],
+        }
+        self.run_subtests(
+            subtest_config,
+            _run_test_summon_full_param_writeback,
+            cls=self,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -232,15 +230,30 @@ class TestSummonFullParams(FSDPTest):
             output.backward()
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("mixed_precision", [True, False])
-    def test_summon_full_params_respects_reshard_after_forward(self, mixed_precision):
-        mixed_precision = MixedPrecision(param_dtype=torch.float16) if mixed_precision else None
+    def test_summon_full_params_respects_reshard_after_forward(self):
+        self.run_subtests(
+            {
+                "mixed_precision": [MixedPrecision(param_dtype=torch.float16), None],
+                "use_orig_params": [False, True],
+            },
+            self._test_summon_full_params_respects_reshard_after_forward,
+        )
+
+    def _test_summon_full_params_respects_reshard_after_forward(
+        self,
+        mixed_precision: Optional[MixedPrecision],
+        use_orig_params: bool
+    ):
+        fsdp_kwargs = {
+            "mixed_precision": mixed_precision,
+            "use_orig_params": use_orig_params,
+        }
         model = FSDP(
             nn.Sequential(
-                FSDP(nn.Linear(5, 5, bias=False), mixed_precision=mixed_precision),
+                FSDP(nn.Linear(5, 5, bias=False), **fsdp_kwargs),
                 nn.Linear(5, 3, bias=False),
             ),
-            mixed_precision=mixed_precision,
+            **fsdp_kwargs,
         ).cuda(self.rank)
 
         outer_param = model.get_parameter("_fsdp_wrapped_module.flat_param")

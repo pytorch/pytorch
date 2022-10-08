@@ -148,8 +148,8 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
             for (const auto dim : c10::irange(D)) {
                 const input_t elt = accessor_in[i][dim];
 
-                // Skips elements which fall outside the specified bins
-                if (elt < leftmost_edge[dim] || rightmost_edge[dim] < elt) {
+                // Skips elements which fall outside the specified bins and NaN elements
+                if (!(elt >= leftmost_edge[dim] && elt <= rightmost_edge[dim])) {
                     skip_elt = true;
                     break;
                 }
