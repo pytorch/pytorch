@@ -9,6 +9,7 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
+#include <tuple>
 
 namespace at {
 namespace native {
@@ -193,9 +194,58 @@ Tensor _nested_tensor_from_tensor_list(
       pin_memory);
 }
 
+C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_nested_layer_norm_inputs(
+    const NestedTensorImpl& input,
+    IntArrayRef normalized_shape,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */) {
 
-Tensor NestedTensor_layer_norm(
+  const size_t normalized_ndim = normalized_shape.size();
+  TORCH_CHECK(
+      normalized_ndim >= 1,
+      "Expected normalized_shape to be at least 1-dimensional, i.e., ",
+      "containing at least one element, but got normalized_shape = ",
+      normalized_shape);
+  TORCH_CHECK(
+      !weight.defined() || weight.sizes().equals(normalized_shape),
+      "Expected weight to be of same shape as normalized_shape, but got ",
+      "weight of shape ",
+      weight.sizes(),
+      " and normalized_shape = ",
+      normalized_shape);
+  TORCH_CHECK(
+      !bias.defined() || bias.sizes().equals(normalized_shape),
+      "Expected bias to be of same shape as normalized_shape, but got ",
+      "bias of shape ",
+      bias.sizes(),
+      " and normalized_shape = ",
+      normalized_shape);
+
+  // Check that the normalized_shape has the exact same sizes as the last dimensions from the NestedTensor input
+  // Also, compute M and N considering the idiosyncracies of NestedTensors
+  int64_t N = 1;
+  for (const auto i: c10::irange(normalized_ndim)) {
+    TORCH_CHECK(
+      input.opt_size(-normalized_ndim + i) != c10::nullopt,
+      "normalized_shape extends into irregular dimensions for the nested tensor"
+    );
+    TORCH_CHECK(
+      normalized_shape[i] == *input.opt_size(-normalized_ndim + i),
+      "The shape at dimension ",
+      i,
+      "of normalized_shape doesn't match the input"
+    );
+    N *= normalized_shape[i];
+  }
+
+  const int64_t M = input.numel() / N;
+
+  return std::make_pair(M, N);
+}
+
+std::tuple<Tensor, Tensor, Tensor> nested_layer_norm(
     const Tensor& input,
+    IntArrayRef normalized_shape,
     const c10::optional<Tensor>& weight_opt,
     const c10::optional<Tensor>& bias_opt,
     double eps) {
@@ -207,8 +257,9 @@ Tensor NestedTensor_layer_norm(
   auto* nt_input = get_nested_tensor_impl(input);
   TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
   const auto& input_buffer = nt_input->get_buffer();
-  const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_input);
-  const auto valid_word_num = input_buffer.numel() / last_dim;
+  auto M_N = _check_nested_layer_norm_inputs(*nt_input, normalized_shape, weight, bias);
+  auto M = M_N.first;
+  auto N = M_N.second;
   const auto weight_contig = weight.expect_contiguous();
   const auto bias_contig = bias.expect_contiguous();
   auto output_buffer = at::native::empty_like(
@@ -223,21 +274,24 @@ Tensor NestedTensor_layer_norm(
     auto acc_type = at::toAccumulateType(input_buffer.scalar_type(), true);
     options = options.dtype(acc_type);
   }
-  Tensor mean = at::empty({valid_word_num}, options);
-  Tensor rstd = at::empty({valid_word_num}, options);
+  Tensor mean = at::empty({M}, options);
+  Tensor rstd = at::empty({M}, options);
   LayerNormKernel(
       input_buffer.is_cuda() ? kCUDA : kCPU,
       input_buffer,
       *weight_contig,
       *bias_contig,
-      valid_word_num,
-      last_dim,
+      M,
+      N,
       eps,
       &output_buffer,
       &mean,
       &rstd);
-  return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(output_buffer), nt_input->get_nested_size_tensor());
+  return std::make_tuple(
+    wrap_buffer(output_buffer, nt_input->get_nested_size_tensor()),
+    mean,
+    rstd
+  );
 }
 
 Tensor NestedTensor_from_padded_and_nested_example(
