@@ -75,10 +75,10 @@
   using namespace at::native::metal::mpscnn;
   TORCH_CHECK(
       params.DX == params.DY == 1, "Dilated convolution is not supported yet.");
-  const int64_t oC = params.OC;
-  const int64_t iC = params.C;
-  const int64_t kH = params.KH;
-  const int64_t kW = params.KW;
+  const NSUInteger oC = params.OC;
+  const NSUInteger iC = params.C;
+  const NSUInteger kH = params.KH;
+  const NSUInteger kW = params.KW;
   MPSCNNNeuron* neuron = at::native::metal::neuron(t);
   MPSCNNConvolutionDescriptor* desc = nil;
   if (params.isDepthwise()) {
@@ -149,7 +149,7 @@
   offset.z = 0;
   [conv setOffset:offset];
 
-  TORCH_CHECK(conv.inputFeatureChannels == params.IC * params.G);
+  TORCH_CHECK(static_cast<int64_t>(conv.inputFeatureChannels) == params.IC * params.G);
   TORCH_CHECK(oC % conv.groups == 0);
   TORCH_CHECK(conv.outputFeatureChannels == oC);
   TORCH_CHECK(conv.kernelWidth == kW);
