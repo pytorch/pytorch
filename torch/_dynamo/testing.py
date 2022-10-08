@@ -4,6 +4,7 @@ import functools
 import importlib
 import logging
 import os.path
+import sys
 import types
 import unittest
 from unittest.mock import patch
@@ -44,6 +45,9 @@ def run_tests(argv=None, needs=()):
                 importlib.import_module(need)
             except ImportError:
                 return
+
+    if argv is None:
+        argv = sys.argv
 
     run_tests(argv)
 

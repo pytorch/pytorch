@@ -911,7 +911,20 @@ class BenchmarkRunner:
     def setup_amp(self):
         if self.args.amp and self.args.training:
             assert self.args.devices == ["cuda"], "AMP is supported only for CUDA"
-            self.grad_scaler = torch.cuda.amp.GradScaler()
+            # AMP training can lead to small loss values which can undeflow
+            # gradient values returning in zero gradients. To solve this
+            # problem, PyTorch introduces GradScaler. GradScaler is a stateful
+            # structure, that scales the loss values to prevent underflow. Loss
+            # values are big at the beginning of training (therefore not
+            # requiring scaling), while loss value tends to be small as network
+            # starts getting better (requiring scaling). GradScaler manages all
+            # of this fine tuning, checking the gradients are turning to inf,
+            # discarding such batches.
+
+            # Since we are not running a long iteration, default value of
+            # init_scale 65536 is going to turn all gradients to inf. Therefore,
+            # we just use a init_scale of 2.0 for benchmarking purpose.
+            self.grad_scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
             self.autocast = torch.cuda.amp.autocast
 
     @property
@@ -952,6 +965,10 @@ class BenchmarkRunner:
 
     @property
     def failing_dynamic_shape_models(self):
+        return set()
+
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
         return set()
 
     @property
@@ -1058,11 +1075,14 @@ class BenchmarkRunner:
                 ("dev", "name", "batch_size", "accuracy"),
                 [current_device, current_name, current_batch_size, accuracy_status],
             )
-            return "PASS" if accuracy_status == "pass" else "FAIL"
+            return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
         tolerance, cos_similarity = self.get_tolerance_and_cosine_flag(
             self.args.training, current_device, name
         )
+
+        if name in self.skip_accuracy_checks_large_models_dashboard:
+            return record_status("pass_due_to_skip")
 
         # Collect the fp64 reference outputs to be used later for accuracy checking.
         fp64_outputs = None
@@ -1364,6 +1384,9 @@ def parse_args():
     parser.add_argument("--cosine", action="store_true", help="use cosine similarity")
     parser.add_argument(
         "--ci", action="store_true", help="Flag to tell that its a CI run"
+    )
+    parser.add_argument(
+        "--dashboard", action="store_true", help="Flag to tell that its a Dashboard run"
     )
     parser.add_argument(
         "--skip-fp64-check", action="store_true", help="skip accuracy check using fp64"

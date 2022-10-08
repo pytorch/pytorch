@@ -240,7 +240,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{compiler}_{suite}_{dtype}_{mode}_{device}_{testing}.csv"
                     cmd = f"python benchmarks/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    cmd = f"{cmd} {base_cmd} --no-skip --quiet"
+                    cmd = f"{cmd} {base_cmd} --no-skip --quiet --dashboard"
 
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
@@ -451,7 +451,10 @@ class ParsePerformanceLogs(Parser):
                         if not perf_row.empty:
                             if acc_row.empty:
                                 perf_row[compiler].iloc[0] = 0.0
-                            elif acc_row[compiler].iloc[0] != "pass":
+                            elif acc_row[compiler].iloc[0] not in (
+                                "pass",
+                                "pass_due_to_skip",
+                            ):
                                 perf_row[compiler].iloc[0] = 0.0
                     perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)

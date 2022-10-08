@@ -191,6 +191,16 @@ DONT_CHANGE_BATCH_SIZE = {
 }
 
 
+SKIP_ACCURACY_CHECK_MODELS = {
+    # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
+    # even for 40 GB machine. We have tested accuracy for smaller version of
+    # these models
+    "hf_GPT2_large",
+    "hf_T5_large",
+    "timm_vision_transformer_large",
+}
+
+
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
         super(TorchBenchmarkRunner, self).__init__()
@@ -230,6 +240,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def failing_dynamic_shape_models(self):
         return DYNAMIC_SHAPES_NOT_YET_WORKING
+
+    @property
+    def skip_accuracy_checks_large_models_dashboard(self):
+        if self.args.dashboard:
+            return SKIP_ACCURACY_CHECK_MODELS
+        return set()
 
     def load_model(
         self,
