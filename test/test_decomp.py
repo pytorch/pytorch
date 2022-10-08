@@ -162,6 +162,8 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.float16, torch.ops.aten.native_batch_norm.default): 1e-5,
         (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
         (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-6,
+        (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
+        (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
     if ref.is_floating_point():
         orig_diff = (orig - ref).abs().max()
@@ -198,6 +200,7 @@ def op_assert_equal(test_case, op, test_dtype, orig, decomp, args, kwargs):
         # Exceeds tolerances on CUDA, likely due to fma
         (torch.float32, torch.ops.aten.mv.default) : (1e-5, 3e-5),
         (torch.float64, torch.ops.aten.upsample_bicubic2d.vec) : (1e-5, 1e-6),
+        (torch.complex64, torch.ops.aten.mv.default): (5e-5, 5e-5),
     }
     if (test_dtype, op) in tol_table:
         rtol, atol = tol_table[(decomp.dtype, op)]
