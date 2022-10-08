@@ -397,14 +397,6 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         with track_graph_compiling("forward"):
             compiled_fw_func = aot_config.fw_compiler(fw_module, deduped_flat_args)
 
-        if config.debug_partitioner:
-            fw_outs = call_func_with_args(compiled_fw_func, deduped_flat_args)
-            activation_sizes = 0
-            for out in fw_outs[_num_outs:]:
-                if isinstance(out, torch.Tensor):
-                    activation_sizes += out.storage().nbytes()
-            print(f"Real Activations Stored(GB): {activation_sizes/1e9}")
-
     class CompiledFunction(torch.autograd.Function):
         compiled_fw = compiled_fw_func
         compiled_bw = None
@@ -487,7 +479,7 @@ def create_aot_dispatcher_function(
     python_dispatcher_mode = enable_python_dispatcher() if config.use_dynamic_shapes else nullcontext()
     shape_env = ShapeEnv() if config.use_dynamic_shapes else None
 
-    with preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+    with torch.autograd.set_multithreading_enabled(False), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
 
         def process_inputs(flat_args):
             if config.use_fake_tensor:
