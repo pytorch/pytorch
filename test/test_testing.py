@@ -1786,7 +1786,9 @@ class TestImports(TestCase):
             # Distributed does not work on Windows or by default on Mac
             ignored_modules.append("torch.distributed.")
             ignored_modules.append("torch.testing._internal.dist_utils")
+            # And these both end up with transitive dependencies on distributed
             ignored_modules.append("torch.nn.parallel._replicated_tensor_ddp_interop")
+            ignored_modules.append("torch.testing._internal.common_fsdp")
 
         torch_dir = os.path.dirname(torch.__file__)
         for base, folders, files in os.walk(torch_dir):
