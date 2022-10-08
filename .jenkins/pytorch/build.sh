@@ -19,12 +19,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
-  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
-  # only on one config for now, can expand later
-  export USE_DEPLOY=ON
-fi
-
 echo "Python version:"
 python --version
 
@@ -232,7 +226,7 @@ else
     else
       python setup.py bdist_wheel
     fi
-    python -mpip install dist/*.whl
+    python -mpip install "$(echo dist/*.whl)[opt-einsum]"
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
