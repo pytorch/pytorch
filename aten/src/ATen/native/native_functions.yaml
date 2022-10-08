@@ -3710,15 +3710,19 @@
   dispatch:
     CPU: narrow_copy_dense_cpu_out
 
-- func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
+- func: narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: narrow_symint
 
-- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, int length) -> Tensor(a)
+- func: narrow.Tensor(Tensor(a) self, int dim, Tensor start, SymInt length) -> Tensor(a)
   variants: function, method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: narrow_tensor_symint
 
 - func: native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:

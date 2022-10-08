@@ -168,7 +168,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(movedim, int);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
-  OP_DECOMPOSE(narrow);
+  m.impl("narrow", native::narrow_symint);
   OP_DECOMPOSE(negative);
   OP_DECOMPOSE2(frobenius_norm, dim);
   OP_DECOMPOSE2(nuclear_norm, dim);

@@ -9,4 +9,5 @@ namespace native {
 // However, in certain cases (such as static runtime), we call the native versions of the ops directly.
 // In those cases, we will duplicate the signature here with non-symbolic ints, and also duplicate the C++ implementation.
 TORCH_API at::Tensor reshape(const at::Tensor& self, at::IntArrayRef proposed_shape);
+TORCH_API at::Tensor narrow(const at::Tensor& self, int64_t dim, int64_t start, int64_t length);
 }}
