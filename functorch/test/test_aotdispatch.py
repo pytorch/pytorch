@@ -402,6 +402,31 @@ class TestAOTAutograd(AOTTestCase):
         self.assertEqual(ref_out, test_out)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_autocast_disable_guard(self):
+        guard = torch._C._DisableAutocast()
+        try:
+            x = torch.rand([4, 4]).cuda()
+            y = x @ x
+            self.assertEqual(y.dtype, torch.float32)
+        finally:
+            del guard
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_nonidempotent_amp(self):
+        def f(self_s_emb, add_3):
+            einsum_2 = torch.functional.einsum('ah,th->t', self_s_emb, add_3)
+            log_softmax_2 = einsum_2.log_softmax(-1)
+            return (log_softmax_2,)
+
+        args = [torch.rand((1, 256), dtype=torch.float32, device='cuda'), torch.rand((30, 256), dtype=torch.float16, device='cuda')]
+        with torch.cuda.amp.autocast(enabled=True):
+            self.verify_aot_autograd(f, args)
+
+        args = [e.requires_grad_(True) for e in args]
+        with torch.cuda.amp.autocast(enabled=True):
+            self.verify_aot_autograd(f, args)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
