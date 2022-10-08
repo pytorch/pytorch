@@ -157,7 +157,7 @@ class TestOptim(TestCase):
             else:
                 self.assertLess(fn().item(), initial_value)
 
-    def _test_state_dict(self, weight, bias, input, constructor):
+    def _test_state_dict(self, weight, bias, input, constructor, atol=None, rtol=None):
         weight = Parameter(weight)
         bias = Parameter(bias)
         with torch.no_grad():
@@ -255,7 +255,7 @@ class TestOptim(TestCase):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
             self.assertEqual(weight, weight_cuda)
-            self.assertEqual(bias, bias_cuda)
+            self.assertEqual(bias, bias_cuda, atol=atol, rtol=rtol)
 
         # validate deepcopy() copies all public attributes
         def getPublicAttr(obj):
@@ -263,7 +263,8 @@ class TestOptim(TestCase):
         self.assertEqual(getPublicAttr(optimizer), getPublicAttr(deepcopy(optimizer)))
 
     def _test_basic_cases(self, constructor, scheduler_constructors=None,
-                          ignore_multidevice=False, constructor_accepts_maximize=False, constructor_accepts_foreach=False):
+                          ignore_multidevice=False, constructor_accepts_maximize=False, constructor_accepts_foreach=False,
+                          atol=None, rtol=None):
         if scheduler_constructors is None:
             scheduler_constructors = []
 
@@ -285,6 +286,7 @@ class TestOptim(TestCase):
                 torch.randn(10),
                 torch.randn(5),
                 make_two_arg_constructor(constructor, maximize, foreach),
+                atol=atol, rtol=rtol
             )
         self._test_basic_cases_template(
             torch.randn(10, 5),
@@ -1006,6 +1008,7 @@ class TestOptim(TestCase):
 
     @skipIfRocm
     def test_rprop(self):
+        is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
         for foreach in (False, True):
             self._test_basic_cases(
                 lambda weight, bias, maximize, foreach: optim.Rprop(
@@ -1018,6 +1021,7 @@ class TestOptim(TestCase):
                     self._build_params_dict(weight, bias, lr=1e-2), lr=2e-4, maximize=maximize, foreach=foreach),
                 constructor_accepts_maximize=True,
                 constructor_accepts_foreach=True,
+                atol=4e-5 if is_cuda_sm86 else None, rtol=3e-5 if is_cuda_sm86 else None
             )
             self._test_complex_2d(lambda param: optim.Rprop(param, foreach=foreach))
             self._test_complex_optimizer(

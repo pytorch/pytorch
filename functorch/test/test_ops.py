@@ -697,7 +697,7 @@ class TestOperators(TestCase):
 
             is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
             is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-            atol, rtol = (1e-4, 2e-2) if is_cuda_sm86 else (1e-4, 1e-4)
+            atol, rtol = (1e-4, 2e-2) if is_cuda_sm86 else (None, None)
             generator = get_fallback_and_vmap_exhaustive(
                 vjp_of_vjp, args_and_cotangents, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
@@ -784,7 +784,7 @@ class TestOperators(TestCase):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
         is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-        atol, rtol= (1e-4, 4e-2) if is_cuda_sm86 else (1e-4, 1e-4)
+        atol, rtol = (1e-4, 4e-2) if is_cuda_sm86 else (None, None)
         for sample in samples:
             cotangents = get_sample_cotangents(op, sample)
             fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
