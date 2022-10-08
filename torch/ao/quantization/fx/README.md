@@ -377,4 +377,3 @@ However, for some operator based backends, like the current pytorch native backe
 ## Extensibility
 
 FX graph mode quantization can be extended to work with different backends, which may have different sets of supported quantized operator patterns and different requirements for each pattern. For more detail, please refer to the [BackendConfig README](/torch/ao/quantization/backend_config/README.md).
-

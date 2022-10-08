@@ -383,20 +383,76 @@ class TestNestedTensorDeviceType(TestCase):
     @torch.inference_mode()
     def test_layer_norm(self, device, dtype):
         def _test(size):
+            # Simple shapes test
             t0 = torch.randn(2, size, device=device, dtype=dtype, requires_grad=False)
             t1 = torch.randn(2, size, device=device, dtype=dtype, requires_grad=False)
             ts = [t0, t1, t0, t1]
             nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
             layer_norm = torch.nn.LayerNorm(size, device=device, dtype=dtype)
-            nt_result = nt._nested_tensor_layer_norm(
-                layer_norm.weight, layer_norm.bias, 1e-5
-            )
+            nt_result = layer_norm(nt)
             for (nt_subresult, t) in zip(nt_result.unbind(), ts):
                 t_result = layer_norm(t.reshape(1, -1, size).squeeze(0))
                 self.assertEqual(nt_subresult, t_result)
 
+            # More complex nt test with different lengths for each tensor
+            t0 = torch.randn(4, size, device=device, dtype=dtype, requires_grad=False)
+            t1 = torch.randn(10, size, device=device, dtype=dtype, requires_grad=False)
+            t2 = torch.randn(7, size, device=device, dtype=dtype, requires_grad=False)
+            ts = [t0, t1, t2, t0, t2]
+            nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
+            layer_norm = torch.nn.LayerNorm(size, device=device, dtype=dtype)
+            nt_result = layer_norm(nt)
+            for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+                t_result = layer_norm(t.reshape(1, -1, size).squeeze(0))
+                self.assertEqual(nt_subresult, t_result)
+
+            if size <= 128:
+                # Test with multidimensional tensors after irregular dim
+                # (run only with smaller dimensions to ensure fast execution)
+                t0 = torch.randn(4, size, size, 4, device=device, dtype=dtype, requires_grad=False)
+                t1 = torch.randn(10, size, size, 4, device=device, dtype=dtype, requires_grad=False)
+                t2 = torch.randn(7, size, size, 4, device=device, dtype=dtype, requires_grad=False)
+                ts = [t0, t1, t2, t0, t2]
+                nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
+                layer_norm = torch.nn.LayerNorm((size, size, 4), device=device, dtype=dtype)
+                nt_result = layer_norm(nt)
+                for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+                    t_result = layer_norm(t.reshape(1, -1, size, size, 4).squeeze(0))
+                    self.assertEqual(nt_subresult, t_result)
+
+                # Test where the normalizing dimensions are not all
+                layer_norm = torch.nn.LayerNorm((size, 4), device=device, dtype=dtype)
+                nt_result = layer_norm(nt)
+                for (nt_subresult, t) in zip(nt_result.unbind(), ts):
+                    t_result = layer_norm(t.reshape(1, -1, size, size, 4).squeeze(0))
+                    self.assertEqual(nt_subresult, t_result)
+
         for size in (1024, 1023, 513, 512, 256, 128, 2, 4, 32):
             _test(size)
+
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.half)
+    @skipMeta
+    @torch.inference_mode()
+    def test_layer_norm_breaking(self, device, dtype):
+        size = 128
+        t0 = torch.randn(4, size, size, 4, device=device, dtype=dtype, requires_grad=False)
+        t1 = torch.randn(10, size, size, 4, device=device, dtype=dtype, requires_grad=False)
+        t2 = torch.randn(7, size, size, 4, device=device, dtype=dtype, requires_grad=False)
+        ts = [t0, t1, t2, t0, t2]
+        nt = torch.nested.nested_tensor(ts, device=device, dtype=dtype)
+        layer_norm = torch.nn.LayerNorm((4, size, size, 4), device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "normalized_shape extends into irregular dimensions for the nested tensor",
+            lambda: layer_norm(nt),
+        )
+        layer_norm = torch.nn.LayerNorm((size + 1, size, 4), device=device, dtype=dtype)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "The shape at dimension 0",
+            lambda: layer_norm(nt),
+        )
 
     @skipMeta
     @torch.inference_mode()
