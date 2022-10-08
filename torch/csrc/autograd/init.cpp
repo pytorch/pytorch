@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
@@ -40,6 +41,17 @@ struct DisableFuncTorch {
         back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
   c10::impl::ExcludeDispatchKeyGuard front_guard_;
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+struct MultithreadingEnabled {
+  MultithreadingEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
+  }
+  ~MultithreadingEnabled() {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
+  }
+  bool old_;
 };
 
 struct EnableTorchFunction {
@@ -310,6 +322,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
   m.def("_clear_callbacks", []() { at::clearCallbacks(); });
   m.def(
+      "_saved_tensors_hooks_is_enabled",
+      at::SavedTensorDefaultHooks::is_enabled);
+  m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
+  m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_get_disabled_error_message",
+      at::SavedTensorDefaultHooks::get_disabled_error_message);
+  m.def(
       "_push_saved_tensors_default_hooks",
       [](py::function& pack_hook, py::function& unpack_hook) {
         torch::autograd::PyDefaultSavedVariableHooks::push_hooks(
@@ -345,6 +365,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_DisablePythonDispatcher")
       .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
+  py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
+      .def(py::init<bool>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
