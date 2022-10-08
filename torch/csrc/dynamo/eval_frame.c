@@ -564,10 +564,6 @@ static struct PyModuleDef _module = {
     _methods};
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
-  if (sizeof(unsigned long) != sizeof(void*)) {
-    // 32 bit platforms not supported
-    Py_RETURN_NONE;
-  }
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);

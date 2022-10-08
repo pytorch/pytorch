@@ -9,6 +9,7 @@ from unittest.mock import patch
 import torch
 
 import torch.dynamo
+from torch.inductor.utils import has_triton
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -573,4 +574,5 @@ instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     torch.dynamo.config.raise_on_assertion_error = True
-    run_tests()
+    if has_triton():
+        run_tests()
