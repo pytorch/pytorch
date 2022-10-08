@@ -26,6 +26,23 @@ three = 3
 log = logging.getLogger(__name__)
 
 
+def run_tests(needs_triton=False):
+    from torch.testing._internal.common_utils import run_tests, TEST_WITH_TORCHDYNAMO
+
+    if TEST_WITH_TORCHDYNAMO:
+        return  # cant dynamo dynamo
+
+    if needs_triton:
+        if not torch.cuda.is_available():
+            return
+        try:
+            import triton  # noqa: F401
+        except ImportError:
+            return
+
+    run_tests()
+
+
 def clone_me(x):
     if x is None:
         return None

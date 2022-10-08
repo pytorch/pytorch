@@ -8,13 +8,6 @@ import os.path
 import threading
 from typing import List
 
-import triton
-from triton import cdiv, Config, heuristics, next_power_of_2
-from triton.ops.matmul import get_configs_io_bound
-from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
-from triton.runtime.jit import get_cuda_stream, KernelInterface
-from triton.testing import do_bench
-
 import torch
 
 from .. import config
@@ -28,6 +21,18 @@ from .conv_perf_model import (
 )
 
 log = logging.getLogger(__name__)
+
+try:
+    import triton
+    from triton import cdiv, Config, next_power_of_2
+    from triton.runtime.jit import get_cuda_stream, KernelInterface
+except ImportError:
+    cdiv = None
+    Config = object
+    get_cuda_stream = None
+    KernelInterface = object
+    next_power_of_2 = None
+    triton = None
 
 
 class CachingAutotuner(KernelInterface):
@@ -54,7 +59,7 @@ class CachingAutotuner(KernelInterface):
             self.launchers = AsyncCompile.map(self._precompile_config, self.configs)
             self.configs = None
 
-    def _precompile_config(self, cfg: triton.runtime.autotuner.Config):
+    def _precompile_config(self, cfg: Config):
         """Ahead of time compile a given autotuner config."""
         torch.cuda.set_device(torch.cuda.current_device())
         compile_meta = copy.deepcopy(self.meta)
@@ -127,6 +132,8 @@ class CachingAutotuner(KernelInterface):
                 grid=grid,
                 stream=stream,
             )
+
+        from triton.testing import do_bench
 
         return do_bench(kernel_call)
 
@@ -513,6 +520,8 @@ def conv_heuristics():
 
 
 def mm_heuristics():
+    from triton import heuristics
+
     mm_heuristic = heuristics(
         {
             "EVEN_K": lambda args: args["K"] % (args["BLOCK_K"] * args["SPLIT_K"]) == 0,
@@ -522,6 +531,9 @@ def mm_heuristics():
 
 
 def mm_autotune(get_io_bound_configs=False):
+    from triton.ops.matmul import get_configs_io_bound
+    from triton.ops.matmul_perf_model import early_config_prune as mm_early_config_prune
+
     configs = [
         # basic configs for compute-bound matmuls
         triton.Config(
