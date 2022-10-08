@@ -339,13 +339,6 @@ coverage_ignore_classes = [
     "SymFloatNode",
 ]
 
-coverage_ignore_modules = [
-    "torch.inductor",
-    "torch.inductor.triton_ops",
-    "torch.inductor.codegen",
-    "torch.dynamo",
-]
-
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
 #
@@ -491,7 +484,7 @@ def coverage_post_process(app, exception):
     for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__,
                                                    prefix=torch.__name__ + '.'):
         if ispkg and is_not_internal(modname):
-            if modname not in modules and modname not in coverage_ignore_modules:
+            if modname not in modules:
                 missing.add(modname)
 
     output = []
