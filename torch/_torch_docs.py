@@ -951,7 +951,7 @@ as_tensor(data, dtype=None, device=None) -> Tensor
 Converts data into a tensor, sharing data and preserving autograd
 history if possible.
 
-If data is already a tensor with the requeseted dtype and device
+If data is already a tensor with the requested dtype and device
 then data itself is returned, but if data is a
 tensor with a different dtype or device then it's copied as if using
 `data.to(dtype=dtype, device=device)`.
@@ -4982,7 +4982,7 @@ The elements are sorted into equal width bins between :attr:`min` and
 :attr:`max`. If :attr:`min` and :attr:`max` are both zero, the minimum and
 maximum values of the data are used.
 
-Elements lower than min and higher than max are ignored.
+Elements lower than min and higher than max and ``NaN`` elements are ignored.
 
 Args:
     {input}
@@ -8513,6 +8513,8 @@ element in :attr:`input` i.e.,
 
 .. math::
     \text{{out}}_i \sim \text{{Poisson}}(\text{{input}}_i)
+
+:attr:`input` must be non-negative.
 
 Args:
     input (Tensor): the input tensor containing the rates of the Poisson distribution
