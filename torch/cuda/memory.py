@@ -595,9 +595,24 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
     device = _get_device_index(device)
     return torch.cuda.cudart().cudaMemGetInfo(device)
 
-def _record_memory_history(enabled: bool, device: Union[Device, int] = None):
+def _record_memory_history(enabled: bool, device: Union[Device, int] = None, *, _enable_expensive_cpp: bool = False):
+    """Enables recording of Python stack traces to be associated with memory
+    allocations, so you can tell what allocated any piece of memory in
+    :func:`torch.memory_snapshot`.
+
+    The Python trace collection is fast (2us per trace), so you may consider
+    enabling this on production jobs if you anticipate ever having to debug
+    memory issues.
+
+    .. warning:
+        The :attr:`_enable_expensive_cpp` arguments lets you enable also
+        collecting C++ stack traces.  This collection is VERY SLOW and should
+        only be used if you are debugging framework problems on a minified
+        example.  In principle, it should be possible to implement fast C++
+        stack trace collection; file an issue with us if you need it.
+    """
     with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(enabled)
+        _C._cuda_recordMemoryHistory(enabled, _enable_expensive_cpp)
 
 def _snapshot(device: Union[Device, int] = None):
     with torch.cuda.device(device):
