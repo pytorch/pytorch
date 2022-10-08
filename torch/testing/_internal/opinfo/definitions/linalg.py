@@ -35,7 +35,9 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    IS_MACOS,
     make_fullrank_matrices_with_distinct_singular_values,
+    skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
 )
@@ -1122,6 +1124,22 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
             ),
+            DecorateInfo(
+                unittest.skip("Gradients are incorrect on macos"),
+                "TestGradients",
+                "test_fn_grad",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
+            ),
+            DecorateInfo(
+                unittest.skip("Gradients are incorrect on macos"),
+                "TestGradients",
+                "test_forward_mode_AD",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
+            ),
             # Both Hessians are incorrect on complex inputs??
             DecorateInfo(
                 unittest.expectedFailure,
@@ -1382,6 +1400,13 @@ op_db: List[OpInfo] = [
             skipCPUIfNoLapack,
             DecorateInfo(
                 toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
             ),
         ],
     ),
@@ -2006,6 +2031,19 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cuda",
+            ),
+            # This test is flaky under slow gradcheck, likely due to rounding issues
+            DecorateInfo(
+                skipIfSlowGradcheckEnv,
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
             ),
         ),
     ),
