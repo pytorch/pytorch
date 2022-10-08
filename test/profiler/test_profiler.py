@@ -1579,18 +1579,19 @@ class TestTorchTidyProfiler(TestCase):
                 flat_out_extrafields(node.children, out)
             return out
 
-
         inputs = torch.rand(10)
+        net = SimpleNet()
+        out = net(inputs)
+        torch.nn.functional.cross_entropy(out, torch.rand(2)).backward()
         with torch.profiler.profile(with_stack=True, profile_memory=True) as p:
-            net = SimpleNet()
-            out = net(inputs)
+            _ = net(inputs)
 
         modules = flat_out_extrafields(p.profiler.kineto_results.experimental_event_tree())
         self.assertEqual(len(modules), 2, f"Expected two parameter list, but got {len(modules)}")
 
-        params = [(n, p.storage_data_ptr) for module in modules for (n, p) in module.params]
-        expected = [(name, val.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
-        expected += [(name, val.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
+        params = [(n, p.storage_data_ptr, g.storage_data_ptr) for module in modules for (n, p, g) in module.params]
+        expected = [(name, val.storage().data_ptr(), val.grad.storage().data_ptr()) for name, val in net.fc1._parameters.items()]
+        expected += [(name, val.storage().data_ptr(), val.grad.storage().data_ptr()) for name, val in net.fc2._parameters.items()]
         self.assertEqual(expected, params, f"{expected} vs. {params}")
 
     def _flat_out_extrafields(self, nodes, out=None):
