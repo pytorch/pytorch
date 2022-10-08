@@ -410,26 +410,6 @@ void SyncMap::build(Fusion* fusion) {
             }
           }
 
-          // If same parallel type and mapped, no need for syncs unless
-          // producer is in smem, producer parallel type is a thread
-          // dimension, and consumer concretizes the dimension. This sync is
-          // due to the redundant predicate omission in lower thread
-          // predicate.
-          auto redundant_preds = GpuLower::current()
-                                     ->threadPredMap()
-                                     .getPredicateInfo(producer)
-                                     .redundant_types;
-
-          if (p_id->isBroadcast() &&
-              GpuLower::current()->concretizedBroadcastDomains()->isConcretized(
-                  p_id) &&
-              producer->getMemoryType() == MemoryType::Shared &&
-              redundant_preds.hasTID()) {
-            redundant_preds.clearAllBID();
-            raw_dims |= redundant_preds;
-            continue;
-          }
-
           // When the producer axis is a broadcast, it is not really
           // parallelized unless thread-predicated and concretized
           if (isParallelTypeThread(producer_ptype) && p_id->isBroadcast() &&
