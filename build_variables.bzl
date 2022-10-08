@@ -659,6 +659,7 @@ def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
 libtorch_cuda_core_sources = [
     "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
+    "torch/csrc/cuda/memory_snapshot.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/profiler/cuda.cpp",
     "torch/csrc/autograd/functions/comm.cpp",
@@ -898,7 +899,6 @@ libtorch_python_core_sources = [
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
     "torch/csrc/functorch/init.cpp",
-    "torch/csrc/functorch/CompileCache.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.cpp",
     "torch/csrc/jit/python/init.cpp",
