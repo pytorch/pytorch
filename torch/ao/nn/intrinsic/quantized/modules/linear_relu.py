@@ -1,6 +1,7 @@
 import torch
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.intrinsic as nni
+from torch.ao.nn.quantized.modules.utils import _quantize_weight
 
 class LinearReLU(nnq.Linear):
     r"""
@@ -78,7 +79,7 @@ class LinearLeakyReLU(nnq.Linear):
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
         dtype = weight_post_process.dtype
-        act_scale, act_zp = activation_post_process.calculate_qparams()
+        act_scale, act_zp = activation_post_process.calculate_qparams()  # type: ignore[union-attr,operator]
         assert dtype == torch.qint8, 'Weight observer must have dtype torch.qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         qlinear = cls(mod.in_features,
