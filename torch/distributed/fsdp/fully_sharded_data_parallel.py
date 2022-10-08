@@ -2556,10 +2556,9 @@ class FullyShardedDataParallel(nn.Module):
         # gather all the parameters in this layer. This can be achieved by
         # concatenated all the local shards and then append the padding.
         # https://github.com/pytorch/pytorch/issues/77461
-        for (param_name, _, module_name) in self._fsdp_wrapped_module.handle.flat_param._param_infos:
-            module_name = self._convert_to_wrapped_module_name(module_name)
-            fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{module_name}{param_name}"
-            param = state_dict.pop(fqn)
+        for fqn, _, _ in self._param_fqns:
+            full_fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{fqn}"
+            param = state_dict.pop(full_fqn)
 
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
