@@ -185,6 +185,10 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward1, [["add_7", "add_6"], ["add_5", "add_4", "add_3"], ["add_2", "add_1", "add"]]),
         (TestPartitionFunctions.forward2, [["add_3", "add_2"], ["add_1", "add"]]),
 
+        # 1 horizontal fusion with common producer
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
+
         # 2 branches cases
         (TestPartitionFunctions.forward5, [["add_1", "add"]]),
         (TestPartitionFunctions.forward6, [["add"]]),

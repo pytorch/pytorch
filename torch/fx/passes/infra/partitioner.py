@@ -122,15 +122,14 @@ class CapabilityBasedPartitioner:
 
         logging.debug("Proposing partitions...")
 
-        # visit candidates in reversed topological order
-        for node in reversed(candidates):
+        def getIndependentUserPartitions(node, merge_self=True):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             user_partitions: Dict[Partition, None] = {}
             for user_node in node.users:
                 if user_node in assignment:
                     id = assignment[user_node]
                     user_partitions[partitions_by_id[id]] = None
-                else:
+                elif merge_self:
                     user_partitions[Partition(nodes=[user_node])] = None
 
             # Filter out all the partitions that has dependency on other users
@@ -152,27 +151,36 @@ class CapabilityBasedPartitioner:
             # 3. If there are more than one partition candidates, assign current node to the first partition and
             #    merge the other partitions with first partition, since user_partitions doesn't have depedency between
             #    each other.
+            partitions_id_list = [partition.id for partition in user_partitions if partition.id is not None]
 
-            assigned_candidate_partition_ids = [partition.id for partition in user_partitions if partition.id is not None]
-
-            if len(assigned_candidate_partition_ids) == 0:
+            if merge_self and len(partitions_id_list) == 0:
                 # create a new partition
-                assign(node, next(new_partition_id))
-            elif len(assigned_candidate_partition_ids) == 1:
-                id = assigned_candidate_partition_ids[0]
-                assign(node, id)
-            else:
+                id = next(new_partition_id)
+            elif len(partitions_id_list) == 1:
+                id = partitions_id_list[0]
+            if len(partitions_id_list) > 1:
                 # users are assigned to more than one partition, since user_partitions doesn't have
                 # dependency on each other, they can be fused into a single partition
-                id = assigned_candidate_partition_ids[0]
-                assign(node, id)
+                id = partitions_id_list[0]
 
                 reassignment: Dict[Node, int] = {}
-                for other_id in assigned_candidate_partition_ids[1:]:
+                for other_id in partitions_id_list[1:]:
                     for other_node in partitions_by_id[other_id].nodes:
                         reassignment[other_node] = id
                 for other_node in reassignment:
                     assign(other_node, id)
+
+            if merge_self:
+                assign(node, id)
+
+        # visit candidates in reversed topological order
+        for node in reversed(candidates):
+            getIndependentUserPartitions(node, True)
+
+        # not very efficient, this handles sibling fusion of partitions that share inputs.
+        for node in self.graph_module.graph.nodes:
+            if node not in assignment:
+                getIndependentUserPartitions(node, False)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
@@ -190,7 +198,7 @@ class CapabilityBasedPartitioner:
                 id = assignment.get(node, None)     # type: ignore[arg-type]
                 for user in node.users:
                     if assignment.get(user, None) != id:    # type: ignore[arg-type]
-                        nodes_reassignment[user] = id
+                        nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             assign(node, id)
 
