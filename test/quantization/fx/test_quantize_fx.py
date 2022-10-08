@@ -364,7 +364,7 @@ class TestFuseFx(QuantizationTestCase):
 
     @skipIfNoONEDNN
     def test_fuse_linear_bn_leaky_relu_eval(self):
-        # for onednn backend only
+        # linear - bn - leaky_relu is fused for onednn backend only
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         expected_nodes = [
             ns.call_module(nni.LinearLeakyReLU),
@@ -380,6 +380,25 @@ class TestFuseFx(QuantizationTestCase):
             # fuse_fx is a top level api and only supports eval mode
             m = fuse_fx(m,
                         backend_config=get_onednn_backend_config())
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=expected_nodes,
+                expected_node_occurrence=expected_occurrence)
+
+    def test_no_fuse_linear_bn_leaky_relu_eval(self):
+        # Make sure linear - bn - leaky_relu is not fused by default
+        for with_bn in [True, False]:
+            # test eval mode
+            m = LinearBnLeakyReluModel(with_bn).eval()
+            # fuse_fx is a top level api and only supports eval mode
+            m = fuse_fx(m)
+            expected_nodes = [
+                ns.call_module(nn.Linear),
+                ns.call_module(nn.LeakyReLU),
+            ]
+            expected_occurrence = {
+                ns.call_module(nni.LinearLeakyReLU): 0,
+            }
             self.checkGraphModuleNodes(
                 m,
                 expected_node_list=expected_nodes,
@@ -482,8 +501,8 @@ class TestFuseFx(QuantizationTestCase):
             self.checkGraphModuleNodes(quantized, expected_node_list=node_list)
 
     @skipIfNoONEDNN
-    def test_qconfig_linear_leaky_relu(self):
-        # for onednn backend only
+    def test_qconfig_linear_leaky_relu_onednn(self):
+        # linear - leaky_relu is fused for onednn backend only
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
         qconfig_mapping.set_object_type(nn.Linear, default_qconfig) \
@@ -507,6 +526,27 @@ class TestFuseFx(QuantizationTestCase):
                                    backend_config=get_onednn_backend_config())
 
             self.checkGraphModuleNodes(quantized, expected_node_list=linearLeakyRelu_node_list)
+
+    def test_qconfig_linear_leaky_relu(self):
+        # Make sure linear - leaky_relu is not fused by default
+        qconfig_mapping = get_default_qconfig_mapping()
+
+        expected_node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Linear),
+            ns.call_module(nnq.LeakyReLU),
+            ns.call_method('dequantize')
+        ]
+
+        for with_bn in [True, False]:
+            m = LinearBnLeakyReluModel(with_bn).eval()
+            example_inputs = (torch.rand(5, 5),)
+            prepared = prepare_fx(m, qconfig_mapping, example_inputs=example_inputs)
+
+            prepared(*example_inputs)
+            quantized = convert_fx(prepared)
+
+            self.checkGraphModuleNodes(quantized, expected_node_list=expected_node_list)
 
     def test_problematic_fuse_example(self):
         class LinearRelu(nn.Sequential):
