@@ -10235,8 +10235,6 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
-               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive',
-                            device_type='cuda', dtypes=(torch.complex64,)),
            )),
     OpInfo('max',
            variant_test_name='reduction_with_dim',
@@ -13039,8 +13037,6 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/71774
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.long,)),
-               DecorateInfo(unittest.skip('Skipped!'), 'TestDecomp', 'test_comprehensive',
-                            device_type='cuda', dtypes=(torch.complex64,)),
            )),
     BinaryUfuncInfo('__rmod__',
                     op=torch.Tensor.__rmod__,

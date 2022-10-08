@@ -1871,6 +1871,8 @@ class TestRefsOpsInfo(TestCase):
             prefix = "_refs."
             if ref.startswith(prefix):
                 return ref[len(prefix):]
+            else:
+                return ref
 
         extra_aliases = []
         for ref in self.ref_db_names:
