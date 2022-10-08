@@ -12594,7 +12594,7 @@ class TestNNDeviceType(NNTestCase):
             output2.backward(grad_output[:, offset:].contiguous())
 
             self.assertEqual(output, torch.cat([output1, output2], 1),
-                             atol=dtype2prec_DONTUSE[dtype], rtol=0)
+                             atol=dtype2prec_DONTUSE[dtype] if dtype != torch.float else 3e-4, rtol=3e-2)
             self.assertEqual(i.grad.data,
                              torch.cat([i1.grad.data, i2.grad.data], 1),
                              atol=dtype2prec_DONTUSE[dtype], rtol=0)
