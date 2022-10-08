@@ -535,6 +535,7 @@ PT_OPS_PRIM = [
     "aten::_pack_sequence",
     "aten::_get_tracing_state",
     "aten::is_scripting",
+    "aten::_is_hooks_available",
     "aten::_no_grad_uniform_",
     "aten::_no_grad_normal_",
     "aten::_no_grad_fill_",
