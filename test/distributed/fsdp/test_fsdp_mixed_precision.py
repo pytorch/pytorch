@@ -613,9 +613,11 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         loss.backward()
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("offload_params", [False, True])
-    def test_grads_reduced_precision(self, offload_params: bool):
-        self._test_grads_reduced_precision(offload_params)
+    def test_grads_reduced_precision(self):
+        self.run_subtests(
+            {"offload_params": [False, True]},
+            self._test_grads_reduced_precision,
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize("convert_sync_bn", [True, False])
@@ -683,9 +685,11 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
         return 1
 
     @skip_if_lt_x_gpu(1)
-    @parametrize("offload_params", [False, True])
-    def test_grads_reduced_precision(self, offload_params: bool):
-        return self._test_grads_reduced_precision(offload_params)
+    def test_grads_reduced_precision(self):
+        self.run_subtests(
+            {"offload_params": [False, True]},
+            self._test_grads_reduced_precision,
+        )
 
     @skip_if_lt_x_gpu(1)
     def test_mixed_precision_no_reshard_after_forward(self):
@@ -716,7 +720,6 @@ class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
         )
 
 instantiate_parametrized_tests(TestFSDPMixedPrecisionSharded)
-instantiate_parametrized_tests(TestFSDPMixedPrecisionUnsharded)
 
 if __name__ == "__main__":
     run_tests()
