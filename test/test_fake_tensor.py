@@ -394,6 +394,14 @@ class FakeTensorTest(TestCase):
             self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
             b = torch.rand([4, 4], device='cuda')
             self.checkType(b.new(device='cuda'), "cuda", [0])
+            self.checkType(a.new(torch.rand([1])), "cpu", [1])
+
+    def test_scalar_inputs(self):
+        with FakeTensorMode():
+            self.checkType(torch.div(3, 2), "cpu", [])
+            ten = torch.zeros(2, dtype=torch.int32) * 2.0
+            self.assertEqual(ten.dtype, torch.float)
+            self.checkType(ten, "cpu", [2])
 
 
 class FakeTensorConstHandling(TestCase):
