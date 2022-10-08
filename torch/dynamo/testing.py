@@ -195,13 +195,16 @@ def standard_test(self, fn, nargs, expected_ops=None, expected_ops_dynamic=None)
         self.assertEqual(actual.op_count, expected_ops)
 
 
+# class TestCase(torch.testing._internal.common_utils.TestCase):
 class TestCase(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
+        super().tearDownClass()
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(
             patch.object(config, "raise_on_backend_error", True)
@@ -211,6 +214,7 @@ class TestCase(unittest.TestCase):
         )
 
     def setUp(self):
+        super().setUp()
         reset()
         utils.counters.clear()
 
@@ -219,6 +223,7 @@ class TestCase(unittest.TestCase):
             print(k, v.most_common())
         reset()
         utils.counters.clear()
+        super().tearDown()
 
 
 def dummy_fx_compile(gm: fx.GraphModule, example_inputs):

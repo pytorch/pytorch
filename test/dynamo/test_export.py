@@ -2,10 +2,10 @@
 from unittest.mock import patch
 
 import torch
-import torch.utils._pytree as pytree
-from torch.fx.experimental.proxy_tensor import make_fx
 
 import torch.dynamo.testing
+import torch.utils._pytree as pytree
+from torch.fx.experimental.proxy_tensor import make_fx
 
 
 class ExportTests(torch.dynamo.testing.TestCase):

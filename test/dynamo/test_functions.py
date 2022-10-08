@@ -8,11 +8,11 @@ import operator
 from typing import Any
 
 import torch
-from torch import sub
-from torch.nn import functional as F
 
 import torch.dynamo.testing
+from torch import sub
 from torch.dynamo.testing import requires_static_shapes
+from torch.nn import functional as F
 
 tensor_for_import_testing = torch.ones(10, 10)
 d = torch.ones(10, 10)

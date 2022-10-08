@@ -9,31 +9,27 @@ import unittest
 from unittest.mock import patch
 
 import torch
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.nn import functional as F
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
-from torch.utils._pytree import tree_flatten
-from torch.utils._pytree import tree_unflatten
 
 import torch.dynamo
 from torch.dynamo.debug_utils import same_two_models
-from torch.dynamo.testing import rand_strided
-from torch.dynamo.testing import same
+from torch.dynamo.testing import rand_strided, same
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.inductor.utils import timed
+from torch.nn import functional as F
+from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.utils._pytree import tree_flatten, tree_unflatten
 
 try:
     import sympy
 
     importlib.import_module("functorch")
 
+    import torch.inductor.config
     from functorch.compile import config as functorch_config
     from torch._decomp import get_decompositions
-
-    import torch.inductor.config
     from torch.inductor import config
     from torch.inductor.compile_fx import compile_fx
-    from torch.inductor.ir import IndexingDiv
-    from torch.inductor.ir import ModularIndexing
+    from torch.inductor.ir import IndexingDiv, ModularIndexing
     from torch.inductor.sizevars import SizeVarAllocator
     from torch.inductor.utils import has_torchvision_roi_align
 

@@ -4,15 +4,14 @@ from copy import deepcopy
 from unittest.mock import patch
 
 import torch
-from torch.nn import functional as F
-from torch.nn.modules.lazy import LazyModuleMixin
-from torch.nn.parameter import Parameter
-from torch.nn.parameter import UninitializedParameter
 
 import torch.dynamo.testing
 from torch.dynamo.eval_frame import unsupported
 from torch.dynamo.mutation_guard import GenerationTracker
 from torch.dynamo.testing import same
+from torch.nn import functional as F
+from torch.nn.modules.lazy import LazyModuleMixin
+from torch.nn.parameter import Parameter, UninitializedParameter
 
 try:
     from . import test_functions

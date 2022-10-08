@@ -1,16 +1,10 @@
 # Owner(s): ["module: dynamo"]
-from typing import Callable
-from typing import Dict
-from typing import List
-from typing import NamedTuple
-from typing import Optional
+from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
 
 import torch.dynamo
-from torch.dynamo.testing import CompileCounter
-from torch.dynamo.testing import TestCase
-from torch.dynamo.testing import same
+from torch.dynamo.testing import CompileCounter, same, TestCase
 
 """
 This is an example of a pure-python version of autograd implemented by

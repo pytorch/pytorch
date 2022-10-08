@@ -15,7 +15,7 @@ from ..guards import Guard, GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
 from ..utils import is_namedtuple_cls, namedtuple_fields
 from .base import MutableLocal, VariableTracker
-from .misc import AutogradProfilerContextWrapperVariable
+from .misc import ProfilerContextWrapperVariable
 
 
 class UserDefinedVariable(VariableTracker):
@@ -78,7 +78,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         options = VariableTracker.propagate(self, args, kwargs.values())
 
         if self.value is torch.autograd.profiler.profile:
-            return AutogradProfilerContextWrapperVariable()
+            return ProfilerContextWrapperVariable()
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
             items = list(args)

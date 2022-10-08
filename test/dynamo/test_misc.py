@@ -15,14 +15,16 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
-from torch.testing._internal.jit_utils import JitTestCase
 
 import torch.dynamo.testing
 from torch.dynamo import bytecode_transformation
-from torch.dynamo.testing import CompileCounter
-from torch.dynamo.testing import requires_static_shapes
-from torch.dynamo.testing import same
-from torch.dynamo.testing import unsupported
+from torch.dynamo.testing import (
+    CompileCounter,
+    requires_static_shapes,
+    same,
+    unsupported,
+)
+from torch.testing._internal.jit_utils import JitTestCase
 
 mytuple = collections.namedtuple("mytuple", ["a", "b", "ab"])
 
@@ -1316,8 +1318,28 @@ class MiscTests(torch.dynamo.testing.TestCase):
         result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
         self.assertTrue(result[1] == fn.__code__.co_lnotab)
 
+    def test_torch_profiler(self):
+        # wrap torch.profiler.* as ProfilerContextWrapperVariable and do nothing
+        def fn(x):
+            y = x**2
+            with torch.profiler.profile():
+                y = y + 2
+                with torch.profiler.record_function("my_function"):
+                    z = y**3
+                    z.tolist()  # graph break
+                    z = z + 1
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        cnts = torch.dynamo.testing.CompileCounter()
+        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_autograd_profiler(self):
-        # wrap torch.autograd.profiler.* as AutogradProfilerContextWrapperVariable and do nothing
+        # wrap torch.autograd.profiler.* as ProfilerContextWrapperVariable and do nothing
         def fn(x):
             y = x**2
             with torch.autograd.profiler.profile():
@@ -1545,7 +1567,9 @@ class MiscTests(torch.dynamo.testing.TestCase):
 
         torch.dynamo.reset()
         with patch.object(torch.dynamo.config, "fake_tensor_propagation", False):
-            opt_f = torch.dynamo.optimize_assert(torch.dynamo.testing.CompileCounter())(f)
+            opt_f = torch.dynamo.optimize_assert(torch.dynamo.testing.CompileCounter())(
+                f
+            )
             opt_f(x)
 
     def test_inline_list_mutation(self):

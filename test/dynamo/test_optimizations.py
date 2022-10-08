@@ -11,8 +11,7 @@ import torch.dynamo
 from torch.dynamo.optimizations import backends
 from torch.dynamo.optimizations.analysis import has_mutation
 from torch.dynamo.optimizations.log_args import conv_args_analysis
-from torch.dynamo.optimizations.normalize import Inplacifier
-from torch.dynamo.optimizations.normalize import normalize
+from torch.dynamo.optimizations.normalize import Inplacifier, normalize
 from torch.dynamo.testing import same
 
 

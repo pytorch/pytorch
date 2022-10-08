@@ -11,8 +11,7 @@ import torch.dynamo.testing
 from torch.dynamo.testing import same
 
 try:
-    from . import test_modules
-    from . import test_repros
+    from . import test_modules, test_repros
 except ImportError:
     import test_modules
     import test_repros

@@ -13,15 +13,13 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
-from torch import nn
-from torch.nn import functional as F
 
 import torch.dynamo.testing
 import torch.dynamo.utils
+from torch import nn
 from torch.dynamo.debug_utils import same_two_models
-from torch.dynamo.testing import rand_strided
-from torch.dynamo.testing import requires_static_shapes
-from torch.dynamo.testing import same
+from torch.dynamo.testing import rand_strided, requires_static_shapes, same
+from torch.nn import functional as F
 
 try:
     import torch._refs
@@ -754,9 +752,9 @@ class TestModule(torch.nn.Module):
 class ReproTests(torch.dynamo.testing.TestCase):
     def test_do_paste_mask(self):
         torch.dynamo.utils.counters.clear()
-        opt__do_paste_mask = torch.dynamo.optimize(torch.dynamo.testing.CompileCounter())(
-            _do_paste_mask
-        )
+        opt__do_paste_mask = torch.dynamo.optimize(
+            torch.dynamo.testing.CompileCounter()
+        )(_do_paste_mask)
         opt__do_paste_mask(
             torch.randn(1, 1, 28, 28),
             torch.tensor([[0.0, 1, 2, 4]]) * 1,
@@ -1554,8 +1552,10 @@ class ReproTests(torch.dynamo.testing.TestCase):
     def test_multi_import(self):
         @torch.dynamo.optimize("eager", nopython=True)
         def to_bitmasks(boxes):
-            from detectron2.layers.mask_ops import _paste_masks_tensor_shape
-            from detectron2.layers.mask_ops import paste_masks_in_image
+            from detectron2.layers.mask_ops import (
+                _paste_masks_tensor_shape,
+                paste_masks_in_image,
+            )
 
             if (
                 paste_masks_in_image is not None

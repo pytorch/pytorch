@@ -1678,6 +1678,19 @@ def index_put_(self, indices, values, accumulate=False):
         if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:
             return index_put_fallback(self, indices, values, accumulate)
 
+    x_size = self.get_size()
+    x_ndim = len(x_size)
+
+    # fallback to aten.index_put_, as tl.atomic_add does NOT support int64 or bool
+    if self.get_dtype() in {torch.int64, torch.bool}:
+        # self is an scalar Tensor
+        if x_ndim == 0:
+            self = view(self, [1])
+        self = index_put_fallback(self, indices, values, accumulate)
+        if x_ndim == 0:
+            self = view(self, [])
+        return self
+
     values = to_dtype(values, self.get_dtype())
     indices, start_offset, end_offset = check_and_broadcast_indices(indices)
     indices_sizes = [i.get_size() for i in indices if i is not None]
@@ -1687,7 +1700,10 @@ def index_put_(self, indices, values, accumulate=False):
     self.realize()
     V.graph.realize_users_of(self.get_name())
 
-    x_size = self.get_size()
+    # self is an scalar Tensor
+    if x_ndim == 0:
+        self = view(self, [1])
+
     output_size = list(indices_sizes[0])
     expected_vals_size = [
         *x_size[:start_offset],
@@ -1721,6 +1737,9 @@ def index_put_(self, indices, values, accumulate=False):
         scatter,
     )
     buffer.name = V.graph.register_buffer(buffer)
+
+    if x_ndim == 0:
+        self = view(self, [])
     return self
 
 

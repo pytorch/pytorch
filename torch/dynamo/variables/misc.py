@@ -356,9 +356,9 @@ def exit_functional_autocast(mode):
     mode.__exit__(None, None, None)
 
 
-class AutogradProfilerContextWrapperVariable(ContextWrappingVariable):
+class ProfilerContextWrapperVariable(ContextWrappingVariable):
     def __init__(self, target_values=None, **kwargs):
-        super(AutogradProfilerContextWrapperVariable, self).__init__(
+        super(ProfilerContextWrapperVariable, self).__init__(
             target_values=target_values, **kwargs
         )
 

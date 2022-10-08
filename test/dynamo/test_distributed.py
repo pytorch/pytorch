@@ -5,13 +5,13 @@ from unittest.mock import patch
 import pytest
 import torch
 import torch.distributed as dist
-from torch import nn
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.nn.parallel import DistributedDataParallel as DDP
 
 import torch.dynamo
+from torch import nn
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.dynamo import config
 from torch.dynamo.testing import same
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 
 class ToyModel(nn.Module):

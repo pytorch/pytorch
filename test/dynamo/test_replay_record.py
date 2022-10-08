@@ -39,7 +39,9 @@ class ReplayRecordTests(torch.dynamo.testing.TestCase):
             except Exception:
                 pass  # we'll check the logs for the raised exception
 
-        with self.assertLogs(logger="torch.dynamo", level=logging.ERROR) as log_replayed:
+        with self.assertLogs(
+            logger="torch.dynamo", level=logging.ERROR
+        ) as log_replayed:
             file_name_match = re.search(
                 r"torch.dynamo\.replay\('(.*)'\)", log_orig.output[-1]
             )
