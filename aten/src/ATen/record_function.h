@@ -610,6 +610,16 @@ TORCH_API bool hasThreadLocalCallbacks();
  */
 TORCH_API void clearThreadLocalCallbacks();
 
+// Bookend to the RECORD_FUNCTION macros.  Use this after the kernel
+// launch to let the profiler bind the outputs to the op that produced
+// them.  Note that guard is declared by RECORD_FUNCTION so this macro
+// needs to be called from the same scope as RECORD_FUNCTION
+#define RECORD_OUTPUTS(outputs) \
+  if (guard.needsOutputs()) {   \
+    guard.setOutputs(           \
+        std::vector<c10::IValue>(outputs.begin(), outputs.end()));\
+  }
+
 /**
  * addGlobalCallback adds a global callback to run with RecordFunction:
  *
