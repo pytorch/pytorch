@@ -116,6 +116,7 @@ class TestSavePlan(TestCase):
 
         all_plans = [create_data(0), create_data(1), create_data(2), create_data(3)]
         final_plans, metadata = create_default_global_save_plan(all_plans=all_plans)
+
         # The default global plan updates all indexes to include hints
         for new_plan, old_plan in zip(final_plans, all_plans):
             for new_item, old_item in zip(new_plan.items, old_plan.items):

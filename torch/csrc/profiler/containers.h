@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <forward_list>
+#include <new>
 #include <utility>
 #include <vector>
 
@@ -63,7 +64,7 @@ class AppendOnlyList {
   template <class... Args>
   T* emplace_back(Args&&... args) {
     maybe_grow();
-    *next_ = {std::forward<Args>(args)...};
+    ::new ((void*)next_) T{std::forward<Args>(args)...};
     return next_++;
   }
 
@@ -71,8 +72,8 @@ class AppendOnlyList {
   typename std::enable_if<
       std::is_same<T0, T>::value && std::is_trivially_copyable<T>::value>::type
   copy(c10::ArrayRef<T0> src) {
-    int n = src.size();
-    if (C10_LIKELY(next_ + n <= end_)) {
+    size_t n = src.size();
+    if (C10_LIKELY(next_ && (next_ + n <= end_))) {
       std::memcpy((void*)next_, (void*)src.begin(), n * sizeof(T0));
       next_ += n;
     } else {

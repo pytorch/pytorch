@@ -42,6 +42,7 @@ from torchgen.model import (
     NativeFunction,
     NativeFunctionsViewGroup,
     OperatorName,
+    SchemaKind,
     Type,
     Variant,
 )
@@ -167,9 +168,14 @@ def load_derivatives(
     return _GLOBAL_LOAD_DERIVATIVE_CACHE[key]
 
 
+# TODO: Why is this going through CppSignatureGroup, that doesn't make sense...
 @with_native_function
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
+    sigs = CppSignatureGroup.from_native_function(f, method=False)
+    if sigs.symint_signature is not None:
+        return sigs.symint_signature.arguments()
+    else:
+        return sigs.signature.arguments()
 
 
 def create_derivative(
@@ -267,7 +273,7 @@ def postprocess_forward_derivatives(
     def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
         required_inputs = set()
         for arg in args_with_derivatives:
-            if arg.type == "at::TensorList":
+            if arg.type in ("at::TensorList", "const at::ITensorListRef &"):
                 # The functions taking TensorList handle everything internally
                 continue
             arg_name = arg.name
@@ -292,6 +298,9 @@ def postprocess_forward_derivatives(
         formula = defn.formula
         required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
+            assert (
+                f.func.kind() != SchemaKind.inplace
+            ), f"Cannot use auto_element_wise with {f.func.name} because it is an in-place variant"
             if (
                 (not len(args_with_derivatives) == 1)
                 or len(forward_derivatives) > 1
@@ -773,6 +782,17 @@ def saved_variables(
                 "expr": lambda name: f"{name}.has_value() ? c10::optional<IntArrayRef>({name}->sizes()) : c10::nullopt",
             },
         ),
+        # replace self->sym_sizes() with self_sym_sizes_opt
+        (
+            r"{}->sym_sizes\(\)",
+            {
+                "suffix": "_sym_sizes_opt",
+                "nctype": lambda name: NamedCType(
+                    name, OptionalCType(BaseCType(symIntArrayRefT))
+                ),
+                "expr": lambda name: f"{name}.has_value() ? c10::optional<c10::SymIntArrayRef>({name}->sym_sizes()) : c10::nullopt",
+            },
+        ),
         # replace self.options() with self_options
         (
             r"{}.options\(\)",
@@ -856,6 +876,15 @@ def saved_variables(
             {
                 "suffix": "_strides",
                 "nctype": lambda name: NamedCType(name, BaseCType(intArrayRefT)),
+                "expr": stride_expr,
+            },
+        ),
+        # replace self.sym_strides() with self_sym_strides
+        (
+            r"{}.sym_strides\(\)",
+            {
+                "suffix": "_sym_strides",
+                "nctype": lambda name: NamedCType(name, BaseCType(symIntArrayRefT)),
                 "expr": stride_expr,
             },
         ),

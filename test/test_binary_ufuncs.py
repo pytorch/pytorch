@@ -1128,6 +1128,16 @@ class TestBinaryUfuncs(TestCase):
                 # Cases that throw warnings
                 op(*inputs, out=torch.empty(2, device=device))
                 self.assertEqual(len(w), 1)
+        # test that multi-d out doesn't trigger segfault
+        arg1 = (torch.ones(2, 1, device=device), torch.ones(1, device=device))
+        arg2 = (torch.ones(2, device=device), torch.ones(1, 1, device=device))
+        outs = (torch.ones(2, 1, 1, 1, device=device), torch.ones(2, 2, 2, 2, device=device))
+
+        for a1, a2, o in zip(arg1, arg2, outs):
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                torch.mul(a1, a2, out=o)
+                self.assertEqual(len(w), 1)
 
     # Verifies that the inplace dunders (like idiv) actually are in place
     @expectedFailureMeta  # UserWarning not triggered
@@ -3361,6 +3371,23 @@ class TestBinaryUfuncs(TestCase):
             actual = torch.lerp(x, y, w)
             expected = torch.lerp(xref, yref, wref).to(dtype)
             self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
+
+    @onlyCPU
+    @dtypes(torch.bfloat16)
+    def test_lerp_lowp_cpu(self, device, dtype):
+        xvals = (0.0, -30000.0)
+        yvals = (0.1, -20000.0)
+        for shape in [(4,), (20,), (3, 10, 10)]:
+            xs = [torch.full(shape, xval, device=device, dtype=dtype) for xval in xvals]
+            ys = [torch.full(shape, yval, device=device, dtype=dtype) for yval in yvals]
+            weights = [70000, torch.full(shape, 8, device=device, dtype=dtype)]
+            for x, y, w in zip(xs, ys, weights):
+                xref = x.float()
+                yref = y.float()
+                wref = w.float() if isinstance(w, torch.Tensor) else w
+                actual = torch.lerp(x, y, w)
+                expected = torch.lerp(xref, yref, wref).to(dtype)
+                self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
 
     def _test_logaddexp(self, device, dtype, base2):
         if base2:

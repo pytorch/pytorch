@@ -20,6 +20,7 @@ from torch._prims_common import (
     DimsType,
     Number,
     NumberType,
+    RETURN_TYPE,
     ShapeType,
     StrideType,
     TensorLike,
@@ -60,6 +61,8 @@ __all__ = [
     "bessel_i0e",
     "bessel_i1",
     "bessel_i1e",
+    "bessel_j0",
+    "bessel_j1",
     "bitwise_not",
     "cbrt",
     "ceil",
@@ -88,6 +91,7 @@ __all__ = [
     "signbit",
     "sin",
     "sinh",
+    "spherical_bessel_j0",
     "sqrt",
     "tan",
     "tanh",
@@ -188,6 +192,7 @@ __all__ = [
     #
     # Randomness Prims
     #
+    "normal",
     "uniform",
     #
     # FFT prims
@@ -196,27 +201,6 @@ __all__ = [
     "fft_c2c",
     "fft_c2r",
 ]
-
-
-# In order to keep things like aliasing relationships and storage
-# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
-# which caches conversions to Meta Tensors. We would like to use
-# one consistent mode among along FakeTensors, which we store here.
-# We store a weakref, so that when all previous FakeTensors are
-# the present mode will also deallocate. FakeTensorMode holds onto
-# tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.x
-prim_fake_mode_ref = None
-
-
-def get_prim_fake_mode():
-    global prim_fake_mode_ref
-    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
-        mode = FakeTensorMode()
-        prim_fake_mode_ref = weakref.ref(mode)
-        return mode
-    else:
-        return prim_fake_mode_ref()
 
 
 def TensorMeta(
@@ -259,58 +243,7 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    if isinstance(tensorlike, FakeTensor):
-        mode = tensorlike.fake_mode
-    else:
-        mode = get_prim_fake_mode()
-
-    if device.type == "meta":
-        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-    else:
-        # SymInt doesnt support empty_strided yet
-        if any(
-            isinstance(inp, torch.SymIntNode) for inp in itertools.chain(shape, strides)
-        ):
-            meta_t = torch.empty(shape, dtype=dtype, device="meta")
-        else:
-            meta_t = torch.empty_strided(shape, strides, dtype=dtype, device="meta")
-        return FakeTensor(mode, meta_t, device)
-
-
-#
-# Common datastructures and helpers
-#
-
-# Describes the return type of the primitive:
-#
-#   - NEW, a new tensor is created
-#   - VIEW, a view of an input tensor is returned
-#   - INPLACE, one or more input tensors is modified
-#
-# these descriptors are mututally exclusive and exhaustive.
-class RETURN_TYPE(Enum):
-    NEW = (0,)
-    VIEW = (1,)
-    INPLACE = (2,)
-
-
-def _wrap_tensor_meta(f):
-    def wrap(t):
-        if (
-            isinstance(t, torch.Tensor)
-            and not isinstance(t, FakeTensor)
-            and not t.device.type == "meta"
-        ):
-            return FakeTensor.from_tensor(t, get_prim_fake_mode())
-        else:
-            return t
-
-    def wrapper(*args, **kwargs):
-        wrapped_args = tree_map(wrap, args)
-        wrapped_kwargs = tree_map(wrap, kwargs)
-        return f(*wrapped_args, **wrapped_kwargs)
-
-    return wrapper
+    return torch.empty_strided(shape, strides, dtype=dtype, device=device)
 
 
 def _make_prim(
@@ -342,18 +275,16 @@ def _make_prim(
     def _autograd_impl(*args, **kwargs):
         return backwards_not_supported(_prim)(*args, **kwargs)
 
-    _meta_impl = _wrap_tensor_meta(meta)
-
     def _backend_select_impl(*args, **kwargs):
         if kwargs.get("device") and kwargs["device"].type == "meta":
-            return _meta_impl(*args, **kwargs)
+            return meta(*args, **kwargs)
         else:
             return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
     prim_autograd_impl.impl(name, _autograd_impl)
-    prim_meta_impl.impl(name, _meta_impl)
+    prim_meta_impl.impl(name, meta)
 
     _prim_packet = getattr(torch.ops.prims, name)
     _prim = _prim_packet.default
@@ -369,7 +300,7 @@ def _make_prim(
 
         p.schema = schema
         p.prim_impl = _prim_impl
-        p.prim_meta_impl = _wrap_tensor_meta(meta)
+        p.prim_meta_impl = meta
 
     return _prim
 
@@ -455,6 +386,8 @@ def _elementwise_meta(
     # Number case
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
+    assert not isinstance(number, torch.SymIntNode), "NYI"
+    assert not isinstance(number, torch.SymFloatNode), "NYI"
     return TensorMeta(number)
 
 
@@ -563,6 +496,20 @@ cos = _make_elementwise_unary_prim(
 cosh = _make_elementwise_unary_prim(
     "cosh",
     impl_aten=torch.cosh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bessel_j0 = _make_elementwise_unary_prim(
+    "bessel_j0",
+    impl_aten=torch.special.bessel_j0,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+bessel_j1 = _make_elementwise_unary_prim(
+    "bessel_j1",
+    impl_aten=torch.special.bessel_j1,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -844,6 +791,13 @@ sin = _make_elementwise_unary_prim(
 sinh = _make_elementwise_unary_prim(
     "sinh",
     impl_aten=torch.sinh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+spherical_bessel_j0 = _make_elementwise_unary_prim(
+    "spherical_bessel_j0",
+    impl_aten=torch.special.spherical_bessel_j0,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -1794,12 +1748,16 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
     shape = tensors[0].shape
     concat_length = 0
-    for tensor in tensors:
+    for tensor_idx, tensor in enumerate(tensors):
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 concat_length = concat_length + length
-            else:
-                assert length == common_length
+            elif length != common_length:
+                raise RuntimeError(
+                    f"Sizes of tensors must match except in dimension {dim}. "
+                    "Expected {common_length} but got {length} for tensor number "
+                    "{tensor_idx} in the list"
+                )
 
     new_shape = list(tensors[0].shape).copy()
     new_shape[dim] = concat_length
@@ -2589,6 +2547,64 @@ svd = _make_prim(
 # Randomness Prims
 #
 
+# TODO: add generator support
+# NOTE: there is currently no way of acquiring the "default" torch generator
+def _normal_meta(
+    shape: ShapeType,
+    *,
+    mean: Union[float, complex],
+    std: float,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> TensorLikeType:
+    utils.check(
+        std >= 0.0,
+        lambda: f"expected non-negative standard deviation, but got std={std}",
+    )
+
+    utils.check(
+        utils.is_float_dtype(dtype) or utils.is_complex_dtype(dtype),
+        lambda: f"expected a floating-point or complex dtype, but got dtype={dtype}",
+    )
+
+    strides = utils.make_contiguous_strides_for(shape)
+    return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
+
+
+def _normal_aten(
+    shape: ShapeType,
+    *,
+    mean: Union[float, complex],
+    std: float,
+    dtype: torch.dtype,
+    device: torch.device,
+    requires_grad: bool,
+) -> Tensor:
+    a = torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    with torch.no_grad():
+        # NOTE: normal_ is incorrectly annotated to expect mean to be a float
+        a.normal_(mean, std)  # type: ignore[arg-type]
+    return a
+
+
+_normal_doc = """
+    Constructs a tensor filled with values drawn from a normal distribution with the specified mean
+    and standard deviation.
+
+    Only supports floating-point types.
+"""
+
+normal = _make_prim(
+    schema=(
+        "normal(SymInt[] shape, *, Scalar mean, Scalar std, ScalarType dtype, Device device,  bool requires_grad) -> Tensor"
+    ),
+    return_type=RETURN_TYPE.NEW,
+    meta=_normal_meta,
+    impl_aten=_normal_aten,
+    doc=_normal_doc,
+)
+
 
 def _uniform_meta(
     shape: ShapeType,
@@ -2629,6 +2645,10 @@ uniform = _make_prim(
     impl_aten=_uniform_aten,
     doc=_uniform_doc,
 )
+
+#
+# FFT prims
+#
 
 
 def _fft_r2c_meta(

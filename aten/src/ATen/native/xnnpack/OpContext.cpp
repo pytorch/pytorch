@@ -133,10 +133,12 @@ XNNPackTransposeConv2dOpContext::create_context(at::Tensor&& weight,
 }
 
 Tensor XNNPackConv2dOpContext::run(const Tensor& input) {
+  std::lock_guard<std::mutex> lock(xnnp_mutex_);
   return xnnpack::internal::convolution2d::run(op_context_, input);
 }
 
 Tensor XNNPackTransposeConv2dOpContext::run(const Tensor& input) {
+  std::lock_guard<std::mutex> lock(xnnp_mutex_);
   return xnnpack::internal::convolution2d::run(op_context_, input);
 }
 
