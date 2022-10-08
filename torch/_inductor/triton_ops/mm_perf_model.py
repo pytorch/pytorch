@@ -1,10 +1,3 @@
-import triton
-import triton._C.libtriton.triton as _triton
-from triton.ops.matmul_perf_model import (
-    get_dram_gbps as get_dram_gbps,
-    get_tflops as get_tflops,
-)
-
 import torch
 
 
@@ -26,6 +19,13 @@ def estimate_matmul_time(
 ):
     """return estimated running time in ms
     = max(compute, loading) + store"""
+    import triton
+    import triton._C.libtriton.triton as _triton
+    from triton.ops.matmul_perf_model import (
+        get_dram_gbps as get_dram_gbps,
+        get_tflops as get_tflops,
+    )
+
     backend = _triton.runtime.backend.CUDA
     device = torch.cuda.current_device()
     dtype = A.dtype

@@ -20,7 +20,7 @@ class AotAutogradFallbackTests(torch._dynamo.testing.TestCase):
             def __init__(self):
                 super().__init__()
                 self.self_mod_model_lstm_lstm = torch.nn.LSTM(
-                    2048, 2048, num_layers=2, bidirectional=True
+                    64, 64, num_layers=2, bidirectional=True
                 )
 
             def forward(self, permute: torch.Tensor):
@@ -32,7 +32,7 @@ class AotAutogradFallbackTests(torch._dynamo.testing.TestCase):
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
         aot_mod = torch._dynamo.optimize(compiler_fn)(mod)
 
-        args = [((92, 4, 2048), (1, 188416, 92), torch.float32, "cpu", False)]
+        args = [((92, 4, 64), (1, 5888, 92), torch.float32, "cpu", False)]
         args = [
             rand_strided(sh, st, dt, dev).requires_grad_(rg)
             for (sh, st, dt, dev, rg) in args
