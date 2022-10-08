@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     FILE_SCHEMA,
+    find_free_port,
     IS_FBCODE,
     NO_MULTIPROCESSING_SPAWN,
     parametrize,
@@ -535,6 +536,8 @@ class TestDistBackend(MultiProcessTestCase):
         # Skip return code checking for following tests as they are expected to
         # crash a process due to NCCL_ASYNC_ERROR_HANDLING.
         self.skip_return_code_checks = []
+        # Explicitly looking for a free port here
+        os.environ["MASTER_PORT"] = str(find_free_port())
 
     def tearDown(self):
         cleanup_temp_dir()
