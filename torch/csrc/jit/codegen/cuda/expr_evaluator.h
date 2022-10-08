@@ -7,6 +7,7 @@
 
 #include <c10/util/Optional.h>
 
+#include <string>
 #include <unordered_map>
 
 namespace torch {
@@ -29,6 +30,9 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
 
   //! Bind a concrete value to an IR variable
   void bind(Val* value, const IntOrDouble& concrete_value);
+
+  //! Bind a concrete value to a named scalar
+  void bind(const std::string& name, const IntOrDouble& concrete_value);
 
   //! Try to evaluate a Fusion IR value
   c10::optional<IntOrDouble> evaluate(Val* value);

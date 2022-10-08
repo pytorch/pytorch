@@ -1,5 +1,7 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/dynamic_type.h>
+#include <torch/csrc/jit/codegen/cuda/executor_launch_params.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 
@@ -18,27 +20,25 @@ namespace cuda {
 // nsight compute. This utility currently has the following assumptions and
 // limitations:
 //
-//   1. This utility assumes that `blockDim.x` is large enough to hold one phase
-//   2. This utility assumes that the address only depends on loop variables
-//      (there can not be a thing like `T0.stride[0]`, `blockDim.x`)
-//   3. This utility assumes that the data of the tensor is accessed by
+//   1. This utility assumes that the data of the tensor is accessed by
 //      `T0[index]`, where `index` is the one stored in the `TensorIndex`
 //      object.
-//   4. This utility only checks the first iteration, and the start of all
-//      loop variables are assumed to be `0` (if we have something like
+//   2. This utility only checks the first iteration. If we have something like
 //      `T1_s[tidx, 5]`, then different iterations should have different
-//      results, which this utility will not be able to handle all of them now)
-//   5. This utility assumes that all tensors are independent, which means:
-//      5.1 All shared memory tensors are allocated starting from a multiple of
+//      conflictions, which will not be evaluated for all of them
+//   3. This utility assumes that all tensors are independent, which means:
+//      3.1 All shared memory tensors are allocated starting from a multiple of
 //          4*32 bytes
-//      5.2 The only source of bank confliction is from within a tensor.
+//      3.2 The only source of bank confliction is from within a tensor.
 //          There is no bank conflict between different tensors.
 //
 // Also note that this utility will not provide accurate estimation if the above
 // assumptions are satisfied
 
 std::unordered_map<const Expr*, std::pair<int, int>> getBankConflictInfo(
-    kir::Kernel* kernel);
+    kir::Kernel* kernel,
+    c10::optional<LaunchParams> launch_params = c10::nullopt,
+    const std::unordered_map<std::string, IntOrDouble>& known_values = {});
 
 } // namespace cuda
 } // namespace fuser

@@ -61,6 +61,12 @@ void ExpressionEvaluator::bind(Val* value, const IntOrDouble& concrete_value) {
   }
 }
 
+void ExpressionEvaluator::bind(
+    const std::string& name,
+    const IntOrDouble& concrete_value) {
+  known_named_scalars_[name] = concrete_value;
+}
+
 c10::optional<IntOrDouble> ExpressionEvaluator::evaluate(Val* value) {
   if (evaluator_precomputed_values_ != nullptr) {
     return toOptionalIntOrDouble(
