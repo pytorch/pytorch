@@ -577,8 +577,11 @@ def _get_devices_properties(device_ids):
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
 
-def is_xpu_available() -> bool:
-    return torch._C._is_xpu_available()
+def is_backend_available(device_type) -> bool:
+    if device_type.lower() == "xpu":
+        return torch._C._is_hooks_available("xpu") and torch.xpu.device_count() > 0  # type: ignore[attr-defined]
+    # add more available device types here
+    return False
 
 
 def get_current_device_index() -> int:
@@ -589,8 +592,9 @@ def get_current_device_index() -> int:
     """
     if torch.cuda.device_count() > 0:
         return torch.cuda.current_device()
-    if is_xpu_available() and torch.xpu.device_count() > 0:  # type: ignore[attr-defined]
+    if is_backend_available("xpu"):
         return torch.xpu.current_device()  # type: ignore[attr-defined]
+    # add more available device types here
     return -1
 
 

@@ -428,14 +428,21 @@ PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_isXPUAvailable_wrap(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  if (at::hasXPU()) {
+PyObject* THPModule_isHooksAvailable_wrap(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_is_hooks_available expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  std::string device_type = THPUtils_unpackString(arg);
+  if (device_type == "xpu" && at::hasXPU()) {
     Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
   }
-  END_HANDLE_TH_ERRORS
+  if (device_type == "mps" && at::hasMPS()) {
+    Py_RETURN_TRUE;
+  }
+  // add more available device types here
+  Py_RETURN_FALSE;
 }
 
 PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
@@ -940,7 +947,7 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
-    {"_is_xpu_available", THPModule_isXPUAvailable_wrap, METH_NOARGS, nullptr},
+    {"_is_hooks_available", THPModule_isHooksAvailable_wrap, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},
@@ -1307,7 +1314,6 @@ Call this whenever a new thread is created in order to propagate values from
 
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
-  py_module.def("_is_mps_available", []() { return at::hasMPS(); });
 
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));

@@ -846,7 +846,7 @@ def _has_storage(x: Tensor) -> _bool: ...
 # https://code.activestate.com/lists/python-dev/139675/
 def _to_dlpack(data: Tensor) -> Any: ...  # THPModule_toDLPack
 def _from_dlpack(data: Any) -> Tensor: ...  # THPModule_fromDLPack
-def _is_xpu_available() -> _bool: ...  # THPModule_isXPUAvailable_wrap
+def _is_hooks_available(device_type: str) -> _bool: ...  # THPModule_isHooksAvailable_wrap
 def _get_cpp_backtrace(frames_to_skip: _int, maximum_number_of_frames: _int) -> str: ...  # THPModule_getCppBacktrace
 def set_flush_denormal(arg: _bool) -> _bool: ...  # THPModule_setFlushDenormal
 def get_default_dtype() -> _dtype: ...  # THPModule_getDefaultDtype
@@ -869,7 +869,6 @@ def _disabled_torch_function_impl(func: Callable, types: Iterable[Type], args: T
 def _disabled_torch_dispatch_impl(func: Callable, types: Iterable[Type], args: Tuple, kwargs: Dict) -> Any: ...  # THPModule_disable_dispatch_function
 def _get_linalg_preferred_backend() -> torch._C._LinalgBackend: ...
 def _set_linalg_preferred_backend(arg: torch._C._LinalgBackend): ...
-def _is_mps_available() -> _bool: ...
 def _is_deploy_enabled() -> _bool: ...
 class _LinalgBackend:
     Default: _LinalgBackend
