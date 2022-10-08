@@ -393,6 +393,9 @@ RegisterOperators reg({
           std::string device_type;
           bool is_hooks = false;
           pop(stack, device_type);
+          if (device_type == "cuda") {
+            is_hooks = at::hasCUDA();
+          }
           if (device_type == "xpu") {
             is_hooks = at::hasXPU();
           }

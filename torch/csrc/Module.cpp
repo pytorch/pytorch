@@ -435,6 +435,9 @@ PyObject* THPModule_isHooksAvailable_wrap(PyObject* _unused, PyObject* arg) {
       "but got %s",
       THPUtils_typename(arg));
   std::string device_type = THPUtils_unpackString(arg);
+  if (device_type == "cuda" && at::hasCUDA()) {
+    Py_RETURN_TRUE;
+  }
   if (device_type == "xpu" && at::hasXPU()) {
     Py_RETURN_TRUE;
   }
