@@ -44,16 +44,39 @@ using TensorImplAddress = strong::type<
     const c10::TensorImpl*,
     struct TensorImplAddress_,
     strong::regular,
-    strong::hashable>;
+    strong::hashable,
+    strong::boolean>;
 
-using StorageImplData = strong::
-    type<void*, struct StorageImplData_, strong::regular, strong::hashable>;
+using StorageImplData = strong::type<
+    void*,
+    struct StorageImplData_,
+    strong::regular,
+    strong::hashable,
+    strong::boolean>;
 
-struct TensorMetadata {
-  c10::Device device() const {
-    return {device_type_, device_index_};
-  }
+// Identity is a complex concept in PyTorch. A Tensor might not have a
+// an associated storage, multiple Tensors might share the same underlying
+// storage, the storage of a Tensor might change over time, etc.
+//
+// For the purpose of profiling we're mostly interested in data flow
+// analysis. As a result, we can take an expansive view of identity:
+// Tensors share an ID if they share a TensorImpl or storage data.
+//
+// This identity equality is transitive; If Tensors T0 and T1 share a storage
+// S0 and T1 later points to a different storage S1 then all Tensors which
+// point to either S0 or S1 are considered to have the same identity. (Since
+// profiler cannot reason beyond that.)
+//
+// The profiler will handle lifetime analysis to ensure that identities do
+// not run afoul of the ABA problem. This does, however, mean that identities
+// can only be assigned when memory profiling is enabled. (And we cannot
+// handle ABA for TensorImpl as those allocations are not instrumented.)
+using TensorID = strong::type<size_t, struct TensorID_, strong::regular>;
 
+struct TORCH_API RawTensorMetadata {
+  RawTensorMetadata() = default;
+  RawTensorMetadata(const RawTensorMetadata&) = default;
+  explicit RawTensorMetadata(const at::Tensor& t);
   TensorImplAddress impl_;
   StorageImplData data_;
 
@@ -65,6 +88,16 @@ struct TensorMetadata {
   c10::ScalarType dtype_;
   c10::Layout layout_;
   uint32_t dim_;
+};
+
+struct TensorMetadata : public RawTensorMetadata {
+  explicit TensorMetadata(const RawTensorMetadata& r) : RawTensorMetadata(r) {}
+  explicit TensorMetadata(const at::Tensor& t) : RawTensorMetadata(t) {}
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  c10::optional<TensorID> id_;
 };
 
 struct Inputs {
@@ -147,8 +180,7 @@ struct ExtraFields<EventType::Backend> {
   jit_modules_t jit_modules_;
 };
 
-template <>
-struct ExtraFields<EventType::Allocation> {
+struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
@@ -160,8 +192,19 @@ struct ExtraFields<EventType::Allocation> {
 
 // For performance.
 static_assert(
-    std::is_pod<ExtraFields<EventType::Allocation>>::value,
-    "Non-POD member of ExtraFields<EventType::Allocation>.");
+    std::is_pod<RawAllocation>::value,
+    "Non-POD member of RawAllocation.");
+
+template <>
+struct ExtraFields<EventType::Allocation> : RawAllocation {
+  ExtraFields(const RawAllocation& allocation) : RawAllocation(allocation) {}
+
+  c10::Device device() const {
+    return {device_type_, device_index_};
+  }
+
+  c10::optional<TensorID> id_;
+};
 
 template <>
 struct ExtraFields<EventType::OutOfMemory> {
@@ -191,15 +234,32 @@ using strong_t = strong::
 using PyModuleSelf = strong_t<PyObject*, struct PyModuleSelf_>;
 using PyModuleCls = strong_t<PyObject*, struct PyModuleCls_>;
 using PyMethod = strong_t</*PyMethodDef*/ void*, struct PyMethod_>;
+using PyOptimizerSelf = strong_t<PyObject*, struct PyOptSelf_>;
+using PyOptimizerCls = strong_t<PyObject*, struct PyOptimizer_>;
+
+struct ParameterInfo {
+  std::string param_name_;
+  TensorMetadata param_;
+  c10::optional<TensorMetadata> grad_;
+};
 
 struct NNModuleInfo {
   PyModuleSelf self_;
   PyModuleCls cls_;
   at::StringView cls_name_;
 
-  std::vector<std::pair<std::string, void*>> params_;
+  std::vector<ParameterInfo> params_;
   // Indicates that `self_` is the kth instance of `cls_` observed.
   size_t id_{std::numeric_limits<size_t>::max()};
+};
+
+struct OptimizerInfo {
+  PyOptimizerSelf self_;
+  PyOptimizerCls opt_;
+  at::StringView opt_name_;
+
+  std::vector<TensorMetadata> params_addr_;
+  std::vector<std::pair<std::string, TensorMetadata>> opt_state_;
 };
 
 struct PyExtraFieldsBase {
@@ -216,7 +276,11 @@ struct PyExtraFieldsBase {
 
 template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
-  using args_t = std::pair<PyFrameState, c10::optional<NNModuleInfo>>;
+  using args_t = struct {
+    PyFrameState frame_state_;
+    c10::optional<NNModuleInfo> module_info_;
+    c10::optional<OptimizerInfo> opt_info_;
+  };
 
   ExtraFields(
       time_t end_time_ns,
@@ -224,11 +288,13 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
       PyFrameState caller,
       args_t args)
       : PyExtraFieldsBase(end_time_ns, python_tid, caller),
-        callsite_{args.first},
-        module_{args.second} {}
+        callsite_{args.frame_state_},
+        module_{args.module_info_},
+        opt_{args.opt_info_} {}
 
   PyFrameState callsite_;
   c10::optional<NNModuleInfo> module_;
+  c10::optional<OptimizerInfo> opt_;
 };
 
 template <>
@@ -386,7 +452,7 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
-  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+  AppendOnlyList<RawTensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_strides_;
   AppendOnlyList<c10::IValue, IO_ENCODER_DEFAULT_BLOCK_SIZE> ivalues_;
@@ -481,7 +547,7 @@ class TORCH_API ThreadLocalSubqueue {
   AppendOnlyList<ExtraFields<EventType::Backend>, BlockSize> backend_events_;
 
   // reportMemoryUsage
-  AppendOnlyList<ExtraFields<EventType::Allocation>, BlockSize> allocations_;
+  AppendOnlyList<RawAllocation, BlockSize> allocations_;
 
   // reportOOMs
   AppendOnlyList<ExtraFields<EventType::OutOfMemory>, BlockSize> ooms_;
