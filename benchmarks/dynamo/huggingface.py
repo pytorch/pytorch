@@ -8,11 +8,10 @@ import sys
 import warnings
 
 import torch
-from common import BenchmarkRunner
-from common import main
+from common import BenchmarkRunner, main
 
-from torch.dynamo.testing import collect_results
-from torch.dynamo.utils import clone_inputs
+from torch._dynamo.testing import collect_results
+from torch._dynamo.utils import clone_inputs
 
 log = logging.getLogger(__name__)
 

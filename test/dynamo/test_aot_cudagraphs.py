@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo
-import torch.dynamo.testing
-from torch.dynamo.testing import same
+import torch._dynamo
+import torch._dynamo.testing
+from torch._dynamo.testing import same
 
 
 def composed(*decs):
@@ -24,10 +24,10 @@ def assert_aot_autograd_counter(ok=True):
     def deco(f):
         @functools.wraps(f)
         def wrap(self, *args, **kwargs):
-            torch.dynamo.utils.counters.clear()
+            torch._dynamo.utils.counters.clear()
             r = f(self, *args, **kwargs)
-            c_ok = torch.dynamo.utils.counters["aot_autograd"]["ok"]
-            c_not_ok = torch.dynamo.utils.counters["aot_autograd"]["not_ok"]
+            c_ok = torch._dynamo.utils.counters["aot_autograd"]["ok"]
+            c_not_ok = torch._dynamo.utils.counters["aot_autograd"]["not_ok"]
             if ok:
                 self.assertGreater(c_ok, 0)
                 self.assertEqual(c_not_ok, 0)
@@ -43,7 +43,7 @@ def assert_aot_autograd_counter(ok=True):
 
 def patch_all(ok=True):
     return composed(
-        patch("torch.dynamo.config.verify_correctness", True),
+        patch("torch._dynamo.config.verify_correctness", True),
         assert_aot_autograd_counter(ok),
     )
 
@@ -53,13 +53,13 @@ N_ITERS = 5
 
 @unittest.skip("requires https://github.com/pytorch/pytorch/pull/84432/")
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
-class TestAotCudagraphs(torch.dynamo.testing.TestCase):
+class TestAotCudagraphs(torch._dynamo.testing.TestCase):
     @patch_all()
     def test_basic(self):
         def model(x, y):
             return (x + y) * y
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(x, y):
             for i in range(N_ITERS):
                 loss = model(x, y).sum()
@@ -76,7 +76,7 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
             b = a.cpu() * 3
             return b
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(x, y):
             for i in range(N_ITERS):
                 loss = model(x, y).sum()
@@ -92,7 +92,7 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
             a = x + y
             return a * 3
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(x, y):
             for i in range(N_ITERS):
                 loss = model(x, y).sum()
@@ -109,7 +109,7 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
             y.add_(3)
             return x * y
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(x, y):
             for i in range(N_ITERS):
                 with self.subTest(i):
@@ -129,7 +129,7 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
             c.add_(2)
             return x * y * 0 + c
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(x, y):
             for i in range(N_ITERS):
                 with self.subTest(i):
@@ -148,7 +148,7 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
             x.add_(3)
             return x * y
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(y):
             for i in range(N_ITERS):
                 with self.subTest(i):
@@ -169,7 +169,7 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
             x.fill_(2)
             return x
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(x):
             for i in range(N_ITERS):
                 with self.subTest(i):
@@ -189,7 +189,7 @@ class TestAotCudagraphs(torch.dynamo.testing.TestCase):
             y.fill_(3)
             return x, y
 
-        @torch.dynamo.optimize("aot_cudagraphs")
+        @torch._dynamo.optimize("aot_cudagraphs")
         def fn(x):
             for i in range(N_ITERS):
                 with self.subTest(i):

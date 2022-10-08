@@ -1,9 +1,7 @@
 import torch
-from torch.profiler import ProfilerActivity
-from torch.profiler import profile
-from torch.profiler import record_function
 
-import torch.inductor.triton_ops
+import torch._inductor.triton_ops
+from torch.profiler import profile, ProfilerActivity, record_function
 
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -67,7 +65,7 @@ def profile_op(
     elif provider == "triton":
 
         def fn():
-            return torch.inductor.triton_ops.conv(
+            return torch._inductor.triton_ops.conv(
                 x, w, bias, stride, padding, dilation, False, (0, 0), groups
             )
 

@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo.testing
-from torch.dynamo.eval_frame import unsupported
-from torch.dynamo.mutation_guard import GenerationTracker
-from torch.dynamo.testing import same
+import torch._dynamo.testing
+from torch._dynamo.eval_frame import unsupported
+from torch._dynamo.mutation_guard import GenerationTracker
+from torch._dynamo.testing import same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
@@ -596,7 +596,7 @@ class ModuleAttributePrecedence(ModuleAttributePrecedenceBase):
 
 def make_test(fn, expected_ops=None):
     def test_fn(self):
-        return torch.dynamo.testing.standard_test(
+        return torch._dynamo.testing.standard_test(
             self, fn=fn, nargs=1, expected_ops=expected_ops
         )
 
@@ -604,7 +604,7 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
-class NNModuleTests(torch.dynamo.testing.TestCase):
+class NNModuleTests(torch._dynamo.testing.TestCase):
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
     test_basicmodule2 = make_test(BasicModule())
@@ -648,19 +648,19 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
     def test_unsupportedmethod(self):
         m = UnsupportedMethodCall()
         i = torch.randn(10)
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_m = torch.dynamo.optimize(cnt)(m)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt)(m)
         r = opt_m(i)
-        self.assertTrue(torch.dynamo.testing.same(r, m(i)))
+        self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 5)
 
     def test_unsupportedmodule(self):
         m = UnsupportedModuleCall()
         i = torch.randn(10)
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_m = torch.dynamo.optimize(cnt)(m)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt)(m)
         r = opt_m(i)
-        self.assertTrue(torch.dynamo.testing.same(r, m(i)))
+        self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
     def test_self_mutating1(self):
@@ -670,29 +670,29 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
         m4 = SelfMutatingModule(m1)
         i = torch.randn(10)
         out2 = [m2(i), m2(i), m2(i)]
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_m3 = torch.dynamo.optimize_assert(cnt)(m3)
-        opt_m4 = torch.dynamo.optimize_assert(cnt)(m4)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m3 = torch._dynamo.optimize_assert(cnt)(m3)
+        opt_m4 = torch._dynamo.optimize_assert(cnt)(m4)
         out3 = [opt_m3(i), opt_m3(i), opt_m3(i)]
         out4 = [opt_m4(i), opt_m4(i), opt_m4(i)]
-        self.assertTrue(torch.dynamo.testing.same(out2, out3))
-        self.assertTrue(torch.dynamo.testing.same(out2, out4))
+        self.assertTrue(torch._dynamo.testing.same(out2, out3))
+        self.assertTrue(torch._dynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
 
-    @patch.object(torch.dynamo.config, "raise_on_ctx_manager_usage", False)
+    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
-        cnt = torch.dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounter()
 
         # guarantee that we have installed
         # the generation tagging function
-        with torch.dynamo.optimize_assert(cnt):
+        with torch._dynamo.optimize_assert(cnt):
             pass
 
         m1 = torch.nn.Linear(10, 10)
         prev_generation = GenerationTracker.get_generation_value(m1)
         cur_generation = prev_generation + 1
 
-        with torch.dynamo.optimize_assert(cnt):
+        with torch._dynamo.optimize_assert(cnt):
             m2 = torch.nn.Linear(10, 10)
 
         self.assertEqual(GenerationTracker.get_generation_value(m1), prev_generation)
@@ -717,18 +717,18 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
             def __torch_function__(cls, func, types, args=(), kwargs=None):
                 return super().__torch_function__(func, types, args, kwargs)
 
-        torch.dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+        torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
         x = torch.randn(1).as_subclass(TensorProxy)
-        cnt = torch.dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounter()
         out1 = foo(x)
-        opt_foo = torch.dynamo.optimize(cnt, nopython=True)(foo)
+        opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
         out2 = opt_foo(x)
 
         self.assertEqual(cnt.op_count, 4)
-        self.assertTrue(torch.dynamo.testing.same(out1, out2))
+        self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-        torch.dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+        torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
     def test_torch_function_with_closure(self):
         def run():
@@ -753,23 +753,23 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
                     counter + 1
                     return super().__torch_function__(func, types, args, kwargs)
 
-            torch.dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+            torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
             x = torch.randn(1).as_subclass(TensorProxy)
             x = torch.randn(1)
-            cnt = torch.dynamo.testing.CompileCounter()
+            cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
-            opt_foo = torch.dynamo.optimize(cnt, nopython=True)(foo)
+            opt_foo = torch._dynamo.optimize(cnt, nopython=True)(foo)
             out2 = opt_foo(x)
 
             self.assertEqual(cnt.op_count, 4)
-            self.assertTrue(torch.dynamo.testing.same(out1, out2))
+            self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-            torch.dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
         run()
 
-    @patch.object(torch.dynamo.config, "raise_on_ctx_manager_usage", False)
+    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
         class M(torch.nn.Module):
             def __init__(self, module_dict):
@@ -786,29 +786,29 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
         m = M(module_dict)
         data = torch.randn(1)
         out1 = m(data)
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_m = torch.dynamo.optimize(cnt, nopython=True)(m)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
         out2 = opt_m(data)
         self.assertEqual(cnt.op_count, 2)
-        self.assertTrue(torch.dynamo.testing.same(out1, out2))
+        self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
         module_dict = torch.nn.ModuleDict({"bar": torch.nn.Conv2d(1, 1, 1)})
         m = M(module_dict)
         data = torch.randn(1)
         out1 = m(data)
-        cnt = torch.dynamo.testing.CompileCounter()
-        torch.dynamo.reset()
-        opt_m = torch.dynamo.optimize(cnt, nopython=True)(m)
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch._dynamo.reset()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
         out2 = opt_m(data)
 
         self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch.dynamo.testing.same(out1, out2))
+        self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
         module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
         pre = m(data)
         cnt.clear()
 
-        with torch.dynamo.optimize(cnt, nopython=False):
+        with torch._dynamo.optimize(cnt, nopython=False):
             opt_pre = m(data)
             m = M(module_dict)
             data = torch.randn(1)
@@ -817,20 +817,20 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
         out_post = m(data)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch.dynamo.testing.same(pre, opt_pre))
-        self.assertTrue(torch.dynamo.testing.same(out1, out_post))
+        self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
+        self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
     def test_lazy_module(self):
         input_shape = (16, 3, 6, 7, 8)
 
-        cnt = torch.dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounter()
         module = LazyModule()
 
         def test_static_module():
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_static_module = torch.dynamo.optimize(cnt)(test_static_module)
+        opt_test_static_module = torch._dynamo.optimize(cnt)(test_static_module)
         opt_test_static_module()
 
         self.assertTrue(
@@ -848,7 +848,7 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
             input = torch.ones(*input_shape)
             module(input)
 
-        opt_test_unspecialized = torch.dynamo.optimize(cnt)(test_unspecialized)
+        opt_test_unspecialized = torch._dynamo.optimize(cnt)(test_unspecialized)
         opt_test_unspecialized()
 
         self.assertTrue(
@@ -862,15 +862,15 @@ class NNModuleTests(torch.dynamo.testing.TestCase):
             affine=False, track_running_stats=False
         )
 
-        cnt = torch.dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounter()
 
-        torch.dynamo.reset()
+        torch._dynamo.reset()
 
         def test_torch_static():
             input = torch.ones(*input_shape)
             return module(input)  # fully materialized
 
-        opt_test_torch_static = torch.dynamo.optimize(cnt)(test_torch_static)
+        opt_test_torch_static = torch._dynamo.optimize(cnt)(test_torch_static)
         opt_test_torch_static()
         out = opt_test_torch_static()
 

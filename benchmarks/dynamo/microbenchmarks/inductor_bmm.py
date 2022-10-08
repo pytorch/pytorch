@@ -1,17 +1,17 @@
 import torch
+
+import torch._dynamo
+import torch._dynamo.config
+import torch._inductor.config as config
 from benchmark_helper import time_with_torch_timer
 
-import torch.dynamo
-import torch.dynamo.config
-import torch.inductor.config as config
 
-
-@torch.dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", nopython=True)
 def inductor_aten_bmm(a, b):
     return torch.bmm(a, b)
 
 
-@torch.dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", nopython=True)
 def inductor_triton_bmm(a, b):
     return torch.bmm(a, b)
 

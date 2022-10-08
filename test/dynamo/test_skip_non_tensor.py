@@ -3,11 +3,11 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo
-from torch.dynamo.testing import CompileCounter
+import torch._dynamo
+from torch._dynamo.testing import CompileCounter
 
 
-class SkipNonTensorTests(torch.dynamo.testing.TestCase):
+class SkipNonTensorTests(torch._dynamo.testing.TestCase):
     def test_add_tensor1(self):
         def fn(a, b):
             return a + b
@@ -15,7 +15,7 @@ class SkipNonTensorTests(torch.dynamo.testing.TestCase):
         counter = CompileCounter()
         x = torch.randn(4)
         y = 5
-        opt_fn = torch.dynamo.optimize_assert(counter)(fn)
+        opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn(x, y)
 
         assert counter.op_count == 1
@@ -28,7 +28,7 @@ class SkipNonTensorTests(torch.dynamo.testing.TestCase):
 
         x = torch.randn(4)
         y = 5
-        opt_fn = torch.dynamo.optimize_assert(counter)(fn)
+        opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn(x, y)
 
         assert counter.op_count == 1
@@ -40,7 +40,7 @@ class SkipNonTensorTests(torch.dynamo.testing.TestCase):
         counter = CompileCounter()
         x = torch.randn(4)
         y = 5
-        opt_fn = torch.dynamo.optimize_assert(counter)(fn)
+        opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn([x, y])
 
         assert counter.op_count == 1
@@ -52,7 +52,7 @@ class SkipNonTensorTests(torch.dynamo.testing.TestCase):
         counter = CompileCounter()
         x = torch.randn(4)
         y = 5
-        opt_fn = torch.dynamo.optimize_assert(counter)(fn)
+        opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         opt_fn({"a": x, "b": y})
 
         assert counter.op_count == 1
@@ -62,14 +62,14 @@ class SkipNonTensorTests(torch.dynamo.testing.TestCase):
             return a + b
 
         counter = CompileCounter()
-        opt_fn = torch.dynamo.optimize_assert(counter)(fn)
+        opt_fn = torch._dynamo.optimize_assert(counter)(fn)
         x = 4
         y = 5
         opt_fn(x, y)
 
         assert counter.op_count == 0
 
-    @patch.object(torch.dynamo.config, "raise_on_ctx_manager_usage", False)
+    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_recursive_list(self):
         def fn(x):
             return x
@@ -78,12 +78,12 @@ class SkipNonTensorTests(torch.dynamo.testing.TestCase):
 
         x = []
         x.append(x)
-        with torch.dynamo.optimize_assert(counter):
+        with torch._dynamo.optimize_assert(counter):
             fn(x)
 
         assert counter.op_count == 0
 
-    @patch.object(torch.dynamo.config, "raise_on_ctx_manager_usage", False)
+    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_custom_list(self):
         def fn(x):
             return x[0] + x[1]
@@ -100,7 +100,7 @@ class SkipNonTensorTests(torch.dynamo.testing.TestCase):
         x = Foo()
         x.append(torch.randn(4))
         x.append(torch.randn(4))
-        with torch.dynamo.optimize_assert(counter):
+        with torch._dynamo.optimize_assert(counter):
             fn(x)
 
         assert counter.op_count == 0

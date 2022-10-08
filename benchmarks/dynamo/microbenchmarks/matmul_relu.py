@@ -1,13 +1,13 @@
 import torch
-from benchmark_helper import time_with_torch_timer
 
-import torch.dynamo
-import torch.inductor.config as inductor_config
+import torch._dynamo
+import torch._inductor.config as inductor_config
+from benchmark_helper import time_with_torch_timer
 
 inductor_config.triton.mm = "triton"
 
 
-@torch.dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", nopython=True)
 def inductor_mm(a, b):
     return torch.mm(a, b)
 

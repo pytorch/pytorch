@@ -2,20 +2,14 @@ import functools
 import logging
 import math
 import os
-from collections import Counter
-from collections import defaultdict
+from collections import Counter, defaultdict
 from functools import partial
-from typing import Any
-from typing import Dict
-from typing import Generator
-from typing import Iterable
-from typing import Tuple
+from typing import Any, Dict, Generator, Iterable, Tuple
 
 import torch
 from torch.testing import make_tensor
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._pytree import tree_flatten
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_flatten, tree_map
 
 log = logging.getLogger(__name__)
 

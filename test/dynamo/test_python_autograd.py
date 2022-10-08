@@ -3,8 +3,8 @@ from typing import Callable, Dict, List, NamedTuple, Optional
 
 import torch
 
-import torch.dynamo
-from torch.dynamo.testing import CompileCounter, same, TestCase
+import torch._dynamo
+from torch._dynamo.testing import CompileCounter, same, TestCase
 
 """
 This is an example of a pure-python version of autograd implemented by
@@ -203,7 +203,7 @@ class TestPythonAutograd(TestCase):
         args1 = [torch.randn(10), torch.randn(10)]
         args2 = [torch.randn(10), torch.randn(10)]
         cnt = CompileCounter()
-        fn_dynamo = torch.dynamo.optimize_assert(cnt)(fn)
+        fn_dynamo = torch._dynamo.optimize_assert(cnt)(fn)
         reset_tape()
         res1 = fn_dynamo(*args1)
         reset_tape()
@@ -270,8 +270,8 @@ class TestPythonAutograd(TestCase):
         grad1 = grad(loss1, [v1, v2])
 
         reset_tape()
-        opt_forward = torch.dynamo.optimize_assert(cnt)(forward)
-        opt_grad = torch.dynamo.optimize_assert(cnt)(grad)
+        opt_forward = torch._dynamo.optimize_assert(cnt)(forward)
+        opt_grad = torch._dynamo.optimize_assert(cnt)(grad)
         loss2 = opt_forward(v1, v2)
         # force two frames
         grad2 = opt_grad(loss2, [v1, v2])

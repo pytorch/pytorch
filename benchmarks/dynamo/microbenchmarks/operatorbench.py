@@ -5,14 +5,13 @@ import torch
 import triton
 from operator_inp_utils import OperatorInputsLoader
 
-from torch.dynamo.optimizations.backends import cudagraphs_inner
-from torch.dynamo.testing import same
-from torch.inductor import config as inductor_config
-from torch.inductor.compile_fx import compile_fx
-from torch.inductor.decomposition import decompositions
-from torch.inductor.lowering import fallbacks
-from torch.inductor.lowering import lowerings
-from torch.inductor.utils import gen_gm_and_inputs
+from torch._dynamo.optimizations.backends import cudagraphs_inner
+from torch._dynamo.testing import same
+from torch._inductor import config as inductor_config
+from torch._inductor.compile_fx import compile_fx
+from torch._inductor.decomposition import decompositions
+from torch._inductor.lowering import fallbacks, lowerings
+from torch._inductor.utils import gen_gm_and_inputs
 
 aten = torch.ops.aten
 

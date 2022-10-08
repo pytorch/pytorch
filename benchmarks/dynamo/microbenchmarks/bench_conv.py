@@ -1,8 +1,8 @@
 import model
 import torch
-import triton
 
-import torch.inductor.triton_ops
+import torch._inductor.triton_ops
+import triton
 
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -107,7 +107,7 @@ def bench_op(
     elif provider == "triton":
 
         def fn():
-            return torch.inductor.triton_ops.conv(
+            return torch._inductor.triton_ops.conv(
                 x, w, bias, stride, padding, dilation, False, (0, 0), groups
             )
 

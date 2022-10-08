@@ -5,8 +5,8 @@ import unittest
 
 import torch
 
-import torch.dynamo
-import torch.dynamo.testing
+import torch._dynamo
+import torch._dynamo.testing
 
 input = torch.ones([10, 10])
 model = torch.nn.Sequential(*[torch.nn.Linear(10, 10) for _ in range(2)])
@@ -19,7 +19,7 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     def test_fn(self):
         nonlocal opt
 
-        counter = torch.dynamo.testing.CompileCounter()
+        counter = torch._dynamo.testing.CompileCounter()
 
         if closure is not None:
 
@@ -29,7 +29,7 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
         else:
             fn = opt.step
 
-        opt_fn = torch.dynamo.optimize(counter)(fn)
+        opt_fn = torch._dynamo.optimize(counter)(fn)
         opt_fn()
 
         self.assertEqual(counter.frame_count, exp_frame_cnt)
@@ -37,7 +37,7 @@ def make_test(optim_cls, exp_frame_cnt=1, closure=None, **kwargs):
     return test_fn
 
 
-class OptimizerTests(torch.dynamo.testing.TestCase):
+class OptimizerTests(torch._dynamo.testing.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -45,17 +45,17 @@ class OptimizerTests(torch.dynamo.testing.TestCase):
         # to be called with capturable=True
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
-                torch.dynamo.config, "capture_scalar_outputs", True
+                torch._dynamo.config, "capture_scalar_outputs", True
             )
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
-                torch.dynamo.config, "fake_tensor_propagation", False
+                torch._dynamo.config, "fake_tensor_propagation", False
             )
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
-                torch.dynamo.config, "raise_on_assertion_error", True
+                torch._dynamo.config, "raise_on_assertion_error", True
             )
         )
 

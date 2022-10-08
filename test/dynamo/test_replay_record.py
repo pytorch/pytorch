@@ -6,51 +6,51 @@ import unittest
 
 import torch
 
-import torch.dynamo.testing
+import torch._dynamo.testing
 
 
-class ReplayRecordTests(torch.dynamo.testing.TestCase):
+class ReplayRecordTests(torch._dynamo.testing.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
-                torch.dynamo.config, "replay_record_enabled", True
+                torch._dynamo.config, "replay_record_enabled", True
             )
         )
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
-                torch.dynamo.config,
+                torch._dynamo.config,
                 "replay_record_dir_name",
-                "/tmp/torch.dynamo_error_records/",
+                "/tmp/torch._dynamo_error_records/",
             )
         )
 
     @classmethod
     def tearDownClass(cls):
-        shutil.rmtree(torch.dynamo.config.replay_record_dir_name, ignore_errors=True)
+        shutil.rmtree(torch._dynamo.config.replay_record_dir_name, ignore_errors=True)
         cls._exit_stack.close()
 
     def check_replay(self, fn, *args, exp_exc_name=None):
-        fn_opt = torch.dynamo.optimize("eager")(fn)
-        with self.assertLogs(logger="torch.dynamo", level=logging.ERROR) as log_orig:
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        with self.assertLogs(logger="torch._dynamo", level=logging.ERROR) as log_orig:
             try:
                 fn_opt(*args)
             except Exception:
                 pass  # we'll check the logs for the raised exception
 
         with self.assertLogs(
-            logger="torch.dynamo", level=logging.ERROR
+            logger="torch._dynamo", level=logging.ERROR
         ) as log_replayed:
             file_name_match = re.search(
-                r"torch.dynamo\.replay\('(.*)'\)", log_orig.output[-1]
+                r"torch._dynamo\.replay\('(.*)'\)", log_orig.output[-1]
             )
             self.assertTrue(
                 file_name_match is not None,
                 "No record file name found in generated logs.",
             )
 
-            torch.dynamo.replay(file_name_match.groups()[0])
+            torch._dynamo.replay(file_name_match.groups()[0])
 
         def get_error_name(log):
             error_name = re.search(r"\w+Error", log.output[-1])

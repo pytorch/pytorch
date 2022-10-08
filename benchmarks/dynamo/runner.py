@@ -36,18 +36,17 @@ import shutil
 import subprocess
 from collections import defaultdict
 from datetime import datetime
-from os.path import abspath
-from os.path import exists
+from os.path import abspath, exists
 from random import randint
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import torch
+
+import torch._dynamo
 from matplotlib import rcParams
 from scipy.stats import gmean
 from tabulate import tabulate
-
-import torch.dynamo
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
@@ -285,17 +284,17 @@ def build_summary():
         out_io.write(f"{name} = {os.environ[name]}\n")
 
     out_io.write("## Commit hashes ##\n")
-    print_commit_hash(".", "torch.dynamo")
+    print_commit_hash(".", "torch._dynamo")
     print_commit_hash("../pytorch", "pytorch")
     print_commit_hash("../functorch", "functorch")
     print_commit_hash("../torchbenchmark", "torchbench")
 
     out_io.write("\n")
     out_io.write("## TorchDynamo config flags ##\n")
-    for key in dir(torch.dynamo.config):
-        val = getattr(torch.dynamo.config, key)
+    for key in dir(torch._dynamo.config):
+        val = getattr(torch._dynamo.config, key)
         if not key.startswith("__") and isinstance(val, bool):
-            out_io.write(f"torch.dynamo.config.{key} = {val}\n")
+            out_io.write(f"torch._dynamo.config.{key} = {val}\n")
 
     out_io.write("\n")
     out_io.write("## Torch version ##\n")

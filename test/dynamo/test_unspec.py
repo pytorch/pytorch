@@ -7,8 +7,8 @@ from unittest.mock import patch
 import numpy as np
 import torch
 
-import torch.dynamo.testing
-from torch.dynamo.testing import same
+import torch._dynamo.testing
+from torch._dynamo.testing import same
 
 try:
     from . import test_modules, test_repros
@@ -20,7 +20,7 @@ except ImportError:
 def make_unspec_fn(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
-        with patch.object(torch.dynamo.config, "specialize_int_float", False):
+        with patch.object(torch._dynamo.config, "specialize_int_float", False):
             return fn(*args, **kwargs)
 
     return _fn
@@ -50,8 +50,8 @@ UnspecReproTests = make_unspec_cls(test_repros.ReproTests)
 UnspecNNModuleTests = make_unspec_cls(test_modules.NNModuleTests)
 
 
-@patch.object(torch.dynamo.config, "specialize_int_float", False)
-class UnspecTests(torch.dynamo.testing.TestCase):
+@patch.object(torch._dynamo.config, "specialize_int_float", False)
+class UnspecTests(torch._dynamo.testing.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
@@ -70,8 +70,8 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         y = torch.ones([2, 2], dtype=torch.int64)
         z = np.int64(12)
         res1 = fn(x, y, z)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2))
 
@@ -81,8 +81,8 @@ class UnspecTests(torch.dynamo.testing.TestCase):
             return {"a": x + 1, "b": y / 2}
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         for i in range(10):
             opt_fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
@@ -97,8 +97,8 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         y = 10
         z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         res1 = fn(x, y, z)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2))
 
@@ -111,8 +111,8 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         shape = [2, 3]
         random.seed(1)
         res1 = fn(shape)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         random.seed(1)
         res2 = opt_fn(shape)
 
@@ -130,13 +130,13 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         random.seed(1)
         res1 = fn(x)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
 
-    @patch.object(torch.dynamo.config, "fake_tensor_propagation", False)
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     def test_multiple_consecutive_random_calls_before_graph(self):
         def fn(x):
             dim1 = random.randrange(start=0, stop=5)
@@ -148,8 +148,8 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
         random.seed(1)
         res1 = fn(x)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -165,7 +165,7 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         x = torch.randn(4)
         random.seed(1)
         res1 = fn(x)
-        opt_fn = torch.dynamo.optimize("eager")(fn)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -177,8 +177,8 @@ class UnspecTests(torch.dynamo.testing.TestCase):
 
         x = list(range(50))
         ref = fn(x, 48)  # 48 is unspecialized
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, 48)
         self.assertTrue(same(ref, res))
 
@@ -192,8 +192,8 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         x = torch.randn([3, 6], device="cuda")
         scaler = 0.23  # 0.23 is unspecialized
         ref = fn(x, scaler)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, scaler)
         self.assertTrue(same(ref, res))
         self.assertEqual(ref.device, res.device)
@@ -214,7 +214,7 @@ class UnspecTests(torch.dynamo.testing.TestCase):
         x = torch.rand([3, 427, 640])
         scale_factor = 1.873536229133606
         ref = fn(x, scale_factor)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))

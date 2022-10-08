@@ -1,22 +1,22 @@
 # flake8: noqa
 import model
 import torch
+
+import torch._dynamo
+import torch._inductor.config
 import triton
 from prettytable import PrettyTable
 
-import torch.dynamo
-import torch.inductor.config
-
-# torch.inductor.config.debug = True
-torch.inductor.config.triton.convolution = "triton"
-torch.inductor.config.triton.dense_indexing = True
+# torch._inductor.config.debug = True
+torch._inductor.config.triton.convolution = "triton"
+torch._inductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 useCudaGraph = True
 
 
 class Func(object):
     # conv
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def conv_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         return y
@@ -27,7 +27,7 @@ class Func(object):
         return y
 
     # conv+bias
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def conv_add_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         return y
@@ -38,7 +38,7 @@ class Func(object):
         return y
 
     # relu(conv)
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def conv_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, None, stride, padding, dilation, groups)
         return torch.relu(y)
@@ -49,7 +49,7 @@ class Func(object):
         return torch.relu(y)
 
     # relu(conv+bias)
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def conv_add_relu_torchinductor(x, w, bias, stride, padding, dilation, groups):
         y = torch.conv2d(x, w, bias, stride, padding, dilation, groups)
         return torch.relu(y)
@@ -60,7 +60,7 @@ class Func(object):
         return torch.relu(y)
 
     # bn(conv)
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def conv_bn_torchinductor(
         x,
         w,
@@ -117,7 +117,7 @@ class Func(object):
         return y
 
     # relu(bn(conv))
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def conv_bn_relu_torchinductor(
         x,
         w,

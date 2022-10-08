@@ -1,11 +1,11 @@
 import model
 import torch
-import triton
 
-import torch.dynamo
-import torch.inductor
-import torch.inductor.config as config
-import torch.inductor.triton_ops
+import torch._dynamo
+import torch._inductor
+import torch._inductor.config as config
+import torch._inductor.triton_ops
+import triton
 
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -111,14 +111,14 @@ def bench_op(
     elif provider == "triton_conv":
 
         def fn():
-            return torch.inductor.triton_ops.conv(
+            return torch._inductor.triton_ops.conv(
                 x, w, bias, stride, padding, dilation, False, (0, 0), groups
             )
 
     elif provider == "triton_conv1x1":
 
         def fn():
-            return torch.inductor.triton_ops.conv1x1(
+            return torch._inductor.triton_ops.conv1x1(
                 x, w, bias, stride, padding, dilation, False, (0, 0), groups
             )
 
@@ -127,7 +127,7 @@ def bench_op(
 
     elif provider == "autotune":
 
-        @torch.dynamo.optimize("inductor")
+        @torch._dynamo.optimize("inductor")
         def wrap_conv(*args, **kwargs):
             return torch.conv2d(*args, **kwargs)
 

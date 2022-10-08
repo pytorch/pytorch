@@ -4,13 +4,13 @@ from unittest.mock import patch
 
 import pytest
 import torch
-import torch.distributed as dist
 
-import torch.dynamo
+import torch._dynamo
+import torch.distributed as dist
 from torch import nn
+from torch._dynamo import config
+from torch._dynamo.testing import same
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.dynamo import config
-from torch.dynamo.testing import same
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 
@@ -37,7 +37,7 @@ class CheckSplitsCompiler:
 
 
 @pytest.mark.skip("Module hangs in PyTorch CI")
-class TestDistributed(torch.dynamo.testing.TestCase):
+class TestDistributed(torch._dynamo.testing.TestCase):
     """
     Test harness initializes dist process group
     """
@@ -75,7 +75,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
     def test_ddp_baseline_aot_eager(self):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
-        ddp_m = torch.dynamo.optimize("aot_eager")(ddp_m)
+        ddp_m = torch._dynamo.optimize("aot_eager")(ddp_m)
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
@@ -83,7 +83,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
     def test_ddp_baseline_inductor(self):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids)
-        ddp_m = torch.dynamo.optimize("inductor")(ddp_m)
+        ddp_m = torch._dynamo.optimize("inductor")(ddp_m)
         outputs = ddp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
@@ -93,7 +93,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
     def test_fsdp_baseline_aot_eager(self):
         m, inputs, correct_outputs = self.get_model()
         fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
-        fsdp_m = torch.dynamo.optimize("aot_eager")(fsdp_m)
+        fsdp_m = torch._dynamo.optimize("aot_eager")(fsdp_m)
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
@@ -103,7 +103,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
     def test_fsdp_baseline_inductor(self):
         m, inputs, correct_outputs = self.get_model()
         fsdp_m = FSDP(m, device_id=self.device_ids[0] if self.device_ids else None)
-        fsdp_m = torch.dynamo.optimize("inductor")(fsdp_m)
+        fsdp_m = torch._dynamo.optimize("inductor")(fsdp_m)
         outputs = fsdp_m(inputs)
         self.assertTrue(same(correct_outputs, outputs))
 
@@ -124,7 +124,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
 
         check_splits_compiler = CheckSplitsCompiler()
 
-        @torch.dynamo.optimize(check_splits_compiler.compile_fn)
+        @torch._dynamo.optimize(check_splits_compiler.compile_fn)
         def opt_fn(inputs):
             return ddp_m(inputs)
 
@@ -145,7 +145,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torch.dynamo.optimize("inductor")
+        @torch._dynamo.optimize("inductor")
         def opt_fn(inputs):
             return ddp_m(inputs)
 
@@ -167,7 +167,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
 
         check_splits_compiler = CheckSplitsCompiler()
 
-        @torch.dynamo.optimize(check_splits_compiler.compile_fn)
+        @torch._dynamo.optimize(check_splits_compiler.compile_fn)
         def opt_fn(inputs):
             return ddp_m(inputs)
 
@@ -188,7 +188,7 @@ class TestDistributed(torch.dynamo.testing.TestCase):
         m, inputs, correct_outputs = self.get_model()
         ddp_m = DDP(m, device_ids=self.device_ids, bucket_cap_mb=25)
 
-        @torch.dynamo.optimize("aot_nvfuser")
+        @torch._dynamo.optimize("aot_nvfuser")
         def opt_fn(inputs):
             return ddp_m(inputs)
 

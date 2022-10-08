@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-from torch.dynamo.testing import make_test_cls_with_patches
+from torch._dynamo.testing import make_test_cls_with_patches
 
 try:
     from . import test_functions, test_misc, test_modules, test_repros, test_unspec

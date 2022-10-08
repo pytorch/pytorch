@@ -6,10 +6,10 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo
-import torch.dynamo.config as config
-from torch.dynamo.optimizations import backends
-from torch.dynamo.testing import same
+import torch._dynamo
+import torch._dynamo.config as config
+from torch._dynamo.optimizations import backends
+from torch._dynamo.testing import same
 
 
 def has_onnxruntime():
@@ -77,7 +77,7 @@ def transform(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return gm
 
 
-class TestVerifyCorrectness(torch.dynamo.testing.TestCase):
+class TestVerifyCorrectness(torch._dynamo.testing.TestCase):
     @patch.object(config, "verify_correctness", True)
     def test_example_inputs(self):
         def fn(a, bc, d):
@@ -95,7 +95,7 @@ class TestVerifyCorrectness(torch.dynamo.testing.TestCase):
         d = 4
         r1 = None
         r2 = fn(a, (b, c), d)
-        opt_fn = torch.dynamo.optimize_assert(compiler_fn)(fn)
+        opt_fn = torch._dynamo.optimize_assert(compiler_fn)(fn)
         r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
@@ -107,7 +107,7 @@ class TestVerifyCorrectness(torch.dynamo.testing.TestCase):
         s = Seq()
         i = torch.randn(10)
         r1 = s(i)
-        opt_s = torch.dynamo.optimize("nnc")(s)
+        opt_s = torch._dynamo.optimize("nnc")(s)
         r2 = opt_s(i)
         self.assertTrue(same(r1, r2))
 
@@ -127,7 +127,7 @@ class TestVerifyCorrectness(torch.dynamo.testing.TestCase):
 
         toy_example(i1, i2)
         try:
-            opt_toy_example = torch.dynamo.optimize(incorrect_compile_fn)(toy_example)
+            opt_toy_example = torch._dynamo.optimize(incorrect_compile_fn)(toy_example)
             opt_toy_example(i1, i2)
         except RuntimeError:
             pass
@@ -149,7 +149,7 @@ class TestVerifyCorrectness(torch.dynamo.testing.TestCase):
             return transform(gm).forward
 
         r1 = toy_example(i1, i2)
-        opt_toy_example = torch.dynamo.optimize(incorrect_compile_fn)(toy_example)
+        opt_toy_example = torch._dynamo.optimize(incorrect_compile_fn)(toy_example)
         r2 = opt_toy_example(i1, i2)
         self.assertTrue(not same(r1, r2))
 
@@ -161,7 +161,7 @@ class TestVerifyCorrectness(torch.dynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch.dynamo.optimize(backends.ipex_fp32)(model)
+        opt_model = torch._dynamo.optimize(backends.ipex_fp32)(model)
         with torch.no_grad():
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2))
@@ -175,7 +175,7 @@ class TestVerifyCorrectness(torch.dynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch.dynamo.optimize(backends.ipex_bf16)(model)
+        opt_model = torch._dynamo.optimize(backends.ipex_bf16)(model)
         with torch.no_grad(), torch.cpu.amp.autocast():
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))

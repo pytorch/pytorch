@@ -7,12 +7,12 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo
-from torch.dynamo.optimizations import backends
-from torch.dynamo.optimizations.analysis import has_mutation
-from torch.dynamo.optimizations.log_args import conv_args_analysis
-from torch.dynamo.optimizations.normalize import Inplacifier, normalize
-from torch.dynamo.testing import same
+import torch._dynamo
+from torch._dynamo.optimizations import backends
+from torch._dynamo.optimizations.analysis import has_mutation
+from torch._dynamo.optimizations.log_args import conv_args_analysis
+from torch._dynamo.optimizations.normalize import Inplacifier, normalize
+from torch._dynamo.testing import same
 
 
 def has_onnxruntime():
@@ -64,7 +64,7 @@ class Conv_Bn_Relu(torch.nn.Module):
         return self.relu(self.bn(self.conv(x)))
 
 
-class TestOptimizations(torch.dynamo.testing.TestCase):
+class TestOptimizations(torch._dynamo.testing.TestCase):
     def test_inplacifier(self):
         gm = torch.fx.symbolic_trace(Seq())
         normalize(gm)
@@ -98,7 +98,7 @@ class TestOptimizations(torch.dynamo.testing.TestCase):
             self.assertTrue(has_mutation(graph, example_inputs))
             return graph
 
-        opt_fn = torch.dynamo.optimize(compiler_fn)(fn)
+        opt_fn = torch._dynamo.optimize(compiler_fn)(fn)
         opt_fn()
 
     def test_example_inputs(self):
@@ -117,14 +117,14 @@ class TestOptimizations(torch.dynamo.testing.TestCase):
         d = 4
         r1 = None
         r2 = fn(a, (b, c), d)
-        opt_fn = torch.dynamo.optimize_assert(compiler_fn)(fn)
+        opt_fn = torch._dynamo.optimize_assert(compiler_fn)(fn)
         r3 = opt_fn(a, (b, c), d)
 
         self.assertIsNotNone(r1)
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    @patch.object(torch.dynamo.config, "fake_tensor_propagation", False)
+    @patch.object(torch._dynamo.config, "fake_tensor_propagation", False)
     @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_log_conv_args(self):
         model = Conv_Bn_Relu(3, 32, kernel_size=3, stride=1)
@@ -136,7 +136,7 @@ class TestOptimizations(torch.dynamo.testing.TestCase):
         filename = "tmp/conv_args.json"
         if os.path.exists(filename):
             os.remove(filename)
-        opt_model = torch.dynamo.optimize(conv_args_analysis)(model)
+        opt_model = torch._dynamo.optimize(conv_args_analysis)(model)
         with torch.no_grad():
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
@@ -163,7 +163,7 @@ class TestOptimizations(torch.dynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch.dynamo.optimize(backends.ipex_fp32)(model)
+        opt_model = torch._dynamo.optimize(backends.ipex_fp32)(model)
         with torch.no_grad():
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2))
@@ -176,14 +176,14 @@ class TestOptimizations(torch.dynamo.testing.TestCase):
         model = model.eval()
         input = torch.randn(8, 3, 64, 64).contiguous(memory_format=torch.channels_last)
         r1 = model(input)
-        opt_model = torch.dynamo.optimize(backends.ipex_bf16)
+        opt_model = torch._dynamo.optimize(backends.ipex_bf16)
         with torch.no_grad(), torch.cpu.amp.autocast():
             r2 = opt_model(input)
         self.assertTrue(same(r1, r2.float(), tol=0.1))
         self.assertEqual(r2.dtype, torch.bfloat16)
 
 
-class NormalizeIRTests(torch.dynamo.testing.TestCase):
+class NormalizeIRTests(torch._dynamo.testing.TestCase):
     @unittest.skipIf(not has_functorch(), "requires functorch")
     def test_inplace_normalize(self):
         def fn(a, b):
@@ -196,6 +196,6 @@ class NormalizeIRTests(torch.dynamo.testing.TestCase):
 
         ref = fn(a, b)
 
-        optimized_fn = torch.dynamo.optimize("aot_eager")(fn)
+        optimized_fn = torch._dynamo.optimize("aot_eager")(fn)
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))

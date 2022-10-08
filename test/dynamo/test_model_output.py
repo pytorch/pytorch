@@ -4,8 +4,8 @@ import unittest.mock
 
 import torch
 
-import torch.dynamo.testing
-from torch.dynamo.testing import same
+import torch._dynamo.testing
+from torch._dynamo.testing import same
 
 try:
     from transformers import modeling_outputs
@@ -22,7 +22,7 @@ def maybe_skip(fn):
     return fn
 
 
-class TestHFPretrained(torch.dynamo.testing.TestCase):
+class TestHFPretrained(torch._dynamo.testing.TestCase):
     @maybe_skip
     def test_pretrained(self):
         def fn(a, tmp):
@@ -33,19 +33,19 @@ class TestHFPretrained(torch.dynamo.testing.TestCase):
         x = torch.randn(2)
         tmp = PretrainedConfig(return_dict=True, max_length=20)
         ref = fn(x, tmp)
-        opt_fn = torch.dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         res = opt_fn(x, tmp)
         self.assertTrue(same(ref, res))
 
 
-class TestModelOutput(torch.dynamo.testing.TestCase):
+class TestModelOutput(torch._dynamo.testing.TestCase):
     @maybe_skip
     def test_mo_create(self):
         def fn(a, b):
             tmp = BaseModelOutput(a + 1, attentions=b + 3)
             return tmp
 
-        torch.dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=2)
+        torch._dynamo.testing.standard_test(self, fn=fn, nargs=2, expected_ops=2)
 
     @maybe_skip
     def test_mo_assign(self):
@@ -58,8 +58,8 @@ class TestModelOutput(torch.dynamo.testing.TestCase):
         args = [torch.randn(10), torch.randn(10)]
         obj1 = fn(*args)
 
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize_assert(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
         self.assertTrue(same(obj1.last_hidden_state, obj2.last_hidden_state))
         self.assertTrue(same(obj1.hidden_states, obj2.hidden_states))
@@ -74,8 +74,8 @@ class TestModelOutput(torch.dynamo.testing.TestCase):
             )
         ]
         obj1 = fn(*args)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize_assert(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize_assert(cnts)(fn)
         obj2 = opt_fn(*args)
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
@@ -152,8 +152,8 @@ class TestModelOutput(torch.dynamo.testing.TestCase):
         correct1 = fn(obj1)
 
         obj2 = MyDataClass(*tensors)
-        cnts = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnts)(fn)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertTrue(same(opt_fn(obj2), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)

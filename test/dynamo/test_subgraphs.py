@@ -4,10 +4,10 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo.testing
-from torch.dynamo import config
-from torch.dynamo.testing import unsupported
-from torch.dynamo.utils import disable_cache_limit
+import torch._dynamo.testing
+from torch._dynamo import config
+from torch._dynamo.testing import unsupported
+from torch._dynamo.utils import disable_cache_limit
 
 globalmod = torch.nn.ReLU()
 
@@ -17,19 +17,19 @@ def indirectly_unsupported(a, b):
     return unsupported(a, c)
 
 
-class SubGraphTests(torch.dynamo.testing.TestCase):
+class SubGraphTests(torch._dynamo.testing.TestCase):
     def _common(self, fn, frame_count, op_count):
-        torch.dynamo.reset()
+        torch._dynamo.reset()
         v1 = torch.ones(10)
         v2 = torch.ones(10) * -2.0
         correct1 = fn(v1, v2)
         correct2 = fn(v2, v1)
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnt)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
         r1 = opt_fn(v1, v2)
         r2 = opt_fn(v2, v1)
-        self.assertTrue(torch.dynamo.testing.same(r1, correct1))
-        self.assertTrue(torch.dynamo.testing.same(r2, correct2))
+        self.assertTrue(torch._dynamo.testing.same(r1, correct1))
+        self.assertTrue(torch._dynamo.testing.same(r2, correct2))
         self.assertEqual(cnt.frame_count, frame_count)
         self.assertEqual(cnt.op_count, op_count)
 
@@ -106,7 +106,7 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
         def fn(a, b):
             c1 = a - b
             c2 = b - a
-            return torch.dynamo.testing.unsupported(c1, c2)
+            return torch._dynamo.testing.unsupported(c1, c2)
 
         self._common(fn, 1, 2)
 
@@ -280,12 +280,12 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
         t = torch.ones(1, dtype=torch.int32)
         correct1 = fn(v1, v2, t)
         correct2 = fn(v1, v2, f)
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnt)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
         r1 = opt_fn(v1, v2, t)
         r2 = opt_fn(v1, v2, f)
-        self.assertTrue(torch.dynamo.testing.same(r1, correct1))
-        self.assertTrue(torch.dynamo.testing.same(r2, correct2))
+        self.assertTrue(torch._dynamo.testing.same(r1, correct1))
+        self.assertTrue(torch._dynamo.testing.same(r2, correct2))
         self.assertEqual(cnt.frame_count, 3)
         self.assertEqual(cnt.op_count, 4)
 
@@ -349,24 +349,24 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
         def fn(a, b):
             return a - b * 10
 
-        torch.dynamo.reset()
-        cnt_static = torch.dynamo.testing.CompileCounter()
-        with patch("torch.dynamo.config.dynamic_shapes", False):
-            opt_fn = torch.dynamo.optimize(cnt_static)(fn)
+        torch._dynamo.reset()
+        cnt_static = torch._dynamo.testing.CompileCounter()
+        with patch("torch._dynamo.config.dynamic_shapes", False):
+            opt_fn = torch._dynamo.optimize(cnt_static)(fn)
             for i in range(10):
                 opt_fn(torch.randn(i), torch.randn(i))
         self.assertEqual(cnt_static.frame_count, 10)
 
-        torch.dynamo.reset()
-        cnt_dynamic = torch.dynamo.testing.CompileCounter()
-        with patch("torch.dynamo.config.dynamic_shapes", True):
-            opt_fn = torch.dynamo.optimize(cnt_dynamic)(fn)
+        torch._dynamo.reset()
+        cnt_dynamic = torch._dynamo.testing.CompileCounter()
+        with patch("torch._dynamo.config.dynamic_shapes", True):
+            opt_fn = torch._dynamo.optimize(cnt_dynamic)(fn)
             for i in range(10):
                 opt_fn(torch.randn(i), torch.randn(i))
         # just one graph now rather than 10
         self.assertEqual(cnt_dynamic.frame_count, 1)
 
-    @patch.object(torch.dynamo.config, "capture_scalar_outputs", True)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_no_graph_break_on_item(self):
         def fn(a, b):
             x = a + b - 1.5
@@ -377,7 +377,7 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
 
         self._common(fn, 1, 6)
 
-    @patch.object(torch.dynamo.config, "capture_scalar_outputs", False)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_graph_break_on_item(self):
         def fn(a, b):
             x = a + b - 1.5
@@ -404,8 +404,8 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
         v1 = torch.randn(10)
         t = torch.Tensor([True])
         f = torch.Tensor([False])
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnt)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
         for a in (t, f):
             for b in (t, f):
                 for c in (t, f):
@@ -426,7 +426,7 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
             return x
 
         self._common(fn, 2, 9)
-        torch.dynamo.reset()
+        torch._dynamo.reset()
         with torch.no_grad():
             self._common(fn, 2, 9)
 
@@ -490,8 +490,8 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
 
         v1 = torch.randn(10)
         v2, it2 = fn(v1)
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnt)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
         v3, it3 = opt_fn(v1)
         v4, it4 = opt_fn(v1)
         self.assertEqual(v2.tolist(), v3.tolist())
@@ -511,8 +511,8 @@ class SubGraphTests(torch.dynamo.testing.TestCase):
 
         v1 = torch.randn(10)
         it1 = iter(tuple(range(10)))
-        cnt = torch.dynamo.testing.CompileCounter()
-        opt_fn = torch.dynamo.optimize(cnt)(fn)
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt)(fn)
         self.assertEqual(opt_fn(v1, it1).tolist(), (v1 + 1 + 2 + 3).tolist())
         self.assertEqual(list(it1), [4, 5, 6, 7, 8, 9])
 

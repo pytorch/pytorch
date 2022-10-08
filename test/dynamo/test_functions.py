@@ -9,9 +9,9 @@ from typing import Any
 
 import torch
 
-import torch.dynamo.testing
+import torch._dynamo.testing
 from torch import sub
-from torch.dynamo.testing import requires_static_shapes
+from torch._dynamo.testing import requires_static_shapes
 from torch.nn import functional as F
 
 tensor_for_import_testing = torch.ones(10, 10)
@@ -33,7 +33,7 @@ def make_test(fn):
     nargs = len(inspect.signature(fn).parameters)
 
     def test_fn(self):
-        return torch.dynamo.testing.standard_test(self, fn=fn, nargs=nargs)
+        return torch._dynamo.testing.standard_test(self, fn=fn, nargs=nargs)
 
     return test_fn
 
@@ -53,7 +53,7 @@ def inline_unused(x):
     return x + 5.6
 
 
-class FunctionTests(torch.dynamo.testing.TestCase):
+class FunctionTests(torch._dynamo.testing.TestCase):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -396,7 +396,7 @@ class FunctionTests(torch.dynamo.testing.TestCase):
     @make_test
     def test_module_constant(x, y):
         r = x + y
-        for i in range(torch.dynamo.testing.three):
+        for i in range(torch._dynamo.testing.three):
             r = r / y
         return r
 

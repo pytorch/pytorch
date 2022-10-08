@@ -7,11 +7,11 @@ import numpy as np
 import tabulate
 import torch
 
-import torch.inductor
-from torch.dynamo.optimizations.backends import cudagraphs_inner
-from torch.dynamo.testing import same
-from torch.inductor.compile_fx import compile_fx
-from torch.inductor.utils import timed
+import torch._inductor
+from torch._dynamo.optimizations.backends import cudagraphs_inner
+from torch._dynamo.testing import same
+from torch._inductor.compile_fx import compile_fx
+from torch._inductor.utils import timed
 
 try:
     import test.test_torchinductor as tti
@@ -134,12 +134,12 @@ def main():
 
     if args.threads:
         torch.set_num_threads(args.threads)
-        torch.inductor.config.cpp.threads = args.threads
+        torch._inductor.config.cpp.threads = args.threads
 
     if args.verbose:
-        torch.inductor.config.debug = True
+        torch._inductor.config.debug = True
 
-    torch.inductor.config.triton.autotune = True
+    torch._inductor.config.triton.autotune = True
 
     rows = []
     for model in (MicroBenchmarks.sum,):

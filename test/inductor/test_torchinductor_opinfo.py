@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo
-from torch.inductor.utils import has_triton
+import torch._dynamo
+from torch._inductor.utils import has_triton
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
@@ -444,9 +444,9 @@ class TestInductorOpInfo(TestCase):
         True
     )  # inductor kernels failing this test intermittently
     @_ops(op_db[START:END])
-    @patch("torch.dynamo.config.raise_on_unsafe_aot_autograd", True)
+    @patch("torch._dynamo.config.raise_on_unsafe_aot_autograd", True)
     def test_comprehensive(self, device, dtype, op):
-        torch.dynamo.reset()
+        torch._dynamo.reset()
         with torch.no_grad():
             torch.cuda.empty_cache()
         op_name = op.name
@@ -573,6 +573,6 @@ class TestInductorOpInfo(TestCase):
 instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
-    torch.dynamo.config.raise_on_assertion_error = True
+    torch._dynamo.config.raise_on_assertion_error = True
     if has_triton():
         run_tests()

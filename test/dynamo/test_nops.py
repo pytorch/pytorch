@@ -1,8 +1,8 @@
 # Owner(s): ["module: dynamo"]
 import torch
 
-import torch.dynamo.testing
-from torch.dynamo import eval_frame
+import torch._dynamo.testing
+from torch._dynamo import eval_frame
 
 c = 10
 
@@ -31,11 +31,11 @@ def fn3():
 
 
 with_debug_nops = eval_frame._optimize_catch_errors(
-    torch.dynamo.testing.debug_insert_nops
+    torch._dynamo.testing.debug_insert_nops
 )
 
 
-class NopTests(torch.dynamo.testing.TestCase):
+class NopTests(torch._dynamo.testing.TestCase):
     @with_debug_nops
     def test1(self):
         self.assertEqual(fn1(1, 2), -7)

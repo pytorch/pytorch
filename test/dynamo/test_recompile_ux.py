@@ -4,12 +4,12 @@ import weakref
 
 import torch
 
-import torch.dynamo
-import torch.dynamo.config
-import torch.dynamo.testing
+import torch._dynamo
+import torch._dynamo.config
+import torch._dynamo.testing
 
 
-class RecompileUxTests(torch.dynamo.testing.TestCase):
+class RecompileUxTests(torch._dynamo.testing.TestCase):
     # TODO(whc) dynamo actualy recompiles one more time than the cache limit
     cache_limit = 1
 
@@ -18,7 +18,7 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
         super().setUpClass()
         cls._exit_stack.enter_context(
             unittest.mock.patch.object(
-                torch.dynamo.config, "cache_size_limit", cls.cache_limit
+                torch._dynamo.config, "cache_size_limit", cls.cache_limit
             )
         )
 
@@ -45,7 +45,7 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
 
         x = torch.randn(2)
         for i in range(2):
-            opt_model = torch.dynamo.optimize(compiler)(model)
+            opt_model = torch._dynamo.optimize(compiler)(model)
             opt_model(x, i)
 
         self.assertTrue(triggered)
@@ -58,11 +58,11 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
                 out += input
             return out
 
-        compile_counter = torch.dynamo.testing.CompileCounter()
+        compile_counter = torch._dynamo.testing.CompileCounter()
         for _ in range(10):
             x = torch.randn(3)
             iters = torch.randint(low=0, high=1000, size=())
-            opt_loop_torture = torch.dynamo.optimize(compile_counter)(loop_torture)
+            opt_loop_torture = torch._dynamo.optimize(compile_counter)(loop_torture)
             opt_loop_torture(x, iters)
 
         # Currently, we recompile each time,
@@ -81,15 +81,15 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
             return input + input
 
         expected_recompiles = 2
-        compile_counter = torch.dynamo.testing.CompileCounter()
+        compile_counter = torch._dynamo.testing.CompileCounter()
         with unittest.mock.patch.object(
-            torch.dynamo.config, "cache_size_limit", expected_recompiles
+            torch._dynamo.config, "cache_size_limit", expected_recompiles
         ):
-            with self.assertLogs(logger="torch.dynamo", level="WARNING") as logs:
+            with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
                 for _ in range(10):
                     bsz = torch.randint(low=0, high=1000, size=())
                     x = torch.randn((bsz, 3, 4))
-                    opt_model = torch.dynamo.optimize(compile_counter)(model)
+                    opt_model = torch._dynamo.optimize(compile_counter)(model)
                     opt_model(x)
 
         self.assertEqual(compile_counter.frame_count, expected_recompiles)
@@ -98,7 +98,7 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
         self.assertTrue(
             logs.records[0]
             .getMessage()
-            .startswith("torch.dynamo hit config.cache_size_limit")
+            .startswith("torch._dynamo hit config.cache_size_limit")
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -114,10 +114,10 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
         b_v = torch.rand(3, 5, 4, device="cuda").view(3, 4, 5)
         b_p = torch.rand(3, 5, 4, device="cuda").permute(0, 2, 1)
         c = torch.rand(3, 4, 5, device="cuda")
-        compile_counter = torch.dynamo.testing.CompileCounter()
+        compile_counter = torch._dynamo.testing.CompileCounter()
 
-        with unittest.mock.patch.object(torch.dynamo.config, "cache_size_limit", 2):
-            opt_func = torch.dynamo.optimize(compile_counter)(func)
+        with unittest.mock.patch.object(torch._dynamo.config, "cache_size_limit", 2):
+            opt_func = torch._dynamo.optimize(compile_counter)(func)
             opt_func(a, b, c)  # warmup
             self.assertEqual(compile_counter.frame_count, 1)
 
@@ -146,14 +146,14 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
 
         def cache_fail_test(cached_input, missed_input, expected_failure):
             # TODO(whc) maybe its hacky to have a 'test within a test' but this seemed convenient
-            torch.dynamo.reset()
-            torch.dynamo.utils.counters.clear()
-            opt_func = torch.dynamo.optimize("eager")(func)
+            torch._dynamo.reset()
+            torch._dynamo.utils.counters.clear()
+            opt_func = torch._dynamo.optimize("eager")(func)
             # warmup
             opt_func(cached_input)
 
-            with self.assertLogs(logger="torch.dynamo", level="WARNING") as logs:
-                opt_func = torch.dynamo.optimize("eager")(func)
+            with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
+                opt_func = torch._dynamo.optimize("eager")(func)
                 opt_func(missed_input)
             self.assert_single_log_contains(logs, expected_failure)
 
@@ -186,12 +186,12 @@ class RecompileUxTests(torch.dynamo.testing.TestCase):
         def func(a, b):
             return a + b
 
-        opt_func = torch.dynamo.optimize("eager")(func)
+        opt_func = torch._dynamo.optimize("eager")(func)
         # warmup
         opt_func(a, b)
 
-        with self.assertLogs(logger="torch.dynamo", level="WARNING") as logs:
-            opt_func = torch.dynamo.optimize("eager")(func)
+        with self.assertLogs(logger="torch._dynamo", level="WARNING") as logs:
+            opt_func = torch._dynamo.optimize("eager")(func)
             opt_func(a, 1)
         self.assert_single_log_contains(
             logs, "expected type of 'b' to be a tensor type, ' but found <class 'int'>"

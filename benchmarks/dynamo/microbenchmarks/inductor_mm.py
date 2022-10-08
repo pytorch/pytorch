@@ -1,10 +1,10 @@
 import torch
+
+import torch._dynamo
+import torch._dynamo.config
+import torch._inductor.config as config
 import triton
 from benchmark_helper import time_with_torch_timer
-
-import torch.dynamo
-import torch.dynamo.config
-import torch.inductor.config as config
 
 # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -12,12 +12,12 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-@torch.dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", nopython=True)
 def inductor_aten_mm(a, b):
     return torch.mm(a, b)
 
 
-@torch.dynamo.optimize("inductor", nopython=True)
+@torch._dynamo.optimize("inductor", nopython=True)
 def inductor_triton_mm(a, b):
     return torch.mm(a, b)
 
@@ -56,7 +56,7 @@ def test_total_time(shapes):
 
         print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
 
-        torch.dynamo.reset()
+        torch._dynamo.reset()
 
 
 def test_GPU_time(shapes):
@@ -79,7 +79,7 @@ def test_GPU_time(shapes):
         ind_triton_ms, _, _ = triton.testing.do_bench(lambda: inductor_triton_mm(a, b))
         print(torch_ms, triton_ms, ind_aten_ms, ind_triton_ms, sep="; ")
 
-        torch.dynamo.reset()
+        torch._dynamo.reset()
 
 
 if __name__ == "__main__":

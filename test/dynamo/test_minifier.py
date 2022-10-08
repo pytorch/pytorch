@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import torch
 
-import torch.dynamo
-import torch.dynamo.testing
-from torch.dynamo.optimizations.backends import create_backend
+import torch._dynamo
+import torch._dynamo.testing
+from torch._dynamo.optimizations.backends import create_backend
 
 
 class MockModule(torch.nn.Module):
@@ -23,7 +23,7 @@ class MockModule(torch.nn.Module):
         return x
 
 
-class MinfierTests(torch.dynamo.testing.TestCase):
+class MinfierTests(torch._dynamo.testing.TestCase):
     def test_after_dynamo(self):
         @create_backend
         def bad_dynamo_backend(subgraph):
@@ -41,13 +41,13 @@ class MinfierTests(torch.dynamo.testing.TestCase):
             return f
 
         mod = MockModule()
-        opt_mod = torch.dynamo.optimize("bad_dynamo_backend")(mod)
+        opt_mod = torch._dynamo.optimize("bad_dynamo_backend")(mod)
         repro_dir = "/tmp/test_minifier"
         repro_file = os.path.join(repro_dir, "minifier_launcher.py")
         shutil.rmtree(repro_dir, ignore_errors=True)
 
-        @patch.object(torch.dynamo.config, "repro_after", "dynamo")
-        @patch.object(torch.dynamo.config, "repro_dir", repro_dir)
+        @patch.object(torch._dynamo.config, "repro_after", "dynamo")
+        @patch.object(torch._dynamo.config, "repro_dir", repro_dir)
         def inner():
             x = torch.randn(4)
             try:
@@ -60,13 +60,13 @@ class MinfierTests(torch.dynamo.testing.TestCase):
 
     def test_after_aot(self):
         mod = MockModule()
-        opt_mod = torch.dynamo.optimize("inductor")(mod)
+        opt_mod = torch._dynamo.optimize("inductor")(mod)
         repro_dir = "/tmp/test_minifier"
         repro_file = os.path.join(repro_dir, "minifier_launcher.py")
         shutil.rmtree(repro_dir, ignore_errors=True)
 
-        @patch.object(torch.dynamo.config, "repro_after", "aot")
-        @patch.object(torch.dynamo.config, "repro_dir", repro_dir)
+        @patch.object(torch._dynamo.config, "repro_after", "aot")
+        @patch.object(torch._dynamo.config, "repro_dir", repro_dir)
         def inner():
             x = torch.randn(4)
             try:

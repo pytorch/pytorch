@@ -3,9 +3,9 @@ import functools
 
 import torch
 
-import torch.dynamo
-from torch.dynamo.optimizations.training import is_aot_autograd_safe_to_run
-from torch.dynamo.testing import rand_strided
+import torch._dynamo
+from torch._dynamo.optimizations.training import is_aot_autograd_safe_to_run
+from torch._dynamo.testing import rand_strided
 
 
 def compiler_safe_fn(gm, example_inputs, is_safe):
@@ -13,7 +13,7 @@ def compiler_safe_fn(gm, example_inputs, is_safe):
     return gm.forward
 
 
-class AotAutogradFallbackTests(torch.dynamo.testing.TestCase):
+class AotAutogradFallbackTests(torch._dynamo.testing.TestCase):
     def test_LSTM(self):
         # https://github.com/pytorch/torchdynamo/issues/1147
         class Repro(torch.nn.Module):
@@ -30,7 +30,7 @@ class AotAutogradFallbackTests(torch.dynamo.testing.TestCase):
         is_safe = [True]
         mod = Repro()
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_mod = torch.dynamo.optimize(compiler_fn)(mod)
+        aot_mod = torch._dynamo.optimize(compiler_fn)(mod)
 
         args = [((92, 4, 2048), (1, 188416, 92), torch.float32, "cpu", False)]
         args = [
@@ -56,7 +56,7 @@ class AotAutogradFallbackTests(torch.dynamo.testing.TestCase):
         x = torch.nn.Parameter(torch.randn(4))
         is_safe = [True]
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch.dynamo.optimize(compiler_fn)(fn)
+        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
         aot_fn(x, y)
         self.assertTrue(not is_safe[0])
 
@@ -68,6 +68,6 @@ class AotAutogradFallbackTests(torch.dynamo.testing.TestCase):
         x = torch.randn(4)
         is_safe = [True]
         compiler_fn = functools.partial(compiler_safe_fn, is_safe=is_safe)
-        aot_fn = torch.dynamo.optimize(compiler_fn)(fn)
+        aot_fn = torch._dynamo.optimize(compiler_fn)(fn)
         aot_fn(x, y)
         self.assertTrue(is_safe[0])

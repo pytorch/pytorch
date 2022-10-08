@@ -1,8 +1,8 @@
 import model
 import torch
-import triton
 
-import torch.inductor.triton_ops
+import torch._inductor.triton_ops
+import triton
 
 # https://pytorch.org/blog/accelerating-pytorch-with-cuda-graphs/
 useCudaGraph = False
@@ -104,7 +104,7 @@ def bench_op(
     elif provider == "triton":
 
         def fn():
-            return torch.inductor.triton_ops.conv1x1(
+            return torch._inductor.triton_ops.conv1x1(
                 x, w, bias, stride, padding, dilation, False, (0, 0), groups
             )
 

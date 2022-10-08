@@ -30,7 +30,6 @@ import unittest
 import weakref
 
 import torch
-import torch.dynamo
 
 try:
     import torch._prims
@@ -194,7 +193,12 @@ def is_torch_inline_allowed(filename):
     )
 
 
+@functools.lru_cache(None)
+def dynamo_dir():
+    return _module_dir(importlib.import_module(config.dynamo_import))
+
+
 def is_torch(filename):
-    if filename.startswith(_module_dir(torch.dynamo)):
+    if filename.startswith(dynamo_dir()):
         return False
     return filename.startswith(_module_dir(torch))

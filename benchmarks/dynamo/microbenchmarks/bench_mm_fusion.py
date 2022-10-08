@@ -1,13 +1,13 @@
 # flake8: noqa
 import torch
+
+import torch._dynamo
+import torch._inductor.config
 import triton
 from prettytable import PrettyTable
 
-import torch.dynamo
-import torch.inductor.config
-
-# torch.inductor.config.debug = True
-torch.inductor.config.triton.dense_indexing = True
+# torch._inductor.config.debug = True
+torch._inductor.config.triton.dense_indexing = True
 torch.manual_seed(0)
 
 
@@ -17,25 +17,25 @@ torch.backends.cuda.matmul.allow_tf32 = True
 
 class Func(object):
     # mm
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def mm(a, b, bias):
         y = torch.mm(a, b)
         return y
 
     # mm+bias
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def mm_add(a, b, bias):
         y = torch.mm(a, b)
         return y + bias
 
     # relu(mm)
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def mm_relu(a, b, bias):
         y = torch.mm(a, b)
         return torch.relu(y)
 
     # relu(mm+bias)
-    @torch.dynamo.optimize("inductor")
+    @torch._dynamo.optimize("inductor")
     def mm_add_relu(a, b, bias):
         y = torch.mm(a, b)
         y += bias
@@ -72,14 +72,16 @@ def bench(shape, layer_id, p, fusion_types=[""]):
         def fn():
             return fn_mm(*args)
 
-        torch.inductor.config.triton.mm = "aten"
+        torch._inductor.config.triton.mm = "aten"
         torch_mm_ms, _, _ = triton.testing.do_bench(fn)
-        torch.inductor.config.triton.mm = "triton"
+        torch._inductor.config.triton.mm = "triton"
         # reset to force code gen new python code
-        torch.dynamo.reset()
-        torch.inductor.metrics.reset()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
         triton_mm_ms, _, _ = triton.testing.do_bench(fn)
-        assert torch.inductor.metrics.generated_kernel_count == 1, "codegen #kernel != 1"
+        assert (
+            torch._inductor.metrics.generated_kernel_count == 1
+        ), "codegen #kernel != 1"
         row.extend([tflops(torch_mm_ms), tflops(triton_mm_ms)])
 
     p.add_row(row)
