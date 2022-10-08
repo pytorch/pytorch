@@ -921,7 +921,7 @@ Tensor expand(const Tensor& self, c10::IntArrayRef size, bool /*unused*/) {
 }
 
 Tensor expand_as(const Tensor& self, const Tensor& other) {
-  return self.expand(other.sizes());
+  return self.expand_symint(other.sym_sizes());
 }
 
 Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
@@ -2773,11 +2773,11 @@ Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
     return self.alias();
   }
 
-  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  SymDimVector sizes(self.sym_sizes().begin(), self.sym_sizes().end());
   std::swap(sizes[dim0], sizes[dim1]);
-  DimVector strides(self.strides().begin(), self.strides().end());
+  SymDimVector strides(self.sym_strides().begin(), self.sym_strides().end());
   std::swap(strides[dim0], strides[dim1]);
-  auto result = self.as_strided(sizes, strides);
+  auto result = self.as_strided_symint(sizes, strides);
   propagate_transposed_names(result, self, dim0, dim1);
   return result;
 }
@@ -3343,35 +3343,25 @@ Tensor detach(const Tensor& self) {
     /*allow_tensor_metadata_change=*/false));
 }
 
-Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
-  // some special handling to deal with allow dimension == 0 when self.dim() == 0
-  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
+Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
+  // some special handling to deal with allow d == 0 when self.dim() == 0
+  auto ndim = self.dim();
+  d = at::maybe_wrap_dim(d, ndim, /*wrap_scalar=*/true);
 
-  const auto sizes = self.sizes();
-  const auto strides = self.strides();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
-  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
+  auto sizes = self.sizes().vec();
+  auto strides = self.strides().vec();
+  int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
-
-  DimVector new_size(self.dim() + 1);
-  DimVector new_stride(self.dim() + 1);
-
-  new_size[self.dim()] = size;
-  new_stride[self.dim()] = self.dim() == 0 ? 1 : strides[dimension];
-  for(const auto d : c10::irange(self.dim())) {
-    const auto self_size = sizes[d];
-    const auto self_stride = strides[d];
-    if(d == dimension) {
-      new_size[d] = (self_size - size) / step + 1;
-      new_stride[d] = step*self_stride;
-    } else {
-      new_size[d] = self_size;
-      new_stride[d] = self_stride;
-    }
+  sizes.push_back(size);
+  strides.push_back(self.dim() == 0 ? 1 : strides[d]);
+  // The if handles the self.dim() == 0 case
+  if (d < ndim) {
+    sizes[d] = (sizes[d] - size) / step + 1;
+    strides[d] *= step;
   }
-
-  return self.as_strided(new_size, new_stride);
+  return self.as_strided(sizes, strides);
 }
 
 template <typename scalar_t>
@@ -3430,7 +3420,7 @@ Tensor& diag_cpu_out(const Tensor& self, int64_t dimension, Tensor &result) {
   return result;
 }
 
-Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagonal) {
+Tensor diag_backward_symint(const Tensor& grad, SymIntArrayRef input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
   AT_ASSERT(ndimension == 1 || ndimension == 2);
 
@@ -3439,11 +3429,11 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
+  return at::diagonal_backward_symint(grad, input_sizes, diagonal, 0, 1);
 }
 
-Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
+Tensor diagonal_backward_symint(const Tensor & grad, SymIntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
+  auto grad_input = at::zeros_symint(input_sizes, grad.options());
   auto diag = grad_input.diagonal(offset, dim1, dim2);
   diag.copy_(grad);
   return grad_input;
@@ -3887,6 +3877,14 @@ at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
   auto tmp = self.alias();
   out.copy_(tmp);
   return out;
+}
+
+int64_t sparse_dim_strided(const at::Tensor& self) {
+  return 0;
+}
+
+int64_t dense_dim_strided(const at::Tensor& self) {
+  return self.dim();
 }
 
 } // namespace native
