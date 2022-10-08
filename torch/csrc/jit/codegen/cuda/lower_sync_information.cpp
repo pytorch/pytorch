@@ -483,7 +483,7 @@ void SyncMap::build(Fusion* fusion) {
       } // end for consumers
 
       if (raw_dims.any()) {
-        needs_raw_sync_[producer] = raw_dims;
+        needs_raw_sync_[producer] |= raw_dims;
       }
 
     } // end producer
@@ -492,10 +492,14 @@ void SyncMap::build(Fusion* fusion) {
 
 std::string SyncMap::toString() const {
   std::stringstream ss;
-  ss << "TVs requiring RAW:" << std::endl;
+  ss << "SyncMap:";
+  bool is_first = true;
   for (auto entry : needs_raw_sync_) {
-    ss << "  " << entry.first->toString() << " :: " << entry.second.toString()
-       << std::endl;
+    if (!is_first) {
+      ss << ",";
+    }
+    ss << " " << entry.first->toString() << " -> " << entry.second.toString();
+    is_first = false;
   }
   return ss.str();
 }

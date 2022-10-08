@@ -5040,6 +5040,40 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
+// Repro of #2046
+TEST_F(NVFuserTest, FusionValidateParallelize7_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = set(tv1);
+  auto tv3 = set(tv1);
+  fusion.addOutput(tv2);
+  fusion.addOutput(tv3);
+
+  tv1->setMemoryType(MemoryType::Global);
+
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+
+  tv2->axis(1)->parallelize(ParallelType::TIDy);
+  tv3->axis(0)->parallelize(ParallelType::BIDx);
+
+  // tv2 uses tv1 but is not parallelized with BIDx, so a grid sync is
+  // required. It should be placed as a top-level expression.
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      std::any_of(
+          gpulw.kernel()->topLevelExprs().begin(),
+          gpulw.kernel()->topLevelExprs().end(),
+          [](Expr* expr) { return expr->isA<kir::GridSync>(); }),
+      "Grid sync not found");
+}
+
 TEST_F(NVFuserTest, FusionDAGMerging_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

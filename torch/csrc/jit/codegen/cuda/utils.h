@@ -59,7 +59,8 @@ enum class DebugDumpOption {
                        //! path and replay result
   Cubin, //! Dump compiled CUBIN
   Ptx, //! Dump compiled PTX
-  BankConflictInfo //! Dump bank confliction info
+  BankConflictInfo, //! Dump bank confliction info
+  SyncMap //! RAW dependency info
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);

@@ -303,6 +303,9 @@ void GpuLower::lower(Fusion* fusion, DataType index_type) {
   // Depends on thread_pred_map_, validates parallelization collects which
   // tensor views need WAR or RAW syncs
   sync_map_.build(fusion_);
+  if (isDebugDumpEnabled(DebugDumpOption::SyncMap)) {
+    std::cout << sync_map_.toString() << std::endl;
+  }
 
   partialSplitMap().build(fusion_);
 

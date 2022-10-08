@@ -43,7 +43,8 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::TransformPropagator, false},
       {DebugDumpOption::Cubin, false},
       {DebugDumpOption::Ptx, false},
-      {DebugDumpOption::BankConflictInfo, false}};
+      {DebugDumpOption::BankConflictInfo, false},
+      {DebugDumpOption::SyncMap, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -106,6 +107,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::Ptx] = true;
       } else if (token == "bank_conflict") {
         options_map[DebugDumpOption::BankConflictInfo] = true;
+      } else if (token == "sync_map") {
+        options_map[DebugDumpOption::SyncMap] = true;
       } else {
         TORCH_CHECK(
             false,
@@ -118,7 +121,7 @@ auto parseDebugDumpOptions() {
             "\tdraw_segmented_fusion, scheduler_params, parallel_dimensions,\n",
             "\tbuffer_reuse_verbose, ptxas_verbose, halo, segmenter_logging,\n",
             "\tperf_debug_verbose, python_definition, python_frontend_debug,\n",
-            "\ttransform_propagator, cubin, ptx, bank_conflict\n");
+            "\ttransform_propagator, cubin, ptx, bank_conflict, sync_map\n");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
