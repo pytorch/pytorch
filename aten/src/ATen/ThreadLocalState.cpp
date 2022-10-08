@@ -18,13 +18,17 @@ ThreadLocalState::ThreadLocalState()
       python_torch_function_state_(at::impl::PythonTorchFunctionTLS::get_state()) {
   rf_tls_ = at::get_record_function_tls_();
 
-  saved_tensors_default_hooks_ = at::SavedTensorDefaultHooks::get_stack();
+  saved_tensors_default_hooks_state_ = at::SavedTensorDefaultHooks::get_tls_state();
 
   torch_dispatch_mode_state_ = c10::impl::TorchDispatchModeTLS::get_state();
 }
 
 void ThreadLocalState::set_grad_mode(bool enabled) {
   autograd_tls_.set_grad_mode(enabled);
+}
+
+void ThreadLocalState::set_multithreading_enabled(bool enabled) {
+  autograd_tls_.set_multithreading_enabled(enabled);
 }
 
 /* static */
@@ -40,7 +44,7 @@ void ThreadLocalState::setThreadLocalState(
 
   at::set_record_function_tls_(state.rf_tls_);
 
-  at::SavedTensorDefaultHooks::set_stack(state.saved_tensors_default_hooks_);
+  at::SavedTensorDefaultHooks::set_tls_state(state.saved_tensors_default_hooks_state_);
 
   c10::impl::PythonDispatcherTLS::set_state(state.python_dispatcher_state_);
 
