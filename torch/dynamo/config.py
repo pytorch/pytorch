@@ -16,10 +16,11 @@ except ImportError:
 
 
 # log level (levels print what it says + all levels listed below it)
-# DEBUG print full traces <-- lowest level + print tracing of every instruction
-# INFO print compiled functions + graphs
-# WARN print warnings (including graph breaks)
-# ERROR print exceptions (and what user code was being processed when it occurred)
+# logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
+# torchdynamo.logging.CODE print compiled functions + graphs
+# logging.INFO print the steps that dynamo is running
+# logging.WARN print warnings (including graph breaks)
+# logging.ERROR print exceptions (and what user code was being processed when it occurred)
 # NOTE: changing log_level will automatically update the levels of all torchdynamo loggers
 log_level = logging.WARNING
 
@@ -158,7 +159,7 @@ class _AccessLimitingConfig(ModuleType):
             raise AttributeError(f"{__name__}.{name} does not exist")
         # automatically set logger level whenever config.log_level is modified
         if name == "log_level":
-            from .utils import set_loggers_level
+            from .logging import set_loggers_level
 
             set_loggers_level(value)
         return object.__setattr__(self, name, value)

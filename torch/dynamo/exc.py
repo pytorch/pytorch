@@ -1,4 +1,3 @@
-import dataclasses
 import os
 import textwrap
 
@@ -23,11 +22,6 @@ class SkipFrame(TorchDynamoException):
 
 class TorchRuntimeError(TorchDynamoException):
     pass
-
-
-@dataclasses.dataclass
-class FakeTensorError(TorchDynamoException):
-    reason: str
 
 
 class ResetRequired(TorchDynamoException):

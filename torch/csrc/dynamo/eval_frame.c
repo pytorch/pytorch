@@ -13,7 +13,12 @@
 #define bool char
 #define false 0
 #define true 1
+
+#ifdef _WIN32
+#define unlikely(x) (x)
+#else
 #define unlikely(x) __builtin_expect((x), 0)
+#endif
 
 #define NULL_CHECK(val)                                         \
   if (unlikely((val) == NULL)) {                                \

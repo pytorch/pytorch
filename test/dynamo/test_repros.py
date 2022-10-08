@@ -1688,7 +1688,3 @@ class ReproTests(torch.dynamo.testing.TestCase):
             for (sh, st, dt, dev, rg) in args
         ]
         self.assertTrue(same_two_models(mod, opt_mod, args))
-
-
-if __name__ == "__main__":
-    unittest.main()

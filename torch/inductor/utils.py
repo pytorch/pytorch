@@ -16,7 +16,9 @@ from . import config
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
 # We import torchdynamo modules indirectly to allow a future rename to torch.dynamo
+dynamo_config = import_module(f"{config.dynamo_import}.config")
 dynamo_debug_utils = import_module(f"{config.dynamo_import}.debug_utils")
+dynamo_logging = import_module(f"{config.dynamo_import}.logging")
 dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
 dynamo_testing = import_module(f"{config.dynamo_import}.testing")
 dynamo_utils = import_module(f"{config.dynamo_import}.utils")
@@ -24,6 +26,8 @@ dynamo_utils = import_module(f"{config.dynamo_import}.utils")
 
 @functools.lru_cache(None)
 def has_triton():
+    if not torch.cuda.is_available():
+        return False
     try:
         import triton
 

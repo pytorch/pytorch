@@ -175,7 +175,7 @@ def generate_compiler_repro_string(gm, args):
 
 INDUCTOR_IMPORT = f"""
 from {config.inductor_import}.compile_fx import compile_fx_inner
-from {config.inductor_import}.debug_utils import same_two_models
+from {config.dynamo_import}.debug_utils import same_two_models
 """
 
 NVFUSER_IMPORT = """

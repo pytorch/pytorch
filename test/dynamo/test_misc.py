@@ -1535,14 +1535,13 @@ class MiscTests(torch.dynamo.testing.TestCase):
     @patch.object(torch.dynamo.config, "fake_tensor_propagation", True)
     def test_unsupported_fake_tensor(self):
         def f(x):
-            return torch.quantize_per_tensor(
-                torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8
-            )
+            return torch.quantize_per_tensor(x, 0.1, 10, torch.quint8)
 
         x = torch.randn(2, 2)
-        with self.assertRaises(RuntimeError):
-            opt_f = torch.dynamo.optimize_assert(torch.dynamo.testing.CompileCounter())(f)
-            opt_f(x)
+        cnts = torch.dynamo.testing.CompileCounter()
+        opt_f = torch.dynamo.optimize(cnts)(f)
+        opt_f(x)
+        self.assertEqual(cnts.op_count, 0)
 
         torch.dynamo.reset()
         with patch.object(torch.dynamo.config, "fake_tensor_propagation", False):

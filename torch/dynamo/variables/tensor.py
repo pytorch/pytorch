@@ -25,7 +25,7 @@ from torch.fx.immutable_collections import immutable_list
 from torch.utils._pytree import tree_map
 
 from .. import config, variables
-from ..exc import TorchRuntimeError, unimplemented
+from ..exc import TorchRuntimeError, unimplemented, Unsupported
 from ..guards import GuardBuilder
 from ..source import AttrSource
 from ..utils import (
@@ -133,6 +133,8 @@ class TensorVariable(VariableTracker):
                         example_value = wrap_fake_exception(
                             lambda: cls.run_proxy(proxy, args, kwargs, nnmodule)
                         )
+                except Unsupported:
+                    raise
                 except RuntimeError as e:
                     if use_fake_tensors and isinstance(e, DataDependentOutputException):
                         if (
