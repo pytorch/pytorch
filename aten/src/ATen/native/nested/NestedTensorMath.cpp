@@ -23,7 +23,6 @@
 #include <ATen/ops/_nested_tensor_from_mask_left_aligned_native.h>
 #include <ATen/ops/_nested_tensor_from_mask_native.h>
 #include <ATen/ops/_nested_tensor_from_tensor_list_native.h>
-#include <ATen/ops/_nested_tensor_layer_norm_native.h>
 #include <ATen/ops/_nested_view_from_buffer_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_softmax_native.h>
