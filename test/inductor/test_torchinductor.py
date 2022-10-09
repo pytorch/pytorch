@@ -421,6 +421,19 @@ class TestIndexingSimplification(TorchTestCase):
         self.assertEqual(ModularIndexing(i0 * 4, 2, 10), ModularIndexing(i0 * 2, 1, 10))
         self.assertEqual(IndexingDiv(i0 * 4, 2), i0 * 2)
 
+        # Nested modular indexing is correctly simplified
+        var_ranges = {"i1": 13, "i2": 121}
+        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784), 1, 28)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        expr = ModularIndexing(ModularIndexing(121 * i1 + i2, 1, 784) + 1, 1, 28)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+        var_ranges = {"i2": 784}
+        expr = ModularIndexing(ModularIndexing(i2, 1, 28), 7, 4)
+        expected = IndexingDiv(ModularIndexing(i2, 1, 28), 7)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expected)
+        expr = ModularIndexing(ModularIndexing(i2, 1, 28) + 1, 7, 4)
+        self.assertEqual(sizevars.simplify_with_ranges(expr, var_ranges), expr)
+
     def test_indexing_join(self):
         sizevars = SizeVarAllocator()
         i0 = sympy.Symbol("i0")
@@ -3808,7 +3821,6 @@ if HAS_CUDA:
                 assert same_two_models(mod, opt_mod, args), "Dynamo failed"
 
 
-if __name__ == "__main__":
-    from torch._dynamo.testing import run_tests
-
-    run_tests()
+# if __name__ == "__main__":
+#    from torch._dynamo.testing import run_tests
+#    run_tests()

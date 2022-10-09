@@ -51,7 +51,6 @@ def patch_all(ok=True):
 N_ITERS = 5
 
 
-@unittest.skip("requires https://github.com/pytorch/pytorch/pull/84432/")
 @unittest.skipIf(not torch.cuda.is_available(), "these tests require cuda")
 class TestAotCudagraphs(torch._dynamo.testing.TestCase):
     @patch_all()
