@@ -778,7 +778,9 @@ def im2col(
         input_w, kernel_w, dilation_w, padding_w, stride_w, input.device
     )
 
-    padded_input = F.pad(input, (padding_h, padding_h, padding_w, padding_w))
+    # Note that F.pad takes (padding_left, padding_right, padding_top, padding_bottom)
+    # ugh
+    padded_input = F.pad(input, (padding_w, padding_w, padding_h, padding_h))
 
     blocks_row_indices = blocks_row_indices.unsqueeze(-1).unsqueeze(-1)
     output = padded_input[:, :, blocks_row_indices, blocks_col_indices]
@@ -886,7 +888,7 @@ def col2im(
     )
     idx = (None, None, indices_row, indices_col)
     output = torch.ops.aten.index_put(output, idx, input, accumulate=True)
-    output = F.pad(output, (-padding_h, -padding_h, -padding_w, -padding_w))
+    output = F.pad(output, (-padding_w, -padding_w, -padding_h, -padding_h))
 
     if not batched_input:
         output = output.squeeze(0)
@@ -1282,12 +1284,8 @@ def native_layer_norm_backward(
     if M <= 0 or N <= 0:
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
-            input.new_zeros(input_shape[axis:])
-            if output_mask[1] and weight_cast
-            else None,
-            input.new_zeros(input_shape[axis:])
-            if output_mask[2] and bias_cast
-            else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[2] else None,
         )
 
     x_hat = (input_cast - mean) * rstd
