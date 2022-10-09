@@ -875,6 +875,8 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
 
+TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
+
 BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
@@ -908,7 +910,7 @@ TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
 
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
-    num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "3"))
+    num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
     # other libraries take up about 11% of space per process
     torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
@@ -1517,18 +1519,31 @@ class CudaMemoryLeakCheck():
         torch.cuda.empty_cache()
 
         for i in range(num_devices):
-            caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
-            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
-            driver_mem_allocated = bytes_total - bytes_free
 
-            caching_allocator_discrepancy = False
-            driver_discrepancy = False
+            discrepancy_detected = True
 
-            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
-                caching_allocator_discrepancy = True
+            # Query memory multiple tiems to ensure leak was not transient
+            for n in range(3):
+                caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
+                bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+                driver_mem_allocated = bytes_total - bytes_free
 
-            if driver_mem_allocated > self.driver_befores[i]:
-                driver_discrepancy = True
+                caching_allocator_discrepancy = False
+                driver_discrepancy = False
+
+                if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
+                    caching_allocator_discrepancy = True
+
+                if driver_mem_allocated > self.driver_befores[i]:
+                    driver_discrepancy = True
+
+                if not(caching_allocator_discrepancy or driver_discrepancy):
+                    # Leak was false positive, exit loop
+                    discrepancy_detected = False
+                    break
+
+            if not discrepancy_detected:
+                continue
 
             if caching_allocator_discrepancy and not driver_discrepancy:
                 # Just raises a warning if the leak is not validated by the
@@ -1562,12 +1577,7 @@ class CudaMemoryLeakCheck():
                     self.driver_befores[i],
                     driver_mem_allocated)
 
-                # See #62533
-                # ROCM: Sometimes the transient memory is reported as leaked memory
-                if TEST_WITH_ROCM:
-                    warnings.warn(msg)
-                else:
-                    raise RuntimeError(msg)
+                raise RuntimeError(msg)
 
 @contextmanager
 def skip_exception_type(exc_type):
@@ -2920,13 +2930,6 @@ def noncontiguous_like(t):
     if not t.is_contiguous():
         return t
 
-    # Special-cases 0-dim tensors
-    zero_dim = t.ndim == 0
-    if zero_dim:
-        t = t.unsqueeze(0)
-
-    result = torch.repeat_interleave(t.detach(), 2, dim=-1)
-
     # Choose a "weird" value that won't be accessed
     if t.dtype.is_floating_point or t.dtype.is_complex:
         value = math.nan
@@ -2935,14 +2938,10 @@ def noncontiguous_like(t):
     else:
         value = 12
 
-    if zero_dim:
-        result[0] = value
-        result.set_(result.storage(), 1, (), ())
-    else:
-        result[..., 1::2] = value
-        strides = list(result.stride())
-        strides[-1] *= 2
-        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    result = t.new_empty(t.shape + (2,))
+    result[..., 0] = value
+    result[..., 1] = t.detach()
+    result = result[..., 1]
     result.requires_grad_(t.requires_grad)
     return result
 
