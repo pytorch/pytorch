@@ -11,6 +11,7 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
+#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
@@ -1136,11 +1137,24 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
-Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
+Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
+  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  auto cur_size = self.sym_size(dim);
+  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
+    start = maybe_wrap_dim(start, cur_size);
+  }
+  TORCH_CHECK(length >= 0 && start <= cur_size - length,
+           "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+  return at::slice_symint(self, dim, start, start + length, 1);
+}
+
+// This overload exists purely for XLA, because they wanted to pass in "symbolic"
+// start via Tensor.
+Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start, SymInt length) {
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
-  return at::narrow(self, dim, st, length);
+  return at::narrow_symint(self, dim, c10::SymInt(st), length);
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
