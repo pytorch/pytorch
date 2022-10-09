@@ -1032,6 +1032,7 @@ symbolic_tensor_failures = {
     xfail('linalg.eig'),
     xfail('linalg.eigvals'),
     skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
+    xfail('__getitem__', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('masked.amax', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('masked.amin', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('masked.argmax', ''),  # aten.argmax.default - couldn't find symbolic meta function/decomposition
@@ -1065,7 +1066,6 @@ symbolic_tensor_failures = {
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('chunk', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
-    xfail('constant_pad_nd', ''),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
     xfail('count_nonzero', ''),  # Could not run 'aten::count_nonzero.dim_IntList' with arguments from the 'Meta' ba...
     xfail('cross', ''),  # aten.linalg_cross.default - couldn't find symbolic meta function/decomposition
     xfail('cummax', ''),  # aten.cummax.default - couldn't find symbolic meta function/decomposition
@@ -1100,6 +1100,7 @@ symbolic_tensor_failures = {
     xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
+    xfail('gather', ''),  # aten.gather.default - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
@@ -1108,6 +1109,7 @@ symbolic_tensor_failures = {
     xfail('hsplit', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_copy', ''),  # Expected a long tensor for index, but got Float
+    xfail('index_fill', ''),  # aten.index_fill.int_Scalar - couldn't find symbolic meta function/decomposition
     xfail('index_reduce', ''),  # Float
     xfail('inner', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('isclose', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
@@ -1191,9 +1193,9 @@ symbolic_tensor_failures = {
     xfail('nn.functional.dropout', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.embedding_bag', ''),  # aten._embedding_bag_forward_only.default - couldn't find symbolic meta fun...
     xfail('nn.functional.embedding', ''),  # argument 'size' must be tuple of ints, but found element of type tor...
+    xfail('nn.functional.feature_alpha_dropout', 'with_train'),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
-    xfail('nn.functional.glu', ''),  # aten.glu.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
     xfail('nn.functional.group_norm', ''),  # 'torch._C.SymIntNode' and 'int'
     xfail('nn.functional.hinge_embedding_loss', ''),  # aten.empty_like.default - couldn't find symbolic meta function/deco...
@@ -1203,7 +1205,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'nearest'),  # aten.upsample_nearest1d.vec - couldn't find symbolic meta function/d...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
-    xfail('nn.functional.local_response_norm', ''),  # Tensors of type TensorImpl do not have numel
     xfail('nn.functional.margin_ranking_loss', ''),  # The underlying op of 'aten.stride' has no overload name '_schema'
     xfail('nn.functional.max_pool1d', ''),  # Trying to call aten.size on a tensor with symbolic shapes.
     xfail('nn.functional.max_pool3d', ''),  # aten.max_pool3d_with_indices.default - couldn't find symbolic meta function/d...
@@ -1213,7 +1214,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.multi_margin_loss', ''),  # Could not run 'aten::multi_margin_loss' with arguments from the...
     xfail('nn.functional.multilabel_margin_loss', ''),  # Could not run 'aten::multilabel_margin_loss_forward' with ...
     xfail('nn.functional.pad', 'circular'),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.pad', 'constant'),  # aten.fill.Scalar - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.pad', 'reflect'),  # aten.reflection_pad1d.default - couldn't find symbolic meta function/decompo...
     xfail('nn.functional.pad', 'replicate'),  # aten.replication_pad1d.default - couldn't find symbolic meta function/deco...
     xfail('nn.functional.pdist', ''),  # Could not run 'aten::_pdist_forward' with arguments from the 'Meta' backend...
@@ -1249,6 +1249,7 @@ symbolic_tensor_failures = {
     xfail('round', 'decimals_0'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
     xfail('round', 'decimals_neg_3'),  # aten.round.decimals - couldn't find symbolic meta function/decomposition
+    xfail('scatter_add', ''),  # aten.scatter_add.default - couldn't find symbolic meta function/decomposition
     xfail('scatter', ''),  # aten.scatter.src - couldn't find symbolic meta function/decomposition
     xfail('scatter_reduce', 'amax'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomposition
     xfail('scatter_reduce', 'amin'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomposition
@@ -1257,6 +1258,9 @@ symbolic_tensor_failures = {
     xfail('scatter_reduce', 'sum'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomposition
     xfail('searchsorted', ''),  # Could not run 'aten::searchsorted.Tensor' with arguments from the 'Meta' backend. ...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta function/decomposition
+    xfail('select', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
+    xfail('select_scatter', ''),  # aten.select_scatter.default - couldn't find symbolic meta function/decomposition
+    xfail('slice_scatter', ''),  # aten.slice_scatter.default - couldn't find symbolic meta function/decomposition
     xfail('sort', ''),  # aten.sort.default - couldn't find symbolic meta function/decomposition
     xfail('special.airy_ai', ''),  # aten.special_airy_ai.default - couldn't find symbolic meta function/decomposition
     xfail('special.bessel_y0', ''),  # aten.special_bessel_y0.default - couldn't find symbolic meta function/decomposition
@@ -1279,8 +1283,6 @@ symbolic_tensor_failures = {
     xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
     xfail('special.xlog1py', ''),  # aten.special_xlog1py.default - couldn't find symbolic meta function/decomposition
     xfail('split', ''),  # 'torch._C.SymIntNode' and 'int'
-    xfail('split', 'list_args'),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('split_with_sizes', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
     xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd', ''),  # aten._linalg_svd.default - couldn't find symbolic meta function/decomposition
