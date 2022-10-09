@@ -199,6 +199,21 @@ supported:
   - _trilinear
   - linalg_pinv.atol_rtol_tensor
   - logsumexp.out
+symint:
+  - empty.memory_format
+  - expand_copy
+  - narrow_copy
+  - view_copy
+  - as_strided_copy
+  - as_strided_scatter
+  - diagonal_backward
+  - slice_backward
+  - slice_copy.Tensor
+  - slice_scatter
+  - empty_strided
+  - new_empty_strided
+  - _reshape_alias_copy
+  - select_backward
 autograd:
   - max_pool3d
   - native_group_norm

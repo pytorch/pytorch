@@ -1,6 +1,7 @@
 #pragma once
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
+#include <ATen/core/IListRef.h>
 
 namespace at {
 namespace native {
@@ -26,11 +27,12 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
    }
  }
 
-inline void check_cat_no_zero_dim(at::ArrayRef<Tensor> tensors) {
-  for(const auto i : c10::irange(tensors.size())) {
-    auto& t = tensors[i];
+inline void check_cat_no_zero_dim(const MaterializedITensorListRef& tensors) {
+  int64_t i = 0;
+  for(const Tensor& t : tensors) {
     TORCH_CHECK(t.dim() > 0,
              "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
+    i++;
   }
 }
 

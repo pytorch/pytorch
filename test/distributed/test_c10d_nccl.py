@@ -815,7 +815,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # anticpate an error
         with self.assertRaisesRegex(
-            RuntimeError, "input tensor must be the same type as the outut tensor."
+            RuntimeError, "input tensor must be the same type as the output tensor."
         ):
             tensor = torch.tensor([self.rank], dtype=torch.float).cuda(local_device_id)
             output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(
@@ -2548,6 +2548,11 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    @property
+    def device(self):
+        return f"cuda:{self.rank}"
+
+
     def setUp(self):
         super(CommTest, self).setUp()
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
@@ -2806,6 +2811,16 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     def test_nncl_rank_membership(self):
         self._test_rank_membership(backend="nccl")
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_tensor_dtype_mismatch(self):
+        self._test_tensor_dtype_mismatch(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_tensor_dtype_complex(self):
+        self._test_tensor_dtype_complex(backend="nccl")
+
 
 class CompilerTest(test_c10d_common.CompilerTest):
 
@@ -2815,12 +2830,61 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     def _get_default_group(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        return c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store,
+        )
+        return dist.distributed_c10d._get_default_group()
 
     @skip_if_lt_x_gpu(2)
-    def test_work_wait_gpu(self):
-        self._test_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
+    def test_allreduce_work_wait_gpu(self):
+        self._test_allgather_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank,
+        )
 
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_work_wait_gpu(self):
+        self._test_allgather_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_work_wait_gpu(self):
+        self._test_reduce_scatter_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_broadcast_work_wait_gpu(self):
+        self._test_broadcast_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_scatter_work_wait_gpu(self):
+        self._test_scatter_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_nested_comm_tensor_wrapping(self):
+        self._test_nested_comm_tensor_wrapping(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+    @skip_if_lt_x_gpu(2)
+    def test_consecutive_comm_work_wait_gpu(self):
+        self._test_consecutive_comm_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
+
+class NcclProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_collectives(self):
+        self._test_collectives(backend="nccl")
 
 if __name__ == "__main__":
     assert (

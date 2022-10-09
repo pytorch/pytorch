@@ -95,7 +95,7 @@ namespace {
     return output;
   }
 
-  Tensor adaptive_avg_pool2d(at::Tensor const& input, IntArrayRef output_size) {
+  Tensor adaptive_avg_pool2d_symint(at::Tensor const& input, SymIntArrayRef output_size) {
     TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
     TORCH_CHECK(
         (output_size[0] >= 0 && output_size[1] >= 0),
@@ -103,10 +103,10 @@ namespace {
         "but received {", output_size[0], ", ", output_size[1], "}");
 
     if (input.is_mkldnn()) {
-      return at::mkldnn_adaptive_avg_pool2d(input, output_size);
+      return at::mkldnn_adaptive_avg_pool2d(input, c10::asIntArrayRefSlow(output_size));
     }
 
-    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
+    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1 && !input.is_xpu()) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
       #if defined(C10_MOBILE) && defined(USE_XNNPACK)
@@ -124,7 +124,7 @@ namespace {
       }
       return out;
     } else {
-      return _adaptive_avg_pool2d(input, output_size);
+      return _adaptive_avg_pool2d_symint(input, output_size);
     }
   }
 

@@ -19,7 +19,7 @@ struct StashTorchFunctionModeGuard {
   }
 
  private:
-  std::shared_ptr<c10::SafePyObject> old_mode_ = nullptr;
+  std::shared_ptr<c10::SafePyObject> old_mode_;
 };
 
 } // namespace overrides

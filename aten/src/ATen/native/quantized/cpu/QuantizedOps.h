@@ -1,7 +1,10 @@
-#include <ATen/ATen.h>
+#pragma once
+#include <ATen/core/Tensor.h>
+#include <ATen/core/IListRef.h>
+#include <ATen/Dispatch.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/TensorIterator.h>
 
 namespace at {
 namespace native {
@@ -143,7 +146,7 @@ using qupsample_bilinear2d_fn = void (*)(
     c10::optional<double> scales_w);
 
 using qcat_nhwc_fn = Tensor (*)(
-    const c10::List<Tensor>& qxs,
+    const MaterializedITensorListRef& qxs,
     int64_t dim,
     double scale,
     int64_t zero_point);
