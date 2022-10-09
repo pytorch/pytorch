@@ -9,8 +9,8 @@ def is_available() -> bool:
     r"""Returns a bool indicating if XPU is currently available."""
     return torch._C._is_hooks_available("xpu")
 
-def device_count():
+def device_count() -> int:
     return torch._C._get_device_count("xpu")
 
-def current_device():
+def current_device() -> int:
     return torch._C._get_device("xpu")
