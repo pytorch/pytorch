@@ -5616,7 +5616,7 @@ TEST(LoopNest, fuseLoopsNotContiguous) {
   //     A[j] = 10 * j;
   //   }
   //   B[0] = 0;
-  //   for (int k = 50; k < 100; k++) {
+  //   for (int k = 0; k < 100; k++) {
   //     B[k] = 20 * k;
   //   }
   BufHandle a_buf("A", {100}, kInt);
@@ -5625,7 +5625,7 @@ TEST(LoopNest, fuseLoopsNotContiguous) {
   VarHandle k("k", kInt);
   auto forJ = For::make(j, 0, 100, Store::make(a_buf, {j}, Mul::make(10, j)));
   auto initB = Store::make(b_buf, {0}, 0);
-  auto forK = For::make(k, 50, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
+  auto forK = For::make(k, 0, 100, Store::make(b_buf, {j}, Mul::make(20, k)));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   auto par = Block::make({forJ, initB, forK});
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
