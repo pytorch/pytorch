@@ -13,6 +13,7 @@ from typing import Dict, Optional, Set
 import numpy
 
 import torch
+from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .utils import is_safe_constant
@@ -154,7 +155,9 @@ def _allowed_function_ids():
         for name, obj in list(module.__dict__.items()):
             if id(obj) not in torch_object_ids:
                 if isinstance(obj, types.ModuleType):
-                    if obj.__name__.startswith("torch."):
+                    if obj.__name__.startswith("torch.") and _is_allowed_module_prefix(
+                        obj
+                    ):
                         torch_object_ids[id(obj)] = f"{module.__name__}.{name}"
                         _find_torch_objects(obj)
                 elif _is_allowed_module_prefix(obj):
@@ -168,6 +171,9 @@ def _allowed_function_ids():
     for idx in _disallowed_function_ids():
         if idx in torch_object_ids:
             del torch_object_ids[idx]
+
+    for extra in (is_fx_tracing,):
+        torch_object_ids[id(extra)] = f"{extra.__module__}.{extra.__name__}"
 
     return torch_object_ids
 
