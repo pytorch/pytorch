@@ -1596,5 +1596,90 @@
     "set_grad_enabled",
     "set_printoptions",
     "unique"
+  ],
+  "torch.fx.experimental.normalize": [
+    "AnnotateTypesWithSchema",
+    "Any",
+    "Argument",
+    "Callable",
+    "Dict",
+    "Node",
+    "Optional",
+    "Proxy",
+    "Target",
+    "Transformer",
+    "Tuple",
+    "create_type_hint",
+    "map_aggregate",
+    "normalize_function",
+    "normalize_module"
+  ],
+  "torch.fx.experimental.proxy_tensor": [
+    "ProxySymDispatchMode",
+    "ProxyTorchDispatchMode",
+    "decompose",
+    "disable_autocast_cache",
+    "disable_proxy_modes_tracing",
+    "fake_signature",
+    "fetch_sym_proxy",
+    "fetch_tensor_proxy",
+    "get_isolated_graphmodule",
+    "get_proxy_slot",
+    "get_proxy_slots",
+    "get_torch_dispatch_modes",
+    "has_proxy_slot",
+    "maybe_disable_fake_tensor_mode",
+    "proxy_call",
+    "set_meta",
+    "set_proxy_slot",
+    "thunkify",
+    "track_tensor",
+    "track_tensor_tree",
+    "wrap_key",
+    "wrapper_and_args_for_make_fx"
+  ],
+  "torch.fx.experimental.schema_type_annotation": [
+    "Any",
+    "Argument",
+    "Dict",
+    "Optional",
+    "Target",
+    "Transformer",
+    "Tuple"
+  ],
+  "torch.fx.experimental.symbolic_shapes": [
+    "Ceil"
+  ],
+  "torch.fx.passes.backends.cudagraphs": [
+    "CapabilityBasedPartitioner",
+    "FakeTensorProp",
+    "OperatorSupport",
+    "tree_map"
+  ],
+  "torch.fx.passes.infra.partitioner": [
+    "Dict",
+    "GraphModule",
+    "Iterable",
+    "List",
+    "Node",
+    "NodeList",
+    "OperatorSupportBase",
+    "Optional",
+    "Set",
+    "defaultdict",
+    "fuse_by_partitions"
+  ],
+  "torch.fx.passes.utils.fuser_utils": [
+    "Dict",
+    "Graph",
+    "GraphModule",
+    "List",
+    "Node",
+    "NodeList",
+    "NodeSet",
+    "SimpleQueue",
+    "Tuple",
+    "legalize_graph",
+    "lift_subgraph_as_module"
   ]
 }
