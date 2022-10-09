@@ -1643,8 +1643,6 @@ except RuntimeError as e:
             _test(1)
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
-    # skip for ROCM. Look into #62533.
-    @skipIfRocm
     def test_cuda_memory_leak_detection(self):
         l = []
 
@@ -4621,7 +4619,7 @@ class TestCudaComm(TestCase):
 
             ss = torch.cuda.memory._snapshot()
             found_it = False
-            for seg in ss:
+            for seg in ss['segments']:
                 for b in seg['blocks']:
                     if 'history' in b:
                         for h in b['history']:
@@ -4629,11 +4627,38 @@ class TestCudaComm(TestCase):
                                 self.assertTrue('test_cuda' in h['frames'][0]['filename'])
                                 found_it = True
             self.assertTrue(found_it)
+
             if not IS_WINDOWS:
                 with tempfile.NamedTemporaryFile() as f:
                     torch.cuda.memory._save_segment_usage(f.name)
                     with open(f.name, 'r') as f2:
                         self.assertTrue('test_cuda.py' in f2.read())
+
+            del x
+            torch.cuda.empty_cache()
+            ss = torch.cuda.memory._snapshot()
+            self.assertTrue(ss['device_traces'][0][-1]['action'] == 'segment_free')
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+
+
+    def test_memory_snapshot_with_cpp(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            x = torch.rand(311, 411, device='cuda')
+
+            ss = torch.cuda.memory._snapshot()['segments']
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                found_it = True
+            self.assertTrue(found_it)
 
         finally:
             torch.cuda.memory._record_memory_history(False)
@@ -4695,6 +4720,50 @@ class TestCudaComm(TestCase):
     def test_raises_oom(self):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
+
+    @unittest.skipIf(IS_WINDOWS, 'Windows CI does not like the load_inline')
+    def test_cpp_memory_snapshot_pickle(self):
+        from torch.utils.cpp_extension import load_inline
+        source = """
+        #include <torch/csrc/cuda/memory_snapshot.h>
+        py::object do_snapshot() {
+            std::string data = torch::cuda::_memory_snapshot_pickled();
+            return py::bytes(data);
+        }
+        void record(bool e) {
+            torch::cuda::_record_memory_history(e);
+        }
+        """
+        m = load_inline(name='snapshot', cpp_sources=[source], functions=['do_snapshot', 'record'])
+        try:
+            m.record(True)
+            t = torch.rand(311, 411, device='cuda')
+            mem = pickle.loads(m.do_snapshot())
+            found = False
+            for s in mem['segments']:
+                for b in s['blocks']:
+                    if b['state'] == 'active_allocated' and 'history' in b:
+                        history = b['history']
+                        if history and history[0]['real_size'] == 311 * 411 * 4:
+                            found = True
+            last_action = mem['device_traces'][0][-1]
+            self.assertTrue(last_action['action'] == 'alloc')
+            self.assertTrue(last_action['size'] == 311 * 411 * 4)
+            self.assertTrue(found)
+        finally:
+            m.record(False)
+
+    def test_notifies_oom(self):
+        x = False
+
+        def cb(device, alloc, device_alloc, device_free):
+            nonlocal x
+            x = True
+        torch._C._cuda_attach_out_of_memory_observer(cb)
+        with self.assertRaises(torch.cuda.OutOfMemoryError):
+            torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
+        self.assertTrue(x)
+
 
 instantiate_parametrized_tests(TestCuda)
 

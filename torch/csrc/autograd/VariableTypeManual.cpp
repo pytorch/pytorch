@@ -154,7 +154,7 @@ Tensor _make_dual(
   std::shared_ptr<ViewBackward0> grad_fn;
   if (compute_requires_grad(primal_)) {
     grad_fn = std::make_shared<ViewBackward0>();
-    grad_fn->self_sizes = primal_.sizes().vec();
+    grad_fn->self_sym_sizes = primal_.sym_sizes().vec();
     grad_fn->set_next_edges(collect_next_edges(primal_));
   }
 

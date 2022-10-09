@@ -54,9 +54,13 @@ struct ShaderSource final {
     } spirv;
   } src_code;
 
-  std::string kernel_name;
-  ShaderLayout::Signature kernel_layout;
+  std::string kernel_name{""};
+  ShaderLayout::Signature kernel_layout{};
 
+  // Shader Metadata
+  utils::uvec3 out_tile_size{1u, 1u, 1u};
+
+  explicit ShaderSource();
   explicit ShaderSource(std::string, const char*);
   explicit ShaderSource(
       std::string,
@@ -64,6 +68,8 @@ struct ShaderSource final {
       const uint32_t,
       const std::vector<VkDescriptorType>&);
 };
+
+bool operator==(const ShaderSource& _1, const ShaderSource& _2);
 
 class ShaderModule final {
  public:
