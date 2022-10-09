@@ -1619,6 +1619,16 @@ class TestRefsOpsInfo(TestCase):
         # duplicated due to efficiency concerns of the ref vs the decomp
         '_refs.index_add_',
         # these are not aten ops?
+        '_refs.bfloat16',
+        '_refs.bool',
+        '_refs.byte',
+        '_refs.char',
+        '_refs.double',
+        '_refs.float',
+        '_refs.half',
+        '_refs.int',
+        '_refs.long',
+        '_refs.short',
         '_refs.broadcast_shapes',
         '_refs.broadcast_tensors',
         '_refs.nn.functional.tanhshrink',
