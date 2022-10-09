@@ -49,6 +49,7 @@
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/native_dropout.h>
 #include <ATen/ops/native_dropout_native.h>
+#include <ATen/ops/native_layer_norm_native.h>
 #include <ATen/ops/prod.h>
 #include <ATen/ops/relu.h>
 #include <ATen/ops/relu_native.h>
