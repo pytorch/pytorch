@@ -1,9 +1,8 @@
 import torch
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 from functorch.experimental.cond import cond
 from torch.fx.experimental.proxy_tensor import make_fx
-
 
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
@@ -19,7 +18,7 @@ class TestControlFlow(TestCase):
 
 
 class TestControlFlowTraced(TestCase):
-    def test_cond_traced(self):
+    def test_cond_traced_not_nested(self):
         def true_fn(x):
             return x.sin()
 
@@ -126,14 +125,14 @@ class TestControlFlowTraced(TestCase):
         def forward(self, x_1, pred_1, pred2_1):
             true_graph_0 = self.true_graph_0
             false_graph_0 = self.false_graph_0
-            conditional = functorch_experimental_ops_cond(pred_1,
-            true_graph_0, false_graph_0, [[x_1]]);  pred_1 = true_graph_0 = false_graph_0 = None
+            conditional = torch.ops.cond(pred_1, true_graph_0, false_graph_0, [[x_1]]);
+            pred_1 = true_graph_0 = false_graph_0 = None
             true_graph_1 = self.true_graph_1
             false_graph_1 = self.false_graph_1
-            conditional_1 = functorch_experimental_ops_cond(pred2_1,
-            true_graph_1, false_graph_1, [[x_1, x_1]]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
-            add_tensor = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
-            return add_tensor
+            conditional_1 = torch.ops.cond(pred2_1, true_graph_1, false_graph_1, [[x_1, x_1]]);
+            pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
+            add = torch.ops.aten.add.Tensor(conditional, conditional_1);  conditional = conditional_1 = None
+            return add
         """
         code = graph.code
         # Normalization hack, cause .code makes some weird whitespace
@@ -145,8 +144,8 @@ class TestControlFlowTraced(TestCase):
         out = """
         def forward(self, flat_args):
             flat_args_1, = fx_pytree.tree_flatten_spec([flat_args], self._in_spec)
-            mul_tensor = torch.ops.aten.mul.Tensor(flat_args_1, flat_args_1);  flat_args_1 = None
-            return pytree.tree_unflatten([mul_tensor], self._out_spec)
+            mul = torch.ops.aten.mul.Tensor(flat_args_1, flat_args_1);  flat_args_1 = None
+            return pytree.tree_unflatten([mul], self._out_spec)
         """
         # Normalization hack, cause .code makes some weird whitespace
         code = "".join(code.split())
@@ -181,3 +180,6 @@ class TestControlFlowTraced(TestCase):
         x = torch.randn(4)
         with self.assertRaises(AssertionError):
             make_fx(f)(x, torch.tensor(False))
+
+if __name__ == '__main__':
+    run_tests()

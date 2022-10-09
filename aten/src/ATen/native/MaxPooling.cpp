@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
@@ -97,13 +98,22 @@ Tensor max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+
+  auto ndim = self.ndimension();
+   TORCH_CHECK(
+       (ndim == 2 && self.size(0) != 0 && self.size(1) != 0) ||
+           (ndim == 3 && self.size(1) != 0 && self.size(2) != 0),
+       "max_pool1d: Expected 2D or 3D (batch mode) tensor with optional 0 dim batch size for input, but got:",
+       self.sizes());
+
   if (self.is_quantized()) {
     return at::quantized_max_pool1d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   if ((self.requires_grad() && at::GradMode::is_enabled()) ||
       self._fw_grad(/*level */ 0).defined() ||
-      !self.device().is_cpu()) {
+      !self.device().is_cpu() ||
+      isTensorSubclassLike(self)) {
     // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
