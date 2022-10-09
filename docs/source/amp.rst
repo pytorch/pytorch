@@ -241,6 +241,12 @@ are safe to autocast.
 
 CPU Op-Specific Behavior
 ------------------------
+
+``bfloat16`` computation can be effectively conducted on platforms with AVX512 instruction set. 
+On platforms with AVX512 BFloat16 instruction, there will be an additional performance boost. 
+Query the instruction set via system ``lscpu | grep avx512_bf16`` or ``cat /proc/cpuinfo | grep avx512_bf16``. 
+In some cases ``float32`` (``float``) computation may be faster ``bfloat16`` one.
+
 The following lists describe the behavior of eligible ops in autocast-enabled regions.
 These ops always go through autocasting whether they are invoked as part of a :class:`torch.nn.Module`,
 as a function, or as a :class:`torch.Tensor` method. If functions are exposed in multiple namespaces,
