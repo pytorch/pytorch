@@ -1495,7 +1495,9 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   for (auto& op : operands_) {
     has_storage &= op.tensor_base().has_storage();
   }
-  auto privateuse1_without_storage = common_device_.type() == DeviceType::PrivateUse1 && !has_storage;
+  auto privateuse1_without_storage =
+     common_device_.type() == DeviceType::PrivateUse1 &&
+     !has_storage;
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
