@@ -866,6 +866,7 @@ import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
+from torch.backends import xpu as _xpu
 import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__

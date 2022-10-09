@@ -448,6 +448,34 @@ PyObject* THPModule_isHooksAvailable_wrap(PyObject* _unused, PyObject* arg) {
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_getDeviceCount_wrap(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_get_device_count expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  std::string device_type = THPUtils_unpackString(arg);
+  if (device_type == "xpu" && at::hasXPU()) {
+    return THPUtils_packUInt64(at::detail::getXPUHooks().device_count());
+  }
+  // add more available device types here
+  return THPUtils_packUInt64(0);
+}
+
+PyObject* THPModule_getDevice_wrap(PyObject* _unused, PyObject* arg) {
+  THPUtils_assert(
+      THPUtils_checkString(arg),
+      "_get_device expects a str, "
+      "but got %s",
+      THPUtils_typename(arg));
+  std::string device_type = THPUtils_unpackString(arg);
+  if (device_type == "xpu" && at::hasXPU()) {
+    return THPUtils_packInt64(at::detail::getXPUHooks().current_device());
+  }
+  // add more available device types here
+  return THPUtils_packInt64(-1);
+}
+
 PyObject* THModule_getCppBacktrace(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   size_t frames_to_skip;
@@ -991,6 +1019,8 @@ static PyMethodDef TorchMethods[] = {
     {"_to_dlpack", THPModule_toDLPack, METH_O, nullptr},
     {"_from_dlpack", THPModule_fromDLPack, METH_O, nullptr},
     {"_is_hooks_available", THPModule_isHooksAvailable_wrap, METH_O, nullptr},
+    {"_get_device_count", THPModule_getDeviceCount_wrap, METH_O, nullptr},
+    {"_get_device", THPModule_getDevice_wrap, METH_O, nullptr},
     {"_get_cpp_backtrace", THModule_getCppBacktrace, METH_VARARGS, nullptr},
     {"set_flush_denormal", THPModule_setFlushDenormal, METH_O, nullptr},
     {"get_default_dtype", THPModule_getDefaultDtype, METH_NOARGS, nullptr},

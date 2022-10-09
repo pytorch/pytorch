@@ -771,7 +771,7 @@ void AliasDb::analyzeImpl(Node* node) {
       "Special cases should be handled already if we're here.");
 
   if (node->kind().is_aten() || node->kind().is_prim() ||
-      node->kind().is_cuda()) {
+      node->kind().is_cuda() || node->kind().is_xpu()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA or
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, but this is the intended

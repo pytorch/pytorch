@@ -260,6 +260,26 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
+std::shared_ptr<SugaredValue> XPUPythonModuleValue::attr(
+    const SourceRange& loc,
+    GraphFunction& m,
+    const std::string& field) {
+  // List of two xpu operators which are only supported in JIT without importing
+  // xpu extension, the other operators will be registered in xpu extension
+  const std::unordered_set<std::string> xpu_ops = {
+      "current_device", "device_count"};
+
+  if (xpu_ops.find(field) != xpu_ops.end()) {
+    return std::make_shared<BuiltinFunction>(Symbol::xpu(field), c10::nullopt);
+  }
+
+  py::object member = getattr(loc, field);
+  // note: is_constant = true because we consider that global properties
+  // on modules like math.pi or torch.float to be constants
+  // even though it is possible, though rare, for someone to mutate them
+  return toSugaredValue(member, m, loc, /*is_constant=*/true);
+}
+
 Value* ModuleValue::asValue(const SourceRange& loc, GraphFunction& m) {
   return self_;
 }
@@ -1201,6 +1221,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
     if (obj_name.compare("torch.cuda") == 0) {
       return std::make_shared<CUDAPythonModuleValue>(obj);
+    }
+    // we register two APIs device_count and current_device in
+    // torch.backends.xpu for two reasons: 1) they are used to support JIT
+    // script. 2) it is independent of xpu extension.
+    if (obj_name.compare("torch.backends.xpu") == 0) {
+      return std::make_shared<XPUPythonModuleValue>(obj);
     }
     return std::make_shared<PythonModuleValue>(obj);
   } else if (

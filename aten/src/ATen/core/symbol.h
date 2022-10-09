@@ -69,6 +69,7 @@ struct TORCH_API Symbol {
   static Symbol attr(const std::string & s);
   static Symbol aten(const std::string & s);
   static Symbol cuda(const std::string & s);
+  static Symbol xpu(const std::string & s);
   static Symbol onnx(const std::string & s);
   static Symbol prim(const std::string & s);
   static Symbol user(const std::string & s);
@@ -80,6 +81,7 @@ struct TORCH_API Symbol {
   bool is_attr() const;
   bool is_aten() const;
   bool is_cuda() const;
+  bool is_xpu() const;
   bool is_prim() const;
   bool is_prims() const;
   bool is_nvprims() const;
@@ -127,6 +129,7 @@ static inline bool operator==(Symbol lhs, Symbol rhs) {
 inline Symbol Symbol::attr(const std::string & s) { return Symbol::fromQualString("attr::" + s); }
 inline Symbol Symbol::aten(const std::string & s)  { return Symbol::fromQualString("aten::" + s); }
 inline Symbol Symbol::cuda(const std::string & s)  { return Symbol::fromQualString("cuda::" + s); }
+inline Symbol Symbol::xpu(const std::string & s)  { return Symbol::fromQualString("xpu::" + s); }
 inline Symbol Symbol::onnx(const std::string & s)  { return Symbol::fromQualString("onnx::" + s); }
 inline Symbol Symbol::prim(const std::string & s)  { return Symbol::fromQualString("prim::" + s); }
 inline Symbol Symbol::scope(const std::string & s) { return Symbol::fromQualString("scope::" + s); }

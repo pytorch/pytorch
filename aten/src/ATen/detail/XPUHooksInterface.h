@@ -42,6 +42,14 @@ struct TORCH_API XPUHooksInterface {
         "Cannot query detailed XPU version without Intel Extension for Pytorch. ",
         XPU_HELP);
   }
+
+  virtual DeviceIndex device_count() const {
+    return 0;
+  }
+
+  virtual DeviceIndex current_device() const {
+    return -1;
+  }
 };
 
 struct TORCH_API XPUHooksArgs {};
