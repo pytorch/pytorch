@@ -743,14 +743,14 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
-  const auto dim_size = self.size(dim_);
+  const auto dim_size = self.sym_size(dim_);
   std::vector<Tensor> splits(sections);
-  int64_t min_split_size = dim_size / sections;
-  int64_t num_splits_one_extra = dim_size % sections;
-  int64_t start_idx = 0;
+  auto min_split_size = dim_size / sections;
+  auto num_splits_one_extra = dim_size % sections;
+  c10::SymInt start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
-    int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
-    splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
+    auto split_size = (num_splits_one_extra > split_idx) ? (min_split_size + 1) : min_split_size;
+    splits[split_idx] = at::slice_symint(self, dim_, start_idx, start_idx + split_size);
     start_idx += split_size;
   }
   return splits;
