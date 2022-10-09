@@ -1,9 +1,22 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/utils/ParamUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_to_dense_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
+#include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
+#include <ATen/ops/to_mkldnn_native.h>
+#endif
+
 
 namespace at { namespace native {
 
