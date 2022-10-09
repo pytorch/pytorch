@@ -14,6 +14,7 @@ import itertools
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
+# TODO: partition here could use a refactor to improvement efficiency on merge and traversal
 class Partition:
     def __init__(self, id: int = None, nodes: Iterable[Node] = None):
         self.id = id
@@ -31,6 +32,8 @@ class Partition:
     def size(self):
         return len(self.nodes)
 
+
+
 class CapabilityBasedPartitioner:
 
     def __init__(self,
@@ -42,50 +45,6 @@ class CapabilityBasedPartitioner:
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
 
-        # map of node to it's upstream dependency nodes
-        # if A is found in dependency_map[B], then B depends on A (or a is an upstream depedency of b)
-        self.dependency_map = self.__build_dependency_map()
-
-    def __build_dependency_map(self) -> Dict[Node, Set[Node]]:
-        dependency_map = defaultdict(set)
-
-        # assumptions: nodes in graph are sorted in topological order
-        for node in self.graph_module.graph.nodes:
-            for input_node in node.all_input_nodes:
-                # add input_node and input_node's upstream dependency
-                dependency_map[node].add(input_node)
-                dependency_map[node].update(dependency_map[input_node])
-
-        return dependency_map
-
-    def __node_depends_on(self, a: Node, b: Node) -> int:
-        # Returns
-        # 1 if b depends on a (,or equivalently a is an upstream depedency of b)
-        # -1 if a depends on b (,or equivalently b is an upstream depedency of a)
-        # 0 if a and b doesn't have dependency between each other
-
-        if a in self.dependency_map[b]:
-            return 1
-        elif b in self.dependency_map[a]:
-            return -1
-        else:
-            return 0
-
-    def __partition_depends_on(self, partition_a: Partition, partition_b: Partition) -> int:
-        # Returns
-        # 1 if b depends on a (,or equivalently a is an upstream depedency of b)
-        # -1 if a depends on b (,or equivalently b is an upstream depedency of a)
-        # 0 if a and b doesn't have dependency between each other
-
-        # TODO: build a cache here to speedup the query
-
-        for node_a in partition_a.nodes:
-            for node_b in partition_b.nodes:
-                dependency = self.__node_depends_on(node_a, node_b)
-                if dependency != 0:
-                    return dependency
-        return 0
-
     def __get_supported_nodes(self) -> NodeList:
         logging.debug("Collecting supported nodes...")
         supported_nodes = []
@@ -94,93 +53,104 @@ class CapabilityBasedPartitioner:
                 supported_nodes.append(node)
         return supported_nodes
 
+    def __is_node_supported(self, node: Node) -> bool:
+        # TODO: reject 'getitem' node since they are special cased in partitioning.
+        return self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node):
+
+
     def propose_partitions(self) -> List[Partition]:
-        candidates: NodeList = self.__get_supported_nodes()
+        # candidates: NodeList = self.__get_supported_nodes()
 
         # assumptions: nodes in candidate list is sorted in topological order
         assignment: Dict[Node, int] = {}   # maping from node to partition_id
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
         new_partition_id = itertools.count()
 
-        def assign(node: Node, id: Optional[int] = None):
-            # If id is None, remove the node from original assigment
+        def maybe_merge_partition(self_id: int, other_id: int):
+            # merged nodes
+            merged_nodes = copy(partitions_by_id[self_id].nodes).update(partitions_by_id[other_id].nodes)
 
-            # node has been assigned before, clean up and re-assign
-            if node in assignment:
-                original_id = assignment[node]
-                del assignment[node]
-                partitions_by_id[original_id].remove_node(node)
-                if partitions_by_id[original_id].size() == 0:
-                    del partitions_by_id[original_id]
+            # def merge_breaks_dagpartitions: List[Partition]):
+            visited: NodeSet = set()
 
-            if id is not None:
-                assignment[node] = id
-                if id not in partitions_by_id:
-                    partitions_by_id[id] = Partition(id=id, nodes=[node])
+            def dfs_find_cycle(node):
+                if node in visited:
+                    return False
+                if node in merged_nodes:
+                    return True  # found cycle, return
+
+                # branching on partition or not
+                visited.add(node)
+                if node in assigment:
+                    for p_node in partitions_by_id[assignment[node]].nodes:
+                        for user_node in p_node.users:
+                            if dfs_find_cycle(user_node):
+                                return True
                 else:
-                    partitions_by_id[id].add_node(node)
+                    for user_node in node.users:
+                        if dfs_find_cycle(user_node):
+                            return True
+                return False
+                
+            # check if merge would create cyclic dependency.
+            for node in merged_nodes:
+                for user_node in node.users:
+                    if user_node not in merged_nodes and dfs_find_cycle(user_node):
+                        # return false indicating no fusion happening.
+                        return False
+
+            # no cyclic dependency, let's move forward with the merge
+            # updating partition nodes
+            partitions_by_id[self_id].nodes = merged_nodes
+            # updating node map
+            for node in partitions_by_id[other_id].nodes:
+                assignment[node] = self_id
+            # delete other partition
+            del partitions_by_id[other_id]
+
+            return True
+
+        def merge_single_node(node: Node, id: int):
+            assert node not in assignment
+
+            assignment[node] = id
+            if id not in partitions_by_id:
+                partitions_by_id[id] = Partition(id=id, nodes=[node])
+            else:
+                partitions_by_id[id].add_node(node)
 
         logging.debug("Proposing partitions...")
 
-        def getIndependentUserPartitions(node, merge_self=True):
+        def mergeAcyclicUserPartitions(node, merge_self=True):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
-            user_partitions: Dict[Partition, None] = {}
+            merge_candidates: Dict[int, None] = {}
+
+            if self.__is_node_supported(node) and node not in assignment:
+                partition_id = next(new_partition_id)
+                merge_single_node(node, partition_id)
+                merge_candidates[partition_id] = None
+
             for user_node in node.users:
                 if user_node in assignment:
-                    id = assignment[user_node]
-                    user_partitions[partitions_by_id[id]] = None
-                elif merge_self:
-                    user_partitions[Partition(nodes=[user_node])] = None
+                    merge_candidates[assignment[user_node].id] = None
 
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
-            user_partitions_list = list(user_partitions.keys())
-            for i in range(len(user_partitions_list)):
-                for j in range(i + 1, len(user_partitions_list)):
-                    pi = user_partitions_list[i]
-                    pj = user_partitions_list[j]
-                    dependency = self.__partition_depends_on(pi, pj)
-                    if dependency == 1 and pj in user_partitions:
-                        del user_partitions[pj]
-                    elif dependency == -1 and pi in user_partitions:
-                        del user_partitions[pi]
-
-            # We use the following rules for partition assignment:
-            # 1. If none of the candidates has been assigned to a partition, create a new partition
-            # 2. If there is one partition candidate, assign to the partition
-            # 3. If there are more than one partition candidates, assign current node to the first partition and
-            #    merge the other partitions with first partition, since user_partitions doesn't have depedency between
-            #    each other.
-            partitions_id_list = [partition.id for partition in user_partitions if partition.id is not None]
-
-            if merge_self and len(partitions_id_list) == 0:
-                # create a new partition
-                id = next(new_partition_id)
-            elif len(partitions_id_list) == 1:
-                id = partitions_id_list[0]
-            if len(partitions_id_list) > 1:
-                # users are assigned to more than one partition, since user_partitions doesn't have
-                # dependency on each other, they can be fused into a single partition
-                id = partitions_id_list[0]
-
-                reassignment: Dict[Node, int] = {}
-                for other_id in partitions_id_list[1:]:
-                    for other_node in partitions_by_id[other_id].nodes:
-                        reassignment[other_node] = id
-                for other_node in reassignment:
-                    assign(other_node, id)
-
-            if merge_self:
-                assign(node, id)
+            merge_candidates_list = list(merge_candidates.keys())
+            if len(merge_candidates_list) > 1:
+                self_id = merge_candidates_list[0]
+                for other_id in merge_candidates_list[1:]:
+                    maybe_merge_partition(self_id, other_id)
 
         # visit candidates in reversed topological order
-        for node in reversed(candidates):
-            getIndependentUserPartitions(node, True)
+        # for node in reversed(candidates):
+        #     mergeAcyclicUserPartitions(node, True)
 
         # not very efficient, this handles sibling fusion of partitions that share inputs.
         for node in self.graph_module.graph.nodes:
-            if node not in assignment:
-                getIndependentUserPartitions(node, False)
+            mergeAcyclicUserPartitions(node)
+            #if node not in assignment:
+            #    mergeAcyclicUserPartitions(node, False)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
@@ -200,7 +170,7 @@ class CapabilityBasedPartitioner:
                     if assignment.get(user, None) != id:    # type: ignore[arg-type]
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
-            assign(node, id)
+            merge_single_node(node, id)
 
         # filter out single node partitions
         if not self.allows_single_node_partition:
