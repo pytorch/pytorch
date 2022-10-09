@@ -50,7 +50,7 @@ def _create_beartype_decorator(
     assert isinstance(_beartype_lib, ModuleType)
 
     if runtime_check_state == _exporter_states.RuntimeTypeCheckState.ERRORS:
-        # Enable runtime type checking which errors on any type hint violation.
+        # Enable runtime type checking with errors on any type hint violation.
         return _beartype_lib.beartype
 
     # Warnings only
