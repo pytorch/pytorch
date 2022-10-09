@@ -1,4 +1,5 @@
 # Owner(s): ["module: mkldnn"]
+import gc
 import sys
 import torch
 import unittest
@@ -43,6 +44,14 @@ class JitLlgaTestCase(JitTestCase):
         torch.jit.enable_onednn_fusion(True)
 
     def tearDown(self):
+        # JIT trace currently leaks memory. Ref: https://github.com/pytorch/pytorch/issues/86537
+        # TorchVision tests use large amount of memory, as the traced models remain in memory
+        # even if a del statement is used.
+        # This can be an issue on machines with less memory, such as the linux.2xlarge CI runner.
+        # Invoking gc.collect() lets python use the memory for future objects, but it might not
+        # relinquish the memory to the Linux subsystem, so this tentative solution might not fix
+        # the issue of this test's process getting killed by Linux's OOM killer on such machines.
+        gc.collect()
         torch.jit.enable_onednn_fusion(False)
         torch._C._jit_set_autocast_mode(self.original_autocast_mode)
 
