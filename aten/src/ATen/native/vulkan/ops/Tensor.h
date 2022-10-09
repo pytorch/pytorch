@@ -179,12 +179,20 @@ class vTensor final {
     return view_->q_scale;
   }
 
+  inline float get_scale_float() const {
+    return api::utils::safe_downcast<float>(view_->q_scale);
+  }
+
   inline void set_zero_point(const int64_t q_zero_point) const {
     view_->q_zero_point = q_zero_point;
   }
 
   inline int64_t get_zero_point() const {
     return view_->q_zero_point;
+  }
+
+  inline int32_t get_zero_point_int32() const {
+    return api::utils::safe_downcast<int32_t>(view_->q_zero_point);
   }
 
   inline size_t nbytes() const {
