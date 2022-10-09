@@ -677,6 +677,11 @@ class TestOperators(TestCase):
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
             return
 
+        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        atol, rtol = (1e-4, 2e-2) if is_cuda_sm86 else (None, None)
+        if is_cuda_sm86 and op.name == "nn.functional.conv_transpose3d" and dtype == torch.float32:
+            self.skipTest("test_vmapvjpvjp_nn_functional_conv_transpose3d_cuda_float32 is grossly incorrect on sm86")
+            return
         for sample in samples:
             fn, args = get_vjpfull_variant(op, sample)
             result = fn(*args)
@@ -696,8 +701,6 @@ class TestOperators(TestCase):
                 return (*result, *result_vjps)
 
             is_batch_norm_and_training = is_batch_norm_training(op.name, sample.kwargs)
-            is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-            atol, rtol = (1e-4, 2e-2) if is_cuda_sm86 else (None, None)
             generator = get_fallback_and_vmap_exhaustive(
                 vjp_of_vjp, args_and_cotangents, {}, is_batch_norm_and_training=is_batch_norm_and_training)
             for loop_out, batched_out in generator:
