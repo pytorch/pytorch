@@ -312,7 +312,7 @@ class Interpreter:
         Fetch an attribute from the ``Module`` hierarchy of ``self.module``.
 
         Args:
-            target (str): The fully-qualfiied name of the attribute to fetch
+            target (str): The fully-qualified name of the attribute to fetch
 
         Return:
             Any: The value of the attribute.
