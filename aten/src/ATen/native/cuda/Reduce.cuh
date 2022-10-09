@@ -1143,6 +1143,9 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
        std::is_same<at::Half, out_scalar_t>::value) ||
       (std::is_same<at::complex<Half>, scalar_t>::value &&
        std::is_same<at::complex<Half>, out_scalar_t>::value);
+  // at::BFloat16 has lower precision and can lead to rounding errors.
+  // So when scalar_t and out_scalar_t are at::BFloat16, we
+  // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_bfloat16 =
       (std::is_same<at::BFloat16, scalar_t>::value &&
        std::is_same<at::BFloat16, out_scalar_t>::value);
@@ -1247,6 +1250,9 @@ inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& fu
        std::is_same<at::Half, out_scalar_t>::value) ||
       (std::is_same<at::complex<Half>, scalar_t>::value &&
        std::is_same<at::complex<Half>, out_scalar_t>::value);
+  // at::BFloat16 has lower precision and can lead to rounding errors.
+  // So when scalar_t and out_scalar_t are at::BFloat16, we
+  // set can_accumulate_in_output to False.
   static constexpr bool is_inp_out_type_bfloat16 =
       (std::is_same<at::BFloat16, scalar_t>::value &&
        std::is_same<at::BFloat16, out_scalar_t>::value);
