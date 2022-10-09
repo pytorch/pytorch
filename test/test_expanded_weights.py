@@ -275,6 +275,9 @@ class TestExpandedWeightFunctional(TestCase):
         for (res, exp) in zip(result, expected):
             self.assertEqual(res, exp, atol=atol, rtol=rtol)
 
+    def _compute_tolerances(self, device):
+        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
+        return (9e-3, 5e-5) if is_cuda_sm86 else (1e-4, 5e-5)
 
     def test_cnn_model_sum(self, device):
         def convnet(num_classes, num_dim):
@@ -295,8 +298,7 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Linear(128, num_classes, bias=True),
             )
 
-        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-        atol, rtol = (9e-3, 5e-5) if is_cuda_sm86 else (1e-4, 5e-5)
+        atol, rtol = self._compute_tolerances(device)
         return self._test_conv_model(convnet, 28, 2, device, atol=atol, rtol=rtol)
 
     def test_cnn_model_mean(self, device):
@@ -317,8 +319,7 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(128, num_classes, bias=True),
             )
-        is_cuda_sm86 = device.startswith("cuda") and torch.cuda.get_device_capability(0) == (8, 6)
-        atol, rtol = (9e-3, 5e-4) if is_cuda_sm86 else (1e-4, 5e-5)
+        atol, rtol = self._compute_tolerances(device)
         return self._test_conv_model(convnet, 28, 2, device, loss_reduction="mean", atol=atol, rtol=rtol)
 
     @parametrize('num_dim', [1, 2, 3])
@@ -332,7 +333,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
             )
-        return self._test_conv_model(instance_norm_model, 7, num_dim, device)
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(instance_norm_model, 7, num_dim, device, atol=atol, rtol=rtol)
 
     @parametrize('num_dim', [1, 2, 3])
     def test_group_norm_model(self, num_dim, device):
@@ -344,7 +346,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
             )
-        return self._test_conv_model(group_norm_model, 7, num_dim, device)
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(group_norm_model, 7, num_dim, device, atol=atol, rtol=rtol)
 
     @parametrize('num_dim', [1, 2, 3])
     def test_layer_norm_model(self, num_dim, device):
@@ -357,7 +360,8 @@ class TestExpandedWeightFunctional(TestCase):
                 nn.Flatten(start_dim=1, end_dim=-1),
                 nn.Linear(32 * (7 ** num_dim), num_classes, bias=True),
             )
-        return self._test_conv_model(layer_norm_model, 7, num_dim, device)
+        atol, rtol = self._compute_tolerances(device)
+        return self._test_conv_model(layer_norm_model, 7, num_dim, device, atol=atol, rtol=rtol)
 
     def test_embedding_model(self, device):
         def embedding_model(num_classes, num_embedding):
