@@ -30,14 +30,16 @@ from torch.autograd.profiler_util import (
 )
 from torch.futures import Future
 
+__all__ = ["profile", "record_function", "emit_itt", "emit_nvtx", "load_nvprof", "EnforceUnique",
+           "parse_nvprof_trace", "kineto_step", "EventList", "FunctionEvent", "MemRecordsAcc"]
 
 try:
     # Available in Python >= 3.2
-    from contextlib import ContextDecorator
+    from contextlib import ContextDecorator as _ContextDecorator
 except ImportError:
     import functools
 
-    class ContextDecorator(object):  # type: ignore[no-redef]
+    class _ContextDecorator(object):  # type: ignore[no-redef]
 
         def __enter__(self):
             raise NotImplementedError
@@ -52,7 +54,6 @@ except ImportError:
                     return func(*args, **kwargs)
 
             return wrapped
-
 
 class profile(object):
     """Context manager that manages autograd profiler state and holds a summary of results.
@@ -440,7 +441,7 @@ class profile(object):
         return function_events
 
 
-class record_function(ContextDecorator):
+class record_function(_ContextDecorator):
     """Context manager/function decorator that adds a label to a block of
     Python code (or function) when running autograd profiler. It is
     useful when tracing the code profile.

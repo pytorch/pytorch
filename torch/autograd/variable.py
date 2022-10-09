@@ -1,6 +1,7 @@
 import torch
 from torch._six import with_metaclass
 
+__all__ = ["VariableMeta", "Variable"]
 
 class VariableMeta(type):
     def __instancecheck__(cls, other):
