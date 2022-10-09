@@ -1,3 +1,4 @@
+import math
 from typing import List, Optional, Union
 
 import torch
@@ -33,6 +34,8 @@ def register_meta(op, register_dispatcher=True):
                     else op.overloadpacket.__name__
                 )
                 _meta_lib_dont_use_me_use_register_meta.impl(name, f)
+
+            op.py_impl(torch._C.DispatchKey.Meta)(f)
 
         tree_map(add_func, op)
         return f
@@ -83,6 +86,11 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
     output_sizes = list(self.size())
     output_sizes[dim[-1]] = lastdim
     return self.new_empty(output_sizes, dtype=toRealValueType(self.dtype))
+
+
+@register_meta(aten.copy_.default, register_dispatcher=False)
+def meta_copy_(self, src, non_blocking=False):
+    return self
 
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
@@ -186,6 +194,16 @@ def dot_check(self, other):
 def meta_dot(self, tensor):
     dot_check(self, tensor)
     return self.new_empty(())
+
+
+@register_meta([aten.mm.default], register_dispatcher=False)
+def meta_mm(a, b):
+    check(a.dim() == 2, lambda: "a must be 2D")
+    check(b.dim() == 2, lambda: "b must be 2D")
+    N, M1 = a.shape
+    M2, P = b.shape
+    check(M1 == M2, lambda: "a and b must have same reduction dim")
+    return a.new_empty(N, P)
 
 
 def _compute_reduction_shape(self, dims, keepdim):
@@ -303,10 +321,17 @@ def meta_conv(
                 )
         return ret_shape
 
-    def pick_memory_format():
-        if input_tensor.is_contiguous(memory_format=torch.channels_last):
-            return torch.channels_last
-        elif input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+    def is_channels_last(ten):
+        return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
+
+    def pick_memory_format(device_hint):
+        if device_hint == "cuda":
+            if is_channels_last(input_tensor) or is_channels_last(weight):
+                return torch.channels_last
+        else:
+            if is_channels_last(input_tensor):
+                return torch.channels_last
+        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
             return torch.contiguous_format
         elif input_tensor.is_contiguous(memory_format=torch.preserve_format):
             return torch.preserve_format
@@ -327,15 +352,150 @@ def meta_conv(
 
     else:
         out_channels = weight.shape[0]
-        if weight.shape[1] != input_tensor.shape[1] / groups:
+        if weight.shape[1] * groups != input_tensor.shape[1]:
             raise RuntimeError("Invalid channel dimensions")
         shape_out = calc_conv_nd_return_shape(
             dims, kernel_size, stride, padding, dilation
         )
     out = input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
-    mem_fmt = pick_memory_format()
+
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    if isinstance(input_tensor, FakeTensor):
+        device_hint = input_tensor.fake_device.type
+    else:
+        device_hint = "cuda"  # default to cuda
+
+    mem_fmt = pick_memory_format(device_hint)
     out = out.to(memory_format=mem_fmt)  # type: ignore[call-overload]
     return out
+
+
+# from check_dim_size() in aten/src/ATen/TensorUtils.cpp.
+def check_dim_size(tensor, dim, dim_size, size):
+    check(
+        tensor.dim() == dim and tensor.shape[dim_size] == size,
+        lambda: f"Expected a tensor of dimension {dim} and tensor.size[{dim_size}] == {size}, "
+        + f"but got : dimension {tensor.dim()} and tensor.size[{dim_size}] = {tensor.shape[dim_size]}",
+    )
+
+
+@register_meta(aten.avg_pool2d.default, register_dispatcher=False)
+def meta_avg_pool2d(
+    input,
+    kernel_size,
+    stride=(),
+    padding=(0,),
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    def unpack(name, val):
+        check(
+            len(val) in [1, 2],
+            lambda: f"avg_pool2d: {name} must either be a single int, or a tuple of two ints",
+        )
+        H = val[0]
+        W = H if len(val) == 1 else val[1]
+        return H, W
+
+    kH, kW = unpack("kernel_size", kernel_size)
+    check(
+        len(stride) in [0, 1, 2],
+        lambda: "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
+    )
+    if len(stride) == 0:
+        dH, dW = kH, kW
+    elif len(stride) == 1:
+        dH, dW = stride[0], stride[0]
+    else:
+        dH, dW = unpack("stride", stride)
+
+    padH, padW = unpack("padding", padding)
+
+    check(
+        divisor_override is None or divisor_override != 0,
+        lambda: "divisor must be not zero",
+    )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
+
+    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
+    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
+
+    memory_format = utils.suggest_memory_format(input)
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        1,
+        1,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        memory_format,
+    )
+
+    if input.dim() == 3:
+        size = [nInputPlane, outputHeight, outputWidth]
+    else:
+        size = [nbatch, nInputPlane, outputHeight, outputWidth]
+    return torch.empty(
+        size, dtype=input.dtype, device=input.device, memory_format=memory_format
+    )
+
+
+# from avg_pool2d_backward_shape_check() in aten/src/ATen/native/Pool.h.
+def avg_pool2d_backward_shape_check(
+    input,
+    gradOutput,
+    nbatch,
+    kH,
+    kW,
+    dH,
+    dW,
+    padH,
+    padW,
+    nInputPlane,
+    inputHeight,
+    inputWidth,
+    outputHeight,
+    outputWidth,
+    mem_format,
+):
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        1,
+        1,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        mem_format,
+    )
+
+    ndim = input.dim()
+    nOutputPlane = nInputPlane
+
+    check_dim_size(gradOutput, ndim, ndim - 3, nOutputPlane)
+    check_dim_size(gradOutput, ndim, ndim - 2, outputHeight)
+    check_dim_size(gradOutput, ndim, ndim - 1, outputWidth)
 
 
 @register_meta(aten._adaptive_avg_pool2d.default)
@@ -735,6 +895,313 @@ def meta_repeat(self, repeats):
     padded_size = (1,) * num_new_dimensions + tuple(self.shape)
     target_size = [padded_size[i] * repeats[i] for i in range(len(repeats))]
     return self.new_empty(target_size)
+
+
+@register_meta(aten.zero_.default, register_dispatcher=False)
+def meta_zero_(self):
+    return self
+
+
+@register_meta(
+    [aten.fill.Tensor, aten.fill.Scalar, aten.fill_.Tensor, aten.fill_.Scalar],
+    register_dispatcher=False,
+)
+def meta_fill_(self, val):
+    return self
+
+
+@register_meta(aten.relu_.default, register_dispatcher=False)
+def meta_relu_(self):
+    return self
+
+
+@register_meta(aten.index_put.default, register_dispatcher=False)
+def meta_index_put(self, indices, values, accumulate=False):
+    return self.new_empty(self.size())
+
+
+@register_meta(aten.masked_fill_.Scalar, register_dispatcher=False)
+def meta_masked_fill_(self, mask, value):
+    return self
+
+
+@register_meta(aten.index_put_.default, register_dispatcher=False)
+def meta_index_put_(self, indices, values, accumulate=False):
+    return self
+
+
+@register_meta(aten.alias.default, register_dispatcher=False)
+def meta_alias(self):
+    return self.view(self.shape)
+
+
+def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None):
+    check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
+    check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+
+    batch1_sizes = batch1.size()
+    batch2_sizes = batch2.size()
+
+    bs = batch1_sizes[0]
+    contraction_size = batch1_sizes[2]
+    res_rows = batch1_sizes[1]
+    res_cols = batch2_sizes[2]
+    output_size = (bs, res_rows, res_cols)
+
+    check(
+        batch2_sizes[0] == bs and batch2_sizes[1] == contraction_size,
+        lambda: f"Expected size for first two dimensions of batch2 tensor to be: [{bs}"
+        f", {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}].",
+    )
+
+    # TODO: handle out
+
+    output = batch2.new_empty(output_size)
+
+    if not is_bmm and self_baddbmm is not None:
+        check(self_baddbmm.dim() == 3, lambda: "self must be a 3D tensor")
+        check(
+            self_baddbmm.size() == output_size,
+            lambda: "Expected an input tensor shape with shape {output_size} but got shape: {self.size()}",
+        )
+
+    return output
+
+
+@register_meta(aten.bmm.default, register_dispatcher=False)
+def meta_bmm(self, mat2):
+    return common_meta_baddbmm_bmm(self, mat2, True)
+
+
+def div_rtn(x, y):
+    q = x // y
+    r = x % y
+    # WARNING: explicit bool conversion here is necessary;
+    # would be fixed by SymBool
+    if r != 0 and (bool(r < 0) != bool(y < 0)):
+        q -= 1
+    return q
+
+
+def pooling_output_shape_pad_lr(
+    inputSize, kernelSize, pad_l, pad_r, stride, dilation, ceil_mode
+):
+    outputSize = (
+        div_rtn(
+            inputSize
+            + pad_l
+            + pad_r
+            - dilation * (kernelSize - 1)
+            - 1
+            + (stride - 1 if ceil_mode else 0),
+            stride,
+        )
+        + 1
+    )
+    if ceil_mode:
+        if (outputSize - 1) * stride >= inputSize + pad_l:
+            outputSize -= 1
+    return outputSize
+
+
+def pooling_output_shape(inputSize, kernelSize, pad, stride, dilation, ceil_mode):
+    check(stride != 0, lambda: "stride should not be zero")
+    check(pad >= 0, lambda: f"pad must be non-negative, but got pad: {pad}")
+    check(
+        pad <= kernelSize // 2,
+        lambda: f"pad should be at most half of kernel size, but got pad={pad} and kernel_size={kernelSize}",
+    )
+    return pooling_output_shape_pad_lr(
+        inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode
+    )
+
+
+def pool2d_shape_check(
+    input,
+    kH,
+    kW,
+    dH,
+    dW,
+    padH,
+    padW,
+    dilationH,
+    dilationW,
+    nInputPlane,
+    inputHeight,
+    inputWidth,
+    outputHeight,
+    outputWidth,
+    memory_format,
+):
+    ndim = input.dim()
+    nOutputPlane = nInputPlane
+
+    check(
+        kW > 0 and kH > 0,
+        lambda: "kernel size should be greater than zero, but got kH: {kH}, kW: {kW}",
+    )
+    check(
+        dW > 0 and dH > 0,
+        lambda: "stride should be greater than zero, but got dH: {dH}, dW: {dW}",
+    )
+    check(
+        dilationH > 0 and dilationW > 0,
+        lambda: "dilation should be greater than zero, but got dilationH: {dilationH}, dilationW: {dilationW}",
+    )
+
+    valid_dims = input.size(1) != 0 and input.size(2) != 0
+
+    if memory_format == torch.channels_last:
+        check(
+            ndim == 4 and valid_dims and input.size(3) != 0,
+            lambda: "Expected 4D (batch mode) tensor expected for input with channels_last layout"
+            " with optional 0 dim batch size for input, but got: {input.size()}",
+        )
+    else:
+        check(
+            (ndim == 3 and input.size(0) != 0 and valid_dims)
+            or (ndim == 4 and valid_dims and input.size(3) != 0),
+            lambda: f"Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got: {input.size()}",
+        )
+
+    check(
+        kW // 2 >= padW and kH // 2 >= padH,
+        lambda: "pad should be smaller than or equal to half of kernel size, but got "
+        f"padW = {padW}, padH = {padH}, kW = {kW}, kH = {kH}",
+    )
+
+    check(
+        outputWidth >= 1 and outputHeight >= 1,
+        lambda: f"Given input size: ({nInputPlane}x{inputHeight}x{inputWidth}). "
+        f"Calculated output size: ({nOutputPlane}x{outputHeight}x{outputWidth}). "
+        "Output size is too small",
+    )
+
+
+@register_meta(aten.max_pool2d_with_indices.default, register_dispatcher=False)
+def meta_max_pool2d_with_indices(
+    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+):
+    # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
+    def unpack(name, val):
+        check(
+            len(val) in [1, 2],
+            lambda: f"max_pool2d: {name} must either be a single int, or a tuple of two ints",
+        )
+        H = val[0]
+        W = H if len(val) == 1 else val[1]
+        return H, W
+
+    kH, kW = unpack("kernel_size", kernel_size)
+
+    check(
+        len(stride) in [0, 1, 2],
+        lambda: "max_pool2d: stride must either be omitted, a single int, or a tuple of two ints",
+    )
+    if len(stride) == 0:
+        dH, dW = kH, kW
+    else:
+        dH, dW = unpack("stride", stride)
+
+    padH, padW = unpack("padding", padding)
+    dilationH, dilationW = unpack("dilation", dilation)
+
+    memory_format = utils.suggest_memory_format(input)
+    if memory_format == torch.channels_last:
+        check(
+            input.dim() == 4,
+            lambda: "non-empty 4D (batch mode) tensor expected for input with channels_last layout",
+        )
+    elif memory_format == torch.contiguous_format:
+        check(
+            input.dim() in [3, 4],
+            lambda: "non-empty 3D or 4D (batch mode) tensor expected for input",
+        )
+    else:
+        check(
+            False,
+            lambda: "Unsupport memory format. Supports only ChannelsLast, Contiguous",
+        )
+
+    nbatch = input.size(-4) if input.dim() == 4 else 1
+    nInputPlane = input.size(-3)
+    inputHeight = input.size(-2)
+    inputWidth = input.size(-1)
+
+    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, dilationH, ceil_mode)
+    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, dilationW, ceil_mode)
+
+    pool2d_shape_check(
+        input,
+        kH,
+        kW,
+        dH,
+        dW,
+        padH,
+        padW,
+        dilationH,
+        dilationW,
+        nInputPlane,
+        inputHeight,
+        inputWidth,
+        outputHeight,
+        outputWidth,
+        memory_format,
+    )
+
+    if input.dim() == 3:
+        size = [nInputPlane, outputHeight, outputWidth]
+    else:
+        size = [nbatch, nInputPlane, outputHeight, outputWidth]
+    return (
+        torch.empty(
+            size, dtype=input.dtype, device=input.device, memory_format=memory_format
+        ),
+        torch.empty(
+            size, dtype=torch.int64, device=input.device, memory_format=memory_format
+        ),
+    )
+
+
+@register_meta([aten.full.default])
+def full(size, fill_value, *args, **kwargs):
+    return torch.empty(size, *args, **kwargs)
+
+
+@register_meta(
+    [
+        aten.randint_like.default,
+        aten.randint_like.low_dtype,
+        aten.randn_like.default,
+        aten.rand_like.default,
+        aten.full_like.default,
+        aten.zeros_like.default,
+        aten.ones_like.default,
+    ]
+)
+def meta_like(self, *args, **kwargs):
+    return aten.empty_like.default(self, **kwargs)
+
+
+# hacky: Please remove after math.ceil works with arange
+@register_meta(aten.arange.default)
+def arange(end, **kwargs):
+    if isinstance(end, float):
+        end = math.ceil(end)
+
+    def is_integral(x):
+        return isinstance(x, int) or isinstance(x, bool)
+
+    set_to_integral_dtype = kwargs.get("dtype", None) is None and is_integral(end)
+    if set_to_integral_dtype:
+        kwargs["dtype"] = torch.int64
+
+    return aten.empty([end], **kwargs)
+
+
+@register_meta(aten.arange.start)
+def arange_start(start, end, **kwargs):
+    return aten.arange(end - start, **kwargs)
 
 
 # We must also trigger meta registrations from PrimTorch ref

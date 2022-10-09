@@ -12,7 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (void)setInputs:(c10::impl::GenericList)inputs;
 
-- (id<MLFeatureProvider>)forward;
+- (id<MLFeatureProvider>)forward:(NSError**)error;
 
 @end
 

@@ -46,7 +46,7 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
 
   is_non_overlapping_and_dense_ = false;
   set_storage_access_should_throw();
-  set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
+  set_custom_sizes_strides(SizesStridesPolicy::CustomStrides);
 }
 
   // Destructor doesn't call release_resources because it's

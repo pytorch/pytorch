@@ -13,12 +13,14 @@ from torch.testing._internal.common_utils import (
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import os
+import subprocess
+import sys
 import unittest
 import warnings
 import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
-from torch.testing._internal.common_utils import IS_WINDOWS
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
 from functorch.experimental import replace_all_batch_norm_modules_
@@ -32,11 +34,8 @@ from functorch import (
 from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
-from functorch._src.eager_transforms import _argnums_partial, enable_fwd_grad
+from functorch._src.eager_transforms import enable_fwd_grad, _slice_argnums
 from functorch.experimental import functionalize
-
-if not IS_WINDOWS:
-    from functorch._src.custom_function import custom_vjp
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -51,145 +50,96 @@ except ImportError:
                   "`--no-deps` to avoid overwriting the pytorch installation",
                   UserWarning)
 
-# TestCase for _argnums_partial, an important helper funciton
+# TestCase for _slice_argnums, an important helper funciton
 
 
-class TestArgnumsPartial(TestCase):
+class TestSliceArgnums(TestCase):
     def test_invalid_argnum_type(self):
         x = torch.randn(3)
         args = (x,)
         with self.assertRaisesRegex(RuntimeError, "int or Tuple"):
-            _argnums_partial(torch.sin, args, 0.0)
+            _slice_argnums(args, 0.0)
         with self.assertRaisesRegex(RuntimeError, "int or Tuple"):
-            _argnums_partial(torch.sin, args, [0])
+            _slice_argnums(args, [0])
         with self.assertRaisesRegex(RuntimeError, "must be int"):
-            _argnums_partial(torch.sin, args, (0.0,))
+            _slice_argnums(args, (0.0,))
 
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
         with self.assertRaisesRegex(RuntimeError, "must be int"):
-            _argnums_partial(torch.sin, args, ((0, 1), 2))
+            _slice_argnums(args, ((0, 1), 2))
 
     def test_out_of_bounds_argnum_values(self):
         x = torch.randn(3)
         args = (x,)
         with self.assertRaisesRegex(RuntimeError, "positional inputs"):
-            _argnums_partial(torch.sin, args, 1)
+            _slice_argnums(args, 1)
         with self.assertRaisesRegex(RuntimeError, "positional inputs"):
-            _argnums_partial(torch.sin, args, -2)
+            _slice_argnums(args, -2)
         with self.assertRaisesRegex(RuntimeError, "positional inputs"):
-            _argnums_partial(torch.sin, args, (-2,))
+            _slice_argnums(args, (-2,))
 
     def test_not_enough_argnums(self):
         x = torch.randn(3)
         args = (x,)
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            _argnums_partial(torch.sin, args, ())
+            _slice_argnums(args, ())
 
     def test_duplicate_argnums(self):
         x = torch.randn(3)
         args = (x, x)
         with self.assertRaisesRegex(RuntimeError, "must be unique"):
-            _argnums_partial(torch.add, args, (0, 0))
+            _slice_argnums(args, (0, 0))
         with self.assertRaisesRegex(RuntimeError, "must be unique"):
-            _argnums_partial(torch.add, args, (0, -2))
+            _slice_argnums(args, (0, -2))
 
     def test_flat_args_with_positive_int_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
-
-        f_new, res = _argnums_partial(f, args, 0)
+        res = _slice_argnums(args, 0)
         self.assertEqual(res, (0.1,))
-        self.assertEqual(f_new(*res), 0.1)
 
-        f_new, res = _argnums_partial(f, args, 4)
+        res = _slice_argnums(args, 4)
         self.assertEqual(res, (4.1,))
-        self.assertEqual(f_new(*res), 0.1)
 
     def test_flat_args_with_negative_int_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
-
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, -1)
+        res = _slice_argnums(args, -1)
         self.assertEqual(res, (4.1,))
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, -5)
+        res = _slice_argnums(args, -5)
         self.assertEqual(res, (0.1,))
-        self.assertEqual(f_new(*res), expected)
 
     def test_flat_args_with_tuple_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
 
-        def f(a, b, c, d, e):
-            return a
-
-        f_new, res = _argnums_partial(f, args, (0, 1, 2, 3, 4))
-        self.assertEqual(f_new(*res), 0.1)
+        res = _slice_argnums(args, (0, 1, 2, 3, 4))
         self.assertEqual(res, args)
 
-        f_new, res = _argnums_partial(f, args, (0, -3))
-        self.assertEqual(f_new(*res), 0.1)
+        res = _slice_argnums(args, (0, -3))
         self.assertEqual(res, (0.1, 2.1))
 
     def test_pytree_args(self):
         args = ((0.1, 1.1), 2.0, [3.1])
 
-        def f(a, b, c):
-            return a[0] + a[1] + b + c[0]
-
-        expected = f(*args)
-
-        f_new, res = _argnums_partial(f, args, 0)
+        res = _slice_argnums(args, 0)
         self.assertEqual(res, args[0:1])
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, (0,))
+        res = _slice_argnums(args, (0,))
         self.assertEqual(res, args[0:1])
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, -1)
+        res = _slice_argnums(args, -1)
         self.assertEqual(res, args[-1:])
-        self.assertEqual(f_new(*res), expected)
 
-        f_new, res = _argnums_partial(f, args, (0, -2))
+        res = _slice_argnums(args, (0, -2))
         self.assertEqual(res, args[0:2])
-        self.assertEqual(f_new(*res), expected)
 
     def test_argnums_reorders(self):
         args = ((0.1, 1.1, 2.1), 3.1, 4.1)
 
-        def f(a, b, c):
-            return a[0] + a[1] + a[2] + b + c
-
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, (1, 0))
+        res = _slice_argnums(args, (1, 0))
         self.assertEqual(res, (args[1], args[0]))
-        self.assertEqual(f_new(*res), expected)
-
-    def test_function_with_default_args(self):
-        args = ((0.1, 1.1, 2.1), 3.1)
-
-        def f(a, b, c=4.1):
-            return a[0] + a[1] + a[2] + b + c
-
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, -2)
-        self.assertEqual(res, args[0:1])
-        self.assertEqual(f_new(*res), expected)
-
-        args = ((0.1, 1.1, 2.1), 3.1, 5.1)
-        expected = f(*args)
-        f_new, res = _argnums_partial(f, args, -1)
-        self.assertEqual(res, args[-1:])
-        self.assertEqual(f_new(*res), expected)
 
 
 class TestGradTransform(TestCase):
@@ -335,7 +285,7 @@ class TestGradTransform(TestCase):
             return y
 
         grad(foo)(x)
-        self.assertEqual(functorch._C.dlevel(escaped[0]), -1)
+        self.assertEqual(torch._C._functorch.dlevel(escaped[0]), -1)
 
     def test_escaped_wrappers_are_ignored(self, device):
         x = torch.randn([], device=device)
@@ -349,7 +299,7 @@ class TestGradTransform(TestCase):
         grad(foo)(x)
 
         something = escaped[0].sum()
-        self.assertEqual(functorch._C.dlevel(something), 0)
+        self.assertEqual(torch._C._functorch.dlevel(something), 0)
         self.assertEqual(something, x.sin().sum())
 
     def test_vjp(self, device):
@@ -868,6 +818,18 @@ class TestGradTransform(TestCase):
                 buf = buf.replace("\n", "").replace("  ", "")
                 expected = expected.replace("\n", "").replace("  ", "")
                 self.assertEqual(expected, buf)
+
+    def test_print_captured_tensor_inside_transform(self, device):
+        x = torch.tensor([1., 2., 3.], device=device)
+        out = None
+
+        def f(y):
+            nonlocal out
+            out = repr(x)
+            return y
+
+        vjp(f, torch.randn(4, device=device))
+        self.assertEqual(out, repr(x))
 
     def test_no_grad_outside(self, device):
         x = torch.randn([], device=device, requires_grad=True)
@@ -1596,6 +1558,40 @@ class TestJac(TestCase):
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
 
+    @jacrev_and_jacfwd
+    def test_against_reference_default_arg(self, device, jacapi):
+        def f(x, y, z=3.):
+            return x * y * z
+
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, device=device)
+        self._test_against_reference(f, (x, y), jacapi)
+
+    @jacrev_and_jacfwd
+    def test_inplace(self, device, jacapi):
+        def f(x, y):
+            y.copy_(x)
+            return y
+
+        out = jacapi(f, argnums=0)  # x is differentiable
+        x, y = torch.randn(2, device=device), torch.randn(2, device=device)
+        self.assertEqual(out(x, y), torch.eye(y.shape[0]))
+
+        # testing tuple of argnums with the example that raised this issue originally
+        def g(x, y, z):
+            x[:2] = y
+            return torch.vstack([(x**2).sum(), (z**3).sum()])
+
+        out = jacapi(g, argnums=(1, 2))
+        x, y, z = torch.randn(3, device=device), torch.randn(2, device=device), torch.randn(2, device=device)
+
+        expected_out = (torch.zeros(2, 1, 2, device=device), torch.zeros(2, 1, 2, device=device))
+        expected_out[0][0][0] = 2 * y  # top left corner
+        expected_out[1][1][0] = 3 * (z ** 2)  # bottom right corner
+
+        out_val = out(x, y, z)
+        self.assertEqual(out_val, expected_out)
+
 
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
@@ -1900,17 +1896,17 @@ class TestJvp(TestCase):
 
     def test_fwd_grad_enabled(self, device):
         # Tests some private helper functions to enable/disable fwd grad mode
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
-        enabled = functorch._C.get_fwd_grad_enabled()
+        enabled = torch._C._functorch.get_fwd_grad_enabled()
         self.assertTrue(enabled)
 
     def test_autograd_function_disables_fwd_grad(self, device):
@@ -1919,7 +1915,7 @@ class TestJvp(TestCase):
         class MySquare(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x):
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertFalse(enabled)
                 return x * x
 
@@ -1933,18 +1929,18 @@ class TestJvp(TestCase):
     def test_enable_fwd_grad(self, device):
         # Tests a private helper function
         try:
-            functorch._C.set_fwd_grad_enabled(False)
-            enabled = functorch._C.get_fwd_grad_enabled()
+            torch._C._functorch.set_fwd_grad_enabled(False)
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
 
             with enable_fwd_grad():
-                enabled = functorch._C.get_fwd_grad_enabled()
+                enabled = torch._C._functorch.get_fwd_grad_enabled()
                 self.assertTrue(enabled)
 
-            enabled = functorch._C.get_fwd_grad_enabled()
+            enabled = torch._C._functorch.get_fwd_grad_enabled()
             self.assertFalse(enabled)
         finally:
-            functorch._C.set_fwd_grad_enabled(True)
+            torch._C._functorch.set_fwd_grad_enabled(True)
 
     def test_disable_fwd_grad_outside(self, device):
         x = torch.randn([], device=device)
@@ -2171,41 +2167,6 @@ class TestVmapJvpInplaceView(TestCase):
         self.assertEqual(tangents[1], yt.movedim(2, 0))
 
 
-class TestCustomFunction(TestCase):
-    @unittest.skipIf(IS_WINDOWS, "Prototype of custom_vjp doesn't link on windows")
-    @onlyCPU
-    def test_basic(self, device):
-        called_impl = False
-        called_vjp = False
-
-        def my_sin_impl(args):
-            x, = args
-            nonlocal called_impl
-            called_impl = True
-            return x.sin(), x
-
-        def my_sin_vjp(args):
-            grad_y, result, x = args
-            nonlocal called_vjp
-            called_vjp = True
-            return (grad_y * 3 * x.cos(),)
-
-        def filter_fn(args):
-            return args[0]
-
-        my_sin = custom_vjp('my_sin', filter_fn, my_sin_impl, my_sin_vjp)
-
-        x = torch.tensor([1., 2.], requires_grad=True, device=device)
-
-        y = my_sin(x)
-        self.assertTrue(called_impl)
-
-        y.sum().backward()
-        self.assertTrue(called_vjp)
-
-        assert torch.allclose(x.grad, 3 * x.cos())
-
-
 class TestComposability(TestCase):
     def test_grad_grad(self, device):
         x = torch.randn([], device=device)
@@ -2316,6 +2277,15 @@ class TestComposability(TestCase):
         new_cotangent = torch.randn(())
         self.assertEqual(fx_f(new_cotangent, True, True), vjp_fn(new_cotangent))
 
+    # it is redundant to run this test twice on a machine that has GPUs
+    @onlyCPU
+    def test_no_warning_on_import_functorch(self, device):
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import functorch"],
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
+
     def test_requires_grad_inside_transform(self, device):
         def f(x):
             x.requires_grad_()
@@ -2402,6 +2372,64 @@ class TestComposability(TestCase):
         x = torch.randn([])
         with self.assertRaises(RuntimeError):
             grad(f)(x)
+
+    @parametrize('transform', [
+        'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
+    ])
+    def test_transforms_dont_support_saved_tensor_hooks(self, device, transform):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+
+        if transform == 'functionalize':
+            transform = functorch.experimental.functionalize
+        else:
+            transform = getattr(functorch, transform)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                transform(f)(x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            transform(g)(x)
+
+    def test_vjp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                vjp(f, x)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            vjp(g, x)
+
+    def test_jvp_doesnt_support_saved_tensor_hooks(self, device):
+        def f(x):
+            return torch.sin(x).sum()
+
+        def g(x):
+            with torch.autograd.graph.save_on_cpu():
+                return f(x)
+
+        x = torch.randn(3, device=device)
+        t = torch.randn(3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            with torch.autograd.graph.save_on_cpu():
+                jvp(f, (x,), (t,))
+
+        with self.assertRaisesRegex(RuntimeError, "saved tensor hooks"):
+            jvp(g, (x,), (t,))
 
 
 class TestMakeFunctional(TestCase):
@@ -3467,11 +3495,6 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestExamplesCorrectness,
-    globals(),
-    only_for=only_for,
-)
-instantiate_device_type_tests(
-    TestCustomFunction,
     globals(),
     only_for=only_for,
 )
