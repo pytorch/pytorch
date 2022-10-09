@@ -2799,9 +2799,14 @@ class TestReductions(TestCase):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device),
                         bins=4, max=3),
             torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
-        # tensor with nan -- should throw a RuntimeError
+        # tensor with nan; min, max not provided -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, r'range of \[nan, nan\] is not finite'):
             torch.histc(torch.tensor([float("nan")], dtype=torch.float, device=device))
+        # tensor with nan; min, max provided -- nan is ignored
+        self.assertEqual(
+            torch.histc(torch.tensor([1., 2., float("nan")], dtype=torch.float, device=device),
+                        bins=4, max=3),
+            torch.tensor([0, 1, 1, 0], dtype=torch.float, device=device))
         # tensors with min > max -- should throw a RuntimeError
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histc(torch.tensor([1., 2., 3.], dtype=torch.float, device=device),
