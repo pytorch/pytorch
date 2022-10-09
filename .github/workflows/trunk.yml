@@ -86,12 +86,12 @@ jobs:
       build-generates-artifacts: false
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-xenial-cuda11_3-py3_7-gcc7-no-ops-build:
-    name: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
+  linux-bionic-cuda11_7-py3_10-gcc7-no-ops-build:
+    name: linux-bionic-cuda11.7-py3.10-gcc7-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-no-ops
+      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
