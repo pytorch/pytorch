@@ -2,6 +2,8 @@ import time
 import sys
 import queue
 import threading
+from dataclasses import dataclass
+
 import torch
 import torch.distributed as dist
 from torch.futures import Future
@@ -158,12 +160,20 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
 
 dist.Backend.register_backend('threaded', _create_threaded_pg)
 
+@dataclass
+class WorldData:
+    default_pg: dist.ProcessGroup
+    pg_map: dict
+    pg_names: dict
+    pg_group_ranks: dict
+    group_count: int
+
 class ThreadLocalWorld:
     _world = threading.local()
 
-    def _get_world(self):
+    def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = dist.distributed_c10d._World()
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, 0)
         return ThreadLocalWorld._world.world
 
     @property
