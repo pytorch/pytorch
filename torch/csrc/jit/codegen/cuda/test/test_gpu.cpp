@@ -10899,7 +10899,7 @@ TEST_F(NVFuserTest, FusionLSTMCell_CUDA) {
       &fusion, cg_outputs, aten_inputs, {at_cy, at_hy}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
+TEST_F(NVFuserTest, DISABLED_FusionComputeAtMultiBCast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
