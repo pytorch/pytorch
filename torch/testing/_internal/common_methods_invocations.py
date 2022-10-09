@@ -17651,7 +17651,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clone",
         torch_opinfo_name="clone",
-        validate_view_consistency=False,
         supports_nvfuser=False,
     ),
     #
