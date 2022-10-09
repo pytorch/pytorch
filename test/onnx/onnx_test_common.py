@@ -61,7 +61,7 @@ def set_rng_seed(seed):
 
 
 class _TestONNXRuntime(common_utils.TestCase):
-    opset_version = _constants.onnx_default_opset
+    opset_version = _constants.ONNX_DEFAULT_OPSET
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
     check_shape = True

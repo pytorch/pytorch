@@ -489,9 +489,12 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
     image = Image.fromarray(tensor)
     if rois is not None:
         image = draw_boxes(image, rois, labels=labels)
-    image = image.resize((scaled_width, scaled_height), Image.ANTIALIAS)
+    try:
+        ANTIALIAS = Image.Resampling.LANCZOS
+    except AttributeError:
+        ANTIALIAS = Image.ANTIALIAS
+    image = image.resize((scaled_width, scaled_height), ANTIALIAS)
     import io
-
     output = io.BytesIO()
     image.save(output, format="PNG")
     image_string = output.getvalue()
