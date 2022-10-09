@@ -1345,7 +1345,7 @@ class MultiMarginLoss(_WeightedLoss):
     .. math::
         \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i])^p}{\text{x.size}(0)}
 
-    where :math:`x \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
+    where :math:`i \in \left\{0, \; \cdots , \; \text{x.size}(0) - 1\right\}`
     and :math:`i \neq y`.
 
     Optionally, you can give non-equal weighting on the classes by passing

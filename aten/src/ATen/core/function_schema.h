@@ -216,6 +216,7 @@ enum struct TORCH_API SchemaArgType { input, output };
 struct TORCH_API SchemaArgument {
   SchemaArgType type;
   size_t index;
+  SchemaArgument(SchemaArgType tpe, size_t idx) : type(tpe), index(idx) {}
   bool operator==(const SchemaArgument& rhs) const {
     return type == rhs.type && index == rhs.index;
   }
@@ -474,7 +475,7 @@ struct TORCH_API FunctionSchema {
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;
 
-  FunctionSchema cloneWithRealTypes() const;
+  FunctionSchema cloneWithRealTypes(bool with_symint=true) const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.
@@ -550,7 +551,10 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
-  auto type = arg.type();
+  // real_type versus fake_type: in order to be compatible with FunctionSchema
+  // parser, printing an argument with either MemoryFormat or Layout type should
+  // give us the original schema string, hence printing out real_type.
+  auto type = arg.real_type();
   bool is_opt = type->kind() == OptionalType::Kind;
   auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 

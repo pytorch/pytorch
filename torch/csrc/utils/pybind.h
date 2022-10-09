@@ -12,6 +12,8 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <stdexcept>
 #include <utility>
@@ -108,6 +110,28 @@ struct TORCH_PYTHON_API type_caster<at::IntArrayRef> {
 };
 
 template <>
+struct TORCH_PYTHON_API type_caster<at::MemoryFormat> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::MemoryFormat, _("at::MemoryFormat"));
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPMemoryFormat_Check(obj)) {
+      value = reinterpret_cast<THPMemoryFormat*>(obj)->memory_format;
+      return true;
+    }
+    return false;
+  }
+  static handle cast(
+      at::MemoryFormat src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return handle(torch::utils::getTHPMemoryFormat(src));
+  }
+};
+
+template <>
 struct type_caster<at::Device> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -133,6 +157,33 @@ struct type_caster<at::Device> {
       return_value_policy /* policy */,
       handle /* parent */) {
     return handle(THPDevice_New(src));
+  }
+};
+
+template <>
+struct type_caster<c10::DispatchKey>
+    : public type_caster_base<c10::DispatchKey> {
+  using base = type_caster_base<c10::DispatchKey>;
+  c10::DispatchKey tmp;
+
+ public:
+  bool load(handle src, bool convert) {
+    if (base::load(src, convert)) {
+      return true;
+    } else if (py::isinstance(
+                   src, py::module_::import("builtins").attr("str"))) {
+      tmp = c10::parseDispatchKey(py::cast<std::string>(src));
+      value = &tmp;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      c10::DispatchKey src,
+      return_value_policy policy,
+      handle parent) {
+    return base::cast(src, policy, parent);
   }
 };
 

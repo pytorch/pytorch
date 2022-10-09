@@ -35,7 +35,9 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
+    IS_MACOS,
     make_fullrank_matrices_with_distinct_singular_values,
+    skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
 )
@@ -525,7 +527,11 @@ def sample_inputs_linalg_norm(
     ]
 
     vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5, -inf)
-    matrix_ords = (None, "fro", "nuc", 1, 2, inf, -1, -2, -inf)
+    if dtype in {torch.float16, torch.bfloat16, torch.complex32}:
+        # svdvals not supported for low precision dtypes
+        matrix_ords = ("fro", inf, -inf, 1, -1)
+    else:
+        matrix_ords = (None, "fro", "nuc", inf, -inf, 1, -1, 2, -2)
 
     inputs = []
 
@@ -533,8 +539,11 @@ def sample_inputs_linalg_norm(
         is_vector_norm = len(test_size) == 1
         is_matrix_norm = len(test_size) == 2
 
+        # IndexError: amax(): Expected reduction dim 0 to have non-zero size.
+        is_valid_for_p2 = is_vector_norm or (test_size[-1] != 0 and test_size[-2] != 0)
+
         for keepdim in [False, True]:
-            if not variant == "subgradient_at_zero":
+            if variant != "subgradient_at_zero" and is_valid_for_p2:
                 inputs.append(
                     SampleInput(
                         make_tensor(
@@ -555,6 +564,28 @@ def sample_inputs_linalg_norm(
             ords = vector_ords if is_vector_norm else matrix_ords
 
             for ord in ords:
+                if is_vector_norm and test_size[-1] == 0:
+                    if ord == np.inf or (ord is not None and ord < 0):
+                        # RuntimeError: linalg.vector_norm cannot compute the
+                        # {ord} norm on an empty tensor because the operation
+                        # does not have an identity
+                        continue
+                elif is_matrix_norm:
+                    dims_to_check = {
+                        None: (0,),
+                        np.inf: (0,),
+                        2: (0, 1),
+                        1: (1,),
+                        -1: (1,),
+                        -2: (0, 1),
+                        -np.inf: (0,),
+                    }.get(ord, ())
+
+                    if any(test_size[d] == 0 for d in dims_to_check):
+                        # IndexError: amax(): Expected reduction dim {dim} to
+                        # have non-zero size.
+                        continue
+
                 if variant == "subgradient_at_zero":
                     inputs.append(
                         SampleInput(
@@ -599,7 +630,7 @@ def sample_inputs_linalg_norm(
                             )
                         )
 
-        return inputs
+    return inputs
 
 
 def sample_inputs_linalg_vecdot(op_info, device, dtype, requires_grad, **kwargs):
@@ -1299,6 +1330,22 @@ op_db: List[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
             ),
+            DecorateInfo(
+                unittest.skip("Gradients are incorrect on macos"),
+                "TestGradients",
+                "test_fn_grad",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
+            ),
+            DecorateInfo(
+                unittest.skip("Gradients are incorrect on macos"),
+                "TestGradients",
+                "test_forward_mode_AD",
+                device_type="cpu",
+                dtypes=(torch.float64,),
+                active_if=IS_MACOS,
+            ),
             # Both Hessians are incorrect on complex inputs??
             DecorateInfo(
                 unittest.expectedFailure,
@@ -1437,10 +1484,6 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
         skips=(
-            # Pre-existing condition; Needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_operator"
-            ),
             # exits early on eager extremal value test
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -1565,10 +1608,11 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})
             ),
             DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_forward_ad"
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cpu",
+                dtypes=(torch.complex128,),
             ),
         ],
     ),
@@ -1734,6 +1778,9 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_gradgrad"),
+        ),
     ),
     OpInfo(
         "linalg.norm",
@@ -1757,6 +1804,10 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestGradients", "test_fn_fwgrad_bwgrad"
             ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestGradients", "test_forward_mode_AD"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestGradients", "test_fn_grad"),
         ),
     ),
     OpInfo(
@@ -1801,12 +1852,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
-        skips=(
-            # Pre-existing condition (calls .item); needs to be fixed
-            DecorateInfo(
-                unittest.expectedFailure, "TestCompositeCompliance", "test_backward"
-            ),
-        ),
         sample_inputs_func=sample_inputs_linalg_vander,
     ),
     ReductionOpInfo(
@@ -2192,6 +2237,19 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="cuda",
+            ),
+            # This test is flaky under slow gradcheck, likely due to rounding issues
+            DecorateInfo(
+                skipIfSlowGradcheckEnv,
+                "TestGradients",
+                "test_fn_fwgrad_bwgrad",
+                device_type="cuda",
             ),
         ),
     ),
