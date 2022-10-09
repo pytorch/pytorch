@@ -119,11 +119,13 @@ class TreeSpec:
 
     def __post_init__(self) -> None:
         self.num_leaves: int = sum([spec.num_leaves for spec in self.children_specs])
-         
+
     def __repr__(self) -> str:
         # Represent leaf node with '*', root node with dictionary
-        dict_factory = lambda tuples: '*' if tuples[0][1] is None else dict(tuples)
-        return pprint.pformat(asdict(self, dict_factory=dict_factory), sort_dicts=False)
+        def dict_factory(tuples: List[Any]) -> Any:
+            d: Dict[Any, Any] = dict(tuples)
+            return '*' if d['type'] is None else d
+        return pprint.pformat(asdict(self, dict_factory=dict_factory))
 
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
