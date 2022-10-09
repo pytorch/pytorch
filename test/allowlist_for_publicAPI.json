@@ -141,20 +141,6 @@
   "torch.backends": [
     "contextmanager"
   ],
-  "torch.cpu.amp.autocast_mode": [
-    "Any"
-  ],
-  "torch.cuda": [
-    "Any",
-    "Device",
-    "Dict",
-    "List",
-    "Optional",
-    "Set",
-    "Tuple",
-    "Union",
-    "classproperty"
-  ],
   "torch.cuda.comm": [
     "broadcast",
     "broadcast_coalesced",
@@ -162,12 +148,6 @@
     "reduce_add_coalesced",
     "scatter",
     "gather"
-  ],
-  "torch.cuda.amp.autocast_mode": [
-    "Any"
-  ],
-  "torch.cuda.amp.common": [
-    "find_spec"
   ],
   "torch.cuda.nccl": [
     "init_rank",
@@ -292,47 +272,7 @@
   "torch.distributed.optim.utils": [
     "Type"
   ],
-  "torch.distributed.pipeline.sync.checkpoint": [
-    "Checkpoint",
-    "Checkpointing",
-    "Context",
-    "Function",
-    "Recompute",
-    "ThreadLocal",
-    "checkpoint",
-    "enable_checkpointing",
-    "enable_recomputing",
-    "restore_rng_states",
-    "save_rng_states"
-  ],
-  "torch.distributed.pipeline.sync.copy": [
-    "Context",
-    "Copy",
-    "Wait"
-  ],
-  "torch.distributed.pipeline.sync.dependency": [
-    "Fork",
-    "Join",
-    "fork",
-    "join"
-  ],
-  "torch.distributed.pipeline.sync.microbatch": [
-    "Batch",
-    "NoChunk",
-    "check",
-    "gather",
-    "scatter"
-  ],
-  "torch.distributed.pipeline.sync.phony": [
-    "get_phony"
-  ],
   "torch.distributed.pipeline.sync.pipe": [
-    "BalanceError",
-    "PipeSequential",
-    "Pipeline",
-    "WithDevice"
-  ],
-  "torch.distributed.pipeline.sync.pipeline": [
     "Pipeline"
   ],
   "torch.distributed.pipeline.sync.skip.layout": [
@@ -356,25 +296,6 @@
     "current_skip_tracker",
     "use_skip_tracker"
   ],
-  "torch.distributed.pipeline.sync.stream": [
-    "CPUStreamType",
-    "as_cuda",
-    "current_stream",
-    "default_stream",
-    "get_device",
-    "is_cuda",
-    "new_stream",
-    "record_stream",
-    "use_device",
-    "use_stream",
-    "wait_stream"
-  ],
-  "torch.distributed.pipeline.sync.worker": [
-    "Task",
-    "create_workers",
-    "spawn_workers",
-    "worker"
-  ],
   "torch.distributed.remote_device": [
     "Optional",
     "Union"
@@ -395,69 +316,6 @@
     "urlunparse"
   ],
   "torch.distributed.rpc": [
-    "Any",
-    "Dict",
-    "Future",
-    "Generator",
-    "Generic",
-    "GenericWithOneTypeVar",
-    "PyRRef",
-    "RemoteProfilerManager",
-    "RpcAgent",
-    "RpcBackendOptions",
-    "Set",
-    "Store",
-    "TensorPipeAgent",
-    "Tuple",
-    "TypeVar",
-    "WorkerInfo",
-    "enable_gil_profiling",
-    "get_rpc_timeout",
-    "method",
-    "timedelta",
-    "urlparse"
-  ],
-  "torch.distributed.rpc.api": [
-    "Any",
-    "Dict",
-    "Future",
-    "Generic",
-    "GenericWithOneTypeVar",
-    "PyRRef",
-    "PythonUDF",
-    "RPCExecMode",
-    "RemoteProfilerManager",
-    "Set",
-    "TypeVar",
-    "WorkerInfo",
-    "get_rpc_timeout",
-    "method"
-  ],
-  "torch.distributed.rpc.backend_registry": [
-    "Dict",
-    "List",
-    "Set",
-    "Tuple"
-  ],
-  "torch.distributed.rpc.constants": [
-    "timedelta"
-  ],
-  "torch.distributed.rpc.internal": [
-    "Enum"
-  ],
-  "torch.distributed.rpc.options": [
-    "DeviceType",
-    "Dict",
-    "List",
-    "Optional",
-    "Union"
-  ],
-  "torch.distributions.utils": [
-    "Any",
-    "Dict",
-    "Number",
-    "is_tensor_like",
-    "update_wrapper"
   ],
   "torch.fft": [
     "Tensor",
