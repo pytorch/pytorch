@@ -300,16 +300,6 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     return new_fn
 
 
-# @contextmanager
-# def disable_autocast_cache():
-#     old_value = torch.is_autocast_cache_enabled()
-#     torch.set_autocast_cache_enabled(False)
-#     try:
-#         yield
-#     finally:
-#         torch.set_autocast_cache_enabled(old_value)
-
-
 @contextmanager
 def disable_autocast_manager():
     guard = torch._C._DisableAutocast()
