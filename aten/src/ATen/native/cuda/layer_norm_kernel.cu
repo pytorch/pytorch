@@ -25,6 +25,7 @@
 #endif
 
 #include <c10/cuda/CUDAMathCompat.h>
+#include <c10/util/env.h>
 
 namespace {
 // This is the un-specialized struct.  Note that we prevent instantiation of this
@@ -796,7 +797,7 @@ void cuLoadWriteStridedInputs(
     const int i1_end,
     const int64_t n2,
     const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ invvar,
+    const T_ACC* __restrict__ rstd,
     bool rms_only
     )
 {
@@ -806,7 +807,7 @@ void cuLoadWriteStridedInputs(
     if (!rms_only) {
       curr_mean = mean[i1];
     }
-    T curr_invvar = invvar[i1];
+    T curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
       int load_idx = i1*n2+i2;
@@ -816,9 +817,9 @@ void cuLoadWriteStridedInputs(
         T curr_dout = static_cast<T>(dout[load_idx]);
         if (!rms_only) {
           warp_buf1[write_idx] = curr_dout;
-          warp_buf2[write_idx] = curr_dout * (curr_input - curr_mean) * curr_invvar;
+          warp_buf2[write_idx] = curr_dout * (curr_input - curr_mean) * curr_rstd;
         } else {
-          warp_buf2[write_idx] = curr_dout * (curr_input) * curr_invvar;
+          warp_buf2[write_idx] = curr_dout * (curr_input) * curr_rstd;
         }
       } else {
         if (!rms_only) {
@@ -852,7 +853,7 @@ void cuLoadAddStridedInputs(
     const int i1_end,
     const int64_t n2,
     const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ invvar,
+    const T_ACC* __restrict__ rstd,
     bool rms_only
     )
 {
@@ -862,7 +863,7 @@ void cuLoadAddStridedInputs(
     if (!rms_only) {
       curr_mean = mean[i1];
     }
-    T_ACC curr_invvar = invvar[i1];
+    T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
       int load_idx = i1*n2+i2;
@@ -872,9 +873,9 @@ void cuLoadAddStridedInputs(
         T_ACC curr_dout = static_cast<T_ACC>(dout[load_idx]);
         if (!rms_only) {
           warp_buf1[write_idx] += curr_dout;
-          warp_buf2[write_idx] += curr_dout * (curr_input - curr_mean) * curr_invvar;
+          warp_buf2[write_idx] += curr_dout * (curr_input - curr_mean) * curr_rstd;
         } else {
-          warp_buf2[write_idx] += curr_dout * (curr_input) * curr_invvar;
+          warp_buf2[write_idx] += curr_dout * (curr_input) * curr_rstd;
         }
       }
     }
@@ -888,7 +889,7 @@ void cuComputePartGradGammaBeta(
     const int64_t n1,
     const int64_t n2,
     const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ invvar,
+    const T_ACC* __restrict__ rstd,
     T_ACC* part_grad_gamma,
     T_ACC* part_grad_beta,
     bool rms_only)
@@ -908,9 +909,9 @@ void cuComputePartGradGammaBeta(
     T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
     // compute partial sums from strided inputs
     // do this to increase number of loads in flight
-    cuLoadWriteStridedInputs(i1_beg,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,invvar, rms_only);
+    cuLoadWriteStridedInputs(i1_beg,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd, rms_only);
     for (int i1_block = i1_beg+blockDim.y*blockDim.y;  i1_block < i1_end;  i1_block+=blockDim.y*blockDim.y) {
-      cuLoadAddStridedInputs(i1_block,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,invvar, rms_only);
+      cuLoadAddStridedInputs(i1_block,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd, rms_only);
     }
     __syncthreads();
     // inter-warp reductions
@@ -1024,7 +1025,7 @@ void cuComputeGradInput(
     const int64_t n1,
     const int64_t n2,
     const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ invvar,
+    const T_ACC* __restrict__ rstd,
     const T* gamma,
     T* grad_input,
     bool rms_only)
@@ -1036,7 +1037,7 @@ void cuComputeGradInput(
     if (!rms_only) {
       c_mean = mean[i1];
     }
-    const T_ACC c_invvar = invvar[i1];
+    const T_ACC c_rstd = rstd[i1];
     const T* k_input = input + i1*n2;
     const T* k_dout = dout + i1*n2;
     const int numx = blockDim.x * blockDim.y;
@@ -1050,9 +1051,9 @@ void cuComputeGradInput(
         const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
         if (!rms_only) {
           sum_loss1 += c_loss * gamma_idx;
-          sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_invvar;
+          sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
         } else {
-          sum_loss2 += c_loss * gamma_idx * (c_h) * c_invvar;
+          sum_loss2 += c_loss * gamma_idx * (c_h) * c_rstd;
         }
       }
     } else {
@@ -1062,9 +1063,9 @@ void cuComputeGradInput(
         const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
         if (!rms_only) {
           sum_loss1 += c_loss;
-          sum_loss2 += c_loss * (c_h - c_mean) * c_invvar;
+          sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
         } else {
-          sum_loss2 += c_loss * (c_h) * c_invvar;
+          sum_loss2 += c_loss * (c_h) * c_rstd;
         }
       }
     }
@@ -1115,7 +1116,7 @@ void cuComputeGradInput(
     }
     // all threads now have the two sums over l
     T_ACC fH = (T_ACC)n2;
-    T_ACC term1 = (T_ACC(1) / fH) * c_invvar;
+    T_ACC term1 = (T_ACC(1) / fH) * c_rstd;
     T* k_grad_input = grad_input + i1*n2;
     if (gamma != NULL) {
       for (int l = thrx;  l < n2;  l+=numx) {
@@ -1124,9 +1125,9 @@ void cuComputeGradInput(
         T_ACC f_grad_input = fH * c_loss * gamma[l];
         if (!rms_only) {
           f_grad_input -= sum_loss1;
-          f_grad_input -= (c_h - c_mean) * c_invvar * sum_loss2;
+          f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
         } else {
-          f_grad_input -= (c_h) * c_invvar * sum_loss2;
+          f_grad_input -= (c_h) * c_rstd * sum_loss2;
         }
         f_grad_input *= term1;
         k_grad_input[l] = static_cast<T>(f_grad_input);
@@ -1138,9 +1139,9 @@ void cuComputeGradInput(
         T_ACC f_grad_input = fH * c_loss;
         if (!rms_only) {
           f_grad_input -= sum_loss1;
-          f_grad_input -= (c_h - c_mean) * c_invvar * sum_loss2;
+          f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
         } else {
-          f_grad_input -= (c_h) * c_invvar * sum_loss2;
+          f_grad_input -= (c_h) * c_rstd * sum_loss2;
         }
         f_grad_input *= term1;
         k_grad_input[l] = static_cast<T>(f_grad_input);
