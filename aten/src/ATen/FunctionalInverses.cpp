@@ -191,17 +191,17 @@ Tensor FunctionalInverses::split_copy_Tensor_inverse(const Tensor& base, const T
     return base.slice_scatter(mutated_view, dim, start, end, 1);
 }
 
-Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, at::IntArrayRef split_sizes, int64_t dim) {
-    dim = at::maybe_wrap_dim(dim, base.sizes().size());
+Tensor FunctionalInverses::split_with_sizes_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t mutated_view_idx, c10::SymIntArrayRef split_sizes, int64_t dim) {
+    dim = at::maybe_wrap_dim(dim, base.dim());
     auto dim_size = base.size(dim);
-    int64_t start = 0;
+    c10::SymInt start = 0;
     for (auto i = 0; i < mutated_view_idx; ++i) {
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];
     if (end > dim_size) end = dim_size;
     // Pessimism: we can't reapply views for slice_scatter.
-    return base.slice_scatter(mutated_view, dim, start, end, 1);
+    return base.slice_scatter_symint(mutated_view, dim, start, end, 1);
 }
 
 Tensor FunctionalInverses::squeeze_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views) {
