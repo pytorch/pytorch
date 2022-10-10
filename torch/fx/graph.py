@@ -471,7 +471,7 @@ class CodeGen(object):
                     body.append('\n# No stacktrace found for following nodes \n')
 
         def stringify_shape(shape : torch.Size) -> str:
-            return f"[{', '.join(str(x) for x in shape)}]"
+            return f"[{','.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
@@ -485,11 +485,11 @@ class CodeGen(object):
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
 
                 if isinstance(meta_val, FakeTensor):
-                    maybe_type_annotation = f': Tensor<{dtype_abbrs[meta_val.dtype]}>{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
                 elif isinstance(meta_val, PySymInt):
                     maybe_type_annotation = f': Symint({meta_val.expr})'
                 elif isinstance(meta_val, TensorMetadata):
-                    maybe_type_annotation = f': Tensor<{dtype_abbrs[meta_val.dtype]}>{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
 
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
