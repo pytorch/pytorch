@@ -5150,6 +5150,11 @@ class TestQuantizeFx(QuantizationTestCase):
             self._validate_qconfig_against_backend_config_constraints(
                 MyModel(), qconfig, backend_config, satisfies_constraints=True, qconfig_name=qconfig_name)
 
+    def test_get_executorch_backend_config(self):
+        from torch.ao.quantization.backend_config import get_executorch_backend_config
+        # make sure this runs
+        executorch_backend_config = get_executorch_backend_config()
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
