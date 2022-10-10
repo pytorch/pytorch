@@ -10,6 +10,7 @@ from torch.fx.passes.operator_support import OperatorSupportBase
 from collections import defaultdict
 import logging
 import itertools
+from copy import copy
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
