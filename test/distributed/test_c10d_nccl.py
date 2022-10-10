@@ -2355,7 +2355,6 @@ class DistributedDataParallelTest(
         for p1, p2 in zip(lstm.parameters(), lstm_ddp.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
-
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_channels_last_contig(self):
