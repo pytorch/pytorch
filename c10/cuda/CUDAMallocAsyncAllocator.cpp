@@ -912,7 +912,7 @@ void recordHistory(
     bool alloc_trace_record_context) {
   NOT_AVAILABLE("recordHistory");
 }
-void attachOutOfMemoryObserver(OutOfMemoryObsserver observer) {
+void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   NOT_AVAILABLE("attachOutOfMemoryObserver");
 }
 
