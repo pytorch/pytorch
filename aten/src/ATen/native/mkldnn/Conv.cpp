@@ -1,7 +1,10 @@
 #define TORCH_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <torch/library.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/ConvUtils.h>
+
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -171,14 +174,23 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
    return memory_format;
 }
 
-Tensor mkldnn_convolution(
+Tensor _mkldnn_convolution(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    std::string attr = "none",
+    std::vector<c10::optional<at::Scalar>> scalars = {},
+    c10::optional<std::string> algorithm = c10::nullopt) {
+  ideep::attr_t op_attr = ideep::attr_t();
+  if (attr != "none") {
+    auto it = fx_fusion_attr_map().find(attr);
+    TORCH_CHECK(it != fx_fusion_attr_map().end(), "Fusion behavior undefined.");
+    op_attr = it->second(scalars, algorithm);
+  }
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
@@ -219,7 +231,8 @@ Tensor mkldnn_convolution(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        is_channels_last);
+        is_channels_last,
+        op_attr);
   } else {
     ideep::convolution_forward::compute_v3(
         x,
@@ -231,7 +244,8 @@ Tensor mkldnn_convolution(
         {padding.begin(), padding.end()},
         {padding.begin(), padding.end()},
         groups,
-        is_channels_last);
+        is_channels_last,
+        op_attr);
   }
 
   if (input.is_mkldnn()) {
@@ -242,6 +256,43 @@ Tensor mkldnn_convolution(
     TORCH_INTERNAL_ASSERT(y.get_desc().is_nhwc());
     return output;
   }
+}
+
+Tensor mkldnn_convolution(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  return _mkldnn_convolution(
+      input_t, weight_t, bias_opt, padding, stride, dilation, groups);
+}
+
+Tensor mkldnn_convolution_pointwise(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups,
+    std::string attr,
+    std::vector<c10::optional<at::Scalar>> scalars,
+    c10::optional<std::string> algorithm) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  return _mkldnn_convolution(
+      input_t,
+      weight_t,
+      bias_opt,
+      padding,
+      stride,
+      dilation,
+      groups,
+      attr,
+      scalars,
+      algorithm);
 }
 
 Tensor mkldnn_convolution_backward_input(
@@ -363,6 +414,12 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
 }
 
 REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_backward_stub, &mkldnn_convolution_backward);
+
+TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
+      TORCH_FN(mkldnn_convolution_pointwise));
+}
 
 }}  // namespace at::native
 

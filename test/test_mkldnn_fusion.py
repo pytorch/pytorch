@@ -13,7 +13,6 @@ from test_tensorexpr import warmup_and_run_forward
 
 FUSION_GROUP = 'prim::TensorExprGroup'
 
-
 class EltwiseFusionOp(NamedTuple):
     attr : str
     pointwise_module : nn.Module
@@ -199,7 +198,6 @@ class TestMkldnnFusion(JitTestCase):
                 with torch.no_grad():
                     mod = M(pointwise_info.pointwise_module, input_shape[-1], 10, bias).eval()
                     v = torch.randn(input_shape)
-
                     ref = mod(v)
                     attr = pointwise_info.attr
                     scalars = pointwise_info.scalars
@@ -207,6 +205,45 @@ class TestMkldnnFusion(JitTestCase):
                     fused = torch.ops.mkldnn._linear_pointwise(
                         v, mod.linear.weight, mod.linear.bias, attr, scalars, algorithm
                     )
+                    self.assertEqual(ref, fused)
+
+
+    def test_conv_eltwise_fusion_ops(self):
+        conv_module = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
+
+        class M(nn.Module):
+            def __init__(self, eltwise_fn, dim, in_channels, out_channels, dilation, groups, bias, **kwargs):
+                super(M, self).__init__()
+                self.conv = conv_module[dim](in_channels, out_channels, dilation=dilation, groups=groups, bias=bias, **kwargs)
+                self.eltwise = eltwise_fn
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.eltwise(x)
+                return x
+
+        input_shapes = {2: (112, 112), 3: (55, 55, 55)}
+        for pointwise_name, pointwise_info in self._eltwise_list().items():
+            for dim in [2, 3]:
+                channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
+                options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
+                for bias, dilation, groups, memory_format in options:
+                    N = torch.randint(3, 10, (1,)).item()
+                    oC = torch.randint(1, 3, (1,)).item() * groups
+                    iC = torch.randint(1, 3, (1,)).item() * groups
+                    x_shape = (N, iC) + input_shapes[dim]
+                    x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
+                    mod = M(pointwise_info.pointwise_module, dim, iC, oC, dilation, groups, bias, kernel_size=3)
+                    mod = mod.to(memory_format=memory_format).eval()
+                    with torch.no_grad():
+                        ref = mod(x)
+                        attr = pointwise_info.attr
+                        scalars = pointwise_info.scalars
+                        algorithm = pointwise_info.algorithm
+                        fused = torch.ops.mkldnn._convolution_pointwise(
+                            x, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
+                            mod.conv.groups, attr, scalars, algorithm
+                        )
                     self.assertEqual(ref, fused)
 
 
