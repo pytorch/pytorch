@@ -1,5 +1,6 @@
 # Owner(s): ["module: tests"]
 
+import contextlib
 import torch
 import numpy as np
 
@@ -17,7 +18,7 @@ from torch.testing._internal.common_dtype import (
     integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
 )
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
+    TEST_WITH_ROCM, TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -3390,7 +3391,15 @@ as the input tensor excluding its innermost dimension'):
         t[2**30:] = -1
         expected = torch.tensor(0, device=device, dtype=dtype)
         self.assertEqual(torch.sum(t), expected)
-        self.assertEqual(torch.mean(t), expected)
+
+        is_rocm_and_chalf = TEST_WITH_ROCM and dtype is torch.chalf
+        # On Rocm:
+        # RuntimeError: "mean_cuda" not implemented for 'ComplexHalf'
+        err_msg = "not implemented for 'ComplexHalf'"
+        ctx = self.assertRaisesRegex(
+            RuntimeError, err_msg) if is_rocm_and_chalf else contextlib.nullcontext()
+        with ctx:
+            self.assertEqual(torch.mean(t), expected)
 
 instantiate_device_type_tests(TestReductions, globals())
 
