@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.4.1)
 project(pytorch_vision_jni CXX)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 14 CACHE STRING "The C++ standard whose features are requested to build this target.")
 set(CMAKE_VERBOSE_MAKEFILE ON)
 
 set(pytorch_vision_cpp_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)

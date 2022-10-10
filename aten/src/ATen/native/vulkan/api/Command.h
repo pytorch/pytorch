@@ -18,7 +18,8 @@ class CommandBuffer final {
  public:
   explicit CommandBuffer(
       const VkCommandBuffer,
-      const VkCommandBufferUsageFlags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+      const VkCommandBufferUsageFlags =
+          VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
   CommandBuffer(const CommandBuffer&) = delete;
   CommandBuffer& operator=(const CommandBuffer&) = delete;
@@ -30,14 +31,15 @@ class CommandBuffer final {
 
   // The lifecycle of a command buffer is as follows:
   enum State {
-    INVALID,  // Used to indicate the command buffer is moved from
-    NEW,  // Set during constructor
-    RECORDING,  // Set during call to begin(), dispatch(), and copy_texture_to_texture()
-    PIPELINE_BOUND,  // Set during call to  bind_pipeline()
-    DESCRIPTORS_BOUND,  // Set during call to bind_descriptors()
-    BARRIERS_INSERTED,  // Set during call to insert_barrier()
-    READY,  //  Set during call to end()
-    SUBMITTED,  // Set during call to get_submit_handle()
+    INVALID, // Used to indicate the command buffer is moved from
+    NEW, // Set during constructor
+    RECORDING, // Set during call to begin(), dispatch(), and
+               // copy_*_to_*()
+    PIPELINE_BOUND, // Set during call to  bind_pipeline()
+    DESCRIPTORS_BOUND, // Set during call to bind_descriptors()
+    BARRIERS_INSERTED, // Set during call to insert_barrier()
+    READY, //  Set during call to end()
+    SUBMITTED, // Set during call to get_submit_handle()
   };
 
   struct Bound {
@@ -47,11 +49,10 @@ class CommandBuffer final {
     VkDescriptorSet descriptors;
 
     explicit Bound()
-      : pipeline{VK_NULL_HANDLE},
-        pipeline_layout{VK_NULL_HANDLE},
-        local_workgroup_size{0u, 0u, 0u},
-        descriptors{VK_NULL_HANDLE} {
-    }
+        : pipeline{VK_NULL_HANDLE},
+          pipeline_layout{VK_NULL_HANDLE},
+          local_workgroup_size{0u, 0u, 0u},
+          descriptors{VK_NULL_HANDLE} {}
 
     inline void reset() {
       pipeline = VK_NULL_HANDLE;
@@ -80,6 +81,13 @@ class CommandBuffer final {
   void insert_barrier(const PipelineBarrier& pipeline_barrier);
   void dispatch(const utils::uvec3&);
 
+  void copy_buffer_to_buffer(
+      const api::VulkanBuffer&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
   void copy_texture_to_texture(
       const api::VulkanImage&,
       const api::VulkanImage&,
@@ -87,9 +95,22 @@ class CommandBuffer final {
       const api::utils::uvec3&,
       const api::utils::uvec3&);
 
+  void copy_texture_to_buffer(
+      const api::VulkanImage&,
+      const api::VulkanBuffer&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
+  void copy_buffer_to_texture(
+      const api::VulkanBuffer&,
+      const api::VulkanImage&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&);
+
   void write_timestamp(const VkQueryPool, const uint32_t) const;
-  void reset_querypool(
-      const VkQueryPool, const uint32_t, const uint32_t) const;
+  void reset_querypool(const VkQueryPool, const uint32_t, const uint32_t) const;
 
   VkCommandBuffer get_submit_handle();
 
@@ -106,7 +127,9 @@ struct CommandPoolConfig final {
 class CommandPool final {
  public:
   explicit CommandPool(
-      const VkDevice, const uint32_t, const CommandPoolConfig&);
+      const VkDevice,
+      const uint32_t,
+      const CommandPoolConfig&);
 
   CommandPool(const CommandPool&) = delete;
   CommandPool& operator=(const CommandPool&) = delete;

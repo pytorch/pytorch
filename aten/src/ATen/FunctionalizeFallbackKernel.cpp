@@ -14,6 +14,9 @@
 #else
 #include <ATen/ops/_to_copy.h>
 #include <ATen/ops/to_native.h>
+#include <ATen/ops/lift.h>
+#include <ATen/ops/lift_fresh.h>
+#include <ATen/ops/lift_fresh_copy.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/as_strided_copy.h>
@@ -173,7 +176,23 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
 
 at::Tensor lift_functionalize(const at::Tensor & self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
-  return at::functionalization::impl::to_functional_tensor(self);
+  at::AutoDispatchSkipFunctionalize guard;
+  auto out = at::lift(self);
+  return at::functionalization::impl::to_functional_tensor(out);
+}
+
+at::Tensor lift_fresh_functionalize(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  at::AutoDispatchSkipFunctionalize guard;
+  auto out = at::lift_fresh(self);
+  return at::functionalization::impl::to_functional_tensor(out);
+}
+
+at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
+  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  at::AutoDispatchSkipFunctionalize guard;
+  auto out = at::lift_fresh_copy(self);
+  return at::functionalization::impl::to_functional_tensor(out);
 }
 
 bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
@@ -237,35 +256,35 @@ at::Tensor _to_copy_functionalize(
 // The idea with _unsafe_view is that you're guaranteed that the input
 // is a temporary, and don't actually have to worry about propagating
 // mutations between the input and output.
-at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::IntArrayRef size) {
+at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymIntArrayRef size) {
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
     at::AutoDispatchSkipFunctionalize guard;
-    return at::_unsafe_view(self, size);
+    return at::_unsafe_view_symint(self, size);
   }
 
   auto self_ = at::functionalization::impl::from_functional_tensor(self);
   at::Tensor tmp_output;
   {
     at::AutoDispatchSkipFunctionalize guard;
-    tmp_output = at::_unsafe_view(self_, size);
+    tmp_output = at::_unsafe_view_symint(self_, size);
   }
 
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
-      return at::_unsafe_view(base, size);
+      return at::_unsafe_view_symint(base, size);
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return at::_unsafe_view(mutated_view, base.sizes());
+      return at::_unsafe_view_symint(mutated_view, base.sym_sizes());
     }
   );
 
   auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
   // See  Note [Propagating strides in the functionalization pass]
   // (for _unsafe_view, I'm just manually doing the shape inference rule here instead of calling the meta function for unsafe_view)
-  auto inferred_size = at::infer_size_dv(size, self.numel());
-  auto stride = at::detail::computeStride(self.sizes(), self.strides(), inferred_size);
+  auto inferred_size = at::infer_size_dv(size, self.sym_numel());
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), inferred_size);
   TORCH_INTERNAL_ASSERT(stride.has_value());
-  out.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride.value());
+  out.unsafeGetTensorImpl()->set_sizes_and_strides(inferred_size, stride.value());
   return out;
 }
 
@@ -276,6 +295,8 @@ TORCH_LIBRARY_IMPL(_, Functionalize, m) {
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("resize_", TORCH_FN(resize__functionalization));
   m.impl("lift", TORCH_FN(lift_functionalize));
+  m.impl("lift_fresh", TORCH_FN(lift_fresh_functionalize));
+  m.impl("lift_fresh_copy", TORCH_FN(lift_fresh_functionalize_copy));
   m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
   m.impl("_unsafe_view", TORCH_FN(_unsafe_view_functionalize));
 }

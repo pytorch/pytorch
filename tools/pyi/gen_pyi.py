@@ -1,21 +1,22 @@
 import argparse
 import collections
 from pprint import pformat
+from typing import Dict, List, Sequence
 
-from torchgen.model import Variant
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
     returns_named_tuple_pyi,
 )
 from torchgen.gen import parse_native_yaml
+
+from torchgen.model import DispatchKey, Variant
 from torchgen.utils import FileManager
-from typing import Sequence, List, Dict
 
 from tools.autograd.gen_python_functions import (
-    should_generate_py_binding,
-    load_signatures,
     group_overloads,
+    load_signatures,
+    should_generate_py_binding,
 )
 
 """
@@ -73,7 +74,7 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Union[_device, str, None]=None"
+DEVICE_PARAM = "device: Device=None"
 FACTORY_PARAMS = (
     f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: _bool=False"
 )
@@ -135,6 +136,9 @@ blocklist = [
     "floor_divide",
     "floor_divide_",
     "floor_divide_out",
+    "to",
+    "_to_copy",
+    "copy_",
 ]
 
 binary_ops = (
@@ -389,7 +393,7 @@ def gen_pyi(
             ],
             "numel": ["def numel(self: Tensor) -> _int: ..."],
             "as_tensor": [
-                "def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."
+                f"def as_tensor(data: Any, dtype: Optional[_dtype]=None, {DEVICE_PARAM}) -> Tensor: ..."
             ],
             "get_num_threads": ["def get_num_threads() -> _int: ..."],
             "set_num_threads": ["def set_num_threads(num: _int) -> None: ..."],
@@ -429,8 +433,15 @@ def gen_pyi(
                 " device: Optional[_device] = None,"
                 " requires_grad: bool = False) -> Tensor: ..."
             ],
+            "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
                 "def _is_functional_tensor(t: Tensor) -> _bool: ..."
+            ],
+            "_from_functional_tensor": [
+                "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
+            ],
+            "_to_functional_tensor": [
+                "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
             "range": [
                 "def range(start: Number, end: Number,"
@@ -615,10 +626,10 @@ def gen_pyi(
                     DEVICE_PARAM
                 ),
             ],
-            "as_subclass": ["def as_subclass(self, cls: Tensor) -> Tensor: ..."],
+            "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
             "_make_subclass": [
                 "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
-                " dispatch_device: _bool=False) -> Tensor: ..."
+                " dispatch_device: _bool=False, device_for_backend_keys: Optional[_device] = None) -> Tensor: ..."
             ],
             "__getitem__": ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
             "__setitem__": [
@@ -689,8 +700,8 @@ def gen_pyi(
                 "def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."
             ],
             "set_": [
-                "def set_(self, storage: Union[Storage, _TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
-                "def set_(self, storage: Union[Storage, _TypedStorage]) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
+                "def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...",
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...",
@@ -711,7 +722,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number]{})"
+                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode]{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
     for binop in ["add", "sub"]:
@@ -721,7 +732,7 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                "def {}(self, other: Union[Tensor, Number], "
+                "def {}(self, other: Union[Tensor, Number, torch.SymIntNode, torch.SymFloatNode], "
                 "*, alpha: Optional[Number]=1{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
@@ -856,6 +867,10 @@ def gen_pyi(
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
     all_directive[0] = "__all__ = {}".format(all_directive[0])
 
+    # Dispatch key hints
+    # ~~~~~~~~~~~~~~~~~~
+    dispatch_key_hints = [f"{d.name}: DispatchKey = ..." for d in DispatchKey]
+
     # Write out the stub
     # ~~~~~~~~~~~~~~~~~~
 
@@ -866,6 +881,7 @@ def gen_pyi(
         "legacy_class_hints": legacy_class_hints,
         "legacy_storage_base_hints": legacy_storage_base_hints,
         "dtype_class_hints": dtype_class_hints,
+        "dispatch_key_hints": dispatch_key_hints,
         "all_directive": all_directive,
     }
     fm.write_with_template(

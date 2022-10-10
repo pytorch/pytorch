@@ -4,11 +4,45 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Copy.h>
+#include <ATen/native/vulkan/ops/Factory.h>
+#include <ATen/native/vulkan/ops/QuantizedFunctions.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 
 namespace {
 
-// using Vulkan Timestamp Queries for the pure GPU execution time only
-static void cat_op_channel_perf_gpu_only(benchmark::State& state) {
+at::Tensor vulkan_to_cpu(at::Tensor vulkan, at::Tensor in_cpu) {
+  auto q_options = in_cpu.options();
+  if (q_options.dtype().toScalarType() == c10::ScalarType::QUInt8) {
+    auto output = at::native::empty_affine_quantized(
+        in_cpu.sizes(),
+        q_options.dtype().toScalarType(),
+        q_options.layout(),
+        q_options.device(),
+        q_options.pinned_memory(),
+        in_cpu.q_scale(),
+        in_cpu.q_zero_point());
+    at::native::vulkan::ops::copy_(output, vulkan);
+    return output;
+  } else {
+    auto output = at::empty(in_cpu.sizes(), q_options);
+    at::native::vulkan::ops::copy_(output, vulkan);
+    return output;
+  }
+}
+
+template <typename dest_t, typename src_t>
+static inline dest_t safe_downcast(src_t v) {
+  TORCH_CHECK(
+      std::numeric_limits<dest_t>::min() <= v &&
+          v <= std::numeric_limits<dest_t>::max(),
+      "integer out of range");
+
+  return static_cast<dest_t>(v);
+}
+
+static void add_op_benchmark(benchmark::State& state) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
@@ -19,65 +53,956 @@ static void cat_op_channel_perf_gpu_only(benchmark::State& state) {
   const auto channels = state.range(1);
   const auto height = state.range(2);
   const auto width = state.range(3);
-  const auto in_cpu1 = at::rand({batches, channels, height, width}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu2 = at::rand({batches, channels, height, width}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto in_cpu3 = at::rand({batches, channels, height, width}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan1 = in_cpu1.vulkan();
   const auto in_vulkan2 = in_cpu2.vulkan();
-  const auto in_vulkan3 = in_cpu3.vulkan();
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
 
   // Act
   for (auto _ : state) {
-    const auto vulkan_out = at::cat({in_vulkan1, in_vulkan2, in_vulkan3}, 1);
-    vulkan_out.cpu();
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_out = at::add(in_vulkan1, in_vulkan2).cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
   }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("add") / 1000000.0);
+#endif
 }
 
-static void gru_op_perf(benchmark::State& state) {
+static void add_op_q_benchmark(benchmark::State& state) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
   }
 
   // Arrange
-  const int H_in = static_cast<int>(state.range(0));  // input_size
-  const int H_out = static_cast<int>(state.range(1)); // hidden_size
-  const int num_layers = static_cast<int>(state.range(2));
-  const double gru_dropout = .0;
-  const bool has_biases = true;
-  const bool train = false;
-  const bool bidirectional = false;
-  const bool batch_first = true;
-  const auto in_cpu = at::rand({1, 1, H_in}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto h0_cpu = at::rand({num_layers, 1, H_out}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto batches = state.range(0);
+  const auto channels = state.range(1);
+  const auto height = state.range(2);
+  const auto width = state.range(3);
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan1 = in_cpu1.vulkan();
+  const auto in_vulkan2 = in_cpu2.vulkan();
+  const double scale = 0.1;
+  const int zero_point = 10;
+  const auto out_cpu1 = at::quantize_per_tensor(
+      in_cpu1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan1 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
 
-  c10::List<at::Tensor> weight_ih_l; // shape (3 * hidden_size, input_size)
-  c10::List<at::Tensor> weight_hh_l; // shape (3 * hidden_size, hidden_size)
-  c10::List<at::Tensor> bias_ih_l;   // shape (3 * hidden_size)
-  c10::List<at::Tensor> bias_hh_l;   // shape (3 * hidden_size)
-  for (int i = 0; i < num_layers; ++i) {
-    weight_ih_l.emplace_back(at::rand({3 * H_out, H_in}, at::device(at::kCPU).dtype(at::kFloat)));
-    weight_hh_l.emplace_back(at::rand({3 * H_out, H_out}, at::device(at::kCPU).dtype(at::kFloat)));
-    bias_ih_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
-    bias_hh_l.emplace_back(at::rand({3 * H_out}, at::device(at::kCPU).dtype(at::kFloat)));
-  }
-
-  // put this guard here to run inference inststead of training
-  // to avoid the following error:
-  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
-  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
-  c10::InferenceMode mode;
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
 
   // Act
-  while (state.KeepRunning()) {
-    // weights/biases should be always on CPU.
-    const auto out_vulkan = at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
-      weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
-      has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
-
-    auto vulkan_output = std::get<0>(out_vulkan);
-    auto vulkan_hidden = std::get<1>(out_vulkan);
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_add = at::native::vulkan::ops::quantized_add(
+        out_vulkan1, out_vulkan2, scale2, zero_point2);
+    const auto vulkan_out = vulkan_to_cpu(vulkan_add, out_cpu1);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
   }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_add") / 1000000.0);
+#endif
+}
+
+static void conv2d_op_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches_in = safe_downcast<uint32_t>(state.range(0));
+  const auto channels_in = safe_downcast<uint32_t>(state.range(1));
+  const auto height_in = safe_downcast<uint32_t>(state.range(2));
+  const auto width_in = safe_downcast<uint32_t>(state.range(3));
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{2, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 1};
+  // TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{batches_in, channels_in, height_in, width_in};
+
+  struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{1, input.channels, 3, 3};
+
+  const auto input_cpu =
+      at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_out = at::conv2d(
+                                input_cpu.vulkan(),
+                                weights_cpu,
+                                bias_cpu,
+                                stride,
+                                padding,
+                                dilation,
+                                groups)
+                                .cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("conv2d") / 1000000.0);
+#endif
+}
+
+static void conv2d_op_q_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches_in = safe_downcast<uint32_t>(state.range(0));
+  const auto channels_in = safe_downcast<uint32_t>(state.range(1));
+  const auto height_in = safe_downcast<uint32_t>(state.range(2));
+  const auto width_in = safe_downcast<uint32_t>(state.range(3));
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{2, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 1};
+  // TODO: Support conv2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{batches_in, channels_in, height_in, width_in};
+
+  struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{1, input.channels, 3, 3};
+
+  const auto input_cpu =
+      at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const double w_scale = 0.1;
+  const int w_zero_point = 10;
+
+  const double b_scale = 0.1;
+  const int b_zero_point = 10;
+
+  const auto weight_q = at::quantize_per_tensor(
+      weights_cpu, w_scale, w_zero_point, c10::ScalarType::QUInt8);
+  const auto bias_q = at::quantize_per_tensor(
+      bias_cpu, b_scale, b_zero_point, c10::ScalarType::QUInt8);
+
+  const auto in_vulkan1 = input_cpu.vulkan();
+  const double scale = 0.1;
+  const int zero_point = 10;
+  const auto out_vulkan1 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  const auto shape_match =
+      at::rand({1, 1, 64, 199}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_conv2d = at::native::vulkan::ops::quantized_conv2d(
+        out_vulkan1,
+        weight_q,
+        bias_q,
+        stride,
+        padding,
+        dilation,
+        groups,
+        scale2,
+        zero_point2);
+    const auto vulkan_out = vulkan_to_cpu(vulkan_conv2d, shape_match);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_conv2d") / 1000000.0);
+#endif
+}
+
+static void conv2dpw_op_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches_in = safe_downcast<uint32_t>(state.range(0));
+  const auto channels_in = safe_downcast<uint32_t>(state.range(1));
+  const auto height_in = safe_downcast<uint32_t>(state.range(2));
+  const auto width_in = safe_downcast<uint32_t>(state.range(3));
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 1};
+  constexpr std::array<int64_t, 2u> padding{0, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{batches_in, channels_in, height_in, width_in};
+
+  struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{29, input.channels, 1, 1};
+
+  const auto input_cpu =
+      at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_out = at::conv2d(
+                                input_cpu.vulkan(),
+                                weights_cpu,
+                                bias_cpu,
+                                stride,
+                                padding,
+                                dilation,
+                                groups)
+                                .cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("conv2d_pw_2x2") / 1000000.0);
+#endif
+}
+
+static void conv2dpw_op_q_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches_in = safe_downcast<uint32_t>(state.range(0));
+  const auto channels_in = safe_downcast<uint32_t>(state.range(1));
+  const auto height_in = safe_downcast<uint32_t>(state.range(2));
+  const auto width_in = safe_downcast<uint32_t>(state.range(3));
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 1};
+  constexpr std::array<int64_t, 2u> padding{0, 0};
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{batches_in, channels_in, height_in, width_in};
+
+  struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{29, input.channels, 1, 1};
+
+  const auto input_cpu =
+      at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const double w_scale = 0.1;
+  const int w_zero_point = 10;
+
+  const double b_scale = 0.1;
+  const int b_zero_point = 10;
+
+  const auto weight_q = at::quantize_per_tensor(
+      weights_cpu, w_scale, w_zero_point, c10::ScalarType::QUInt8);
+  const auto bias_q = at::quantize_per_tensor(
+      bias_cpu, b_scale, b_zero_point, c10::ScalarType::QUInt8);
+
+  const auto in_vulkan1 = input_cpu.vulkan();
+  const double scale = 0.1;
+  const int zero_point = 10;
+  const auto out_vulkan1 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  const auto shape_match =
+      at::rand({1, 29, 127, 397}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_conv2d = at::native::vulkan::ops::quantized_conv2d(
+        out_vulkan1,
+        weight_q,
+        bias_q,
+        stride,
+        padding,
+        dilation,
+        groups,
+        scale2,
+        zero_point2);
+    const auto vulkan_out = vulkan_to_cpu(vulkan_conv2d, shape_match);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_conv2d_pw_2x2") / 1000000.0);
+#endif
+}
+
+static void conv2ddw_op_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches_in = safe_downcast<uint32_t>(state.range(0));
+  const auto height_in = safe_downcast<uint32_t>(state.range(2));
+  const auto width_in = safe_downcast<uint32_t>(state.range(3));
+  constexpr int64_t groups = 7;
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{3, 1};
+
+  struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{batches_in, groups, height_in, width_in};
+
+  struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{groups, 1, 17, 7};
+
+  const auto input_cpu =
+      at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_out = at::conv2d(
+                                input_cpu.vulkan(),
+                                weights_cpu,
+                                bias_cpu,
+                                stride,
+                                padding,
+                                dilation,
+                                groups)
+                                .cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("conv2d_dw") / 1000000.0);
+#endif
+}
+
+static void conv2ddw_op_q_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches_in = safe_downcast<uint32_t>(state.range(0));
+  const auto height_in = safe_downcast<uint32_t>(state.range(2));
+  const auto width_in = safe_downcast<uint32_t>(state.range(3));
+  constexpr int64_t groups = 7;
+  constexpr std::array<int64_t, 2u> stride{2, 3};
+  constexpr std::array<int64_t, 2u> padding{0, 4};
+  constexpr std::array<int64_t, 2u> dilation{3, 1};
+
+  struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          batches,
+          channels,
+          width,
+          height,
+      };
+    }
+  } input{batches_in, groups, height_in, width_in};
+
+  struct {
+    uint32_t output_channels;
+    uint32_t input_channels;
+    uint32_t width;
+    uint32_t height;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+          output_channels,
+          input_channels,
+          width,
+          height,
+      };
+    }
+  } weights{groups, 1, 17, 7};
+
+  const auto input_cpu =
+      at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu =
+      at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::randn(
+      {weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  const double w_scale = 0.1;
+  const int w_zero_point = 10;
+
+  const double b_scale = 0.1;
+  const int b_zero_point = 10;
+
+  const auto weight_q = at::quantize_per_tensor(
+      weights_cpu, w_scale, w_zero_point, c10::ScalarType::QUInt8);
+  const auto bias_q = at::quantize_per_tensor(
+      bias_cpu, b_scale, b_zero_point, c10::ScalarType::QUInt8);
+
+  const auto in_vulkan1 = input_cpu.vulkan();
+  const double scale = 0.1;
+  const int zero_point = 10;
+  const auto out_vulkan1 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  const auto shape_match =
+      at::rand({1, 7, 45, 67}, at::device(at::kCPU).dtype(at::kFloat)) * 6;
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_conv2d = at::native::vulkan::ops::quantized_conv2d(
+        out_vulkan1,
+        weight_q,
+        bias_q,
+        stride,
+        padding,
+        dilation,
+        groups,
+        scale2,
+        zero_point2);
+    const auto vulkan_out = vulkan_to_cpu(vulkan_conv2d, shape_match);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_conv2d_dw") / 1000000.0);
+#endif
+}
+
+static void sub_op_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches = state.range(0);
+  const auto channels = state.range(1);
+  const auto height = state.range(2);
+  const auto width = state.range(3);
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan1 = in_cpu1.vulkan();
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_out = at::sub(in_vulkan1, in_vulkan2).cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("sub") / 1000000.0);
+#endif
+}
+
+static void sub_op_q_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches = state.range(0);
+  const auto channels = state.range(1);
+  const auto height = state.range(2);
+  const auto width = state.range(3);
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan1 = in_cpu1.vulkan();
+  const auto in_vulkan2 = in_cpu2.vulkan();
+  const double scale = 0.1;
+  const int zero_point = 10;
+  const auto out_cpu1 = at::quantize_per_tensor(
+      in_cpu1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan1 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_sub = at::native::vulkan::ops::quantized_sub(
+        out_vulkan1, out_vulkan2, scale2, zero_point2);
+    const auto vulkan_out = vulkan_to_cpu(vulkan_sub, out_cpu1);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_sub") / 1000000.0);
+#endif
+}
+
+static void mul_op_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches = state.range(0);
+  const auto channels = state.range(1);
+  const auto height = state.range(2);
+  const auto width = state.range(3);
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan1 = in_cpu1.vulkan();
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_out = at::mul(in_vulkan1, in_vulkan2).cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("mul") / 1000000.0);
+#endif
+}
+
+static void mul_op_q_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches = state.range(0);
+  const auto channels = state.range(1);
+  const auto height = state.range(2);
+  const auto width = state.range(3);
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan1 = in_cpu1.vulkan();
+  const auto in_vulkan2 = in_cpu2.vulkan();
+  const double scale = 0.1;
+  const int zero_point = 10;
+  const auto out_cpu1 = at::quantize_per_tensor(
+      in_cpu1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan1 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_mul = at::native::vulkan::ops::quantized_mul(
+        out_vulkan1, out_vulkan2, scale2, zero_point2);
+    const auto vulkan_out = vulkan_to_cpu(vulkan_mul, out_cpu1);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_mul") / 1000000.0);
+#endif
+}
+
+static void div_op_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches = state.range(0);
+  const auto channels = state.range(1);
+  const auto height = state.range(2);
+  const auto width = state.range(3);
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan1 = in_cpu1.vulkan();
+  const auto in_vulkan2 = in_cpu2.vulkan();
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_out = at::div(in_vulkan1, in_vulkan2).cpu();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("div") / 1000000.0);
+#endif
+}
+
+static void div_op_q_benchmark(benchmark::State& state) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto batches = state.range(0);
+  const auto channels = state.range(1);
+  const auto height = state.range(2);
+  const auto width = state.range(3);
+  const auto in_cpu1 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand(
+      {batches, channels, height, width},
+      at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan1 = in_cpu1.vulkan();
+  const auto in_vulkan2 = in_cpu2.vulkan();
+  const double scale = 0.1;
+  const int zero_point = 10;
+  const auto out_cpu1 = at::quantize_per_tensor(
+      in_cpu1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan1 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan1, scale, zero_point, c10::ScalarType::QUInt8);
+  const auto out_vulkan2 = at::native::vulkan::ops::quantize_per_tensor(
+      in_vulkan2, scale, zero_point, c10::ScalarType::QUInt8);
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->enable_op_profiling();
+  at::native::vulkan::api::context()->reset_querypool();
+#endif
+
+  // Act
+  const double scale2 = 0.15;
+  const int zero_point2 = 15;
+  for (auto _ : state) {
+    auto start = std::chrono::high_resolution_clock::now();
+    const auto vulkan_div = at::native::vulkan::ops::quantized_div(
+        out_vulkan1, out_vulkan2, scale2, zero_point2);
+    const auto vulkan_out = vulkan_to_cpu(vulkan_div, out_cpu1);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto elapsed =
+        std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+    state.SetIterationTime(elapsed.count());
+  }
+
+#if defined(USE_VULKAN_GPU_DIAGNOSTICS) && defined(__ANDROID__)
+  at::native::vulkan::api::context()->querypool().extract_results();
+  at::native::vulkan::api::context()->querypool().print_results();
+  state.SetIterationTime(at::native::vulkan::api::context()->querypool().get_total_op_ns("quantized_div") / 1000000.0);
+#endif
 }
 
 static void CommonBenchmarkSettings(benchmark::internal::Benchmark* b) {
@@ -87,13 +1012,90 @@ static void CommonBenchmarkSettings(benchmark::internal::Benchmark* b) {
 
 } // namespace
 
-BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 40, 221, 193});  // big multiple of 4 channels
-BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 20, 221, 193});  // big multiple of 4 channels
-BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 39, 221, 193});  // big non-multiple of 4 channels
-BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 4, 221, 193});   // small multiple of 4 channels
-BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(1)->Iterations(100)->Args({3, 3, 221, 193});   // small non-multiple of 4 channels
-BENCHMARK(cat_op_channel_perf_gpu_only)->Apply(CommonBenchmarkSettings)->UseManualTime()->Threads(3)->Iterations(100)->Args({3, 40, 221, 193});  // big multiple of 4 channels (multi-thread)
-BENCHMARK(gru_op_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(100)->Args({384, 384, 2});                                        // McLaren Model inputs
+BENCHMARK(add_op_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
+BENCHMARK(add_op_q_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
+BENCHMARK(conv2d_op_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({1, 17, 127, 397});
+BENCHMARK(conv2d_op_q_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({1, 17, 127, 397});
+BENCHMARK(conv2dpw_op_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({1, 17, 127, 397});
+BENCHMARK(conv2dpw_op_q_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({1, 17, 127, 397});
+BENCHMARK(conv2ddw_op_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(10)
+    ->Args({1, 7, 137, 199});
+BENCHMARK(conv2ddw_op_q_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(10)
+    ->Args({1, 7, 137, 199});
+BENCHMARK(sub_op_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
+BENCHMARK(sub_op_q_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
+BENCHMARK(mul_op_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
+BENCHMARK(mul_op_q_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
+BENCHMARK(div_op_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
+BENCHMARK(div_op_q_benchmark)
+    ->Apply(CommonBenchmarkSettings)
+    ->UseManualTime()
+    ->Threads(1)
+    ->Iterations(100)
+    ->Args({3, 40, 221, 193});
 
 BENCHMARK_MAIN();
 

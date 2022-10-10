@@ -1,9 +1,9 @@
 import argparse
 import gzip
 import os
+import sys
 from urllib.error import URLError
 from urllib.request import urlretrieve
-import sys
 
 MIRRORS = [
     "http://yann.lecun.com/exdb/mnist/",

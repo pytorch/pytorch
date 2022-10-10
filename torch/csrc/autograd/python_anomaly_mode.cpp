@@ -6,6 +6,7 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
 #include <iostream>
@@ -15,7 +16,7 @@ namespace autograd {
 
 void PyAnomalyMetadata::store_stack() {
   pybind11::gil_scoped_acquire gil;
-  THPObjectPtr mod(PyImport_ImportModule("traceback"));
+  THPObjectPtr mod(PyImport_ImportModule("torch.fx.traceback"));
   if (!mod) {
     throw python_error();
   }

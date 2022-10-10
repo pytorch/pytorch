@@ -608,7 +608,7 @@ class TORCH_API BlockRunner {
 
   // Input is readwrite
   IValue& Input(uint32_t i) {
-    DCHECK_LT(i, block_info_.num_inputs());
+    TORCH_DCHECK_LT(i, block_info_.num_inputs());
     return values_[i + block_info_.block_inputs_idx()];
   }
 
