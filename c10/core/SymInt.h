@@ -170,6 +170,9 @@ class C10_API SymInt {
   void operator*=(SymInt sci);
   void operator+=(SymInt sci);
 
+  SymInt min(SymInt sci) const;
+  SymInt max(SymInt sci) const;
+
   SymInt operator*(int64_t sci) const;
   bool operator<(int64_t sci) const;
   bool operator==(int64_t sci) const;
@@ -177,6 +180,7 @@ class C10_API SymInt {
   bool operator<=(int64_t sci) const;
   bool operator>(int64_t sci) const;
   bool operator>=(int64_t sci) const;
+
 
   operator SymFloat() const;
 
