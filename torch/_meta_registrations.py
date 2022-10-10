@@ -80,8 +80,8 @@ def meta_randperm(n, *, generator=None, out):
 
 
 @register_meta(aten.randint.default)
-def meta_randint(high, size, *, dtype=torch.long, **kwargs):
-    return torch.empty(tuple(size), dtype, **kwargs)
+def meta_randint(high, size, *args, dtype=torch.long, **kwargs):
+    return torch.empty(size, *args, dtype=dtype, **kwargs)
 
 
 @register_meta([aten._fft_c2r.default, aten._fft_c2r.out])
