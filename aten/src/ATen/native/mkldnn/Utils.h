@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/ArrayRef.h>
+#include <vector>
 #include <cpuinfo.h>
 #include <vector>
 
