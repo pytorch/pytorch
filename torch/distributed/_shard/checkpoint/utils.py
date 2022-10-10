@@ -1,9 +1,31 @@
-from typing import List, Callable, Optional, Union, TypeVar, cast
+from typing import List, Callable, Optional, Union, TypeVar, Dict, Any, cast
 import torch.distributed as dist
-from .api import CheckpointException
+from .api import (
+    CheckpointException,
+    _wrap_exception,
+    _is_wrapped_exception,
+    WRAPPED_EXCEPTION
+)
+
+import torch
+
+from torch.distributed._shard.sharded_tensor import (
+    ShardedTensor,
+)
+
+from torch.distributed._shard.sharded_tensor.shard import Shard
+
+from .metadata import (
+    STATE_DICT_TYPE,
+    MetadataIndex,
+)
+
 
 T = TypeVar('T')
 R = TypeVar('R')
+
+def _get_failure_dict(results: List[Union[T, WRAPPED_EXCEPTION]]) -> Dict[int, WRAPPED_EXCEPTION]:
+    return cast(Dict[int, WRAPPED_EXCEPTION], {i: err for i, err in enumerate(results) if _is_wrapped_exception(err)})
 
 class _DistWrapper:
     """
@@ -113,24 +135,24 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Scatter to each rank part of the result.
         """
-        local_data: Union[BaseException, T]
+        local_data: Union[WRAPPED_EXCEPTION, T]
         try:
             local_data = map_fun()
         except BaseException as e:
-            local_data = e
+            local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
         all_results: Optional[List[Union[R, CheckpointException]]] = None
         if self.is_coordinator:
             assert all_data is not None
-            node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
+            node_failures = _get_failure_dict(all_data)
 
             if len(node_failures) == 0:
                 try:
-                    # N.B. why can't mypy cast List[R] to List[Union[R, CheckpointException]]?
+                    # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
                     all_results = cast(List[Union[R, CheckpointException]], reduce_fun(cast(List[T], all_data)))
                 except BaseException as e:
-                    node_failures[self.rank] = e
+                    node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
                 all_results = [CheckpointException(step, node_failures)] * self.get_world_size()
@@ -155,22 +177,22 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Broadcast the reduced value to all ranks.
         """
-        local_data: Union[T, BaseException]
+        local_data: Union[T, WRAPPED_EXCEPTION]
         try:
             local_data = map_fun()
         except BaseException as e:
-            local_data = e
+            local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
         result: Optional[Union[R, CheckpointException]] = None
         if self.is_coordinator:
             assert all_data is not None
-            node_failures = {i: err for i, err in enumerate(all_data) if isinstance(err, BaseException)}
+            node_failures = _get_failure_dict(all_data)
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(List[T], all_data))
                 except BaseException as e:
-                    node_failures[self.rank] = e
+                    node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
@@ -192,15 +214,15 @@ class _DistWrapper:
             Run ``map_cp`` on all ranks
             all_gather the values to all ranks
         """
-        result: Union[T, BaseException]
+        result: Union[T, WRAPPED_EXCEPTION]
         try:
             result = map_fun()
         except BaseException as e:
-            result = e
+            result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
 
-        node_failures = {i: err for i, err in enumerate(all_results) if isinstance(err, BaseException)}
+        node_failures = _get_failure_dict(all_results)
         if len(node_failures) > 0:
             raise CheckpointException(step, node_failures)
         return cast(List[T], all_results)
@@ -222,8 +244,43 @@ class _DistWrapper:
             try:
                 result = map_fun()
             except BaseException as e:
-                result = CheckpointException(step, {self.rank: e})
+                result = CheckpointException(step, {self.rank: _wrap_exception(e)})
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
         return cast(T, final_result)
+
+def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
+    if index.offset is None:
+        raise ValueError(f"Cannot lookup {index.fqn} since its a ShardedTensor and no offset was provided")
+
+    shards = tensor.local_shards()
+    # index fast path
+    if index.index is not None:
+        if len(shards) > index.index and torch.Size(shards[index.index].metadata.shard_offsets) == index.offset:
+            return shards[index.index]
+
+    for shard in shards:
+        if torch.Size(shard.metadata.shard_offsets) == index.offset:
+            return shard
+    raise ValueError(f"Could not find shard at '{index.offset}' for FQN: '{index.fqn}'")
+
+def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
+    if isinstance(tensor, ShardedTensor):
+        return _find_shard(tensor, index).tensor
+    if index.offset is not None:
+        # special case looking up a tensor by origin
+        if index.offset == torch.Size([0] * len(tensor.size())):
+            return tensor
+        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
+    return tensor
+
+def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) -> Any:
+    if index.fqn not in state_dict:
+        raise ValueError(f"Could not find FQN: '{index.fqn}'")
+    obj = state_dict[index.fqn]
+    if isinstance(obj, torch.Tensor):
+        return find_tensor_shard(obj, index)
+    elif index.offset is not None:
+        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
+    return obj

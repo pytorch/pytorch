@@ -86,9 +86,12 @@ class TestPublicBindings(TestCase):
             "DeviceObjType",
             "DictType",
             "DisableTorchFunction",
+            "DispatchKey",
+            "DispatchKeySet",
             "dtype",
             "EnumType",
             "ErrorReport",
+            "ExcludeDispatchKeyGuard",
             "ExecutionPlan",
             "FatalError",
             "FileCheck",
@@ -124,9 +127,11 @@ class TestPublicBindings(TestCase):
             "INSERT_FOLD_PREPACK_OPS",
             "InterfaceType",
             "IntType",
+            "SymFloatType",
             "SymIntType",
             "IODescriptor",
             "is_anomaly_enabled",
+            "is_anomaly_check_nan_enabled",
             "is_autocast_cache_enabled",
             "is_autocast_cpu_enabled",
             "is_autocast_enabled",
@@ -188,7 +193,8 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
-            "SymbolicIntNode",
+            "SymFloatNode",
+            "SymIntNode",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -222,6 +228,7 @@ class TestPublicBindings(TestCase):
             "import_ir_module_from_buffer",
             "init_num_threads",
             "is_anomaly_enabled",
+            "is_anomaly_check_nan_enabled",
             "is_autocast_enabled",
             "is_grad_enabled",
             "layout",
@@ -243,12 +250,6 @@ class TestPublicBindings(TestCase):
 
             "wait",
             "Tag",
-            "inplace_view",
-            "view_copy",
-            "generated",
-            "dynamic_output_shape",
-            "nondeterministic_bitwise",
-            "nondeterministic_seeded",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 
@@ -367,7 +368,6 @@ class TestPublicBindings(TestCase):
                 for elem in all_api:
                     if not elem.startswith('_'):
                         check_one_element(elem, modname, mod, is_public=True, is_all=False)
-
         for _, modname, ispkg in pkgutil.walk_packages(path=torch.__path__, prefix=torch.__name__ + '.'):
             test_module(modname)
 

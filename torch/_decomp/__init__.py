@@ -18,6 +18,10 @@ decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
+# decompositions which have been disabled as meta kernel implementations,
+# usually due to mismatching strides, aliasing, or other inconsistent property
+_disabled_meta_decomps = set()
+
 
 def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False):
     """
@@ -100,22 +104,46 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 if op_overload in registry:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
                 registry[op_overload] = fn
+                op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
                 # TODO: factor this logic into OpOverload or Library API
                 name = op_overload._schema.name
                 if op_overload._schema.overload_name:
                     name += "." + op_overload._schema.overload_name
+
+                if disable_meta:
+                    global _disabled_meta_decomps
+                    _disabled_meta_decomps.add(op_overload)
+
                 if (
                     not disable_meta
                     # TorchScript dumps a bunch of extra nonsense overloads
                     # which don't have corresponding dispatcher entries, we need
                     # to filter those out
                     and torch._C._dispatch_has_kernel(name)
-                    # Don't register a meta kernel to any operator that has
-                    # a CompositeImplicitAutograd kernel in core.
-                    # Otherwise we won't be able to run autograd for that operator with the meta backend.
-                    and "CompositeImplicitAutograd" not in torch._C._dispatch_dump(name)
-                    and not torch._C._dispatch_has_kernel_for_dispatch_key(name, "Meta")
+                    # Don't register a python meta kernel to any operator that has
+                    # should already work with meta tensors today.
+                    # We can check that by seeing if the "computed table" for the operator
+                    # has a registration to Meta;
+                    # either through a direct registration, or an indirect one through
+                    # an alias dispatch key (e.g. CompositeImplicitAutograd)
+                    and not torch._C._dispatch_has_computed_kernel_for_dispatch_key(
+                        name, "Meta"
+                    )
                 ):
+                    if any(
+                        a.alias_info is not None and not a.alias_info.is_write
+                        for a in op_overload._schema.arguments
+                    ):
+                        raise RuntimeError(
+                            f"""
+Attempting to register a python meta kernel for a view operator: {str(op_overload)}.
+We shouldn't do this, because the output will report as not having aliased storages.
+All view ops have meta kernels in C++ today, so we should use those instead.
+
+If you're registering an operator through the `@register_decomposition` decorator,
+Please set `disable_meta=True`.
+                        """
+                        )
                     meta_lib.impl(op_overload, fn)
 
         # To handle allowing multiple aten_ops at once
