@@ -15,7 +15,10 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN,
+    TestCase as TorchTestCase,
+)
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 try:
@@ -3497,6 +3500,7 @@ class CommonTemplate:
         inps = [torch.randn(shape, dtype=dtype) for (shape, dtype) in inps]
         self.common(forward, inps, atol=1e-05, rtol=2e-05)
 
+    @unittest.skipIf(TEST_WITH_ASAN, "TODO: debug this with asan")
     def test_tmp_not_defined_issue2(self):
         def forward(arg38_1, arg81_1, getitem_17, new_zeros_default_4):
             div_tensor_7 = torch.ops.aten.div.Tensor(getitem_17, arg81_1)
