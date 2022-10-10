@@ -22,9 +22,10 @@ from typing import List, Tuple, Type, Set, Dict
 # List of all namespaces containing modules to test.
 MODULE_NAMESPACES: List[ModuleType] = [
     torch.nn.modules,
-    torch.nn.qat.modules,
+    torch.ao.nn.qat.modules,
     torch.nn.quantizable.modules,
     torch.nn.quantized.modules,
+    torch.ao.nn.quantized.modules,
 ]
 
 # Modules that shouldn't be tested for one reason or another.
@@ -33,6 +34,7 @@ MODULES_TO_SKIP: Set[Type] = {
     torch.nn.Container,  # deprecated
     torch.nn.NLLLoss2d,  # deprecated
     torch.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
+    torch.ao.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
 }
 
 # List of all module classes to test.

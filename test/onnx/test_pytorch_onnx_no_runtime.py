@@ -6,7 +6,8 @@ import contextlib
 import io
 import itertools
 import unittest
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
+import unittest.mock
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import onnx
 import onnx.numpy_helper
@@ -14,14 +15,15 @@ import onnx.numpy_helper
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.onnx import symbolic_helper, symbolic_registry, utils
+from torch.onnx import symbolic_helper, utils
 from torch.onnx._globals import GLOBALS
+from torch.onnx._internal import registration
 from torch.testing._internal import common_utils
 
 
 def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
-    input: Tuple[torch.Tensor],
+    input: Union[torch.Tensor, Tuple[torch.Tensor]],
     custom_ops: Optional[
         Iterable[
             Union[contextlib.AbstractContextManager, contextlib.ContextDecorator],
@@ -64,75 +66,6 @@ def export_to_onnx(
     onnx_model = onnx.load_from_string(f.getvalue())
     onnx.checker.check_model(onnx_model)
     return onnx_model
-
-
-@common_utils.instantiate_parametrized_tests
-class TestOptionalOutput(common_utils.TestCase):
-    # TODO: Move these tests to test_pytorch_onnx_onnxruntime once
-    # ONNX Runtime 1.11 is released and supports opset 16.
-
-    class IfNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
-            if x.size(0) > 1:
-                y = x
-            return y
-
-    class IfNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
-            if x.size(0) > 1:
-                y = None
-            return y
-
-    class LoopNoneInput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = None
-            for _ in range(x.size(0)):
-                y = x
-            return y
-
-    class LoopNoneOutput(torch.nn.Module):
-        def forward(self, x) -> Optional[Tensor]:
-            y: Optional[Tensor] = x
-            for _ in range(x.size(0)):
-                y = None
-            return y
-
-    @common_utils.parametrize(
-        "module_class",
-        (IfNoneInput, IfNoneOutput, LoopNoneInput, LoopNoneOutput),
-        name_fn=lambda module_class: module_class.__name__,
-    )
-    @common_utils.parametrize("x_size", (0, 1), name_fn=lambda x_size: str(x_size))
-    def test_optional_output(self, module_class: Type[torch.nn.Module], x_size: int):
-        # Need scripting to preserve control flow for this test to be
-        # meaningful.
-        model = torch.jit.script(module_class())
-        f = io.BytesIO()
-        x = torch.ones(x_size)
-        dynamic_axis_name = "condition"
-        torch.onnx.export(
-            model,
-            (x,),
-            f,
-            opset_version=15,
-            # Ensure condition is not constant
-            dynamic_axes={"x": {0: dynamic_axis_name}},
-            input_names=["x"],
-        )
-        exported = onnx.load_from_string(f.getvalue())
-        expected_elem_type = torch.onnx.JitScalarType.from_dtype(x.dtype).onnx_type()
-        expected_output_type = onnx.helper.make_optional_type_proto(
-            onnx.helper.make_tensor_type_proto(expected_elem_type, (dynamic_axis_name,))
-        )
-        self.assertEqual(expected_output_type, exported.graph.output[0].type)
-        for node in exported.graph.node:
-            # Both branches output types should match.
-            if node.op_type == "If":
-                for attr in node.attribute:
-                    if attr.name in ("then_branch", "else_branch"):
-                        self.assertEqual(expected_output_type, attr.g.output[0].type)
 
 
 class TestONNXExport(common_utils.TestCase):
@@ -505,14 +438,11 @@ class TestONNXExport(common_utils.TestCase):
             def forward(self, x):
                 return torch.clamp(x, min=-0.5, max=0.5)
 
-        def break_is_registered_op_api(opname, domain, version):
-            fake_missing_symbolics = ("clamp",)
-            if opname in fake_missing_symbolics:
-                return False
-            return (
-                (domain, version) in symbolic_registry._registry
-                and opname in symbolic_registry._registry[(domain, version)]
-            )
+        def break_is_registered_op_api(name):
+            fake_missing_symbolics = {"aten::clamp"}
+            if name in fake_missing_symbolics:
+                return None
+            return registration.registry.get_function_group(name)
 
         # Force missing symbolic for well-known op using a mock
         onnx_model = export_to_onnx(
@@ -520,7 +450,7 @@ class TestONNXExport(common_utils.TestCase):
             torch.randn(3, 4, requires_grad=True),
             mocks=[
                 unittest.mock.patch(
-                    "torch.onnx.symbolic_registry.is_registered_op",
+                    "torch.onnx._internal.registration.registry.get_function_group",
                     side_effect=break_is_registered_op_api,
                 )
             ],
@@ -695,7 +625,9 @@ class TestONNXExport(common_utils.TestCase):
         def symbolic_custom_invalid_add(g, input, other, alpha=None):
             return g.op("Add", input, other, invalid_attr_i=1)
 
-        torch.onnx.register_custom_op_symbolic("::add", symbolic_custom_invalid_add, 1)
+        torch.onnx.register_custom_op_symbolic(
+            "::add", symbolic_custom_invalid_add, opset_version=9
+        )
 
         x = torch.randn(2, 3, 4)
         y = torch.randn(2, 3, 4)
@@ -705,9 +637,9 @@ class TestONNXExport(common_utils.TestCase):
 
         try:
             with self.assertRaises(torch.onnx.errors.CheckerError):
-                torch.onnx.export(test_model, (x, y), f)
+                torch.onnx.export(test_model, (x, y), f, opset_version=9)
         finally:
-            torch.onnx.unregister_custom_op_symbolic("::add", 1)
+            torch.onnx.unregister_custom_op_symbolic("::add", 9)
 
         self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
         loaded_model = onnx.load_from_string(f.getvalue())

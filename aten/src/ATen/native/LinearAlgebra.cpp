@@ -48,6 +48,8 @@ namespace detail {
 namespace meta {
 
 #define ADDMM_META() \
+  TORCH_CHECK(self.scalar_type() == mat2.scalar_type(), "self and mat2 must have the same dtype"); \
+  TORCH_CHECK(mat1.scalar_type() == mat2.scalar_type(), "mat1 and mat2 must have the same dtype"); \
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor"); \
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor"); \
   TORCH_CHECK( \
@@ -55,7 +57,7 @@ namespace meta {
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")"); \
  \
   auto names = at::namedinference::propagate_names_for_addmm(mat1, mat2, self); \
-  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
+  set_output_raw_strided(0, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options(), names);
 
 TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   ADDMM_META();
@@ -709,24 +711,6 @@ Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   std::tie(atol_tensor, rtol_tensor) = get_atol_rtol(input, tol, 0.0);
 
   return matrix_rank_impl(input, atol_tensor, rtol_tensor, hermitian, result);
-}
-
-Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, tol, symmetric);
-}
-
-Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
 }
 
 // multi_dot helper functions
@@ -2285,8 +2269,7 @@ void compute_T18_scale_square(
   for (const auto i : c10::irange(mexp_scaled.size(0))) {
     auto s_val = s_cpu.select(0, i).template item<int64_t>();
     auto mexp = mexp_scaled.select(0, i);
-    for (const auto p : c10::irange(s_val)) {
-      (void)p; //Suppress unused variable warning
+    for (const auto p C10_UNUSED : c10::irange(s_val)) {
       mexp = at::matmul(mexp, mexp);
     }
     mexp_out.select(0, i).copy_(mexp);
