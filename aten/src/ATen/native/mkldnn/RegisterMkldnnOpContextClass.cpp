@@ -34,6 +34,9 @@ TORCH_LIBRARY(mkldnn, m) {
                 // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
                 std::move(std::get<7>(state)));
           });
+
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkldnn::_linear_pointwise(Tensor X, Tensor W, Tensor? B, str attr, Scalar?[] scalars, str? algorithm) -> Tensor Y"));
 }
 
 TORCH_LIBRARY(mkldnn_prepacked, m) {
