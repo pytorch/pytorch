@@ -8,6 +8,7 @@ When new ops are supported, please scroll down to modify the EXPECTED_SKIPS_OR_F
 ALLOWLIST_OP lists.
 
 """
+import copy
 import itertools
 import unittest
 from collections import namedtuple
@@ -145,19 +146,10 @@ def skip_ops(
     to_skip: Iterable[DecorateMeta],
 ):
     """Decorates OpInfo tests with decorators based on the to_skip list."""
+    ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in to_skip:
-        matching_opinfos = [
-            info
-            for info in all_opinfos
-            if info.name == decorate_meta.op_name
-            and info.variant_test_name == decorate_meta.variant_name
-        ]
-        assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {decorate_meta}"
-        assert len(matching_opinfos) == 1, (
-            "OpInfos should be uniquely determined by their (name, variant_name). "
-            f"Got more than one result for ({decorate_meta.op_name}, {decorate_meta.variant_name})"
-        )
-        opinfo = matching_opinfos[0]
+        opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
+        assert opinfo is not None, f"Couldn't find OpInfo for {decorate_meta}"
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,
@@ -218,6 +210,8 @@ ALLOWLIST_OP = (
     "t",
 )
 
+OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
+
 
 class SingleOpModel(torch.nn.Module):
     """Test model to wrap around a single op for export."""
@@ -236,11 +230,10 @@ class TestConsistency(common_utils.TestCase):
 
     This is a parameterized test suite.
     """
-    @common_device_type.ops(
-        common_methods_invocations.op_db, allowed_dtypes=SUPPORTED_DTYPES
-    )
+
+    @common_device_type.ops(OPS_DB, allowed_dtypes=SUPPORTED_DTYPES)
     @skip_ops(
-        common_methods_invocations.op_db,
+        OPS_DB,
         "TestConsistency",
         "test_output_match",
         to_skip=EXPECTED_SKIPS_OR_FAILS,
