@@ -2394,7 +2394,7 @@ class TestTEFuser(JitTestCase):
             foo_s(torch.rand([4]))
             print(torch.jit.last_executed_optimized_graph())
         fc = FileCheck().check("Found unfused operators")
-        fc.check("aten::rand(int[] size")
+        fc.check("aten::rand(SymInt[] size")
         fc.check("torch.rand([4]").run(str(error_out.exception))
 
         with warnings.catch_warnings(record=True) as warns:
