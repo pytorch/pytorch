@@ -22,18 +22,20 @@ RegisterOperators const reg({
         aliasAnalysisFromSchema()),
     Operator(
         "cuda::_current_device() -> int",
-        [](Stack& stack) {
-          push(stack, -1);
-        },
+        [](Stack& stack) { push(stack, -1); },
         aliasAnalysisFromSchema()),
 #endif
     Operator(
         "xpu::device_count() -> int",
-        [](Stack& stack) { push(stack, at::detail::getXPUHooks().device_count()); },
+        [](Stack& stack) {
+          push(stack, at::detail::getXPUHooks().device_count());
+        },
         aliasAnalysisFromSchema()),
     Operator(
         "xpu::current_device() -> int",
-        [](Stack& stack) { push(stack, at::detail::getXPUHooks().current_device()); },
+        [](Stack& stack) {
+          push(stack, at::detail::getXPUHooks().current_device());
+        },
         aliasAnalysisFromSchema()),
 });
 } // namespace

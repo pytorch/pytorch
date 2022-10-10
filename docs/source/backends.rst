@@ -10,6 +10,7 @@ torch.backends
 These backends include:
 
 - ``torch.backends.cuda``
+- ``torch.backends.xpu``
 - ``torch.backends.cudnn``
 - ``torch.backends.mps``
 - ``torch.backends.mkl``
@@ -61,6 +62,16 @@ torch.backends.cuda
 .. autofunction:: torch.backends.cuda.enable_math_sdp
 
 .. autofunction:: torch.backends.cuda.sdp_kernel
+
+torch.backends.xpu
+^^^^^^^^^^^^^^^^^^
+.. automodule:: torch.backends.xpu
+
+.. autofunction::  torch.backends.xpu.is_available
+
+.. autofunction::  torch.backends.xpu.device_count
+
+.. autofunction::  torch.backends.xpu.current_device
 
 torch.backends.cudnn
 ^^^^^^^^^^^^^^^^^^^^
