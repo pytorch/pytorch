@@ -418,6 +418,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
             )
             num_outs = CompiledFunction.num_outs
             num_symints = CompiledFunction.num_symints
+            # Partitioners must put symint arguments at the end separate from tensor arguments
             if num_symints > 0:
                 ctx.save_for_backward(*fw_outs[num_outs:-num_symints])
                 ctx.symints = fw_outs[-num_symints:]
