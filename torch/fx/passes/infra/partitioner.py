@@ -140,7 +140,7 @@ class CapabilityBasedPartitioner:
 
             for user_node in node.users:
                 if user_node in assignment:
-                    merge_candidates[assignment[user_node].id] = None
+                    merge_candidates[assignment[user_node]] = None
 
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
