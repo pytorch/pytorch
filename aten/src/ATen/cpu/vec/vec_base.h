@@ -154,6 +154,7 @@ public:
   inline operator T*() {
     return values;
   }
+
   // Return the values as char* for type punning
   auto as_bytes() const -> const char* {
     return reinterpret_cast<const char*>(values);
@@ -591,6 +592,50 @@ template <class T> Vectorized<T> inline operator||(
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
     c[i] = a[i] || b[i];
+  }
+  return c;
+}
+
+// Implements the vectorized version of std::max() operation,
+// which DOESNOT propagates NaN for second argument
+template <class T,
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+Vectorized<T> inline max(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = b[i] >= a[i] ? b[i] : a[i];
+  }
+  return c;
+}
+
+template <class T,
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+Vectorized<T> inline max(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = (std::abs(b[i]) >= std::abs(a[i])) ? b[i] : a[i];
+  }
+  return c;
+}
+
+// Implements the vectorized version of std::min() operation,
+// which DOESNOT propagates NaN for second argument
+template <class T,
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+Vectorized<T> inline min(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = std::min(a[i], b[i]);
+  }
+  return c;
+}
+
+template <class T,
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+Vectorized<T> inline min(const Vectorized<T> &a, const Vectorized<T> &b) {
+  Vectorized<T> c;
+  for (int i = 0; i != Vectorized<T>::size(); i++) {
+    c[i] = (std::abs(b[i]) <= std::abs(a[i])) ? b[i] : a[i];
   }
   return c;
 }

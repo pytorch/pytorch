@@ -326,6 +326,22 @@ inline Vectorized<float> Vectorized<float>::frac() const {
   return *this - this->trunc();
 }
 
+// Implements the vectorized version of std::max() operation,
+// which DOESNOT propagates NaN for second argument
+template <>
+Vectorized<float> inline max(const Vectorized<float>& a, const Vectorized<float>& b) {
+  // std::max(NaN, nonNan) -> NaN
+  return _mm256_max_ps(b, a);
+}
+
+// Implements the vectorized version of std::min() operation,
+// which DOESNOT propagates NaN for second argument
+template <>
+Vectorized<float> inline min(const Vectorized<float>& a, const Vectorized<float>& b) {
+  // std::min(NaN, nonNan) -> NaN
+  return _mm256_min_ps(b, a);
+}
+
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <>

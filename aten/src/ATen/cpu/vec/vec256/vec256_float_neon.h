@@ -711,6 +711,11 @@ Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<fl
   return Vectorized<float>(r0, r1);
 }
 
+template <>
+Vectorized<float> inline max(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return maximum(a, b);
+}
+
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
@@ -718,6 +723,11 @@ Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<fl
   float32x4_t r0 = vminq_f32(a.get_low(), b.get_low());
   float32x4_t r1 = vminq_f32(a.get_high(), b.get_high());
   return Vectorized<float>(r0, r1);
+}
+
+template <>
+Vectorized<float> inline min(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return minimum(a, b);
 }
 
 template <>
