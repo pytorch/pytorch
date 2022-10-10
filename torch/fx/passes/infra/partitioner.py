@@ -53,8 +53,11 @@ class CapabilityBasedPartitioner:
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
         new_partition_id = itertools.count()
 
+        # try to merge partition other_id into partition self_id
+        # merge only happens if the end graph doesn't contain cyclic dependency
+        # returns `True` when merge happens, `False` otherwise.
         def maybe_merge_partition(self_id: int, other_id: int):
-            # merged nodes
+            # merged_nodes is the union of nodes in two partition to-be-merged
             merged_nodes = copy(partitions_by_id[self_id].nodes)
             merged_nodes.update(partitions_by_id[other_id].nodes)
 
@@ -67,9 +70,13 @@ class CapabilityBasedPartitioner:
                 if node in merged_nodes:
                     return True  # found cycle, return
 
-                # branching on partition or not
                 visited.add(node)
+                # branching on hitting partition or not
                 if node in assignment:
+                    # Since partition is not merged in the graph yet, when we
+                    # hit a node in a partition through DFS, we need to
+                    # traverse all nodes in the partition to properly reflect
+                    # dependencies after the fusion
                     for p_node in partitions_by_id[assignment[node]].nodes:
                         for user_node in p_node.users:
                             if dfs_find_cycle(user_node):
@@ -84,13 +91,15 @@ class CapabilityBasedPartitioner:
             for node in merged_nodes:
                 for user_node in node.users:
                     if user_node not in merged_nodes and dfs_find_cycle(user_node):
-                        # return false indicating no fusion happening.
+                        # return false indicating cyclic dependency found and
+                        # merge is aborted
                         return False
 
-            # no cyclic dependency, let's move forward with the merge
+            # no cyclic dependency found, move forward with the merge
+
             # updating partition nodes
             partitions_by_id[self_id].nodes = merged_nodes
-            # updating node map
+            # updating assignment map
             for node in partitions_by_id[other_id].nodes:
                 assignment[node] = self_id
             # delete other partition
