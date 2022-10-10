@@ -5913,10 +5913,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_jvp(
       bias_t.defined() ? bias_t.view(view_size) : bias_t);
 
   if (train && (input_p.requires_grad() || at::isTensorSubclassLike(input_p))) {
-    // When input requires_grad, we assume that we will always backward and
-    // use saved_mean and saved_invstd to compute grad_input
-    // This unnecessarily slows down when we only want jvp(f) and vjp(f)
-    // but don't care about computating jvp(vjp(f))
+    // See NOTE [Native batch norm saved intermediates]
+    // When input requires_grad, we may run backward later. And since saved_mean
+    // and saved_invstd are used in backward, we should also compute forward grads
+    // so that the gradient is propagated properly for forward-over-reverse
     auto var_t =
         var_backward(
             input_t, input_p, dims, /*correction=*/false, /*keepdim=*/true)
