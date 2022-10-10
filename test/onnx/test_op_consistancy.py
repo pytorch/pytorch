@@ -205,11 +205,6 @@ EXPECTED_SKIPS_OR_FAILS = (
         dtypes=(torch.bfloat16,) + COMPLEX_TYPES,
         reason="Transpose not implemented for bf64 in onnx runtime",
     ),
-    # skip(
-    #     "t",
-    #     dtypes=COMPLEX_TYPES,
-    #     reason="Not supported by onnx runtime",
-    # ),
 )
 
 
@@ -237,6 +232,10 @@ class SingleOpModel(torch.nn.Module):
 
 
 class TestConsistency(common_utils.TestCase):
+    """Test consistency of exported ONNX models.
+
+    This is a parameterized test suite.
+    """
     @common_device_type.ops(
         common_methods_invocations.op_db, allowed_dtypes=SUPPORTED_DTYPES
     )
