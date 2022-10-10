@@ -63,6 +63,7 @@ torch.backends.cuda
 
 .. autofunction:: torch.backends.cuda.sdp_kernel
 
+
 torch.backends.xpu
 ^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.xpu
@@ -72,6 +73,7 @@ torch.backends.xpu
 .. autofunction::  torch.backends.xpu.device_count
 
 .. autofunction::  torch.backends.xpu.current_device
+
 
 torch.backends.cudnn
 ^^^^^^^^^^^^^^^^^^^^
