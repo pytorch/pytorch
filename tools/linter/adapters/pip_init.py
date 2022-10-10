@@ -37,8 +37,8 @@ if __name__ == "__main__":
         "--dry-run", help="do not install anything, just print what would be done."
     )
     parser.add_argument(
-        "--no-black-binary",
-        help="do not use pre-compiled binaries from pip for black.",
+        "--no-binary",
+        help="do not use pre-compiled binaries from pip.",
         action="store_true",
     )
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
                 "Package {package_name} did not have a version specified. "
                 "Please specify a version to produce a consistent linting experience."
             )
-        if args.no_black_binary and "black" in package_name:
+        if args.no_binary:
             pip_args.append(f"--no-binary={package_name}")
 
     dry_run = args.dry_run == "1"

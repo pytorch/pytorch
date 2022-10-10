@@ -105,7 +105,6 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS})
   list(APPEND Caffe2_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS})
   list(APPEND Caffe2_DEPENDENCY_INCLUDE ${ATen_THIRD_PARTY_INCLUDE})
-  set(Caffe2_CUDA_DEPENDENCY_LIBS ${Caffe2_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 endif()
 
 # ---[ Caffe2 build
@@ -979,17 +978,18 @@ elseif(USE_CUDA)
     )
     if($ENV{ATEN_STATIC_CUDA})
       target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver_static
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
       )
     else()
       target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::cusolver
+          ${CUDA_cusolver_LIBRARY}
       )
     endif()
     # NS: TODO, is this really necessary?
     if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
-          CUDA::culibos ${CMAKE_DL_LIBS})
+          "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
     endif()
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/cuda/LinearAlgebraStubs.cpp PROPERTIES COMPILE_FLAGS "-DBUILD_LAZY_CUDA_LINALG")
     install(TARGETS torch_cuda_linalg DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -1147,6 +1147,9 @@ endif()
 install(DIRECTORY "${TORCH_SRC_DIR}/csrc"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
+install(DIRECTORY "${TORCH_SRC_DIR}/csrc/distributed/c10d"
+  DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}
+  FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp")
 install(FILES
   "${TORCH_SRC_DIR}/script.h"
   "${TORCH_SRC_DIR}/extension.h"
@@ -1154,6 +1157,12 @@ install(FILES
   "${TORCH_SRC_DIR}/library.h"
   "${TORCH_SRC_DIR}/custom_class_detail.h"
   DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
+if(USE_DEPLOY)
+  install(FILES
+    "${TORCH_SRC_DIR}/deploy.h"
+    DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
+endif()
+
 if(BUILD_TEST)
   if(BUILD_LITE_INTERPRETER)
     add_subdirectory(

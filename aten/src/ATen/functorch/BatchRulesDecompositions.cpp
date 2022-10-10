@@ -168,7 +168,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE2(movedim, int);
   OP_DECOMPOSE(msort);
   OP_DECOMPOSE(mT);
-  m.impl("narrow", native::narrow_symint);
+  OP_DECOMPOSE(narrow);
   OP_DECOMPOSE(negative);
   OP_DECOMPOSE2(frobenius_norm, dim);
   OP_DECOMPOSE2(nuclear_norm, dim);
@@ -260,7 +260,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   OP_DECOMPOSE(t_);
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
-  OP_DECOMPOSE(unfold_copy);
 
   // divide, alias for div
   OP_DECOMPOSE2(divide, Tensor);

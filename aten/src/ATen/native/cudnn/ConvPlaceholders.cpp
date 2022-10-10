@@ -1,16 +1,6 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAConfig.h> // for the definition of AT_CUDNN_ENABLED
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/cudnn_convolution_add_relu_native.h>
-#include <ATen/ops/cudnn_convolution_native.h>
-#include <ATen/ops/cudnn_convolution_relu_native.h>
-#include <ATen/ops/cudnn_convolution_transpose_native.h>
-#endif
+#include <ATen/native/ConvUtils.h>
 
 namespace at { namespace native {
 

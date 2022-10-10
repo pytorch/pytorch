@@ -3,7 +3,7 @@ import operator_benchmark as op_bench
 import torch
 from torch import nn
 
-from torch.ao import pruning
+from torch.ao import sparsity
 
 
 """Microbenchmarks for sparsifier."""
@@ -33,7 +33,7 @@ class WeightNormSparsifierBenchmark(op_bench.TorchBenchmarkBase):
         model.register_buffer("weight", weight)
 
         sparse_config = [{"tensor_fqn": "weight"}]
-        self.sparsifier = pruning.WeightNormSparsifier(
+        self.sparsifier = sparsity.WeightNormSparsifier(
             sparsity_level=SL,
             sparse_block_shape=SBS,
             zeros_per_block=ZPB,

@@ -3,7 +3,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/view.h>
 #include <ATen/ops/view_copy.h>
 #endif
 
@@ -438,16 +437,15 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
   return result;
 }
 
-template <typename T>
-inline Tensor _sum_to(
+static inline Tensor sum_to(
     Tensor tensor,
-    const c10::ArrayRef<T> shape,
+    const c10::SymIntArrayRef shape,
     bool always_return_non_view = false) {
   if (shape.size() == 0) {
     return tensor.sum();
   }
 
-  auto sizes = at::symint::sizes<T>(tensor);
+  auto sizes = tensor.sym_sizes();
   c10::SmallVector<int64_t, 8> reduce_dims;
   const int64_t leading_dims = sizes.size() - shape.size();
   for (const auto i : c10::irange(leading_dims)) {
@@ -467,27 +465,22 @@ inline Tensor _sum_to(
     // This is only actually used by the functionalization pass.
     // We want to be able to guarantee that this function doesn't return a view
     // of the input.
-    return leading_dims > 0 ? at::symint::view_copy<T>(tensor, shape)
+    return leading_dims > 0 ? at::view_copy_symint(tensor, shape)
                             : tensor.clone();
   } else {
-    return leading_dims > 0 ? at::symint::view<T>(tensor, shape) : tensor;
+    return leading_dims > 0 ? tensor.view_symint(shape) : tensor;
   }
-}
-
-inline Tensor sum_to(
-    Tensor tensor,
-    const c10::SymIntArrayRef shape,
-    bool always_return_non_view = false) {
-  return _sum_to(tensor, shape, always_return_non_view);
 }
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-inline Tensor sum_to(
+static inline Tensor sum_to(
     Tensor tensor,
     const IntArrayRef shape,
     bool always_return_non_view = false) {
-  return _sum_to(tensor, shape, always_return_non_view);
+  auto sym_size = c10::SymIntArrayRef(
+      reinterpret_cast<const c10::SymInt*>(shape.data()), shape.size());
+  return sum_to(tensor, sym_size, always_return_non_view);
 }
 
 static inline bool is_expandable_to(

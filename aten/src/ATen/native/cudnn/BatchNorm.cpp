@@ -1,5 +1,5 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 
@@ -31,16 +31,6 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 #include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/cudnn_batch_norm_backward_native.h>
-#include <ATen/ops/cudnn_batch_norm_native.h>
-#include <ATen/ops/empty.h>
-#include <ATen/ops/empty_like.h>
-#endif
 
 namespace at { namespace native {
 

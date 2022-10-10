@@ -49,6 +49,14 @@ Tensor ffn(
   return res;
 }
 
+void add_in_place(Tensor& input, const Tensor& arg, bool use_nested_tensor) {
+  if (use_nested_tensor) {
+    NestedTensor_add_NestedTensor_in_place(input, arg);
+  } else {
+    input.add_(arg);
+  }
+}
+
 Tensor norm(
     const Tensor& input,
     const int64_t embed_dim,
@@ -56,7 +64,11 @@ Tensor norm(
     const Tensor& weight,
     const Tensor& bias,
     const bool use_nested_tensor) {
-  return at::layer_norm(input, {embed_dim}, weight, bias, eps, true);
+  if (use_nested_tensor) {
+    return NestedTensor_layer_norm(input, weight, bias, eps);
+  } else {
+    return at::layer_norm(input, {embed_dim}, weight, bias, eps, true);
+  }
 }
 
 } // namespace
@@ -106,8 +118,8 @@ Tensor transformer_encoder_layer_forward(
      x = at::linear(x, qkv_weight, qkv_bias);
      auto x_size_0 = x.size(0);
      x = x.view({x_size_0, -1, 3, num_heads, embed_dim / num_heads});
-     x = flash_attention_helper(x, x, x, 0.0, false, false);
-     x = x.view({x_size_0, -1, embed_dim});
+     x = flash_attention_helper(x, x, x, 0.0, false);
+     x = x.view({{x_size_0, -1, embed_dim});
      x = at::linear(x, proj_weight, proj_bias);
   } else {
 #endif
@@ -128,7 +140,7 @@ Tensor transformer_encoder_layer_forward(
 #if BETTER_TRANSFORMER_USE_FLASH_ATTENTION
   }
 #endif
-  x.add_(src);
+  add_in_place(x, src, use_nested_tensor);
   if (!norm_first) {
     x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_1, layer_norm_bias_1, use_nested_tensor);
   }
@@ -146,7 +158,7 @@ Tensor transformer_encoder_layer_forward(
       ffn_bias_2,
       use_gelu,
       /* add_norm* */ false);
-  x.add_(pre_ffn_res);
+  add_in_place(x, pre_ffn_res, use_nested_tensor);
   if (!norm_first) {
     x = norm(x, embed_dim, layer_norm_eps, layer_norm_weight_2, layer_norm_bias_2, use_nested_tensor);
   }
@@ -185,6 +197,7 @@ std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
     }
   }
   TORCH_CHECK(!norm_first, "norm_first is not supported yet");
+  const bool use_nested_tensor = src.is_nested();
   auto mha_out = native_decoder_only_multi_head_attention(
       src,
       src,
@@ -202,14 +215,20 @@ std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
   auto x = std::get<0>(mha_out);
   auto incr_key_out = std::get<2>(mha_out);
   auto incr_value_out = std::get<3>(mha_out);
-  x.add_(src);
-  x = at::layer_norm(
-      x,
-      {embed_dim},
-      layer_norm_weight_1,
-      layer_norm_bias_1,
-      layer_norm_eps,
-      true);
+  if (use_nested_tensor) {
+    NestedTensor_add_NestedTensor_in_place(x, src);
+    x = NestedTensor_layer_norm(
+        x, layer_norm_weight_1, layer_norm_bias_1, layer_norm_eps);
+  } else {
+    x.add_(src);
+    x = at::layer_norm(
+        x,
+        {embed_dim},
+        layer_norm_weight_1,
+        layer_norm_bias_1,
+        layer_norm_eps,
+        true);
+  }
 
   auto pre_ffn_res = x;
   x = ffn(
@@ -220,14 +239,20 @@ std::tuple<Tensor, Tensor, Tensor>  transformer_decoder_only_layer_forward(
       ffn_bias_2,
       use_gelu,
       /* add_norm* */ false);
-  x.add_(pre_ffn_res);
-  x = at::layer_norm(
-      x,
-      {embed_dim},
-      layer_norm_weight_2,
-      layer_norm_bias_2,
-      layer_norm_eps,
-      true);
+  if (use_nested_tensor) {
+    NestedTensor_add_NestedTensor_in_place(x, pre_ffn_res);
+    x = NestedTensor_layer_norm(
+        x, layer_norm_weight_2, layer_norm_bias_2, layer_norm_eps);
+  } else {
+    x.add_(pre_ffn_res);
+    x = at::layer_norm(
+        x,
+        {embed_dim},
+        layer_norm_weight_2,
+        layer_norm_bias_2,
+        layer_norm_eps,
+        true);
+  }
   return std::make_tuple(std::move(x), std::move(incr_key_out), std::move(incr_value_out));
 }
 

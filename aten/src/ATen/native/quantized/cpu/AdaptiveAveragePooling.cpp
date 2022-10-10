@@ -1,19 +1,7 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/Context.h>
-#include <ATen/Dispatch.h>
+#include <ATen/ATen.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_adaptive_avg_pool2d_native.h>
-#include <ATen/ops/_adaptive_avg_pool3d_native.h>
-#include <ATen/ops/_empty_affine_quantized.h>
-#include <ATen/ops/adaptive_avg_pool3d_native.h>
-#endif
 
 #include <c10/util/irange.h>
 #include <c10/util/math_compat.h>

@@ -1,4 +1,4 @@
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 
 namespace at {
 namespace native {

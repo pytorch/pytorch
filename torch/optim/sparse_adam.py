@@ -40,9 +40,7 @@ class SparseAdam(Optimizer):
         sparse_params = []
         for index, param in enumerate(params):
             if isinstance(param, dict):
-                # given param group, convert given params to a list first before iterating
-                param['params'] = list(param.get("params", []))
-                for d_index, d_param in enumerate(param['params']):
+                for d_index, d_param in enumerate(param.get("params", [])):
                     if d_param.is_sparse:
                         sparse_params.append([index, d_index])
             elif param.is_sparse:

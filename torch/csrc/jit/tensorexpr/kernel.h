@@ -313,7 +313,6 @@ class TORCH_API TensorExprKernel {
   std::vector<bool> isOutputScalar_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<BufPtr> bufOutputs_;
-  std::unordered_set<BufPtr> bufsToBeParallelized_;
   std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;
   std::unordered_map<const torch::jit::Value*, VarHandle> scalars_;
   std::unordered_map<const torch::jit::Value*, std::string> input_name_map_;
