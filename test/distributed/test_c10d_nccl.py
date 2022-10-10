@@ -2300,6 +2300,44 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_ddp_packed_sequence(self):
+        """
+        Tests that DDP with ``device_ids`` specified can run a forward and
+        backward pass with ``PackedSequence`` s without erroring. Because LSTMs
+        are non-deterministic, we cannot reliably compare against a local run.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        seqs = ["sequence_sequence", "seq", "sequence"]
+        vocab = ["<pad>"] + sorted(set([ch for seq in seqs for ch in seq]))
+        vectorized_seqs = [[vocab.index(tok) for tok in seq] for seq in seqs]
+        embed = nn.Embedding(len(vocab), 4)
+        lstm = nn.LSTM(input_size=4, hidden_size=5, batch_first=True)
+        lstm_ddp = DistributedDataParallel(
+            lstm.to(self.rank),
+            device_ids=[self.rank],
+            process_group=process_group,
+        )
+        for p1, p2 in zip(lstm.parameters(), lstm_ddp.module.parameters()):
+            self.assertEqual(p1, p2)
+        seq_lengths = torch.LongTensor(list(map(len, vectorized_seqs)))
+        seq_tensor = torch.Tensor(
+            torch.zeros((len(vectorized_seqs), seq_lengths.max()))
+        ).long()
+        for i, (seq, seq_len) in enumerate(zip(vectorized_seqs, seq_lengths)):
+            seq_tensor[i, :seq_len] = torch.LongTensor(seq)
+        seq_lengths, permutation_idx = seq_lengths.sort(0, descending=True)
+        seq_tensor = seq_tensor[permutation_idx]
+        embedded_seq_tensor = embed(seq_tensor)
+        packed_input = torch.nn.utils.rnn.pack_padded_sequence(
+            embedded_seq_tensor, seq_lengths, batch_first=True,
+        )
+        packed_output, (ht, ct) = lstm_ddp(packed_input)
+        packed_output.data.sum().backward()
+
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_channels_last_contig(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
