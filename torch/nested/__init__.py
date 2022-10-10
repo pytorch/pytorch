@@ -92,7 +92,7 @@ def as_nested_tensor(tensor_list: List[Tensor], dtype: Optional[DType] = None, d
 # also connects the torch.nested Python namespace to the torch._C._nested builtins.
 
 to_padded_tensor = _set_module_and_doc_str(_nested.nested_to_padded_tensor,
-                               r"""
+                                           r"""
 to_padded_tensor(input, padding, output_size=None, out=None) -> Tensor
 
 Returns a new (non-nested) Tensor by padding the attr:`input` nested tensor.
