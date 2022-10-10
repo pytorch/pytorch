@@ -349,7 +349,7 @@ static struct PyModuleDef _module = {
 
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
-  TensorGuardsType.tp_name = "torchdynamo._guards.TensorGuards";
+  TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
   TensorGuardsType.tp_basicsize = sizeof(TensorGuards);
   TensorGuardsType.tp_itemsize = 0;
   TensorGuardsType.tp_dealloc = (destructor)TensorGuards_dealloc;
