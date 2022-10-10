@@ -55,8 +55,7 @@ class CapabilityBasedPartitioner:
 
     def __is_node_supported(self, node: Node) -> bool:
         # TODO: reject 'getitem' node since they are special cased in partitioning.
-        return self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node):
-
+        return self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
 
     def propose_partitions(self) -> List[Partition]:
         # candidates: NodeList = self.__get_supported_nodes()
