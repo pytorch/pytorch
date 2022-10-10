@@ -860,7 +860,10 @@ Tensor unsqueeze_to(const Tensor& self, c10::SymIntArrayRef sym_sizes) {
   return result;
 }
 
-Tensor unsqueeze_to(const Tensor& self, int64_t dim, c10::SymIntArrayRef sym_sizes) {
+Tensor unsqueeze_to(
+    const Tensor& self,
+    int64_t dim,
+    c10::SymIntArrayRef sym_sizes) {
   dim = at::maybe_wrap_dim(dim, sym_sizes.size());
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to
   // avoided unsqueezing in the backward.
@@ -2838,13 +2841,13 @@ Tensor as_strided_backward(
   auto shared_offset =
       // TODO: symint-ify. Do we need a min() and max() for SymInts?
       input_geometry.sym_storage_offset().min(sym_storage_offset);
-  auto inp_effective_offset = input_geometry.sym_storage_offset() - shared_offset;
+  auto inp_effective_offset =
+      input_geometry.sym_storage_offset() - shared_offset;
   auto out_effective_offset = sym_storage_offset - shared_offset;
-  auto base_size1 =_min_storage_size(
-          inp_sizes_,
-          inp_strides_,
-          inp_effective_offset);
-  auto base_size2 = _min_storage_size(out_sizes_, out_strides_, out_effective_offset);
+  auto base_size1 =
+      _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset);
+  auto base_size2 =
+      _min_storage_size(out_sizes_, out_strides_, out_effective_offset);
   auto base_size = base_size1.max(base_size2);
   auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
 
@@ -2853,7 +2856,10 @@ Tensor as_strided_backward(
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
         // TODO: should we symint-ify arange? Need SymScalar.
-        at::arange(0, base_size.guard_int(__FILE__, __LINE__), grad.options().dtype(at::kLong));
+        at::arange(
+            0,
+            base_size.guard_int(__FILE__, __LINE__),
+            grad.options().dtype(at::kLong));
   }
 
   // Step (2): use output geometry to scatter gradients into storage
