@@ -621,11 +621,16 @@ std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
               << std::endl;
   }
 
+  // group should share cache id.
+  auto group_cache_id = args.getCacheId();
   for (auto group_to_run : runtime_workspace_.group_run_order) {
     // TODO: index mode should be updated per segmented kernel
     // Prepare input vector
     KernelArgumentHolder group_runtime_inputs(args.getIndexMode());
     group_runtime_inputs.setDeviceIndex(args.getDeviceIndex());
+    if (group_cache_id.has_value()) {
+      group_runtime_inputs.setCacheId(group_cache_id.value());
+    }
     for (auto input : group_to_run->inputs()) {
       group_runtime_inputs.push(tensor_map.at(input));
     }

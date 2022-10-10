@@ -177,6 +177,35 @@ void FusionExecutor::compileFusion(
     TORCH_INTERNAL_ASSERT(
         out->getValType() == ValType::TensorView,
         "Output types from fusions that are not tensors are not supported at this point.");
+
+    const auto maybe_rfactor_domain =
+        out->as<TensorView>()->getMaybeRFactorDomain();
+    // walking through outputs to see if output shapes are dependent on
+    // non-tensor inputs. For which case, we should have disabled output
+    // allocation, since the caching id only looks at tensor shapes.
+    // See issue https://github.com/csarofeen/pytorch/issues/2002
+    std::vector<Val*> output_extents;
+    for (const auto id : maybe_rfactor_domain) {
+      Val* extent = nullptr;
+      if (id->isReduction() || id->isStride()) {
+        continue;
+      } else if (id->isBroadcast() && id->hasExpandedExtent()) {
+        extent = id->expandedExtent();
+      } else {
+        extent = id->extent();
+      }
+      output_extents.emplace_back(extent);
+    }
+    auto dependencies = InputsOf::outputs(fusion, output_extents);
+    if (std::any_of(dependencies.begin(), dependencies.end(), [](Val* val) {
+          return val->isFusionInput();
+        })) {
+      // TODO: parameter cache is too big a hammer here. We should consider
+      // separate the caching logic of output sizes & launch params. Since
+      // output size dependency should only invalidate the output sizes
+      disable_parameter_cache_ = true;
+      break;
+    }
   }
 
   if (isDebugDumpEnabled(DebugDumpOption::FusionIr)) {
