@@ -7,6 +7,9 @@ from pt import (  # noqa: F401
     groupnorm_test, interpolate_test, instancenorm_test, remainder_test,
     split_test, sum_test, tensor_to_test
 )
+from pt import (  # noqa: F401
+    ao_sparsifier_test
+)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()

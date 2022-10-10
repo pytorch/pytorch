@@ -3,7 +3,6 @@
 import math
 import sys
 import errno
-import multiprocessing
 import os
 import ctypes
 import faulthandler
@@ -15,6 +14,7 @@ import unittest
 import itertools
 import warnings
 import tempfile
+import torch.utils.data.datapipes as dp
 from torch import multiprocessing as mp
 from torch.utils.data import (
     ChainDataset,
@@ -1124,6 +1124,8 @@ except RuntimeError as e:
             next(loader2_it)
             next(loader1_it)
             next(loader2_it)
+            del loader1_it
+            del loader2_it
 
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
@@ -1892,7 +1894,10 @@ except RuntimeError as e:
             #   - `None` means that no error happens.
             # In all cases, all processes should end properly.
             if use_workers:
-                exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
+                # TODO: Fix test for 'loader_kill' that would cause running out of shared memory.
+                # Killing loader process would prevent DataLoader iterator clean up all queues
+                # and worker processes
+                exit_methods = [None, 'loader_error', 'worker_error', 'worker_kill']
                 persistent_workers = self.persistent_workers
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
@@ -2217,6 +2222,9 @@ except RuntimeError as e:
                 r"excessive worker creation might get DataLoader running slow or even freeze"):
             dataloader = DataLoader(self.dataset, batch_size=2, num_workers=1000)
 
+# Define a global function for testing purposes since local functions cannot be pickled
+def identity(x):
+    return x
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2228,9 +2236,9 @@ class TestDataLoader2(TestCase):
         # TODO(VitalyFedyunin): This test will start breaking if we remove guaranteed order
         # of traversing workers
         dp = IterableWrapper(list(range(1000))).sharding_filter()
-        dl = DataLoader(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2 = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2)
-        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=lambda x: x, num_workers=2, parallelism_mode='thread')
+        dl = DataLoader(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2 = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2)
+        dl2_threading = DataLoader2(dp, batch_size=3, collate_fn=identity, num_workers=2, parallelism_mode='thread')
         self.assertEqual(list(dl), list(dl2))
         self.assertEqual(list(dl), list(dl2_threading))
 
@@ -2321,6 +2329,65 @@ class TestDataLoader2_EventLoop(TestCase):
         self.assertEqual(input_len, len(local_datapipe))
 
         clean_me(process, req_queue, res_queue)
+
+
+class IntegrationTestDataLoaderDataPipe(TestCase):
+    r"""
+    Verify the behavior of a certain ``DataPipes`` with ``DataLoader``
+    """
+
+    def test_shuffler_iterdatapipe(self):
+        r"""
+        Verify ``IterDataPipe.shuffle`` is controlled by ``DataLoader``
+        to generate different seeds deterministically per epoch.
+        """
+        exp = list(range(100))
+
+        def _create_dp(buffer_size):
+            input_ds = dp.iter.IterableWrapper(exp)
+            return input_ds.shuffle(buffer_size=buffer_size).sharding_filter()
+
+        for bs in (5, 20, 33):
+            # Test Deterministic
+            for num_workers, pw in itertools.product((0, 1, 2), (True, False)):
+                if num_workers == 0 and pw:
+                    continue
+
+                shuffle_dp = _create_dp(bs)
+
+                mp_ctx = "spawn" if num_workers > 0 else None
+                dl = DataLoader(
+                    shuffle_dp,
+                    num_workers=num_workers,
+                    shuffle=True,
+                    multiprocessing_context=mp_ctx,
+                    persistent_workers=pw
+                )
+
+                # No seed
+                dl_res_ns = list(dl)
+                self.assertEqual(sorted(dl_res_ns), exp)
+
+                # Same seeds
+                dl_res = []
+                for epoch in range(2):
+                    torch.manual_seed(123)
+                    dl_res.append(list(dl))
+                self.assertEqual(dl_res[0], dl_res[1])
+                self.assertEqual(sorted(dl_res[0]), exp)
+
+                # Different seeds
+                torch.manual_seed(321)
+                dl_res.append(list(dl))
+
+                self.assertEqual(len(dl_res[0]), len(dl_res[2]))
+                self.assertNotEqual(dl_res[0], dl_res[2])
+                self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
+
+                if dl._iterator is not None:
+                    dl._iterator._shutdown_workers()
+                    dl._iterator = None
+                del dl
 
 
 class StringDataset(Dataset):
@@ -2723,22 +2790,28 @@ class SetAffinityDataset(IterableDataset):
         after = os.sched_getaffinity(0)
         return iter(after)
 
-
-def worker_set_affinity(_):
-    os.sched_setaffinity(0, [multiprocessing.cpu_count() - 1])
-
-
 @unittest.skipIf(
     not hasattr(os, 'sched_setaffinity'),
     "os.sched_setaffinity is not available")
 class TestSetAffinity(TestCase):
     def test_set_affinity_in_worker_init(self):
+        # Query the current affinity mask to avoid setting a disallowed one
+        old_affinity = os.sched_getaffinity(0)
+        if not old_affinity:
+            self.skipTest("No affinity information")
+        # Choose any
+        expected_affinity = list(old_affinity)[-1]
+
+        def worker_set_affinity(_):
+            os.sched_setaffinity(0, [expected_affinity])
+
+
         dataset = SetAffinityDataset()
 
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity)
         for sample in dataloader:
-            self.assertEqual(sample, [multiprocessing.cpu_count() - 1])
+            self.assertEqual(sample, [expected_affinity])
 
 class ConvDataset(Dataset):
     def __init__(self):

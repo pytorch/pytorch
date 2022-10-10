@@ -1,4 +1,4 @@
-from torch.fx.experimental.migrate_gradual_types.constraint import Conj, Disj, T, F, BinConstraintT
+from torch.fx.experimental.migrate_gradual_types.constraint import Conj, Disj, T, F, BinConstraintT, BVar, is_bool_expr
 from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintD, TVar, DVar
 from torch.fx.experimental.migrate_gradual_types.constraint import Prod, is_algebraic_expression, is_dim
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
@@ -34,24 +34,33 @@ try:
             return False, counter
 
         elif isinstance(constraint, BinConstraintT):
-            assert constraint.op == op_eq
-            lhs, counter = transform_var(constraint.lhs, counter, dimension_dict)
-            rhs, counter = transform_var(constraint.rhs, counter, dimension_dict)
-            return (lhs == rhs), counter
+            if constraint.op == op_eq:
+                lhs, counter = transform_var(constraint.lhs, counter, dimension_dict)
+                rhs, counter = transform_var(constraint.rhs, counter, dimension_dict)
+                return (lhs == rhs), counter
+
+            else:
+                raise NotImplementedError('Method not yet implemented')
 
         elif isinstance(constraint, BinConstraintD):
-
-            lhs, counter = transform_algebraic_expression(constraint.lhs, counter, dimension_dict)
-            rhs, counter = transform_algebraic_expression(constraint.rhs, counter, dimension_dict)
-
             if constraint.op == op_eq:
-                if is_dim(constraint.lhs) and is_dim(constraint.rhs):
+
+                if isinstance(constraint.lhs, BVar) and is_bool_expr(constraint.rhs):
+                    transformed_rhs, counter = transform_to_z3(constraint.rhs, counter, dimension_dict)
+                    transformed_lhs = z3.Bool(constraint.lhs.c)
+                    return transformed_lhs == transformed_rhs, counter
+
+                elif is_dim(constraint.lhs) and is_dim(constraint.rhs):
+                    # with dimension tranformations we consider the encoding
                     lhs, counter = transform_dimension(constraint.lhs, counter, dimension_dict)
                     rhs, counter = transform_dimension(constraint.rhs, counter, dimension_dict)
                     return lhs == rhs, counter
 
                 else:
-                    # otherwise, we consider algebraic expressions
+                    # then we have an algebraic expression which means that we disregard the
+                    # first element of the encoding
+                    lhs, counter = transform_algebraic_expression(constraint.lhs, counter, dimension_dict)
+                    rhs, counter = transform_algebraic_expression(constraint.rhs, counter, dimension_dict)
                     return lhs == rhs, counter
 
             # The assumption here is that the LHS and RHS must be dimensions
@@ -66,7 +75,6 @@ try:
                     elif constraint.lhs == Dyn:
                         return rhs.arg(0) == 1, counter
 
-                    # return lhs.arg(0) != rhs.arg(0), counter
                 # if one of the instances is a number
                 elif isinstance(constraint.lhs, int) or isinstance(constraint.rhs, int):
                     if isinstance(constraint.lhs, int):
@@ -75,32 +83,37 @@ try:
                     elif isinstance(constraint.rhs, int):
                         return z3.Or([lhs.arg(0) == 0, z3.And([lhs.arg(0) == 1, lhs.arg(1) != rhs.arg(1)])]), counter
 
-                    # return Or([lhs.arg(1) != rhs.arg(1), lhs.arg(0) != lhs.arg(0)]), counter
                 else:
-                    raise NotImplementedError
+                    return z3.Or([z3.And([lhs.arg(0) == 0, rhs.arg(0) != 0]),
+                                  z3.And([lhs.arg(0) != 0, rhs.arg(0) == 0]),
+                                  z3.And([lhs.arg(0) != 0, rhs.arg(0) != 0, lhs.arg(1) != rhs.arg(1)])]), counter
+
 
             elif constraint.op == op_leq:
                 # if the dimensions are not dyn, this will come into effect
-                # there would have been another constsraint specifying if a given dimension
+                # there would have been another constraint specifying if a given dimension
                 # is dyn or not
                 assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                lhs, counter = transform_algebraic_expression(constraint.lhs, counter, dimension_dict)
+                rhs, counter = transform_algebraic_expression(constraint.rhs, counter, dimension_dict)
                 return lhs <= rhs, counter
 
             elif constraint.op == op_gt:
                 assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                lhs, counter = transform_algebraic_expression(constraint.lhs, counter, dimension_dict)
+                rhs, counter = transform_algebraic_expression(constraint.rhs, counter, dimension_dict)
                 return lhs > rhs, counter
 
             elif constraint.op == op_lt:
                 assert is_dim(constraint.lhs) and is_dim(constraint.rhs)
+                lhs, counter = transform_algebraic_expression(constraint.lhs, counter, dimension_dict)
+                rhs, counter = transform_algebraic_expression(constraint.rhs, counter, dimension_dict)
                 return lhs < rhs, counter
 
             else:
                 raise NotImplementedError('operation not yet implemented')
 
         else:
-
-            # print(constraint)
-
             raise NotImplementedError('Operation not yet implemented')
 
 
@@ -227,18 +240,109 @@ try:
         # print(*new_constraints.conjucts, sep='\n')
 
         # transform precision, matching, consistency till obtaining a fixed point
-        old_c = None
-        while old_c != new_constraints:
-            old_c = new_constraints
-            new_constraints, counter = transform_constraint(new_constraints, counter)
-
+        new_constraints, counter = iterate_till_fixed_point(new_constraints, counter)
+        # print(new_constraints)
         # print(new_constraints.conjucts)
         # new_constraints.conjucts = new_constraints.conjucts[:-1]
         # print(*new_constraints.conjucts, sep='\n')
 
         transformed, counter = transform_to_z3(new_constraints, counter, dimension_dict)
-
+        # print(transformed)
         return transformed
+
+    def iterate_till_fixed_point(constraints, counter):
+        """
+        Transform constraints till reaching a fixed point
+        """
+        old_c = None
+        while old_c != constraints:
+            old_c = constraints
+            constraints, counter = transform_constraint(constraints, counter)
+        return constraints, counter
+
+    def transform_all_constraints_trace_time(tracer_root, graph, node, counter=0):
+        """
+        Takes a node and a graph and generates two sets of constraints.
+        One set constraints the node's constraints and another set
+        constraints the negation of the node's constraints
+        Args:
+            tracer_root: the root for getting the module instances
+            graph: the graph so far in the tracing process
+            node: node that represents a conditional
+            counter: variable tracking
+
+        Returns: Two sets of constraints. One with a conjunction with the
+        the conditional constraint and the other with a conjunction with
+        its negation.
+
+        """
+        dimension_dict = {}  # type: ignore[var-annotated]
+
+        generator = ConstraintGenerator(tracer_root, graph)
+        new_constraints, counter = generator.generate_constraints(counter)
+
+        condition_constraint = new_constraints.conjucts[-1]
+
+        # we know the constraint is a conjunction where the last constraint is about the conditional
+        # so remove the last constraint
+        new_constraints.conjucts = new_constraints.conjucts[:-1]
+
+        # transform precision, matching, consistency till obtaining a fixed point
+        new_constraints, counter = iterate_till_fixed_point(new_constraints, counter)
+
+
+        # since the function returns a list of one element, we get the first element
+        # we are only interested in the RHS in this case because the LHS just stores
+        # the result
+
+        # we make sure the constraint is of the form:
+        # c = b where b is a boolean expression
+        # and we consider b (constraint.rhs) for transformation
+        assert isinstance(condition_constraint.lhs, BVar)
+        assert is_bool_expr(condition_constraint.rhs)
+        condition_constraint_rhs = condition_constraint.rhs
+
+        # transform the condition constraint
+        condition_constraint_rhs, counter = iterate_till_fixed_point(condition_constraint_rhs, counter)
+
+        transformed, counter = transform_to_z3(new_constraints, counter, dimension_dict)
+
+        transformed_condition_constraint, counter = transform_to_z3(condition_constraint_rhs, counter, dimension_dict)
+
+        negation_transformed_condition_constraint = z3.Not(transformed_condition_constraint)
+
+        return z3.And([transformed, transformed_condition_constraint]),\
+            z3.And([transformed, negation_transformed_condition_constraint])
+
+
+    def evaluate_conditional_with_constraints(tracer_root, graph, node, counter=0, user_constraints=None):
+        """
+        Given an IR and a node representing a conditional, evaluate the conditional
+        and its negation
+        Args:
+            tracer_root: Tracer root for module instances
+            node: The node to be evaluated
+
+        Returns: the results of evaluating the condition and the negation with
+        the rest of the constraints
+
+        """
+
+        transformed_positive, transformed_negative = \
+            transform_all_constraints_trace_time(tracer_root, graph, node, counter)
+
+        s = z3.Solver()
+        s.add(transformed_positive)
+        if user_constraints is not None:
+            s.add(user_constraints)
+        condition = s.check()
+
+        s = z3.Solver()
+        s.add(transformed_negative)
+        if user_constraints is not None:
+            s.add(user_constraints)
+        negation = s.check()
+        return condition, negation
 
 except ImportError:
     HAS_Z3 = False

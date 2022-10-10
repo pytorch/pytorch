@@ -31,6 +31,7 @@ std::vector<VEC_DTYPE> unwrap_vector(at::Tensor tensor) {
   return vec;
 }
 
+#ifdef USE_FBGEMM
 /**
  * Adapted from Fbgemm BCSRMatrix::unpack, but with non-zero zero points and
  * without tiling
@@ -74,6 +75,7 @@ void unpack_bcsr(
     }
   }
 }
+#endif // USE_FBGEMM
 } // namespace
 
 #ifdef USE_FBGEMM

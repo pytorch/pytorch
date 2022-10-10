@@ -126,7 +126,7 @@ class MaxPool2d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on both sides
+        padding: Implicit negative infinity padding to be added on both sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool2d` later
@@ -200,7 +200,7 @@ class MaxPool3d(_MaxPoolNd):
     Args:
         kernel_size: the size of the window to take a max over
         stride: the stride of the window. Default value is :attr:`kernel_size`
-        padding: implicit zero padding to be added on all three sides
+        padding: Implicit negative infinity padding to be added on all three sides
         dilation: a parameter that controls the stride of elements in the window
         return_indices: if ``True``, will return the max indices along with the outputs.
                         Useful for :class:`torch.nn.MaxUnpool3d` later
@@ -291,6 +291,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
 
     Example::
 
+        >>> # xdoctest: +IGNORE_WANT("do other tests modify the global state?")
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
         >>> input = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
@@ -524,7 +525,7 @@ class AvgPool1d(_AvgPoolNd):
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
         >>> m(torch.tensor([[[1.,2,3,4,5,6,7]]]))
-        tensor([[[ 2.,  4.,  6.]]])
+        tensor([[[2., 4., 6.]]])
     """
 
     kernel_size: _size_1_t

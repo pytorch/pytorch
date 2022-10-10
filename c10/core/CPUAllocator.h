@@ -17,12 +17,13 @@ using MemoryDeleter = void (*)(void*);
 // A helper function that is basically doing nothing.
 C10_API void NoDelete(void*);
 
-// A simple struct that is used to report C10's memory allocation and
-// deallocation status to the profiler
+// A simple struct that is used to report C10's memory allocation,
+// deallocation status and out-of-memory events to the profiler
 class C10_API ProfiledCPUMemoryReporter {
  public:
   ProfiledCPUMemoryReporter() {}
   void New(void* ptr, size_t nbytes);
+  void OutOfMemory(size_t nbytes);
   void Delete(void* ptr);
 
  private:

@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexingUtils.h>
+#include <ATen/native/quantized/IndexKernel.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
 
 #include <ATen/core/Tensor.h>
@@ -35,13 +36,13 @@
 #include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 
 #include <limits>
 
 #include <c10/macros/Macros.h>
 
 namespace {
-
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
   int64_t* sorted_indices, int64_t* indices, scalar_t* grad_output, scalar_t* grad_weight,
@@ -109,6 +110,65 @@ __global__ void indexing_backward_kernel(
             int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
             if (feature_dim < stride) {
                 grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
+            }
+          }
+          start_feature += gridDim.y * blockDim.x * SZ;
+        }
+
+        idx++;
+      } while (idx < numel && sorted_indices[idx] == sorted_indices[idx - 1]);
+    }
+  }
+}
+
+template <typename scalar_t, int SZ>
+__global__ void indexing_backward_kernel_quantized(
+  int64_t* sorted_indices, int64_t* indices, float* grad_output, scalar_t* grad_weight,
+  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim,
+  float inv_scale, int zero_point, int64_t qmin, int64_t qmax) {
+
+  // This implementation is adopted from indexing_backward_kernel above.
+  using opmath_t = at::opmath_type<float>;
+  for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
+    int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
+    if (idx < numel
+        && (idx == 0 || sorted_indices[idx] != sorted_indices[idx - 1])){
+      do {
+        int64_t start_feature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+        // we only keep the last duplicate index so skip those before it
+        if ((idx < numel - 1) && sorted_indices[idx] == sorted_indices[idx + 1]) {
+          idx++;
+          continue;
+        }
+        const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
+        const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
+        const opmath_t scale = (opmath_t)1.0;
+
+        opmath_t gradient[SZ];
+        opmath_t weight[SZ];
+
+        while (start_feature < stride) {
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
+            if (feature_dim < stride) {
+              gradient[ii] = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
+            }
+          }
+
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            weight[ii] = gradient[ii] * scale;
+          }
+
+          #pragma unroll
+          for (int ii = 0; ii < SZ; ii++) {
+            int64_t feature_dim = start_feature + ii * C10_WARP_SIZE;
+            if (feature_dim < stride) {
+                // we do quantization here
+                int64_t qvalue = static_cast<int64_t>(zero_point + nearbyintf(weight[ii]* inv_scale));
+                qvalue = min(max(qvalue, qmin), qmax);
+                grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(qvalue);
             }
           }
           start_feature += gridDim.y * blockDim.x * SZ;
@@ -231,9 +291,14 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 
 
 static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
-  checkIndexTensorTypes(orig);
+  checkIndexTensorTypes(orig, /*allow_int*/true);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
+  for (auto & i : indices) {
+    if (i.defined() && i.dtype() == at::kInt) {
+      i = i.to(at::kLong);
+    }
+  }
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()
@@ -357,6 +422,106 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 }
 
 REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
+
+void index_put_with_sort_quantized(Tensor & self, const c10::List<c10::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
+  if (indices.size() > (size_t)self.dim()) {
+    TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  }
+  bool self_contiguous = self.is_contiguous();
+  auto self_ = self_contiguous ? self : self.contiguous();
+  Tensor linearIndex, src, expandedValue = value;
+  int64_t nElemBefore, strideBefore, sliceSize;
+  std::vector<int64_t> inversePerm;
+  std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self_, indices, !unsafe);
+  int64_t num_indices = linearIndex.numel();
+
+  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
+    auto expanded_size = at::DimVector(expandedValue.sizes());
+    auto size1 = expandedValue.sizes();
+    auto size2 = linearIndex.sizes();
+    if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    }
+    if (nElemBefore > 1) {
+      expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
+    expandedValue = expandedValue.expand(expanded_size);
+  }
+  expandedValue = expandedValue.contiguous();
+
+  if (num_indices > 0 && sliceSize > 0) {
+      const bool permuted = !src.is_contiguous();
+      auto src_ = permuted ? src.contiguous() : src;
+      linearIndex = linearIndex.reshape(-1);
+      auto sorted_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      auto orig_indices = at::empty_like(linearIndex, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+      linearIndex.divide_(sliceSize, "trunc");
+
+      // cub on CUDA <= 11.2 have a bug that for small sizes
+      // cub's sort can be much slower than thrust's merge sort
+      // this bug is fixed in CUDA 11.3
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
+      if (num_indices < 50000) {
+        index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
+      } else
+#endif
+      {
+      // Sort the inputs into sorted with the corresponding indices
+      auto range = at::arange(num_indices, linearIndex.options());
+      // linearIndex can not be negative, and we take advantage of this
+      // fact to sort on less bits for better performance.
+      int64_t nbits = cuda::cub::get_num_bits(largestIndex(self_) / sliceSize);
+      cuda::cub::radix_sort_pairs(
+        linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
+        range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
+        num_indices, false, 0, nbits);
+      }
+
+      TORCH_INTERNAL_ASSERT(
+          linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
+          "number of flattened indices did not match number of elements in the value tensor: ",
+          linearIndex.numel()*sliceSize*nElemBefore, " vs ", expandedValue.numel());
+      const int UNROLL = 4;
+      const int indices_per_block = 4;
+      const int warp_size = at::cuda::warp_size();
+      dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
+           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (warp_size*UNROLL))),
+           std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
+      dim3 block(warp_size, indices_per_block);
+
+      AT_DISPATCH_QINT_TYPES(
+        src.scalar_type(), "indexing_backward_quantized", [&] {
+        constexpr int64_t qmin = std::numeric_limits<typename scalar_t::underlying>::min();
+        constexpr int64_t qmax = std::numeric_limits<typename scalar_t::underlying>::max();
+        float inv_scale = 1.0f / static_cast<float>(scale);
+
+        indexing_backward_kernel_quantized<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
+          sorted_indices.data_ptr<int64_t>(),
+          orig_indices.data_ptr<int64_t>(),
+          expandedValue.data_ptr<float>(),
+          src_.data_ptr<scalar_t>(),
+          num_indices,
+          sliceSize,
+          strideBefore,
+          nElemBefore,
+          inv_scale,
+          zero_point,
+          qmin,
+          qmax);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+      });
+
+      if (permuted) {
+        self.copy_(src_.permute(inversePerm));
+      } else if (!self_contiguous) {
+        self.copy_(self_);
+      }
+  }
+}
+
+REGISTER_CUDA_DISPATCH(index_put_with_sort_quantized_stub, &index_put_with_sort_quantized);
 } //anonymous
 
 
@@ -545,11 +710,13 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
 }
 
 void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& source, const Scalar& alpha, const Tensor& result) {
-  if (!result.is_same(self)) result.copy_(self);
+  if (!result.is_same(self)) {
+    result.copy_(self);
+  }
 
   // Scalars are treated as 1-d tensor
-  Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
-  Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
+  const Tensor self_ = (result.dim() == 0) ? result.view(1) : result;
+  const Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
 
   TORCH_CHECK(result.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
   TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
@@ -571,19 +738,19 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   // total size of the tensor ignoring dimension `dim`;
   // -the number of index we are choosing, which is the total size
   // of the tensor `index`.
-  ptrdiff_t sliceSize = getSliceSize(self_, dim, index, source_);
-  ptrdiff_t sourceTotalSize = source.numel();
-  int64_t selfAddDimSize = self_.size(dim);
-  ptrdiff_t numIndex = index.numel();
-  int64_t selfNumel = self_.numel();
+  const ptrdiff_t sliceSize = getSliceSize(self_, dim, index, source_);
+  const ptrdiff_t sourceTotalSize = source.numel();
+  const int64_t selfAddDimSize = self_.size(dim);
+  const ptrdiff_t numIndex = index.numel();
+  const int64_t selfNumel = self_.numel();
 
   if (sliceSize == 0) {
     return;
   }
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  bool indContig = index.is_contiguous();
+  const bool indContig = index.is_contiguous();
 
-  int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
 #define SMALL_INDEX(TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM)     \
   indexFuncSmallIndex<TENSOR_TYPE, INDICES_TYPE, TYPE, SELF_DIM, SOURCE_DIM, IDX_DIM>   \
@@ -604,11 +771,11 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
-  dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
+  const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  const dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
+  const dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  const dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -616,13 +783,13 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::ComplexHalf, result.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
-      int selfAddDim = selfInfo.collapseDims(dim);
+      const int selfAddDim = selfInfo.collapseDims(dim);
       selfInfo.reduceDim(selfAddDim);
-      auto alpha_value = alpha.to<scalar_t>();
+      const auto alpha_value = alpha.to<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cuda_", [&] () {
         auto sourceInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
-        int sourceAddDim = sourceInfo.collapseDims(dim);
+        const int sourceAddDim = sourceInfo.collapseDims(dim);
         sourceInfo.reduceDim(sourceAddDim);
 
         auto indexInfo =
@@ -642,7 +809,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
             SMALL_INDEX(scalar_t, index_t, unsigned int, -1, -1, -1);
           }
         } else {
-          bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
+          const bool indexIsMajor = indexShouldBeMajor(selfInfo, selfAddDim);
 
           if (selfInfo.dims == 1 && sourceInfo.dims == 1 && indContig) {
             LARGE_INDEX(scalar_t, index_t, unsigned int, 1, 1, -2, true);
@@ -668,13 +835,13 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, uint64_t> selfInfo =
         cuda::detail::getTensorInfo<scalar_t, uint64_t>(self_);
-      int selfAddDim = selfInfo.collapseDims(dim);
+      const int selfAddDim = selfInfo.collapseDims(dim);
       selfInfo.reduceDim(selfAddDim);
-      auto alpha_value = alpha.to<scalar_t>();
+      const auto alpha_value = alpha.to<scalar_t>();
 
       cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
         cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
-      int sourceAddDim = sourceInfo.collapseDims(dim);
+      const int sourceAddDim = sourceInfo.collapseDims(dim);
       sourceInfo.reduceDim(sourceAddDim);
 
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cuda_", [&] () {
@@ -1213,6 +1380,35 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
       });
 }
 
+template <typename scalar_t, typename mask_t>
+void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_val) {
+    gpu_kernel(
+        iter, [quantized_val] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
+          if (mask) {
+            return quantized_val;
+          }
+          return self;
+    });
+}
+
+void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
+  AT_DISPATCH_QINT_TYPES(
+      iter.common_dtype(), "masked_fill_", [&]() {
+        float float_val = value.to<float>();
+        const auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
+        auto mask_dtype = iter.input_dtype(0);
+
+        if (mask_dtype == at::ScalarType::Bool) {
+            cuda_masked_fill_kernel_quantized<scalar_t, bool>(iter, quantized_val);
+        }
+        else {
+            cuda_masked_fill_kernel_quantized<scalar_t, uint8_t>(iter, quantized_val);
+        }
+    });
+}
+
+REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_quantized);
+
 } // anonymous namespace
 
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& value) {
@@ -1254,6 +1450,11 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
+  // We hit this function if either of the input tensor lives on CUDA.
+  // It is ok, if `value` is `CPU` tensor but we should not allow `self` or
+  // `mask` to be CPU tensor. Check for `self` and `mask` being on same device
+  // exists in `masked_fill__cuda` (Scalar version).
+  TORCH_CHECK(!self.device().is_cpu(), "masked_fill_: Expected inputs to be on same device")
   return masked_fill__cuda(self, mask, value.item());
 }
 

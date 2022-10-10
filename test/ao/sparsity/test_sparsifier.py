@@ -7,7 +7,7 @@ import re
 
 import torch
 from torch import nn
-from torch.ao.sparsity import BaseSparsifier, WeightNormSparsifier, FakeSparsity, NearlyDiagonalSparsifier
+from torch.ao.pruning import BaseSparsifier, WeightNormSparsifier, FakeSparsity, NearlyDiagonalSparsifier
 from torch.nn.utils.parametrize import is_parametrized
 
 from torch.testing._internal.common_utils import TestCase
@@ -258,7 +258,8 @@ class TestWeightNormSparsifier(TestCase):
         sparsifier.prepare(model, config=[{'tensor_fqn': 'linear.weight'}])
         sparsifier.step()
         # make sure the sparsity level is approximately 50%
-        self.assertAlmostEqual(model.linear.parametrizations['weight'][0].mask.mean().item(), 0.5, places=2)
+        mask = model.linear.parametrizations['weight'][0].mask.to(torch.float)  # mean works on float only
+        self.assertAlmostEqual(mask.mean().item(), 0.5, places=2)
         # Make sure each block has exactly 50% zeros
         module = sparsifier.groups[0]['module']
         mask = module.parametrizations['weight'][0].mask

@@ -107,8 +107,6 @@ class TORCH_CUDA_CU_API WelfordResult {
       TensorView* in_avg,
       TensorView* in_var_sum,
       TensorView* in_n);
-
-  WelfordResult rFactor(const std::vector<int>& axes);
 };
 
 //! Welford operator on specified axes. This is currently the only scan op with
@@ -122,6 +120,21 @@ TORCH_CUDA_CU_API WelfordResult Welford(
     // Initializes to 0 in function definition, doing this so we don't have to
     // import IrBuilder just for this one interface.
     Int* init_N = nullptr);
+
+// TENSOR FACTORIES
+TORCH_CUDA_CU_API TensorView* rand(
+    const std::vector<Val*>& shape,
+    DataType dtype);
+TORCH_CUDA_CU_API TensorView* arange(Val* end, DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    DataType dtype = DataType::Int);
+TORCH_CUDA_CU_API TensorView* arange(
+    Val* start,
+    Val* end,
+    Val* step,
+    DataType dtype = DataType::Int);
 
 // UNARY OPERATIONS
 // abs
@@ -253,6 +266,9 @@ TORCH_CUDA_CU_API TensorView* isposinf(TensorView*);
 // isreal
 TORCH_CUDA_CU_API Val* isreal(Val*);
 TORCH_CUDA_CU_API TensorView* isreal(TensorView*);
+// print
+TORCH_CUDA_CU_API Val* print(Val*);
+TORCH_CUDA_CU_API TensorView* print(TensorView*);
 
 // Broadcasts inp based on bool vector. Size of broadcast bool vector should be
 // the number of dims desired in the broadcasted tensor. This vector should be
@@ -262,13 +278,14 @@ TORCH_CUDA_CU_API TensorView* broadcast(
     TensorView* inp,
     const std::vector<bool>& is_broadcast_dim);
 
-// Expands input based on provided sizes. expand_sizes should be the same size
-// as the input's root domain (really rfactor), and should be -1 for any
-// dimension that should remain a symbolic size. For dimensions that remain
-// broadcast after the expand should be set to 1, any dimension being expanded
-// must be marked as a braodcast in the input and will be expanded to the
-// provided constant size. Any dimension that's symbolic in the input but
-// specified as a non -1 value will be set to that constant value.
+// Expands input based on provided sizes. expand_sizes should be larger than
+// the input's root domain (really rfactor) and will broadcast on inner
+// dimensions. expand_sizes should be -1 for any dimension that should remain a
+// symbolic size. For dimensions that remain broadcast after the expand should
+// be set to 1, any dimension being expanded must be marked as a broadcast in
+// the input and will be expanded to the provided constant size. Any dimension
+// that's symbolic in the input but specified as a non -1 value will be set to
+// that constant value.
 TORCH_CUDA_CU_API TensorView* expand(
     TensorView* inp,
     const std::vector<Val*>& expanded_sizes);
@@ -402,12 +419,14 @@ TORCH_CUDA_CU_API TensorView* sum(
 TORCH_CUDA_CU_API TensorView* max(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 TORCH_CUDA_CU_API TensorView* min(
     TensorView* v1,
     const std::vector<int>& reduction_axes,
-    bool keep_dim = false);
+    bool keep_dim = false,
+    DataType dtype = DataType::Null);
 
 // COMPOUND OPERATIONS
 // add_alpha
