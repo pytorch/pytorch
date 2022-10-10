@@ -743,14 +743,14 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
-  const auto dim_size = self.size(dim_);
+  const auto dim_size = self.sym_size(dim_);
   std::vector<Tensor> splits(sections);
-  int64_t min_split_size = dim_size / sections;
-  int64_t num_splits_one_extra = dim_size % sections;
-  int64_t start_idx = 0;
+  auto min_split_size = dim_size / sections;
+  auto num_splits_one_extra = dim_size % sections;
+  c10::SymInt start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
-    int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
-    splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
+    auto split_size = (num_splits_one_extra > split_idx) ? (min_split_size + 1) : min_split_size;
+    splits[split_idx] = at::slice_symint(self, dim_, start_idx, start_idx + split_size);
     start_idx += split_size;
   }
   return splits;
@@ -1512,49 +1512,39 @@ QuantizerPtr create_subtensor_quantizer(const Tensor& self, bool is_select, int6
   return quantizer;
 }
 
-Tensor select(const Tensor& self, int64_t dim, int64_t index_) {
+Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "select() cannot be applied to a 0-dim tensor.");
   }
   dim = maybe_wrap_dim(dim, ndim);
-  auto size = self.sym_sizes()[dim];
-  if (size < -index_ || size <= index_) {
+  auto size = self.size(dim);
+  if (index < -size || index >= size) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
-      TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
+      TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                      self.sizes(), " at dimension ", self.names()[dim]);
     }
-    TORCH_CHECK_INDEX(false, "select(): index ", index_, " out of range for tensor of size ",
+    TORCH_CHECK_INDEX(false, "select(): index ", index, " out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
   }
-  SymInt index = index_;
   if (index < 0) {
     index += size;
   }
   if (self.is_sparse()) {
-    return select_sparse(self, dim, index.guard_int(__FILE__, __LINE__));
+    return select_sparse(self, dim, index);
   }
+  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  DimVector strides(self.strides().begin(), self.strides().end());
+  auto storage_offset = self.storage_offset() + index * strides[dim];
+  sizes.erase(sizes.begin() + dim);
+  strides.erase(strides.begin() + dim);
 
   Tensor result;
   if (self.is_quantized()) {
-    auto local_index = index.guard_int(__FILE__, __LINE__);
-
-    DimVector sizes(self.sizes().begin(), self.sizes().end());
-    DimVector strides(self.strides().begin(), self.strides().end());
-    auto storage_offset = self.storage_offset() + local_index * strides[dim];
-    sizes.erase(sizes.begin() + dim);
-    strides.erase(strides.begin() + dim);
-
-    auto quantizer = create_subtensor_quantizer(self, true, local_index, local_index + 1, dim, 1);
+    auto quantizer = create_subtensor_quantizer(self, true, index, index + 1, dim, 1);
     result = as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
-    std::vector<c10::SymInt> sizes(self.sym_sizes().begin(), self.sym_sizes().end());
-    std::vector<c10::SymInt> strides(self.sym_strides().begin(), self.sym_strides().end());
-    auto storage_offset = self.sym_storage_offset() + index * strides[dim];
-    sizes.erase(sizes.begin() + dim);
-    strides.erase(strides.begin() + dim);
-
-    result = self.as_strided_symint(sizes, strides, storage_offset);
+    result = self.as_strided(sizes, strides, storage_offset);
   }
   namedinference::propagate_names_except(result, self, {dim});
   return result;
@@ -3901,6 +3891,14 @@ at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
   auto tmp = self.alias();
   out.copy_(tmp);
   return out;
+}
+
+int64_t sparse_dim_strided(const at::Tensor& self) {
+  return 0;
+}
+
+int64_t dense_dim_strided(const at::Tensor& self) {
+  return self.dim();
 }
 
 } // namespace native
