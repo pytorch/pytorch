@@ -10916,7 +10916,7 @@ TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   // Not possible to do computeAt at position -1 as recomputation
   // would be required. An exception should be thrown.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-  if ( at::cuda::getCurrentDeviceProperties()->major >= 8) {
+  if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
     GTEST_SKIP() << "Somehow it passes on sm_80+ GPUs";
   }
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
