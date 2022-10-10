@@ -288,19 +288,14 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
         with track_graph_compiling("inference"):
             compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
-    if not disable_amp:
-
-        @wraps(compiled_fw)
-        def new_fn(args):
-            fw_outs = call_func_with_args(compiled_fw, args)
-            return fw_outs
-    else:
-
-        @wraps(compiled_fw)
-        def new_fn(args):
+    @wraps(compiled_fw)
+    def new_fn(args):
+        if disable_amp:
             with disable_autocast_manager():
                 fw_outs = call_func_with_args(compiled_fw, args)
-            return fw_outs
+        else:
+            fw_outs = call_func_with_args(compiled_fw, args)
+        return fw_outs
 
     return new_fn
 
