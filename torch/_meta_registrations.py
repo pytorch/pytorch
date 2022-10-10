@@ -104,6 +104,22 @@ def meta_fft_c2r(self, dim, normalization, lastdim):
 def meta_copy_(self, src, non_blocking=False):
     return self
 
+@register_meta(aten.unsqueeze_.default, register_dispatcher=False)
+def meta_unsqueeze_(self, dim):
+    wrapped_dim = maybe_wrap_dim(dim, self.dim())
+    # new strides
+    new_stride = 1 if dim >= self.dim() else self.size(dim) * self.stride(dim)
+    strides = list(self.stride())
+    strides.insert(dim, new_stride)
+    # new size
+    size = list(self.size())
+    size.insert(dim, 1)
+    # return self.as_strided_(size, strides)
+    # This is incorrect and self.as_strided_(...) should be returned.
+    # However, as_strided_ doesn't have a meta impl and there's no straightforward way
+    # to inplace modify the strides from python.
+    return self.as_strided(size, strides)
+
 
 # Implementations below are taken from https://github.com/albanD/subclass_zoo/blob/main/python_meta_tensor.py
 @register_meta(aten.index_select.default)
