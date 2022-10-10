@@ -59,7 +59,6 @@ class CapabilityBasedPartitioner:
             merged_nodes = copy(partitions_by_id[self_id].nodes)
             merged_nodes.update(partitions_by_id[other_id].nodes)
 
-            # def merge_breaks_dagpartitions: List[Partition]):
             visited: Set[Node] = set()
 
             def dfs_find_cycle(node):
@@ -94,7 +93,6 @@ class CapabilityBasedPartitioner:
                         return False
 
             # no cyclic dependency found, move forward with the merge
-
             # updating partition nodes
             partitions_by_id[self_id].nodes = merged_nodes
             # updating assignment map
@@ -116,10 +114,15 @@ class CapabilityBasedPartitioner:
 
         logging.debug("Proposing partitions...")
 
-        def mergeAcyclicUserPartitions(node):
+        for node in reversed(self.graph_module.graph.nodes):
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             merge_candidates: Dict[int, None] = {}
 
+            # Note a limited horizontal fusion is enabled:
+            #   when `node` is not supported, the code below attempts to fuse consumer of `node`.
+            #
+            # I don't see a need to add a knob to disable horizontal fusion yet, we can short-cut
+            # the fusion by adding an `else` block here to skip horizontal fusion.
             if self.__is_node_supported(node) and node not in assignment:
                 partition_id = next(new_partition_id)
                 merge_single_node(node, partition_id)
@@ -135,10 +138,10 @@ class CapabilityBasedPartitioner:
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:
+                    # note: merge partition `other_id` into partition `self_id` if
+                    # it doesn't create cyclic depenency in the graph, otherwise,
+                    # this is a no-op
                     maybe_merge_partition(self_id, other_id)
-
-        for node in reversed(self.graph_module.graph.nodes):
-            mergeAcyclicUserPartitions(node)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
