@@ -1,5 +1,6 @@
 import dataclasses
 import functools
+import itertools
 import logging
 from typing import List
 
@@ -306,7 +307,7 @@ def count_tangents(fx_g: torch.fx.GraphModule):
     return len(static_arg_idxs)
 
 
-_graph_counter = 0
+_graph_counter = itertools.count(0)
 
 
 def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]):
@@ -325,9 +326,7 @@ def compile_fx(model_: torch.fx.GraphModule, example_inputs_: List[torch.Tensor]
     num_example_inputs = len(example_inputs_)
     cudagraphs = BoxedBool(config.triton.cudagraphs)
 
-    global _graph_counter
-    graph_id = _graph_counter
-    _graph_counter += 1
+    graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):

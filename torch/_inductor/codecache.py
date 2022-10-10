@@ -14,16 +14,28 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from ctypes import cdll
 from typing import Any, Dict
 
+from filelock import FileLock
+
 import torch
 from torch.utils import cpp_extension
 
 from . import config, exc
 
+LOCK_TIMEOUT = 600
+
 log = logging.getLogger(__name__)
+logging.getLogger("filelock").setLevel(logging.DEBUG if config.debug else logging.INFO)
 
 
 def cache_dir():
     return f"/tmp/torchinductor_{getpass.getuser()}"
+
+
+def get_lock_dir():
+    lock_dir = os.path.join(cache_dir(), "locks")
+    if not os.path.exists(lock_dir):
+        os.makedirs(lock_dir, exist_ok=True)
+    return lock_dir
 
 
 def code_hash(code):
@@ -63,7 +75,12 @@ def cpp_compiler_search(search):
     for cxx in search:
         try:
             if cxx is None:
-                cxx = install_gcc_via_conda()
+                lock_dir = get_lock_dir()
+                lock = FileLock(
+                    os.path.join(lock_dir, "g++.lock"), timeout=LOCK_TIMEOUT
+                )
+                with lock:
+                    cxx = install_gcc_via_conda()
             subprocess.check_output([cxx, "--version"])
             return cxx
         except (subprocess.SubprocessError, FileNotFoundError):
@@ -137,18 +154,21 @@ class CppCodeCache:
     def load(cls, source_code):
         key, input_path = write(source_code, "cpp", extra=cpp_compile_command("i", "o"))
         if key not in cls.cache:
-            output_path = input_path[:-3] + "so"
-            if not os.path.exists(output_path):
-                cmd = cpp_compile_command(input=input_path, output=output_path).split(
-                    " "
-                )
-                try:
-                    subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-                except subprocess.CalledProcessError as e:
-                    raise exc.CppCompileError(cmd, e.output)
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_path = input_path[:-3] + "so"
+                if not os.path.exists(output_path):
+                    cmd = cpp_compile_command(
+                        input=input_path, output=output_path
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output)
 
-            cls.cache[key] = cdll.LoadLibrary(output_path)
-            cls.cache[key].key = key
+                cls.cache[key] = cdll.LoadLibrary(output_path)
+                cls.cache[key].key = key
 
         return cls.cache[key]
 

@@ -4,6 +4,7 @@ import functools
 import inspect
 import logging
 import os
+import sys
 import threading
 import traceback
 import types
@@ -357,6 +358,18 @@ def optimize(
             ...
     """
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
+        return _NullDecorator()
+    if sys.platform == "win32":
+        warnings.warn(
+            "Windows is not currently supported, "
+            + f"{config.dynamo_import}.optimize() will do nothing"
+        )
+        return _NullDecorator()
+    if sys.version_info >= (3, 11):
+        warnings.warn(
+            "Python 3.11+ not yet supported, "
+            f"{config.dynamo_import}.optimize() will do nothing"
+        )
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)

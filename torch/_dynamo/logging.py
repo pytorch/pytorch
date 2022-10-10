@@ -1,3 +1,4 @@
+import itertools
 import logging
 import os
 
@@ -23,7 +24,7 @@ LOGGING_CONFIG = {
     "version": 1,
     "formatters": {
         "torchdynamo_format": {
-            "format": "%(name)s: [%(levelname)s] [%(asctime)s] %(message)s"
+            "format": "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
         },
     },
     "handlers": {
@@ -74,13 +75,11 @@ def init_logging(log_level, log_file_name=None):
 # def fn():
 #     _step_logger()(logging.INFO, "msg")
 
-_step_counter = 1
+_step_counter = itertools.count(1)
 
 
 def get_step_logger(logger):
-    global _step_counter
-    step = _step_counter
-    _step_counter += 1
+    step = next(_step_counter)
 
     def log(level, msg):
         logger.log(level, f"Step {step}: {msg}")
