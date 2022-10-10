@@ -10899,7 +10899,7 @@ TEST_F(NVFuserTest, FusionLSTMCell_CUDA) {
       &fusion, cg_outputs, aten_inputs, {at_cy, at_hy}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, DISABLED_FusionComputeAtMultiBCast_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10916,6 +10916,9 @@ TEST_F(NVFuserTest, DISABLED_FusionComputeAtMultiBCast_CUDA) {
   // Not possible to do computeAt at position -1 as recomputation
   // would be required. An exception should be thrown.
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  if (at::cuda::getCurrentDeviceProperties()->major >= 8) {
+    GTEST_SKIP() << "Somehow it passes on sm_80+ GPUs";
+  }
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
 }
 
