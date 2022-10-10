@@ -284,12 +284,12 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     disable_amp = should_disable_autocast(fw_module, flat_args)
     context = disable_autocast_manager if disable_amp else nullcontext
 
-    with context():
-        with track_graph_compiling("inference"):
+    with context(), track_graph_compiling("inference"):
             compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
     @wraps(compiled_fw)
     def new_fn(args):
+        # on hot path, so avoid invoking nullcontext if disable_amp is False
         if disable_amp:
             with disable_autocast_manager():
                 fw_outs = call_func_with_args(compiled_fw, args)
@@ -441,7 +441,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
         fx_g.recompile()
     else:
         fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(*joint_inputs)
-        disable_amp = should_disable_autocast(fw_module, flat_args)
+        disable_amp = should_disable_autocast(fx_g, flat_args)
 
     if config.debug_joint:
         print("====== Joint graph ======")
