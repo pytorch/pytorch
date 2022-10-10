@@ -265,6 +265,16 @@ class TensorVariable(VariableTracker):
                     need_unwrap=False,
                     **options,
                 )
+        elif proxy.node.target == torch._C._DisableFuncTorch:
+            from . import UserDefinedObjectVariable
+
+            return UserDefinedObjectVariable(example_value)
+        elif proxy.node.target.__name__ == "set_state" and isinstance(
+            proxy.node.target.__self__, torch._C.Generator
+        ):
+            from . import TorchVariable
+
+            return TorchVariable(proxy.node.target)
         else:
             raise AssertionError(
                 "torch.* op returned non-Tensor "

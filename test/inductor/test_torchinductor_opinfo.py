@@ -111,6 +111,7 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
+    "reciprocal": {b8, i32, i64},  # segfault
     "lu_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "lu_unpack": {b8, f16, f32, f64, i32, i64},  # segfault
     "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
@@ -122,7 +123,7 @@ inductor_skips["cuda"] = {
     "masked.prod": {f16, f32, f64},
     "linalg.vander": {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "broadcast_tensors": {f32},
+    "broadcast_tensors": {f16, f32, f64},
     # Call parameter type does not match function signature!
     "masked.logsumexp": {f64},
     "erf": {f64},
@@ -131,6 +132,13 @@ inductor_skips["cuda"] = {
     "nn.functional.binary_cross_entropy_with_logits": {f64},
     "nn.functional.gelu": {f64},
     "nn.functional.glu": {f64},
+    "nn.functional.poisson_nll_loss": {f64},
+    "nn.functional.selu": {f64},
+    "nn.functional.silu": {f64},
+    "nn.functional.tanhshrink": {f16, f64},
+    "nn.functional.conv_transpose3d": {f16, f64},
+    "nn.functional._scaled_dot_product_attention": {f64},
+    "nn.functional.softmin.with_dtype": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_shuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.pixel_unshuffle": {b8, f16, f32, f64, i32, i64},
     "nn.functional.triplet_margin_loss": {f16},
@@ -151,8 +159,8 @@ inductor_skips["cuda"] = {
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
+    "H": {b8, f16, f32, f64, i32, i64},
     "mH": {b8, f16, f32, f64, i32, i64},
     "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
@@ -219,18 +227,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     "multinomial": {f32, f64},
     "nan_to_num": {f16},
     "nanquantile": {f32, f64},
-    "nn.functional._scaled_dot_product_attention": {f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.adaptive_avg_pool2d": {f16},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.dropout": {f32, f64},
-    "nn.functional.dropout2d": {f32, f64},
-    "nn.functional.dropout3d": {f32, f64},
-    "nn.functional.feature_alpha_dropout.with_train": {f32, f64},
-    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.fractional_max_pool2d": {f32, f64},
-    "nn.functional.fractional_max_pool3d": {f32, f64},
     "nn.functional.gaussian_nll_loss": {f32, f64},
     "nn.functional.gelu": {f64},
     "nn.functional.huber_loss": {f16, f32, f64},
@@ -248,7 +248,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "quantile": {f32, f64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
-    "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "scatter_add": {f16},
@@ -276,8 +275,10 @@ inductor_expected_failures_single_sample["cpu"] = {
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "H": {b8, f16, f32, f64, i32, i64},
     "T": {b8, f16, f32, f64, i32, i64},
+    "H": {b8, f16, f32, f64, i32, i64},
+    "mH": {b8, f16, f32, f64, i32, i64},
+    "mT": {b8, f16, f32, f64, i32, i64},
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "allclose": {f16, f32, f64},
     "angle": {f32, f64},
@@ -329,8 +330,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "linalg.matrix_rank.hermitian": {f32, f64},
     "linalg.pinv.hermitian": {f32, f64},
     "linalg.svd": {f32, f64},
-    "mH": {b8, f16, f32, f64, i32, i64},
-    "mT": {b8, f16, f32, f64, i32, i64},
     "masked.argmax": {f16, f32, f64, i32},
     "masked.argmin": {f16, f32, f64, i32},
     "masked_scatter": {f16, f32, f64},
@@ -339,17 +338,9 @@ inductor_expected_failures_single_sample["cuda"] = {
     "min.reduction_with_dim": {b8, i32, i64},
     "multinomial": {f16, f32, f64},
     "nn.functional.adaptive_avg_pool2d": {f16},
-    "nn.functional._scaled_dot_product_attention": {f16, f32, f64},
-    "nn.functional.conv_transpose3d": {f16},
+    "nn.functional._scaled_dot_product_attention": {f64},
     "nn.functional.ctc_loss": {f32, f64},
-    "nn.functional.dropout": {f16, f32, f64},
-    "nn.functional.dropout2d": {f16, f32, f64},
-    "nn.functional.dropout3d": {f16, f32, f64},
     "nn.functional.grid_sample": {f16},
-    "nn.functional.feature_alpha_dropout.with_train": {f16, f32, f64},
-    "nn.functional.feature_alpha_dropout.without_train": {b8, f16, f32, f64, i32, i64},
-    "nn.functional.fractional_max_pool2d": {f16, f32, f64},
-    "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.gaussian_nll_loss": {f16, f32, f64},
     "nn.functional.huber_loss": {f16, f32, f64},
     "nn.functional.one_hot": {i64},
@@ -364,7 +355,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "pow": {i32, i64},
     "rand_like": {f16, f32, f64},
     "randint_like": {f16, f32, f64, i32, i64},
-    "randn": {f16, f32, f64},
     "randn_like": {f16, f32, f64},
     "repeat_interleave": {b8, f16, f32, f64, i32, i64},
     "round.decimals_3": {f16},
@@ -395,6 +385,23 @@ inductor_should_fail_with_exception["cuda"] = {
         i64: "Pow input must be floating point.",
     }
 }
+
+
+def wrapper_set_seed(op, *args, **kwargs):
+    """Wrapper to set seed manually for some functions like dropout
+    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
+    """
+    torch.manual_seed(42)
+    return op(*args, **kwargs)
+
+
+torch.testing._internal.common_methods_invocations.wrapper_set_seed = wrapper_set_seed
+
+# This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
+torch._dynamo.variables.torch.tensor_dunder_fns.append(
+    torch.testing._internal.common_utils.disable_functorch
+)
+
 # key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
 inductor_override_kwargs = {
     # the return value of empty is undefined
@@ -402,6 +409,7 @@ inductor_override_kwargs = {
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
+    "randn": {"assert_equal": False},
     ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
 }
 
@@ -490,7 +498,7 @@ class TestInductorOpInfo(TestCase):
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
-
+                # UNCOMMENT TO DEBUG SEGFAULTS
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
@@ -536,13 +544,12 @@ class TestInductorOpInfo(TestCase):
                 ]
                 if failure in str(e):
                     known_failure = True
-
             if not known_failure:
                 raise e
-        else:
-            # with open("test_output.txt", "a") as f:
-            #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
-            seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
+
+        # with open("test_output.txt", "a") as f:
+        #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
+        seen_succeeded[device_type].setdefault(op_name, set()).add(dtype)
 
         if test_expect is TestExpect.XFAILURE and not COLLECT_EXPECT:
             if FAIL_ON_SUCCESS:

@@ -28,6 +28,7 @@ from .tensor import TensorWithTFOverrideVariable
 
 log = logging.getLogger(__name__)
 
+# TODO(voz): Maybe rename these later
 tensor_dunder_fns = [
     torch.Tensor.__rmatmul__,
     torch.Tensor.__rmod__,
@@ -39,6 +40,8 @@ tensor_dunder_fns = [
     torch._C._TensorBase.__rxor__,
     torch._C._TensorBase.__rand__,
 ]
+
+torch_special_class_types = (torch._C.Generator,)
 
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
@@ -69,6 +72,7 @@ tensor_dunder_fns_remap = {
     torch._C._TensorBase.__rxor__: remap_as_fn___rxor__,
     torch._C._TensorBase.__rand__: remap_as_fn___rand__,
 }
+
 
 try:
     # Wed need to monkeypatch transformers here, sadly.
@@ -116,6 +120,8 @@ class TorchVariable(VariableTracker):
             self_should_be_none, type(torch._C._get_tracing_state.__self__)
         ):
             # some _C functions have __self__ as a null capsule
+            pass
+        elif isinstance(self_should_be_none, torch_special_class_types):
             pass
         else:
             raise AssertionError(f"{value} found with __self__ set")
@@ -274,6 +280,56 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.jit.annotate:
             assert len(args) == 2
             return args[1]
+        if (
+            self.value.__name__ == "get_state"
+            and hasattr(self.value, "__self__")
+            and isinstance(self.value.__self__, torch._C.Generator)
+        ):
+
+            def get_state_from_generator():
+                return self.value()
+
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    get_state_from_generator,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                example_value=self.value(),
+                **options,
+            )
+        if (
+            self.value.__name__ == "set_state"
+            and hasattr(self.value, "__self__")
+            and isinstance(self.value.__self__, torch._C.Generator)
+        ):
+            assert len(args) == 1
+            assert isinstance(args[0], TensorVariable)
+
+            if config.fake_tensor_propagation:
+                # In fake tensor case, this state doesn't matter, but
+                # it needs to be valid to not segfault. Pull a real tensor out.
+                # The value won't matter since we are running with fake tensors anyway, so rng doesn't matter.
+                # However, it is imperative to record the call_function in the graph with the true args
+                # (Not the fake example_value) - for the sake of graph correctness.
+                example_value = self.value.__self__.get_state()
+            else:
+                example_value = args[0].proxy.node.meta["example_value"]
+
+            self.value.__module__ = self.__module__
+            return TensorVariable.create(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    self.value,
+                    *proxy_args_kwargs(args, kwargs),
+                    current_tx=tx,
+                ),
+                example_value=example_value,
+                **options,
+            )
         else:
             # Handle sth like torch.LongTensor(list(np.int64, np.int64, ...)),
             # as FX symbolic trace doesn't support numpy int/float as base types.
