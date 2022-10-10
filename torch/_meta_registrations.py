@@ -160,6 +160,45 @@ def meta_linalg_eigh(self, uplo="L"):
     return (values, vectors)
 
 
+# From aten/src/ATen/native/ReflectionPad.cpp
+@register_meta(
+    [aten.reflection_pad2d_backward.default, aten.replication_pad2d_backward.default]
+)
+def meta_pad2d_backward(grad_output, self, padding):
+    dim_w = 2
+    dim_h = 1
+    dim_plane = 0
+    nbatch = 1
+
+    self_shape = self.shape
+    if self.dim() == 4:
+        nbatch = self_shape[0]
+        dim_w += 1
+        dim_h += 1
+        dim_plane += 1
+
+    pad_l = padding[0]
+    pad_r = padding[1]
+    pad_t = padding[2]
+    pad_b = padding[3]
+
+    nplane = self_shape[dim_plane]
+    input_h = self_shape[dim_h]
+    input_w = self_shape[dim_w]
+    output_h = input_h + pad_t + pad_b
+    output_w = input_w + pad_l + pad_r
+
+    check(
+        output_w == grad_output.shape[dim_w],
+        lambda: f"gradOutput width unexpected. Expected: {output_w}, Got: {grad_output.shape[dim_w]}",
+    )
+    check(
+        output_h == grad_output.shape[dim_h],
+        lambda: f"gradOutput height unexpected. Expected: {output_h}, Got: {grad_output.shape[dim_h]}",
+    )
+    return self.new_empty(self.shape)
+
+
 @register_meta(aten.reflection_pad2d.default)
 def meta_pad2d(self, padding):
     valid_dims = self.size(1) != 0 and self.size(2) != 0
@@ -183,6 +222,35 @@ def meta_pad2d(self, padding):
         return self.new_empty((nplane, output_h, output_w))
     else:
         return self.new_empty((nbatch, nplane, output_h, output_w))
+
+
+@register_meta(aten._fused_moving_avg_obs_fq_helper.default)
+def meta__fused_moving_avg_obs_fq_helper(
+    self,
+    observer_on,
+    fake_quant_on,
+    running_min,
+    running_max,
+    scale,
+    zero_point,
+    averaging_const,
+    quant_min,
+    quant_max,
+    ch_axis,
+    per_row_fake_quant,
+    symmetric_quant,
+):
+    check(
+        ch_axis < self.dim(),
+        lambda: "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()",
+    )
+    mask = self.empty_like(dtype=torch.bool)
+    return (self.empty_like(), mask)
+
+
+@register_meta(aten.bernoulli_.float, register_dispatcher=False)
+def meta_bernoulli_(self, p=0.53841497, generator=None):
+    return self
 
 
 def dot_check(self, other):
@@ -1244,6 +1312,187 @@ def meta_select_scatter(self, src, dim, index):
 @register_meta(aten.slice_scatter.default)
 def meta_slice_scatter(self, src, dim=0, start=None, end=None, step=1):
     return torch.empty_like(self)
+
+
+def maybe_wrap_dim(dim: int, dim_post_expr: int, wrap_scalar: bool = True):
+    if dim_post_expr <= 0:
+        assert wrap_scalar
+        dim_post_expr = 1
+    min = -dim_post_expr
+    max = dim_post_expr - 1
+    assert not (dim < min or dim > max)
+    if dim < 0:
+        dim += dim_post_expr
+    return dim
+
+
+def ensure_nonempty_size(t, dim):
+    return 1 if t.dim() == 0 else t.shape[dim]
+
+
+# From aten/src/ATen/native/ScatterGatherChecks.h
+def gather_shape_check(self, dim, index):
+    self_dims = max(self.dim(), 1)
+    index_dims = max(index.dim(), 1)
+    check(
+        self_dims == index_dims,
+        lambda: "Index tensor must have the same number of dimensions as input tensor",
+    )
+    for i in range(self_dims):
+        if i != dim:
+            check(
+                ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
+                lambda: f"Size does not match at dimension {i} expected index {index.shape}"
+                + f" to be smaller than self {self.shape} apart from dimension {dim}",
+            )
+
+
+@register_meta(aten.gather.default, register_dispatcher=False)
+def meta_gather(self, dim, index, sparse_grad=False):
+    wrapped_dim = maybe_wrap_dim(dim, self.dim())
+    is_index_empty = index.numel() == 0
+    if not is_index_empty:
+        check(
+            index.dtype == torch.long,
+            lambda: "gather(): Expected dtype int64 for index",
+        )
+        gather_shape_check(self, wrapped_dim, index)
+    return self.new_empty(index.shape)
+
+
+# From aten/src/ATen/native/TensorAdvancedIndexing.cpp
+def get_operator_enum(reduce_, use_new_options=False):
+    if use_new_options:
+        if reduce_ == "sum":
+            return "REDUCE_ADD"
+        elif reduce_ == "prod":
+            return "REDUCE_MULTIPLY"
+        elif reduce_ == "mean":
+            return "REDUCE_MEAN"
+        elif reduce_ == "amax":
+            return "REDUCE_MAXIMUM"
+        elif reduce_ == "amin":
+            return "REDUCE_MINIMUM"
+        check(
+            False,
+            lambda: "reduce argument must be either sum, prod, mean, amax or amin.",
+        )
+        return
+    else:
+        if reduce_ == "add":
+            return "REDUCE_ADD"
+        elif reduce_ == "multiply":
+            return "REDUCE_MULTIPLY"
+        check(False, lambda: "reduce argument must be either add or multiply.")
+        return
+
+
+# From aten/src/ATen/native/ScatterGatherChecks.h
+def scatter_gather_dtype_check(method_name, self, index, src_opt=None):
+    if index.numel() != 0:
+        check(
+            index.dtype == torch.long,
+            lambda: f"{method_name}(): Expected dtype int64 for index",
+        )
+
+    if src_opt is not None:
+        check(
+            self.dtype == src_opt.dtype,
+            lambda: f"{method_name}(): Expected self.dtype to be equal to src.dtype",
+        )
+
+
+def ensure_nonempty_dim(dim):
+    return max(dim, 1)
+
+
+# From aten/src/ATen/native/ScatterGatherChecks.h
+def scatter_shape_check(self, dim, index, src_opt=None):
+    if index.numel() == 0:
+        return
+    check(
+        ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
+        lambda: "Index tensor must have the same number of dimensions as self tensor",
+    )
+
+    is_wrong_shape = False
+    self_dims = ensure_nonempty_dim(self.dim())
+
+    # Check: index.size(d) <= self.size(d) for all d != dim
+    for d in range(self_dims):
+        index_d_size = ensure_nonempty_size(index, d)
+        if d == dim:
+            continue
+        if index_d_size > ensure_nonempty_size(self, d):
+            is_wrong_shape = True
+            break
+
+    # Check: index.size(d) <= src.size(d) for all d if src is Tensor
+    if not is_wrong_shape and src_opt is not None:
+        for d in range(self_dims):
+            index_d_size = ensure_nonempty_size(index, d)
+            if index_d_size > ensure_nonempty_size(src_opt, d):
+                is_wrong_shape = True
+                break
+
+    if src_opt is not None:
+        check(
+            ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),
+            lambda: "Index tensor must have the same number of dimensions as self tensor",
+        )
+        check(
+            not is_wrong_shape,
+            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
+            + f" apart from dimension {dim} and to be smaller than src {src_opt.shape}",
+        )
+    else:
+        check(
+            not is_wrong_shape,
+            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
+            + f" apart from dimension {dim}",
+        )
+
+
+# From aten/src/ATen/native/TensorAdvancedIndexing.cpp
+def scatter_meta_impl(self, dim, index, src=None, reduce_=None, use_new_options=False):
+    wrapped_dim = maybe_wrap_dim(dim, self.dim())
+    scatter_gather_dtype_check("scatter", self, index, src)
+    scatter_shape_check(self, wrapped_dim, index, src)
+    if reduce_ is not None:
+        # Check if we have a valid reduce operator.
+        get_operator_enum(reduce_, use_new_options)
+
+
+@register_meta(aten.scatter_add.default, register_dispatcher=False)
+def meta_scatter_add(self, dim, index, src):
+    scatter_meta_impl(self, dim, index, src, "add")
+    return self.new_empty(self.shape)
+
+
+@register_meta(aten.upsample_nearest2d.vec)
+def upsample_nearest2d_vec(input, output_size, scale_factors):
+    mem_format = utils.suggest_memory_format(input)
+    spatial_dimensions = input.dim() - 2
+
+    input_shape = input.shape
+    if output_size is not None:
+        assert scale_factors is None
+        out_size = output_size
+    elif scale_factors is not None:
+        assert output_size is None
+        out_size = []
+        for i in range(spatial_dimensions):
+            sym_float = (input_shape[i + 2] / 1) * scale_factors[i]
+            assert sym_float >= 0
+            out_size.append(math.floor(sym_float))
+
+    output_height = out_size[0]
+    output_width = out_size[1]
+    nbatch = input_shape[0]
+    channels = input_shape[1]
+    return input.new_empty((nbatch, channels, output_height, output_width)).to(
+        memory_format=mem_format
+    )
 
 
 # We must also trigger meta registrations from PrimTorch ref
