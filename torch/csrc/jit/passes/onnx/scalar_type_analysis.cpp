@@ -279,32 +279,16 @@ static void UpdateScalarTypeForInputs(
     auto input_scalar_type =
         input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
 
-    if ((input->node()->kind() == onnx::Constant) ||
-        (input_scalar_type && (*input_scalar_type != scalar_type))) {
-      if (input->node()->kind() == onnx::Constant) {
-        // Fix up the scalar directly instead of inserting a cast operator.
-        // TODO: Keep only the else branch once constant_folding is enabled by
-        // default.
-        at::Tensor val = input->node()->t(attr::value);
-        at::Tensor new_val = val.to(scalar_type);
-        Node* const_node = n->owningGraph()->create(onnx::Constant);
-        const_node->copyMetadata(n);
-        const_node->t_(attr::value, new_val);
-        const_node->insertBefore(n);
-        const_node->output()->setType(TensorType::create(new_val));
-        const_node->copyMetadata(input->node());
-        n->replaceInputWith(input, const_node->output());
-      } else {
-        Node* cast_node = n->owningGraph()->create(onnx::Cast);
-        cast_node->addInput(input);
-        cast_node->copyMetadata(n);
-        cast_node->i_(attr::to, onnx_type);
-        cast_node->insertBefore(n);
-        cast_node->output()->setType(CreateProfiledTensorTypeWithScalarType(
-            input_tensor_type, scalar_type));
-        cast_node->copyMetadata(n);
-        n->replaceInputWith(input, cast_node->output());
-      }
+    if (input_scalar_type && (*input_scalar_type != scalar_type)) {
+      Node* cast_node = n->owningGraph()->create(onnx::Cast);
+      cast_node->addInput(input);
+      cast_node->copyMetadata(n);
+      cast_node->i_(attr::to, onnx_type);
+      cast_node->insertBefore(n);
+      cast_node->output()->setType(CreateProfiledTensorTypeWithScalarType(
+          input_tensor_type, scalar_type));
+      cast_node->copyMetadata(n);
+      n->replaceInputWith(input, cast_node->output());
     }
   }
 }
