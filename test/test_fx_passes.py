@@ -199,6 +199,9 @@ class TestFXGraphPasses(JitTestCase):
         (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']]),
         (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']]),
         (TestPartitionFunctions.forward11, [['add_1'], ['add']]),
+
+        # 4 not necessarily the only partition, just to verify that there's no cyclic dependency after partition
+        (TestPartitionFunctions.forward12, [["add_2"], ["add_3", "add_4", "add_1"], ["add"]]),
     ])
     def test_partitioner(self, fn, expected_partition):
         traced = symbolic_trace(fn)
@@ -219,20 +222,6 @@ class TestFXGraphPasses(JitTestCase):
         expected = fn(a, b, c)
         result = fused_graph(a, b, c)
         torch.testing.assert_close(expected, result)
-
-    @parametrize("fn, expected_partition", [
-        (TestPartitionFunctions.forward12, [["add_2", "add_1", "add"]]),
-    ])
-    def test_partitioner_no_cyclic_dependency(self, fn, expected_partition):
-        traced = symbolic_trace(fn)
-
-        supported_ops = MockOperatorSupport()
-        partitioner = CapabilityBasedPartitioner(traced, supported_ops, allows_single_node_partition=True)
-        partitions = partitioner.propose_partitions()
-
-        print(traced.graph)
-        print(partitions)
-        fused_graph = partitioner.fuse_partitions(partitions)
 
     @parametrize("partition", [
         [['add', 'add_1'], ['add_5', 'add_6']],
