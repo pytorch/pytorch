@@ -127,7 +127,8 @@ class CapabilityBasedPartitioner:
 
         logging.debug("Proposing partitions...")
 
-        def mergeAcyclicUserPartitions(node, merge_self=True):
+        def mergeAcyclicUserPartitions(node):
+            print("merge acyclic user partitions: ", node)
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             merge_candidates: Dict[int, None] = {}
 
@@ -135,6 +136,7 @@ class CapabilityBasedPartitioner:
                 partition_id = next(new_partition_id)
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
+                print("creating single node candidate\n")
 
             for user_node in node.users:
                 if user_node in assignment:
@@ -143,9 +145,12 @@ class CapabilityBasedPartitioner:
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
             merge_candidates_list = list(merge_candidates.keys())
+            print("all candidates: ", merge_candidates_list)
             if len(merge_candidates_list) > 1:
+                print("candidate target: ", self_id)
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:
+                    print("checking other partition: ", other_id)
                     # maybe_merge_partition(self_id, other_id)
                     if maybe_merge_partition(self_id, other_id):
                         print("TTT merging: ", self_id, " and ", other_id)
