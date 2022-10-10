@@ -429,6 +429,7 @@ def assert_valid_qconfig(qconfig: Optional[QConfig],
 
 # TODO: remove QConfigAny and replace it with Optional[QConfig]
 QConfigAny = Optional[QConfig]
+QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
 def add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,
