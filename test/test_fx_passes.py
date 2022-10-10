@@ -161,7 +161,7 @@ class TestPartitionFunctions:
         return out
 
     @staticmethod
-    def forward12(a):
+    def forward12(a, b, c):
         b0 = a + 1.0
         c0 = a + 1.5
         x0 = b0.relu()
