@@ -80,9 +80,6 @@ def meta_randperm(n, *, generator=None, out):
     assert out.ndim == 1 and out.size(0) == n
     return out
 
-@register_meta(aten.randint.default)
-def meta_randperm(high, size, dtype, layout, device, pin_memory):
-    return torch.empty(size, dtype=dtype, device=device)
 
 @register_meta(aten.randint.default)
 def meta_randint(high, size, *, dtype=torch.long, **kwargs):
