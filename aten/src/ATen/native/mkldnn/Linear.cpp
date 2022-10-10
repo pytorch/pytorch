@@ -1,11 +1,12 @@
 #define TORCH_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/core/Tensor.h>
+#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#include <torch/library.h>
 #else
 #include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/mkldnn_linear_backward_input.h>
