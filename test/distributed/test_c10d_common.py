@@ -1366,13 +1366,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
-            dist.Backend._plugins["DUMMY"],
+            dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
 
+    class Options:
+        def __init__(self):
+            pass
+
+        def create(self):
+            pass
+
     @staticmethod
-    def create_dummy(store, rank, size, timeout):
-        return DummyProcessGroup(rank, size)
+    def create_dummy(store, group_rank, group_size, timeout):
+        return DummyProcessGroup(group_rank, group_size)
 
     def test_collectives(self):
         dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
@@ -1432,6 +1439,54 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
+class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super(ProcessGroupWithDispatchedCollectivesTests, self).setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super(ProcessGroupWithDispatchedCollectivesTests, self).tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def _call_collective_with_varying_tensors(self, backend, collective, *args):
+        # call collective with varying tensors to ensure that the tensors are
+        # correctly dispatched
+
+        # TODO: this will be updated in the future to not be backend specific
+        device = "cuda" if backend == "nccl" else "cpu"
+        # ensure supported devices (cpu, cuda) succeeds during dispatch call
+        tensor = torch.zeros(2, 2, device=torch.device(device))
+        # multi tensor collectives
+        if collective == dist.all_gather:
+            collective([tensor], tensor, *args)
+        else:
+            collective(tensor, *args)
+
+    # TODO: backend will be replaced with a non specified backend
+    def _test_collectives(self, backend):
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend,
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        collectives_and_args = [
+            (dist.reduce, self.rank),
+            (dist.broadcast, self.rank),
+            (dist.all_reduce,),
+            (dist.all_gather,)
+        ]
+        for collective, *args in collectives_and_args:
+            with self.subTest(collective=collective, args=args):
+                self._call_collective_with_varying_tensors(backend, collective, *args)
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):

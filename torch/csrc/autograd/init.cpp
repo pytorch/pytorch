@@ -1,6 +1,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/PythonFallbackKernel.h>
 #include <ATen/record_function.h>
@@ -40,6 +41,17 @@ struct DisableFuncTorch {
         back_guard_(c10::DispatchKey::FuncTorchDynamicLayerBackMode) {}
   c10::impl::ExcludeDispatchKeyGuard front_guard_;
   c10::impl::ExcludeDispatchKeyGuard back_guard_;
+};
+
+struct MultithreadingEnabled {
+  MultithreadingEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_multithreading_enabled()) {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(enabled);
+  }
+  ~MultithreadingEnabled() {
+    c10::AutogradState::get_tls_state().set_multithreading_enabled(old_);
+  }
+  bool old_;
 };
 
 struct EnableTorchFunction {
@@ -310,6 +322,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
   m.def("_clear_callbacks", []() { at::clearCallbacks(); });
   m.def(
+      "_saved_tensors_hooks_is_enabled",
+      at::SavedTensorDefaultHooks::is_enabled);
+  m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
+  m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_get_disabled_error_message",
+      at::SavedTensorDefaultHooks::get_disabled_error_message);
+  m.def(
       "_push_saved_tensors_default_hooks",
       [](py::function& pack_hook, py::function& unpack_hook) {
         torch::autograd::PyDefaultSavedVariableHooks::push_hooks(
@@ -345,6 +365,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       _C_m, "_DisablePythonDispatcher")
       .def(py::init<>());
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
+  py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
+      .def(py::init<bool>());
 
   py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
@@ -585,34 +607,6 @@ static PyObject* python_exit_dual_level(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (arg == Py_None) {
-    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
-  } else {
-    Py_INCREF(arg);
-    c10::impl::TorchDispatchModeTLS::set_state(
-        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
-  }
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* get_torch_dispatch_mode(
-    PyObject* _unused,
-    PyObject* _unused2) {
-  HANDLE_TH_ERRORS
-  const auto& mode = c10::impl::TorchDispatchModeTLS::get_state();
-  if (!mode) {
-    Py_RETURN_NONE;
-  } else {
-    auto* r = mode->ptr(getPyInterpreter());
-    Py_INCREF(r);
-    return r;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* set_torch_function_mode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (arg == Py_None) {
@@ -623,21 +617,133 @@ static PyObject* set_torch_function_mode(PyObject* _unused, PyObject* arg) {
         std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
   }
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
+  END_HANDLE_TH_ERRORS;
 }
 
-static PyObject* get_torch_function_mode(
+static PyObject* is_torch_function_mode_enabled(
     PyObject* _unused,
     PyObject* _unused2) {
   HANDLE_TH_ERRORS
-  const auto& mode = at::impl::PythonTorchFunctionTLS::get_mode();
-  if (!mode) {
-    Py_RETURN_NONE;
+  if (at::impl::function_mode_enabled()) {
+    Py_RETURN_TRUE;
   } else {
-    auto* r = mode->ptr(getPyInterpreter());
-    Py_INCREF(r);
-    return r;
+    Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* push_on_torch_function_stack(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg != Py_None) {
+    Py_INCREF(arg);
+    at::impl::PythonTorchFunctionTLS::push_onto_stack(
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* pop_torch_function_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = at::impl::PythonTorchFunctionTLS::pop_stack();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_function_stack_at(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"get_stack_at(int64_t level)"});
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  auto idx = _r.toInt64(0);
+  const auto& mode = at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* len_torch_function_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto len = at::impl::PythonTorchFunctionTLS::stack_len();
+  return utils::wrap(static_cast<int64_t>(len));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_torch_dispatch_mode(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg == Py_None) {
+    c10::impl::TorchDispatchModeTLS::set_mode(nullptr);
+  } else {
+    Py_INCREF(arg);
+    c10::impl::TorchDispatchModeTLS::set_mode(
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS;
+}
+
+static PyObject* push_on_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (arg != Py_None) {
+    Py_INCREF(arg);
+    c10::impl::TorchDispatchModeTLS::push_onto_stack(
+        std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* pop_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto& mode = c10::impl::TorchDispatchModeTLS::pop_stack();
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_dispatch_stack_at(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"get_stack_at(int64_t level)"});
+
+  ParsedArgs<1> parsed_args;
+  auto _r = parser.parse(args, kwargs, parsed_args);
+
+  auto idx = _r.toInt64(0);
+  const auto& mode = c10::impl::TorchDispatchModeTLS::get_stack_at(idx);
+  auto* r = mode->ptr(getPyInterpreter());
+  Py_INCREF(r);
+  return r;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* len_torch_dispatch_stack(
+    PyObject* _unused,
+    PyObject* _unused2) {
+  HANDLE_TH_ERRORS
+  const auto len = c10::impl::TorchDispatchModeTLS::stack_len();
+  return utils::wrap(static_cast<int64_t>(len));
   END_HANDLE_TH_ERRORS
 }
 
@@ -685,10 +791,44 @@ static PyMethodDef methods[] = { // NOLINT
      castPyCFunctionWithKeywords(python_exit_dual_level),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
-    {"_get_torch_dispatch_mode", get_torch_dispatch_mode, METH_NOARGS, nullptr},
+    {"_is_torch_function_mode_enabled",
+     is_torch_function_mode_enabled,
+     METH_NOARGS,
+     nullptr},
     {"_set_torch_function_mode", set_torch_function_mode, METH_O, nullptr},
-    {"_get_torch_function_mode", get_torch_function_mode, METH_NOARGS, nullptr},
+    {"_push_on_torch_function_stack",
+     push_on_torch_function_stack,
+     METH_O,
+     nullptr},
+    {"_pop_torch_function_stack",
+     pop_torch_function_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_get_function_stack_at",
+     castPyCFunctionWithKeywords(get_function_stack_at),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_len_torch_function_stack",
+     len_torch_function_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_set_torch_dispatch_mode", set_torch_dispatch_mode, METH_O, nullptr},
+    {"_push_on_torch_dispatch_stack",
+     push_on_torch_dispatch_stack,
+     METH_O,
+     nullptr},
+    {"_pop_torch_dispatch_stack",
+     pop_torch_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
+    {"_get_dispatch_stack_at",
+     castPyCFunctionWithKeywords(get_dispatch_stack_at),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"_len_torch_dispatch_stack",
+     len_torch_dispatch_stack,
+     METH_NOARGS,
+     nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

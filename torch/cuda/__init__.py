@@ -462,13 +462,14 @@ def set_stream(stream: Stream):
     torch._C._cuda_setStream(stream._cdata)
 
 def _parse_visible_devices() -> Set[int]:
+    """Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
     if var is None:
         return set(x for x in range(64))
 
     def _strtoul(s: str) -> int:
-        """ Return -1 or integer sequence string starts with """
-        if len(s) == 0:
+        """Return -1 or positive integer sequence string starts with,"""
+        if not s:
             return -1
         for idx, c in enumerate(s):
             if not c.isdigit():
@@ -485,6 +486,8 @@ def _parse_visible_devices() -> Set[int]:
     return rc
 
 def _raw_device_count_nvml() -> int:
+    """Return number of devices as reported by NVML
+    or negative value if NVML discovery/initialization failed."""
     from ctypes import CDLL, c_int
     nvml_h = CDLL("libnvidia-ml.so.1")
     rc = nvml_h.nvmlInit()
@@ -500,15 +503,20 @@ def _raw_device_count_nvml() -> int:
     return dev_arr[0]
 
 def _device_count_nvml() -> int:
+    """Return number of devices as reported by NVML taking CUDA_VISIBLE_DEVICES into account.
+    Negative value is returned if NVML discovery or initialization has failed."""
+    visible_devices = _parse_visible_devices()
+    if not visible_devices:
+        return 0
     try:
         raw_cnt = _raw_device_count_nvml()
-        if raw_cnt <= 0:
-            return raw_cnt
-        return len(set(range(raw_cnt)).intersection(_parse_visible_devices()))
     except OSError:
         return -1
     except AttributeError:
         return -1
+    if raw_cnt <= 0:
+        return raw_cnt
+    return len(set(range(raw_cnt)).intersection(visible_devices))
 
 @lru_cache(maxsize=1)
 def device_count() -> int:
@@ -826,7 +834,7 @@ __all__ = [
     'IntStorage', 'IntTensor',
     'LongStorage', 'LongTensor',
     'ShortStorage', 'ShortTensor',
-    'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Device', 'Event', 'ExternalStream', 'OutOfMemoryError',
+    'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError',
     'Stream', 'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
     'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream', 'default_generators',
     'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_arch_list', 'get_device_capability',

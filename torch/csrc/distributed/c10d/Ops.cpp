@@ -6,6 +6,7 @@
 
 namespace c10d {
 namespace {
+
 std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> broadcast_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
@@ -37,6 +38,23 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> allreduce_(
   // the graph later.
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       std::move(tensor_vec), work);
+}
+
+c10::intrusive_ptr<Work> reduce_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const c10::intrusive_ptr<ReduceOp>& reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->reduce(
+      tensor_vec,
+      ReduceOptions{
+          *reduce_op.get(),
+          root_rank,
+          root_tensor,
+          std::chrono::milliseconds(timeout)});
 }
 
 std::tuple<std::vector<std::vector<at::Tensor>>, c10::intrusive_ptr<Work>>
@@ -71,23 +89,6 @@ std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>> reduce_scatter_(
 
   return std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
       output_tensors, work);
-}
-
-c10::intrusive_ptr<Work> reduce_(
-    at::TensorList tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const c10::intrusive_ptr<ReduceOp>& reduce_op,
-    int64_t root_rank,
-    int64_t root_tensor,
-    int64_t timeout) {
-  auto tensor_vec = tensors.vec();
-  return process_group->reduce(
-      tensor_vec,
-      ReduceOptions{
-          *reduce_op.get(),
-          root_rank,
-          root_tensor,
-          std::chrono::milliseconds(timeout)});
 }
 
 c10::intrusive_ptr<Work> gather_(
@@ -167,8 +168,8 @@ TORCH_LIBRARY(c10d, m) {
       .def(torch::init<>())
       .def("wait", [](const c10::intrusive_ptr<Work>& self) { self->wait(); });
   m.class_<ReduceOp>("ReduceOp").def(torch::init<>());
-  // It's important to register the op to the CompositeExplicitAutograd key to
-  // enable
+  // It's important to register the op to the CompositeExplicitAutograd key
+  // instead of the CompositeImplicitAutograd key to enable
   // __torch_dispatch__.
   m.def(
       "broadcast_",
