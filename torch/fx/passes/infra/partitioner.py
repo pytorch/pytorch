@@ -1,13 +1,11 @@
-from typing import Dict, List, Set, Iterable, Optional
+from typing import Dict, List, Set, Iterable
 
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
-from torch.fx.passes.tools_common import NodeList
 
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, _get_qualified_name
 from torch.fx.passes.operator_support import OperatorSupportBase
 
-from collections import defaultdict
 import logging
 import itertools
 from copy import copy
@@ -62,7 +60,7 @@ class CapabilityBasedPartitioner:
             merged_nodes.update(partitions_by_id[other_id].nodes)
 
             # def merge_breaks_dagpartitions: List[Partition]):
-            visited: NodeSet = set()
+            visited: Set[Node] = set()
 
             def dfs_find_cycle(node):
                 if node in visited:
@@ -86,7 +84,7 @@ class CapabilityBasedPartitioner:
                         if dfs_find_cycle(user_node):
                             return True
                 return False
-                
+
             # check if merge would create cyclic dependency.
             for node in merged_nodes:
                 for user_node in node.users:
