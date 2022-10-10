@@ -491,6 +491,13 @@ op_db: List[OpInfo] = [
                 "test_compare_cpu",
             ),
         ),
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
+                "TestCommon",
+                "test_compare_cpu",
+            ),
+        ),
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
