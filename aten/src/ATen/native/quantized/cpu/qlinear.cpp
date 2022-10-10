@@ -1,6 +1,8 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Context.h>
 #include <ATen/Parallel.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
@@ -8,8 +10,19 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
-#include <torch/custom_class.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>         // for _empty_affine_q...
+#include <ATen/ops/_empty_affine_quantized_native.h>  // for empty_affine_qu...
+#include <ATen/ops/empty.h>                           // for empty
+#include <ATen/ops/quantize_per_channel_native.h>     // for quantize_per_ch...
+#include <ATen/ops/quantize_per_tensor_native.h>      // for quantize_per_te...
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/util/irange.h>
 

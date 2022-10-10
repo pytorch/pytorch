@@ -187,11 +187,4 @@ class FlattenParamsWrapper(nn.Module):
         return self.module.__getitem__(key)
 
     def forward(self, *inputs: Any, **kwinputs: Any) -> Any:
-        if self.flat_param is not None:
-            # TODO (awgu): For `use_orig_params=True`, I have moved the
-            # `_use_unsharded_views(False)` call to `handle.unshard()`, namely
-            # `_use_unsharded_flat_param()`. When we retire FPW, we should
-            # consolidate `use_orig_params=False` to do the same.
-            if not self._use_orig_params:
-                self._flat_param_handle._use_unsharded_views(as_params=False)
         return self.module(*inputs, **kwinputs)
