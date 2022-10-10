@@ -15,7 +15,6 @@ from copy import copy
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
-# TODO: partition here could use a refactor to improvement efficiency on merge and traversal
 class Partition:
     def __init__(self, id: int = None, nodes: Iterable[Node] = None):
         self.id = id
@@ -33,8 +32,6 @@ class Partition:
     def size(self):
         return len(self.nodes)
 
-
-
 class CapabilityBasedPartitioner:
 
     def __init__(self,
@@ -46,21 +43,11 @@ class CapabilityBasedPartitioner:
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
 
-    def __get_supported_nodes(self) -> NodeList:
-        logging.debug("Collecting supported nodes...")
-        supported_nodes = []
-        for node in self.graph_module.graph.nodes:
-            if self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node):
-                supported_nodes.append(node)
-        return supported_nodes
-
     def __is_node_supported(self, node: Node) -> bool:
         # TODO: reject 'getitem' node since they are special cased in partitioning.
         return self.operator_support.is_node_supported(dict(self.graph_module.named_modules()), node)
 
     def propose_partitions(self) -> List[Partition]:
-        # candidates: NodeList = self.__get_supported_nodes()
-
         # assumptions: nodes in candidate list is sorted in topological order
         assignment: Dict[Node, int] = {}   # maping from node to partition_id
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
@@ -143,15 +130,8 @@ class CapabilityBasedPartitioner:
                 for other_id in merge_candidates_list[1:]:
                     maybe_merge_partition(self_id, other_id)
 
-        # visit candidates in reversed topological order
-        # for node in reversed(candidates):
-        #     mergeAcyclicUserPartitions(node, True)
-
-        # not very efficient, this handles sibling fusion of partitions that share inputs.
         for node in reversed(self.graph_module.graph.nodes):
             mergeAcyclicUserPartitions(node)
-            #if node not in assignment:
-            #    mergeAcyclicUserPartitions(node, False)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
