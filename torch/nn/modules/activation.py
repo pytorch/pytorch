@@ -654,10 +654,11 @@ class GELU(Module):
     where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
 
     When the approximate argument is 'tanh', Gelu is estimated with:
-        :math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
+
+    .. math:: \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt(2 / \pi) * (x + 0.044715 * x^3)))
 
     Args:
-        approximate (string, optional): the gelu approximation algorithm to use:
+        approximate (str, optional): the gelu approximation algorithm to use:
             ``'none'`` | ``'tanh'``. Default: ``'none'``
 
     Shape:
@@ -683,7 +684,7 @@ class GELU(Module):
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
-        return 'approximate={}'.format(self.approximate)
+        return 'approximate={}'.format(repr(self.approximate))
 
 
 class Hardshrink(Module):
@@ -934,6 +935,7 @@ class MultiheadAttention(Module):
 
     Examples::
 
+        >>> # xdoctest: +SKIP
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
 
@@ -1091,6 +1093,10 @@ class MultiheadAttention(Module):
             why_not_fast_path = "attn_mask was not None"
         elif query.is_nested and key_padding_mask is not None:
             why_not_fast_path = "key_padding_mask is not supported with NestedTensor input"
+        elif self.num_heads % 2 == 1:
+            why_not_fast_path = "num_heads is odd"
+        elif torch.is_autocast_enabled():
+            why_not_fast_path = "autocast is enabled"
 
         if not why_not_fast_path:
             tensor_args = (
@@ -1124,7 +1130,9 @@ class MultiheadAttention(Module):
                     self.out_proj.bias,
                     key_padding_mask if key_padding_mask is not None else attn_mask,
                     need_weights,
-                    average_attn_weights)
+                    average_attn_weights,
+                    1 if key_padding_mask is not None else 0 if attn_mask is not None else None)
+
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
                                 f"The fast path was not hit because {why_not_fast_path}")
@@ -1302,7 +1310,7 @@ class Softmin(Module):
 
     Examples::
 
-        >>> m = nn.Softmin()
+        >>> m = nn.Softmin(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
@@ -1429,7 +1437,7 @@ class LogSoftmax(Module):
 
     Examples::
 
-        >>> m = nn.LogSoftmax()
+        >>> m = nn.LogSoftmax(dim=1)
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """

@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
+from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision
@@ -24,6 +25,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -73,16 +75,46 @@ class Net(nn.Module):
 class DummyState(object):
 
     __slots__ = [
-        "process_group"
+        "process_group",
+        "noise"
     ]
 
-    def __init__(self, process_group):
+    def __init__(self, process_group: dist.ProcessGroup, noise: int):
         self.process_group = process_group
+        self.noise = noise
 
 class DummyHook(object):
 
-    def dummy_hook(self, state: DummyState, grad: torch.Tensor):
+    def dummy_hook_for_no_shard_fsdp(self, state: DummyState, grad: torch.Tensor):
+        """
+        This communication hook is for illustration and testing purpose only.
+        This communication hook is used during FSDP ``NO_SHARD`` training. It adds some noise to
+        the provided ``grad`` parameter and uses ``all_reduce`` to communicate full, flattened,
+        unsharded gradient.
+        """
+        grad.add_(state.noise)
+        dist.all_reduce(grad, group=state.process_group)
+
+    def custom_reduce_scatter(self, output, input, group=None):
+        """
+        This function is for illustrative purpose only.
+        It is meant to implement a custom reduce-scatter
+        of a flattened tensor to all processes in a group.
+        Currently a no-op.
+        """
         pass
+
+    def dummy_hook_for_sharded_fsdp(self, state: DummyState, grad: torch.Tensor, output: torch.Tensor):
+        """
+        This communication hook is for illustration and testing purposes only.
+        This communication hook is used during FSDP ``FULL_SHARD`` or ``SHARD_GRAD_OP`` training.
+        It adds some noise to the provided ``grad`` parameter, uses
+        ``reduce_scatter`` for gradient communication and stores a sharded gradient in ``output``.
+        """
+        grad.add_(state.noise)
+        self.custom_reduce_scatter(
+            output, grad, group=state.process_group
+        )
 
 class TestCommunicationHooks(FSDPTest):
 
@@ -90,7 +122,9 @@ class TestCommunicationHooks(FSDPTest):
     @parametrize(
         "sharding_strategy",
         [
-            ShardingStrategy.NO_SHARD
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP
         ])
     def test_default_communication_hook_behavior(
         self,
@@ -98,21 +132,33 @@ class TestCommunicationHooks(FSDPTest):
     ):
         """
         Tests FSDP's default communication hook's behavior and correctness.
+        This test creates a simple linear net with weight shape  ``1 X N``,
+        where ``N`` is the number of workers.
+        For sharded cases, each worker gets 1 element of the weight parameter. This test
+        checks that after backward, each worker has a proper value in its chunk of
+        the gradient, or the whole gradient on every worker is equal to an expected value.
+
         Arguments:
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
         """
-        m = torch.nn.Linear(1, 5, bias=False)
+        out_dim = self.world_size
+        net = torch.nn.Linear(1, out_dim, bias=False)
         inpt = torch.tensor([self.rank]).float().cuda(self.rank)
 
         net_default_hook = FSDP(
-            m,
+            net,
             device_id=torch.cuda.current_device(),
             sharding_strategy=sharding_strategy
         ).to(self.rank)
 
-        # Check that default hook is set to `all_reduce`
+        # Check that default hook is set to `all_reduce` for `NO_SHARD`
+        # or `reduce_scatter` for sharded cases
+        default_hook = default_hooks.reduce_scatter_hook\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else default_hooks.allreduce_hook
+
         for entry in FSDP.fsdp_modules(net_default_hook):
-            self.assertEqual(entry.communication_hook, default_hooks.allreduce_hook)
+            self.assertEqual(entry._communication_hook, default_hook)
 
         for _ in range(4):
 
@@ -164,6 +210,7 @@ class TestCommunicationHooks(FSDPTest):
     ):
         """
         Tests FSDP's communication hook interface behavior.
+
         Arguments:
             has_wrapping (bool): Configures wrapping of a module.
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
@@ -174,58 +221,70 @@ class TestCommunicationHooks(FSDPTest):
             Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
             sharding_strategy=sharding_strategy
         )
-        dummy_state = DummyState(process_group=None)
 
-        # FSDP currently supports communication hooks for a NO_SHARD strategy
-        # Check that a `NotImplementedError` is raised for other strategies
-        if sharding_strategy != ShardingStrategy.NO_SHARD:
-            # Check that default hook is set to None
-            for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-                self.assertIsNone(entry.communication_hook)
-                self.assertIsNone(entry.communication_hook_state)
+        # Check that default hook is set to `all_reduce` for `NO_SHARD`
+        # or `reduce_scatter` for sharded cases
+        default_hook = default_hooks.reduce_scatter_hook\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else default_hooks.allreduce_hook
 
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                '^Communication hooks are currently only available for a NO_SHARD strategy.$'
-            ):
-                fsdp_model_with_hook.register_comm_hook(dummy_state, DummyHook.dummy_hook)
+        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
+            self.assertEqual(entry._communication_hook, default_hook)
 
-        else:
+        dummy_state = DummyState(process_group=None, noise=1234)
+        dummy_hook = DummyHook.dummy_hook_for_no_shard_fsdp\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else DummyHook.dummy_hook_for_sharded_fsdp
 
-            # Check that default hook is set to `all_reduce`
-            for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-                self.assertEqual(entry.communication_hook, default_hooks.allreduce_hook)
+        fsdp_model_with_hook.register_comm_hook(
+            dummy_state,
+            dummy_hook
+        )
 
-            dummy_state = DummyState(process_group=None)
-
+        # Check that we can't register comm hook twice
+        with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
-                DummyHook.dummy_hook
+                dummy_hook
             )
 
-            # Check that we can't register comm hook twice
-            with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
-                fsdp_model_with_hook.register_comm_hook(
-                    dummy_state,
-                    DummyHook.dummy_hook
-                )
+        # Check dummy hook was registered for the root and all submodules if any
+        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
+            self.assertEqual(
+                entry._communication_hook,
+                dummy_hook
+            )
+            self.assertEqual(
+                entry._communication_hook_state,
+                dummy_state
+            )
 
-            # Check dummy hook was registered for the root and all submodules if any
-            for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-                self.assertEqual(
-                    entry.communication_hook,
-                    DummyHook.dummy_hook
-                )
-                self.assertEqual(
-                    entry.communication_hook_state,
-                    dummy_state
-                )
+        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
+            entry._communication_hook = None
+
+        in_data = torch.rand(16, 8).cuda()
+        loss = fsdp_model_with_hook(in_data).sum()
+        # This Error is raised during backward pass and is checked with `p_assert`,
+        # i.e. it prints error string but AssertionError raises nothing
+        with self.assertRaises(AssertionError):
+            loss.backward()
+
+        for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
+            entry._communication_hook = dummy_hook
+            entry._communication_hook_state = None
+        # Same as above
+        loss = fsdp_model_with_hook(in_data).sum()
+        with self.assertRaises(AssertionError):
+            loss.backward()
+
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
         [
-            ShardingStrategy.NO_SHARD
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP
         ])
     def test_registering_hook_non_root(
         self,
@@ -235,27 +294,32 @@ class TestCommunicationHooks(FSDPTest):
         Tests FSDP's communication hook registering for submodules.
         Make sure it can't be registered for non-root submodules.
         Currently tests only ``NO_SHARD`` strategy.
+
         Arguments:
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
-
         """
 
         fsdp_model_with_hook = self._init_model(
             Net(has_wrapping=True, sharding_strategy=sharding_strategy),
             sharding_strategy=sharding_strategy
         )
-        dummy_state = DummyState(process_group=None)
+        dummy_state = DummyState(process_group=None, noise=1234)
+        dummy_hook = DummyHook.dummy_hook_for_no_shard_fsdp\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else DummyHook.dummy_hook_for_sharded_fsdp
         # Creating a list of non-root submodules to test
         submodules = self._get_submodules(fsdp_model_with_hook)
         # Check that assertion is raised for registering a comm hook on a non-root
         with self.assertRaisesRegex(AssertionError, '^register_comm_hook can only be called on a root instance.$'):
-            submodules[1].register_comm_hook(dummy_state, DummyHook.dummy_hook)
+            submodules[1].register_comm_hook(dummy_state, dummy_hook)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
         [
-            ShardingStrategy.NO_SHARD
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP
         ])
     def test_registering_hook_submodules(
         self,
@@ -265,23 +329,26 @@ class TestCommunicationHooks(FSDPTest):
         Tests FSDP's communication hook registering for submodules.
         Checks behavior if a hook was registered for a non-root submodule
         Currently tests only ``NO_SHARD`` strategy.
+
         Arguments:
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
-
         """
 
         fsdp_model_with_hook = self._init_model(
             Net(has_wrapping=True, sharding_strategy=sharding_strategy),
             sharding_strategy=sharding_strategy
         )
-        dummy_state = DummyState(process_group=None)
+        dummy_state = DummyState(process_group=None, noise=1234)
+        dummy_hook = DummyHook.dummy_hook_for_no_shard_fsdp\
+            if sharding_strategy != ShardingStrategy.NO_SHARD\
+            else DummyHook.dummy_hook_for_sharded_fsdp
         submodules = self._get_submodules(fsdp_model_with_hook)
 
         # Simulate a registration of a hook on a submodule
         submodules[1]._hook_registered = True
         # Check that an error is raised when some of submodules have a non-default hook assigned
         with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
-            fsdp_model_with_hook.register_comm_hook(dummy_state, DummyHook.dummy_hook)
+            fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
         # Reinitialize the model
         fsdp_model_with_hook = self._init_model(
@@ -289,16 +356,16 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy=sharding_strategy
         )
         submodules = self._get_submodules(fsdp_model_with_hook)
-        submodules[1].communication_hook = DummyHook.dummy_hook
+        submodules[1]._communication_hook = dummy_hook
 
         # Check that an error is raised when some of submodules have a non-default hook assigned
         with self.assertRaisesRegex(
             AssertionError,
-            f'^communication hook should be default, but it is {submodules[1].communication_hook.__name__} instead$'
+            f'^communication hook should be default, but it is {submodules[1]._communication_hook.__name__} instead$'
         ):
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
-                DummyHook.dummy_hook
+                dummy_hook
             )
 
     def _check_low_precision_hook(self, state, hook, sharding_strategy, dtype, has_wrapping):
@@ -345,7 +412,9 @@ class TestCommunicationHooks(FSDPTest):
     @parametrize(
         "sharding_strategy",
         [
-            ShardingStrategy.NO_SHARD
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP
         ])
     def test_fp16_hook(
         self,
@@ -353,7 +422,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None)
+        state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.float16, has_wrapping)
@@ -370,7 +439,9 @@ class TestCommunicationHooks(FSDPTest):
     @parametrize(
         "sharding_strategy",
         [
-            ShardingStrategy.NO_SHARD
+            ShardingStrategy.NO_SHARD,
+            ShardingStrategy.FULL_SHARD,
+            ShardingStrategy.SHARD_GRAD_OP
         ])
     def test_bf16_hook(
         self,
@@ -378,7 +449,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None)
+        state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.bfloat16, has_wrapping)

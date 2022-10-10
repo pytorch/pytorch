@@ -3,6 +3,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
+#include <torch/csrc/autograd/graph_task.h>
 #include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
@@ -21,10 +22,10 @@ auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
   variable_list grad_inputs(2);
   if (grad->defined()) {
-    if (should_compute_output(0)) {
+    if (task_should_compute_output(0)) {
       grad_inputs[0] = at::zeros_like(*grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
-    if (should_compute_output(1)) {
+    if (task_should_compute_output(1)) {
       // Handle R->C copies without raising a warning
       const auto src_type = src_options.dtype().toScalarType();
       if (!c10::isComplexType(src_type) && grad->is_complex()) {
@@ -74,15 +75,29 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = grad.new_empty_strided(base.sizes(), base.strides());
+  auto result =
+      grad.new_empty_strided_symint(base.sym_sizes(), base.sym_strides());
   result.copy_(grad);
 
   at::Tensor grad_slice;
   if (view_fn) {
     grad_slice = view_fn(result);
   } else {
-    auto offset = view.storage_offset() - base.storage_offset();
-    grad_slice = result.as_strided(view.sizes(), view.strides(), offset);
+    auto offset = view.sym_storage_offset() - base.sym_storage_offset();
+    grad_slice =
+        result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
+  }
+
+  // Adding the missing nodes to the current graph's `exec_info`.
+  // This is a workaround because the current `GraphTask::init_to_execute`
+  // does not traverse into CopySlices node.
+  const auto exec_info = get_current_graph_task_exec_info();
+  if (exec_info && !exec_info->empty()) {
+    for (const auto& next : fn->next_edges()) {
+      if (next.is_valid()) {
+        add_node_to_current_graph_task_exec_info(next.function.get());
+      }
+    }
   }
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save
@@ -92,7 +107,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
 
   variable_list grad_inputs(num_outputs());
   for (const auto i : c10::irange(res.size())) {
-    if (should_compute_output(i)) {
+    if (task_should_compute_output(i)) {
       AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
