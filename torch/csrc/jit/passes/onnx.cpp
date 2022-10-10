@@ -465,7 +465,9 @@ void NodeToONNX(
       // 1. The torch.autograd.Function class of this node object has `symbolic`
       // method defined.
       // 2. Custom export symbolic is registered for prim::PythonOp.
-      if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX) {
+      if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX ||
+          operator_export_type ==
+              ::torch::onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
         try {
           inlineAutograd(op);
         } catch (const std::exception& ex) {
@@ -481,9 +483,6 @@ void NodeToONNX(
               op->name());
           cloneNode(op);
         }
-      } else if (operator_export_type == ::torch::onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
-        // For ONNX_ATEN_FALLBACK mode, inline all autograd functions
-        inlineAutograd(op);
       } else {
         cloneNode(op);
       }
