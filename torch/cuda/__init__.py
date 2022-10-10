@@ -834,7 +834,7 @@ __all__ = [
     'IntStorage', 'IntTensor',
     'LongStorage', 'LongTensor',
     'ShortStorage', 'ShortTensor',
-    'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Device', 'Event', 'ExternalStream', 'OutOfMemoryError',
+    'CUDAGraph', 'CudaError', 'DeferredCudaCallError', 'Event', 'ExternalStream', 'OutOfMemoryError',
     'Stream', 'StreamContext', 'amp', 'caching_allocator_alloc', 'caching_allocator_delete', 'can_device_access_peer',
     'check_error', 'cudaStatus', 'cudart', 'current_blas_handle', 'current_device', 'current_stream', 'default_generators',
     'default_stream', 'device', 'device_count', 'device_of', 'empty_cache', 'get_arch_list', 'get_device_capability',
