@@ -18,7 +18,7 @@ at::Tensor _nested_tensor_strides(const at::Tensor& self){
   return  get_nested_tensor_impl(self) -> get_nested_stride_tensor();
 }
 std::vector<int64_t> _nested_tensor_offsets(const at::Tensor& self){
-  return get_nested_tensor_impl(self) -> get_offsets();
+  return get_nested_tensor_impl(self) -> get_storage_offsets();
 }
 
 // Helper functions for getting information about a nested tensor's shape.
