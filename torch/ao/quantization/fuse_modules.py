@@ -11,6 +11,12 @@ from torch.nn.utils.parametrize import type_before_parametrizations
 
 from typing import List, Optional
 
+__all__ = [
+    "fuse_known_modules",
+    "fuse_modules",
+    "fuse_modules_qat",
+]
+
 # Generalization of getattr
 def _get_module(model, submodule_key):
     tokens = submodule_key.split('.')
@@ -135,6 +141,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
 
     Examples::
 
+            >>> # xdoctest: +SKIP
             >>> m = M().eval()
             >>> # m is a module containing the sub-modules below
             >>> modules_to_fuse = [ ['conv1', 'bn1', 'relu1'], ['submodule.conv', 'submodule.relu']]

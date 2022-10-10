@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload, cast
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
@@ -43,16 +43,22 @@ ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
 StrideType = Union[List[int], Tuple[int, ...]]
 DimsType = Union[int, List[int], Tuple[int, ...]]
 DimsSequenceType = Union[List[int], Tuple[int, ...]]
+# TODO: Type[torch.SymIntNode], Type[torch.SymFloatNode]
 NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
+# TODO: This needs a lot more type annotations
+# NumberType = Union[bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode]
 NumberType = Union[bool, int, float, complex]
-Number = (bool, int, float, complex)
+Number = (bool, int, float, complex, torch.SymIntNode, torch.SymFloatNode)
 DeviceLikeType = Union[str, torch.device]
 Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
+    torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
     torch.Tensor.numel,
+    torch.Tensor.size,
+    torch.Tensor.storage_offset,
     torch.Tensor.stride,
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
     torch.Tensor.is_sparse.__get__,  # type: ignore[attr-defined]
@@ -86,7 +92,7 @@ def same_shape(a: ShapeType, b: ShapeType) -> bool:
 
 # TODO: look at using torch.testing.assert_close instead with an option
 #   to just compare metadata
-def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
+def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=False):
     """
     Checks that two tensor likes have the same shape,
     dtype and device.
@@ -117,12 +123,15 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
             raise AssertionError(msg)
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
-    # same_strides, idx = check_significant_strides(a, b)
-    # if not same_strides:
-    #     msg = "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-    #         a.stride(), b.stride(), idx
-    #     )
-    # raise RuntimeError(msg)
+    if check_strides:
+        same_strides, idx = check_significant_strides(a, b)
+        if not same_strides:
+            msg = (
+                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
+                    a.stride(), b.stride(), idx
+                )
+            )
+            raise RuntimeError(msg)
 
 
 def check_significant_strides(
@@ -439,21 +448,29 @@ def validate_exclusive_idx(rank: int, ex_idx: int):
     assert ex_idx > 0 and ex_idx <= rank
 
 
-# "Wraps" a dim (up to one time) for the given rank, allowing
-# dims to be specified using negative indices
-def canonicalize_dim(rank: int, idx: int) -> int:
-    # TODO: add a comment for why this is
-    _rank = rank if rank != 0 else 1
+# "Wraps" a dim (up to one time) for the given rank, allowing dims to be
+# specified using negative indices. For scalar tensors with rank 0, then idx
+# must be in the range [-1, 0]. Otherwise, idx should be in the range [-rank, rank-1].
+def canonicalize_dim(rank: int, idx: int, wrap_scalar: bool = True) -> int:
+    if rank < 0:
+        msg = f"Rank cannot be negative but got {rank}"
+        raise IndexError(msg)
 
-    if idx >= 0 and idx < _rank:
+    if rank == 0:
+        if not wrap_scalar:
+            msg = f"Dimension specified as {idx} but tensor has no dimensions"
+            raise IndexError(msg)
+        rank = 1
+
+    if idx >= 0 and idx < rank:
         return idx
 
     if idx < 0:
-        _idx = idx + _rank
+        _idx = idx + rank
     else:
         _idx = idx
 
-    if _idx < 0 or _idx > _rank:
+    if _idx < 0 or _idx >= rank:
         # Same error message as in aten/src/ATen/WrapDimUtils.h:49
         msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
             -rank, rank - 1, idx
@@ -617,8 +634,20 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     return shape if shape is not None else scalar_shape
 
 
+# Extracts dimensions that might be passed either as a list/tuple or as varargs.
+# A typical case is Tensor.permute .
+def extract_dims_from_varargs(dims: Union[DimsSequenceType, Tuple[DimsSequenceType, ...]]) -> DimsSequenceType:
+    if dims and isinstance(dims[0], Sequence):
+        assert len(dims) == 1
+        dims = cast(Tuple[DimsSequenceType], dims)
+        return dims[0]
+    else:
+        return cast(DimsSequenceType, dims)
+
+
 def extract_shape_from_varargs(
-    shape: Union[ShapeType, Tuple[ShapeType]]
+    shape: Union[ShapeType, Tuple[ShapeType]],
+    validate=True,
 ) -> Tuple[int, ...]:
     """
     Returns a shape from varargs.
@@ -642,8 +671,39 @@ def extract_shape_from_varargs(
     if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
 
-    validate_shape(shape)  # type: ignore[arg-type]
+    if validate:
+        validate_shape(shape)  # type: ignore[arg-type]
     return shape  # type: ignore[return-value]
+
+
+def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
+    """
+    Infers the size of a dim with size -1, if it exists.
+    Also checks that new shape is compatible with the number of elements.
+    """
+    dim = None
+    newsize = 1
+    for i, d in enumerate(shape):
+        if d == -1:
+            check(dim is None, lambda: "only one dimension can be inferred")
+            dim = i
+        elif d >= 0:
+            newsize *= d
+        else:
+            check(False, lambda: f"invalid shape dimension {d}")
+    check(
+        numel == newsize or (dim is not None and newsize > 0 and numel % newsize == 0),
+        lambda: f"shape '{list(shape)}' is invalid for input of size {numel}",
+    )
+    if dim is not None:
+        check(
+            newsize != 0,
+            lambda: f"cannot reshape tensor fo 0 elements into shape {shape} because the "
+            f"unspecified dimension size -1 can be any value and is ambiguous",
+        )
+        shape = list(shape)
+        shape[dim] = numel // newsize
+    return tuple(shape)
 
 
 _integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
@@ -725,6 +785,29 @@ def dtype_to_type(dtype: torch.dtype) -> type:
     raise ValueError("Invalid dtype!")
 
 
+def dtype_to_type_ctor(dtype: torch.dtype) -> Callable[[NumberType], NumberType]:
+    """
+    Computes the corresponding Python type constructor for the
+    given dtype.
+    """
+    from torch.fx.experimental.symbolic_shapes import sym_float
+
+    assert isinstance(dtype, torch.dtype)
+
+    if dtype is torch.bool:
+        return lambda x: bool(x)
+    if dtype in _integer_dtypes:
+        # TODO: type error here is real, replace with sym_int
+        return lambda x: int(x)  # type: ignore[arg-type]
+    if dtype in _float_dtypes:
+        return sym_float
+    if dtype in _complex_dtypes:
+        # TODO: type error here is real, replace with sym_complex
+        return lambda x: complex(x)  # type: ignore[arg-type]
+
+    raise ValueError("Invalid dtype!")
+
+
 def type_to_dtype(typ: type) -> torch.dtype:
     """
     Computes the corresponding dtype for a Number type.
@@ -742,6 +825,13 @@ def type_to_dtype(typ: type) -> torch.dtype:
         return corresponding_complex_dtype(torch.get_default_dtype())
 
     raise ValueError("Invalid type!")
+
+
+def get_dtype(x: Union[torch.Tensor, NumberType]):
+    if isinstance(x, torch.Tensor):
+        return x.dtype
+    else:
+        return type_to_dtype(type(x))
 
 
 _ordered_types = (bool, int, float, complex)
@@ -857,6 +947,14 @@ def get_higher_dtype(
             return a
 
     raise RuntimeError("Unexpected termination!")
+
+
+def check_pin_memory(pin_memory: bool):
+    check(not pin_memory, lambda: "PrimTorch does not support pinned memory", NotImplementedError)
+
+
+def check_layout(layout: torch.layout):
+    check(layout == torch.strided, lambda: f"PrimTorch doesn't support layout={layout}", NotImplementedError)
 
 
 # TODO: maybe unify with can_cast_to?
@@ -987,6 +1085,29 @@ class REDUCTION_OUTPUT_TYPE_KIND(Enum):
     ALWAYS_BOOL = (3,)
 
 
+# Describes the return type of the primitive:
+#
+#   - NEW, a new tensor is created
+#   - VIEW, a view of an input tensor is returned
+#   - INPLACE, one or more input tensors is modified
+#
+# these descriptors are mututally exclusive and exhaustive.
+class RETURN_TYPE(Enum):
+    NEW = (0,)
+    VIEW = (1,)
+    INPLACE = (2,)
+
+
+# TODO: when NumberType contains the sym types, can simplify this
+def number_type(x: Union[NumberType, torch.SymIntNode, torch.SymFloatNode]) -> Type:
+    if isinstance(x, torch.SymIntNode):
+        return int
+    elif isinstance(x, torch.SymFloatNode):
+        return float
+    else:
+        return type(x)
+
+
 # TODO: document type promotion kinds
 def elementwise_dtypes(
     *_args,
@@ -1091,7 +1212,7 @@ def elementwise_dtypes(
             raise ValueError(msg)
 
         if isinstance(x, Number):
-            highest_type = get_higher_type(highest_type, type(x))
+            highest_type = get_higher_type(highest_type, number_type(x))
         else:
             # x is a TensorLike
             highest_type = get_higher_type(highest_type, dtype_to_type(x.dtype))
@@ -1302,8 +1423,25 @@ def reduction_dims(shape: ShapeType, dims: Optional[Sequence]) -> Tuple[int, ...
     return dims
 
 
+def set_correction(
+    unbiased: Optional[bool] = None,
+    correction: Optional[int] = None,
+):
+    if correction is not None and unbiased is not None:
+        raise RuntimeError("cannot specify both correction and unbiased arguments")
+    elif correction is None and unbiased is None:
+        correction = 1
+    elif correction is None and unbiased is not None:
+        correction = 0 if unbiased is False else 1
+    if not isinstance(correction, int):
+        raise ValueError("correction argument should be integer")
+    if correction < 0:
+        raise ValueError("correction argument should be non-negative")
+    return correction
+
+
 def check_in_bounds_for_storage(
-    a: torch._TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
+    a: torch.TypedStorage, shape: ShapeType, strides: StrideType, storage_offset: int
 ):
     """
     Determines if the given shape, strides, and offset are valid for the given storage.
@@ -1383,3 +1521,47 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format
+
+
+def prod(xs: Sequence[NumberType]) -> NumberType:
+    """Product of elements in input sequence. Returns 1 for empty sequence"""
+    return reduce(operator.mul, xs, 1)
+
+
+def is_expandable_to(shape: ShapeType, desired: ShapeType) -> bool:
+    """Checks if a shape can be expanded to another shape.
+    This is equivalent to checking if the two shapes are broadcastable.
+    """
+    # This is a Python implementation of
+    # aten/src/ATen/ExpandUtils.h:is_expandable_to
+    if len(shape) > len(desired):
+        return False
+    for i in range(len(shape)):
+        if shape[-i - 1] != desired[-i - 1] and shape[-i - 1] != 1:
+            return False
+    return True
+
+
+def mask_tensor(mask: TensorLikeType, t: TensorLikeType):
+    """
+    Similar to torch.where(mask, t, 0) but if t is boolean,
+    result is also boolean and not promoted to int.
+    """
+    # torch.where(mask, t, False) is equivalent
+    # but feels hacky and might break in the future
+    if t.dtype is torch.bool:
+        return mask.logical_and(t)
+    else:
+        return torch.where(mask, t, 0)
+
+
+def dtype_or_default(dtype: Optional[torch.dtype]) -> torch.dtype:
+    return dtype if dtype is not None else torch.get_default_dtype()
+
+
+def device_or_default(device: Optional[torch.device]) -> torch.device:
+    return device if device is not None else torch.device("cpu")
+
+
+def layout_or_default(layout: Optional[torch.layout]) -> torch.layout:
+    return layout if layout is not None else torch.strided

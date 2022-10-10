@@ -42,6 +42,19 @@ const char* toString(BackendComponent t) {
   }
 }
 
+BackendComponent toBackendComponent(DeviceType device_type) {
+  switch (device_type) {
+#define DO_CASE(device, _)                          \
+  case DeviceType::device: {                        \
+    return toBackendComponent(DispatchKey::device); \
+  }
+    C10_FORALL_BACKEND_DEVICE_TYPES(DO_CASE, unused)
+#undef DO_CASE
+    default:
+      return BackendComponent::InvalidBit;
+  }
+}
+
 const char* toString(DispatchKey t) {
   switch (t) {
     case DispatchKey::Undefined:
@@ -159,12 +172,17 @@ const char* toString(DispatchKey t) {
     case DispatchKey::TESTING_ONLY_GenericMode:
       return "TESTING_ONLY_GenericMode";
 
+    case DispatchKey::PythonDispatcher:
+      return "PythonDispatcher";
+
       // Aliases
 
     case DispatchKey::Autograd:
       return "Autograd";
     case DispatchKey::CompositeImplicitAutograd:
       return "CompositeImplicitAutograd";
+    case DispatchKey::CompositeImplicitAutogradNestedTensor:
+      return "CompositeImplicitAutogradNestedTensor";
     case DispatchKey::CompositeExplicitAutograd:
       return "CompositeExplicitAutograd";
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
@@ -249,6 +267,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"ZeroTensor", c10::DispatchKey::ZeroTensor},
       {"FuncTorchDynamicLayerBackMode",
        c10::DispatchKey::FuncTorchDynamicLayerBackMode},
+      {"Functionalize", c10::DispatchKey::Functionalize},
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
       {"AutogradOther", c10::DispatchKey::AutogradOther},
       {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
@@ -268,6 +287,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"TESTING_ONLY_GenericWrapper",
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
+      {"PythonDispatcher", c10::DispatchKey::PythonDispatcher},
 
       {"CPU", c10::DispatchKey::CPU},
       {"CUDA", c10::DispatchKey::CUDA},
@@ -311,6 +331,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Autograd", c10::DispatchKey::Autograd},
       {"CompositeImplicitAutograd",
        c10::DispatchKey::CompositeImplicitAutograd},
+      {"CompositeImplicitAutogradNestedTensor",
+       c10::DispatchKey::CompositeImplicitAutogradNestedTensor},
       {"CompositeExplicitAutograd",
        c10::DispatchKey::CompositeExplicitAutograd},
       {"CompositeExplicitAutogradNonFunctional",

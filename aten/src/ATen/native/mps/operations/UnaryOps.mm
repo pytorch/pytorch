@@ -19,6 +19,10 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
   if (!output.is_same_size(self)) {
     output.resize_(self.sizes());
   }
+  // Empty tensor is noop
+  if (self.numel() == 0) {
+    return;
+  }
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self}, /*use_scalar_value*/ false);
@@ -57,6 +61,14 @@ void unary_op(const Tensor& self, const Tensor& output, std::string op_name, Una
 
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor)
 {
+  // Rounding is a no-op for integral types, and also a reasonable workaround
+  // For MPSGraph bug on Apple Silicon, that throws `Function floorOp_i64 was not found in the library`
+  // See https://github.com/pytorch/pytorch/issues/84995
+  bool isFloatInput = ([inputTensor dataType] & MPSDataTypeFloatBit) != 0;
+  if (!isFloatInput) {
+    return inputTensor;
+  }
+
   MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
                                                    dataType:inputTensor.dataType];
   MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor

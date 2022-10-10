@@ -11,18 +11,18 @@ using namespace api::utils;
 
 void check_inputs_elementwise_op(const Tensor& input1, const Tensor& input2) {
   TORCH_CHECK(
-      channels_size(input1) == channels_size(input2),
+      get_dim<Dim4D::Channel>(input1) == get_dim<Dim4D::Channel>(input2),
       "Vulkan elementwise ops require channel dimension to be equal!");
-  if (batch_size(input1) != batch_size(input2)) {
+  if (get_dim<Dim4D::Batch>(input1) != get_dim<Dim4D::Batch>(input2)) {
     TORCH_CHECK(
-        channels_size(input1) % 4 == 0,
+        get_dim<Dim4D::Channel>(input1) % 4 == 0,
         "Vulkan elementwise ops require channel to be a multiple of 4 to broadcast along batch dimension!")
   }
 
-  const uint32_t input1_h = height_size(input1);
-  const uint32_t input1_w = width_size(input1);
-  const uint32_t input2_h = height_size(input2);
-  const uint32_t input2_w = width_size(input2);
+  const uint32_t input1_h = get_dim<Dim4D::Height>(input1);
+  const uint32_t input1_w = get_dim<Dim4D::Width>(input1);
+  const uint32_t input2_h = get_dim<Dim4D::Height>(input2);
+  const uint32_t input2_w = get_dim<Dim4D::Width>(input2);
 
   const std::string broadcast_error_msg =
       "Incompatible input dimensions for broadcasting for Vulkan elementwise op!";
