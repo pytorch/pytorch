@@ -184,6 +184,9 @@ __all__ = [
     "int",
     "long",
     "short",
+    "chalf",
+    "cfloat",
+    "cdouble",
     "clone",
     "copy_to",  # TODO: add OpInfo (or implement .to)
     "item",  # TODO: add OpInfo
@@ -1737,6 +1740,24 @@ def short(
     self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
     return self.to(torch.short, memory_format=memory_format)  # type: ignore[call-overload]
+
+
+def chalf(
+    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    return self.to(torch.complex32, memory_format=memory_format)  # type: ignore[call-overload]
+
+
+def cfloat(
+    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    return self.to(torch.cfloat, memory_format=memory_format)  # type: ignore[call-overload]
+
+
+def cdouble(
+    self: TensorLikeType, memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    return self.to(torch.cdouble, memory_format=memory_format)  # type: ignore[call-overload]
 
 
 @register_decomposition(torch.ops.aten.clone)

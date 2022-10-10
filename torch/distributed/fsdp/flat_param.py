@@ -116,8 +116,8 @@ class HandleTrainingState(Enum):
 class HandleConfig:
     sharding_strategy: HandleShardingStrategy
     offload_params: bool
-    param_dtype: Optional[torch.dtype]
-    reduce_dtype: Optional[torch.dtype]
+    low_prec_param_dtype: Optional[torch.dtype]
+    low_prec_reduce_dtype: Optional[torch.dtype]
     keep_low_precision_grads: Optional[bool] = False
 
 
@@ -773,8 +773,8 @@ class FlatParamHandle:
             # that  `_full_param_padded` is in the low precision
             unsharded_flat_param = flat_param._full_prec_full_param_padded  # type: ignore[attr-defined]
             p_assert(
-                unsharded_flat_param.dtype != self._config.param_dtype,
-                f"Expects full precision but got {self._config.param_dtype}",
+                unsharded_flat_param.dtype != self._config.low_prec_param_dtype,
+                f"Expects full precision but got {self._config.low_prec_param_dtype}",
             )
         else:
             unsharded_flat_param = flat_param._full_param_padded  # type: ignore[attr-defined]
@@ -953,7 +953,7 @@ class FlatParamHandle:
                 assert flat_param.grad is not None  # mypy
                 # This cast is meaningful when `param_dtype` is a low precision
                 # dtype.
-                flat_param.grad.data = flat_param.grad.to(self._config.param_dtype)
+                flat_param.grad.data = flat_param.grad.to(self._config.low_prec_param_dtype)
 
         flat_param = self.flat_param
         # TODO (awgu): We should replace these conditional checks to encode
@@ -1637,7 +1637,7 @@ class FlatParamHandle:
 
     @property
     def _uses_param_mixed_precision(self) -> bool:
-        return self._config.param_dtype is not None
+        return self._config.low_prec_param_dtype is not None
 
     @property
     def _force_full_precision(self) -> bool:
