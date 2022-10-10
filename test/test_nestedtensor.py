@@ -649,6 +649,9 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertEqual(chunked[1], torch.nested.nested_tensor(b_nt))
         self.assertEqual(chunked[2], torch.nested.nested_tensor(c_nt))
 
+        for chunk in chunked:
+            self.assertFalse(chunk.is_contiguous())
+
         # Failure chunking on ragged dimensions
         self.assertRaisesRegex(
             RuntimeError, "Chunk for nested tensors is currently only supported for the last dimension.",
@@ -831,6 +834,7 @@ class TestNestedTensorDeviceType(TestCase):
 
         # # Check chunks are contiguous after calling contiguous
         for chunk in chunks:
+            self.assertFalse(chunk.is_contiguous())
             self.assertTrue(chunk.contiguous().is_contiguous())
 
     @dtypes(torch.float, torch.float16)
