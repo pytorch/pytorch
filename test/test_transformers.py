@@ -894,14 +894,15 @@ class TestTransformers(NNTestCase):
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
-            # Invalid last_dim size
-            q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
-            self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
-                q, k, v, None, 0.0, False, False))
+            # Xformers can now cover this case but will add back in next PR
+            # # Invalid last_dim size
+            # q, k, v = make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4), make_tensor(2, 2, 3, 4)
+            # self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
+            #     q, k, v, None, 0.0, False, False))
 
             # Invalid dtype
-            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float), make_tensor(
-                2, 2, 3, 16, dtype=torch.float), make_tensor(2, 2, 3, 16, dtype=torch.float)
+            q, k, v = make_tensor(2, 2, 3, 16, dtype=torch.float64), make_tensor(
+                2, 2, 3, 16, dtype=torch.float64), make_tensor(2, 2, 3, 16, dtype=torch.float64)
             self.assertRaises(RuntimeError, lambda: torch.nn.functional._scaled_dot_product_attention(
                 q, k, v, None, 0.0, False, False))
 
