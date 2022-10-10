@@ -55,7 +55,6 @@ from jit.test_typing import TestTyping  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
-from jit.test_schema_check import TestSchemaCheck  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
@@ -70,7 +69,6 @@ from jit.test_attr import TestGetDefaultAttr  # noqa: F401
 from jit.test_aten_pow import TestAtenPow  # noqa: F401
 from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobilePreserveDebugInfo  # noqa: F401
 from jit.test_union import TestUnion  # noqa: F401
-from jit.test_legacy_upgraders import TestLegacyUpgraders  # noqa: F401
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
 from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
 from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
@@ -1860,6 +1858,7 @@ graph(%Ra, %Rb):
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     def test_dropout_func_requires_grad(self):
         def dropout_training(input):
             return F.dropout(input, 0.5, training=True)

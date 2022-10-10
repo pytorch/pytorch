@@ -1,15 +1,21 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
+#include <ATen/core/Tensor.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <limits>
 #include <vector>
-#include <sstream>
-#include <functional>
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/cuda/Exceptions.h>
@@ -131,7 +137,7 @@ struct Workspace {
     // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
     // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
     // we manually fail with OOM.
-    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+    TORCH_CHECK_WITH(OutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
     data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
@@ -505,7 +511,7 @@ public:
       try {
         f(algoPerf);
         return;
-      } catch (c10::CUDAOutOfMemoryError &e) {
+      } catch (c10::OutOfMemoryError &e) {
         cudaGetLastError(); // clear CUDA error
       }
     }
@@ -516,7 +522,7 @@ public:
         f(algoPerf);
         cache.insert(args.params, algoPerf);
         return;
-      } catch (c10::CUDAOutOfMemoryError &e) {
+      } catch (c10::OutOfMemoryError &e) {
         cudaGetLastError(); // clear CUDA error
       } catch (c10::CuDNNError &e) {
         cudaGetLastError(); // clear CUDA error
@@ -530,7 +536,7 @@ inline Tensor allocate_workspace(size_t size, const Tensor &other) {
   // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
   // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
   // we manually fail with OOM.
-  TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+  TORCH_CHECK_WITH(OutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
   return at::empty({static_cast<int64_t>(size)}, other.options().dtype(kByte));
 }
 

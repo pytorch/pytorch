@@ -164,6 +164,7 @@ Atomic##NAME##IntegerImpl<DTYPE, sizeof(DTYPE)>()(address,                      
 }                                                                                                                      \
 
 ATOMIC_INTEGER_IMPL(Add)
+GPU_ATOMIC_INTEGER(Add, a || b, bool)
 
 // Don't instantiate gpuAtomicAdd with the macro as it seems non-standard (see int32, int64)
 static inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
@@ -204,10 +205,6 @@ static inline __device__ void gpuAtomicAdd(int64_t *address, int64_t val) {
                                                       return a + b;
                                                    });
 #endif
-}
-
-static inline __device__ void gpuAtomicAdd(bool *address, bool val) {
-  *address = address && val;
 }
 
 static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val) {
@@ -256,7 +253,7 @@ static inline __device__ double atomicAdd(double* address, double val)
  * minimal.
  */
 
-#if defined(__HIP_PLATFORM_HCC__) && __hcc_workweek__ < 18312 && !__HIP__
+#if defined(USE_ROCM) && __hcc_workweek__ < 18312 && !__HIP__
   // This needs to be defined for the host side pass
   static inline  __device__  double atomicAdd(double *address, double val) { }
 #endif
