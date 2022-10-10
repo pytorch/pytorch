@@ -97,6 +97,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(_is_tangent, joint_module.graph.nodes))
     # Construct the forward module
+    # Keep symints separate from tensors, passed between fwd/bwd graphs, and in the right order.
     fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values + saved_sym_nodes)
     bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_sym_nodes + saved_values + tangent_inputs, bwd_outputs)
 
@@ -154,16 +155,20 @@ def default_partition(
     forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
     forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
     saved_values = []
+    saved_sym_nodes = []
 
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
-        # Since we can't save tuple of tensor values, we need to flatten out what we're saving
-        if (
+        if is_sym_node(node):
+            # Symints must be kept separate from tensors so that PythonFunction only calls
+            # save_for_backward on tensors and stashes symints in autograd .ctx
+            saved_sym_nodes.append(node)
+        elif (
             'tensor_meta' not in node.meta
             and node.op == 'call_function'
-            and not is_sym_node(node)
         ):
+            # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
             for user in users:
@@ -171,8 +176,7 @@ def default_partition(
         else:
             saved_values.append(node)
     saved_values = list(set(saved_values))
-    saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
-    saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+    saved_sym_nodes = list(set(saved_sym_nodes))
 
     return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes)
 
@@ -414,6 +418,8 @@ def min_cut_rematerialization_partition(
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
+    # Symints must be kept separate from tensors so that PythonFunction only calls
+    # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
     fw_module, bw_module = _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes)
