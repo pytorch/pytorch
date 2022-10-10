@@ -1,11 +1,11 @@
 # Owner(s): ["module: mkldnn"]
-import gc
 import sys
 import torch
 import unittest
 import itertools
-
 import torch.nn as nn
+from functools import wraps
+from concurrent import futures
 import torch.nn.functional as F
 import torch.fx.experimental.optimization as optimization
 from torch.testing._internal.jit_utils import JitTestCase
@@ -15,6 +15,21 @@ from torch.testing._internal.common_device_type import (
     onlyCPU,
     dtypes
 )
+
+# We use this wrapper to run UTs of TorchVision models because of a memory-leak
+# issue with JIT tracing that causes traced model objects to persist in the
+# memory. Ref: https://github.com/pytorch/pytorch/issues/35600
+# Memory requirement for running these UTs was thus increasing cumulatively, and
+# invoked the Linux kernel OOM killer on linux.2xlarge PyTorch CI runners, which
+# only have 16 GB RAM. Cumulatively, these UTs had been using more than 14 GB
+# memory (as per psutils). So now we run each TorchVision model UTs in separate processes.
+def separate_process(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        with futures.ProcessPoolExecutor() as executor:
+            future = executor.submit(func, *args, **kwargs)
+            futures.wait([future])
+    return wrapper
 
 def is_avx512_supported():
     if sys.platform != 'linux':
@@ -44,14 +59,6 @@ class JitLlgaTestCase(JitTestCase):
         torch.jit.enable_onednn_fusion(True)
 
     def tearDown(self):
-        # JIT trace currently leaks memory. Ref: https://github.com/pytorch/pytorch/issues/86537
-        # TorchVision tests use large amount of memory, as the traced models remain in memory
-        # even if a del statement is used.
-        # This can be an issue on machines with less memory, such as the linux.2xlarge CI runner.
-        # Invoking gc.collect() lets python use the memory for future objects, but it might not
-        # relinquish the memory to the Linux subsystem, so this tentative solution might not fix
-        # the issue of this test's process getting killed by Linux's OOM killer on such machines.
-        gc.collect()
         torch.jit.enable_onednn_fusion(False)
         torch._C._jit_set_autocast_mode(self.original_autocast_mode)
 
@@ -810,6 +817,7 @@ for model_name, enabled in [
 ]:
     def _wrapper(mname, dtype):
         @unittest.skipIf(not enabled, 'Disabled')
+        @separate_process
         def test(self, dtype=dtype):
             return self._test_vision(mname, dtype)
         return test
