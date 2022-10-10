@@ -831,18 +831,19 @@ Tensor logcumsumexp_backward(
 }
 
 Tensor unbind_backward(const variable_list& grads, int64_t dim) {
-  IntArrayRef sizes;
+  c10::SymIntArrayRef sizes;
   at::TensorOptions o;
   for (const auto& v : grads) {
     if (v.defined()) {
-      sizes = v.sizes();
+      sizes = v.sym_sizes();
       o = static_cast<Tensor>(v).options();
       break;
     }
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }
@@ -1807,9 +1808,9 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
 
 Tensor split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    c10::SymIntArrayRef split_sizes,
+    IntArrayRef split_sizes,
     int64_t dim,
-    c10::SymIntArrayRef sizes,
+    IntArrayRef sizes,
     const at::TensorOptions& options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
 
@@ -1823,7 +1824,7 @@ Tensor split_with_sizes_backward(
       auto length = split_sizes[j];
       auto grad_size = sizes.vec();
       grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros_symint(grad_size, options);
+      grads_all_defined[j] = at::zeros(grad_size, options);
     }
   }
 
@@ -1833,17 +1834,17 @@ Tensor split_with_sizes_backward(
 
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    c10::SymInt split_size,
+    int64_t split_size,
     int64_t dim,
-    c10::SymIntArrayRef sym_sizes,
+    IntArrayRef sizes,
     const at::TensorOptions& options) {
-  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
-  auto dim_size = sym_sizes[dim];
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  int64_t dim_size = sizes[dim];
   int64_t num_splits = grads.size();
-  std::vector<c10::SymInt> split_sizes(num_splits, split_size);
+  std::vector<int64_t> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
       split_size - (split_size * num_splits - dim_size);
-  return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
+  return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
 }
 
 Tensor max_pool_double_backward(

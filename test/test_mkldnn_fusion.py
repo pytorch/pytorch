@@ -1,6 +1,7 @@
 # Owner(s): ["module: mkldnn"]
 import itertools
 import unittest
+from typing import NamedTuple, List
 
 import torch
 from torch import nn
@@ -12,6 +13,12 @@ from test_tensorexpr import warmup_and_run_forward
 
 FUSION_GROUP = 'prim::TensorExprGroup'
 
+
+class EltwiseFusionOp(NamedTuple):
+    attr : str
+    pointwise_module : nn.Module
+    scalars : List = []
+    algorithm : str = ""
 
 @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
@@ -158,6 +165,49 @@ class TestMkldnnFusion(JitTestCase):
             x = torch.randn(input_sizes).to(memory_format=memory_format)
             graph = self._check_model(m, x, trace)
             self.assertGraphContains(graph, kind='aten::_convolution')
+
+    def _eltwise_list(self):
+        eltwise_list = {
+            "relu": EltwiseFusionOp("relu", nn.ReLU()),
+            "sigmoid": EltwiseFusionOp("sigmoid", nn.Sigmoid()),
+            "tanh": EltwiseFusionOp("tanh", nn.Tanh()),
+            "hardswish": EltwiseFusionOp("hardswish", nn.Hardswish()),
+            "leaky_relu": EltwiseFusionOp("leaky_relu", nn.LeakyReLU(0.1, inplace=False), scalars=[0.1]),
+            "hardtanh": EltwiseFusionOp("hardtanh", nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False), scalars=[-0.5, 4]),
+            "gelu_none": EltwiseFusionOp("gelu", nn.GELU(approximate="none"), algorithm="none"),
+            "gelu_tanh": EltwiseFusionOp("gelu", nn.GELU(approximate="tanh"), algorithm="tanh"),
+        }
+        return eltwise_list
+
+    def test_linear_eltwise(self):
+        class M(nn.Module):
+            def __init__(self, eltwise_fn, in_channels, out_channels, bias, **kwargs):
+                super(M, self).__init__()
+                self.linear = torch.nn.Linear(
+                    in_channels, out_channels, bias=bias, **kwargs
+                )
+                self.eltwise = eltwise_fn
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.eltwise(x)
+                return x
+
+        for pointwise_name, pointwise_info in self._eltwise_list().items():
+            options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
+            for input_shape, bias in options:
+                with torch.no_grad():
+                    mod = M(pointwise_info.pointwise_module, input_shape[-1], 10, bias).eval()
+                    v = torch.randn(input_shape)
+
+                    ref = mod(v)
+                    attr = pointwise_info.attr
+                    scalars = pointwise_info.scalars
+                    algorithm = pointwise_info.algorithm
+                    fused = torch.ops.mkldnn._linear_pointwise(
+                        v, mod.linear.weight, mod.linear.bias, attr, scalars, algorithm
+                    )
+                    self.assertEqual(ref, fused)
 
 
 if __name__ == "__main__":
