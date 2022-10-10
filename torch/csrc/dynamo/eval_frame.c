@@ -3,6 +3,9 @@
 #include <frameobject.h>
 #include <pystate.h>
 
+// Only Python 3.7 through 3.10 supported
+#if PY_VERSION_HEX < 0x03110000
+
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
 #define Py_BUILD_CORE
@@ -10,7 +13,10 @@
 #undef Py_BUILD_CORE
 #endif
 
+// C doesn't have bool types
+#ifndef bool
 #define bool char
+#endif
 #define false 0
 #define true 1
 
@@ -547,6 +553,20 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+#else // python 3.11
+#define PY311_RETURN_ERROR(name)                                          \
+  static PyObject* name(PyObject* dummy, PyObject* args) {                \
+    PyErr_SetString(PyExc_RuntimeError, "Python 3.11 not yet supported"); \
+    return NULL;                                                          \
+  }
+PY311_RETURN_ERROR(set_eval_frame_py);
+PY311_RETURN_ERROR(reset_code);
+PY311_RETURN_ERROR(unsupported);
+PY311_RETURN_ERROR(skip_code);
+PY311_RETURN_ERROR(set_guard_fail_hook);
+PY311_RETURN_ERROR(set_guard_error_hook);
+#endif
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
@@ -564,6 +584,7 @@ static struct PyModuleDef _module = {
     _methods};
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
+#if PY_VERSION_HEX < 0x03110000
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
@@ -574,5 +595,6 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
 
   noargs = PyTuple_New(0);
   dotzerokey = PyUnicode_InternFromString(".0");
+#endif
   return PyModule_Create(&_module);
 }
