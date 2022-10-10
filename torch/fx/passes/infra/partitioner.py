@@ -69,10 +69,14 @@ class CapabilityBasedPartitioner:
 
         def maybe_merge_partition(self_id: int, other_id: int):
             # merged nodes
-            merged_nodes = copy(partitions_by_id[self_id].nodes).update(partitions_by_id[other_id].nodes)
+            #merged_nodes = copy(partitions_by_id[self_id].nodes).update(partitions_by_id[other_id].nodes)
+            merged_nodes = copy(partitions_by_id[self_id].nodes)
+            print("self_id: ", merged_nodes)
+            merged_nodes.update(partitions_by_id[other_id].nodes)
+            print("self_id merged with other: ", merged_nodes)
             print("merging: ", self_id, " and ", other_id)
             print("assignment: ", assignment)
-            print("assignment: ", partitions_by_id)
+            print("partitions_by_id: ", partitions_by_id)
 
             # def merge_breaks_dagpartitions: List[Partition]):
             visited: NodeSet = set()
