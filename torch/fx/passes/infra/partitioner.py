@@ -44,6 +44,7 @@ class CapabilityBasedPartitioner:
         self.graph_module = graph_module
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
+        print("original graph:\n", self.graph_module.graph)
 
     def __get_supported_nodes(self) -> NodeList:
         logging.debug("Collecting supported nodes...")
@@ -68,14 +69,20 @@ class CapabilityBasedPartitioner:
         def maybe_merge_partition(self_id: int, other_id: int):
             # merged nodes
             merged_nodes = copy(partitions_by_id[self_id].nodes).update(partitions_by_id[other_id].nodes)
+            print("merging: ", self_id, " and ", other_id)
+            print("assignment: ", assignment)
+            print("assignment: ", partitions_by_id)
 
             # def merge_breaks_dagpartitions: List[Partition]):
             visited: NodeSet = set()
 
             def dfs_find_cycle(node):
+                print("visiting node: ", node)
                 if node in visited:
+                    print("visited, return false")
                     return False
                 if node in merged_nodes:
+                    print("cycle found")
                     return True  # found cycle, return
 
                 # branching on partition or not
@@ -139,7 +146,11 @@ class CapabilityBasedPartitioner:
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
                 for other_id in merge_candidates_list[1:]:
-                    maybe_merge_partition(self_id, other_id)
+                    # maybe_merge_partition(self_id, other_id)
+                    if maybe_merge_partition(self_id, other_id):
+                        print("TTT merging: ", self_id, " and ", other_id)
+                    else:
+                        print("XXX not merging: ", self_id, " and ", other_id)
 
         # visit candidates in reversed topological order
         # for node in reversed(candidates):
