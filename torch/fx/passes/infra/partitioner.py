@@ -162,7 +162,7 @@ class CapabilityBasedPartitioner:
         #     mergeAcyclicUserPartitions(node, True)
 
         # not very efficient, this handles sibling fusion of partitions that share inputs.
-        for node in self.graph_module.graph.nodes:
+        for node in reversed(self.graph_module.graph.nodes):
             mergeAcyclicUserPartitions(node)
             #if node not in assignment:
             #    mergeAcyclicUserPartitions(node, False)
