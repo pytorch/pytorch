@@ -558,8 +558,8 @@ class DeviceCachingAllocator {
   bool record_history = false;
   std::atomic<CreateContextFn> context_recorder_;
   size_t alloc_trace_next = 0;
-  bool alloc_trace_record_context = false;
-  size_t alloc_trace_max_entries = 1;
+  bool alloc_trace_record_context_ = false;
+  size_t alloc_trace_max_entries_ = 1;
   std::vector<TraceEntry>*
       alloc_trace; // pointer because we need to intentionally leak this on
                    // deallocation it can hold references to Python state which
@@ -599,11 +599,10 @@ class DeviceCachingAllocator {
       size_t alloc_trace_max_entries,
       bool alloc_trace_record_context) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
-    this->record_history = enabled;
-    this->context_recorder_.store(context_recorder);
-    this->alloc_trace_max_entries =
-        std::max(size_t(1), alloc_trace_max_entries);
-    this->alloc_trace_record_context = alloc_trace_record_context;
+    record_history = enabled;
+    context_recorder_.store(context_recorder);
+    alloc_trace_max_entries_ = std::max(size_t(1), alloc_trace_max_entries);
+    alloc_trace_record_context_ = alloc_trace_record_context;
     alloc_trace_next = 0;
     alloc_trace->clear();
   }
@@ -1758,12 +1757,12 @@ class DeviceCachingAllocator {
         addr,
         size,
         stream,
-        alloc_trace_record_context ? std::move(context) : nullptr);
-    if (alloc_trace->size() < alloc_trace_max_entries) {
+        alloc_trace_record_context_ ? std::move(context) : nullptr);
+    if (alloc_trace->size() < alloc_trace_max_entries_) {
       alloc_trace->emplace_back(te);
     } else {
       (*alloc_trace)[alloc_trace_next++] = te;
-      if (alloc_trace_next == alloc_trace_max_entries) {
+      if (alloc_trace_next == alloc_trace_max_entries_) {
         alloc_trace_next = 0;
       }
     }
