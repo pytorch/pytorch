@@ -795,7 +795,7 @@ void cuLoadWriteStridedInputs(
     const T* input,
     const T* dout,
     const int i1_end,
-    const int64_t n2,
+    const int64_t N,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd)
 {
@@ -805,9 +805,9 @@ void cuLoadWriteStridedInputs(
     T curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*n2+i2;
+      int load_idx = i1*N+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
-      if (i2<n2) {
+      if (i2<N) {
         T curr_input = static_cast<T>(input[load_idx]);
         T curr_dout = static_cast<T>(dout[load_idx]);
         warp_buf1[write_idx] = curr_dout;
@@ -838,7 +838,7 @@ void cuLoadAddStridedInputs(
     const T* input,
     const T* dout,
     const int i1_end,
-    const int64_t n2,
+    const int64_t N,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd)
 {
@@ -848,9 +848,9 @@ void cuLoadAddStridedInputs(
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
-      int load_idx = i1*n2+i2;
+      int load_idx = i1*N+i2;
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
-      if (i2<n2) {
+      if (i2<N) {
         T_ACC curr_input = static_cast<T_ACC>(input[load_idx]);
         T_ACC curr_dout = static_cast<T_ACC>(dout[load_idx]);
         warp_buf1[write_idx] += curr_dout;
@@ -864,18 +864,18 @@ template<typename T, typename T_ACC> __global__
 void cuComputePartGradGammaBeta(
     const T* __restrict__ dout,
     const T* __restrict__ input,
-    const int64_t n1,
-    const int64_t n2,
+    const int64_t M,
+    const int64_t N,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
     T_ACC* part_grad_gamma,
     T_ACC* part_grad_beta)
 {
-    const int numsegs_n1 = (n1+blockDim.y*blockDim.y-1) / (blockDim.y*blockDim.y);
-    const int segs_per_block = (numsegs_n1 + gridDim.y - 1) / gridDim.y;
+    const int numsegs_M = (M+blockDim.y*blockDim.y-1) / (blockDim.y*blockDim.y);
+    const int segs_per_block = (numsegs_M + gridDim.y - 1) / gridDim.y;
     const int i1_beg = blockIdx.y * segs_per_block * blockDim.y*blockDim.y;
     const int i1_beg_plus_one = (blockIdx.y+1) * segs_per_block * blockDim.y*blockDim.y;
-    const int i1_end = i1_beg_plus_one < n1 ? i1_beg_plus_one : n1;
+    const int i1_end = i1_beg_plus_one < M ? i1_beg_plus_one : M;
     const int row_stride = blockDim.x+1;
     const int thr_load_col_off = (threadIdx.x*blockDim.y)&(blockDim.x-1);
     const int thr_load_row_off = (threadIdx.x*blockDim.y)/blockDim.x + threadIdx.y*blockDim.y;
@@ -886,9 +886,9 @@ void cuComputePartGradGammaBeta(
     T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
     // compute partial sums from strided inputs
     // do this to increase number of loads in flight
-    cuLoadWriteStridedInputs(i1_beg,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd);
+    cuLoadWriteStridedInputs(i1_beg,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,N,mean,rstd);
     for (int i1_block = i1_beg+blockDim.y*blockDim.y;  i1_block < i1_end;  i1_block+=blockDim.y*blockDim.y) {
-      cuLoadAddStridedInputs(i1_block,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd);
+      cuLoadAddStridedInputs(i1_block,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,N,mean,rstd);
     }
     __syncthreads();
     // inter-warp reductions
@@ -917,13 +917,13 @@ void cuComputePartGradGammaBeta(
       __syncthreads();
     }
     int i2 = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadIdx.y == 0 && i2 < n2) {
+    if (threadIdx.y == 0 && i2 < N) {
       int row1 = threadIdx.y;
       int row2 = threadIdx.y + 1;
       int idx1 = row1*row_stride + threadIdx.x;
       int idx2 = row2*row_stride + threadIdx.x;
-      part_grad_beta[blockIdx.y*n2+i2] = warp_buf1[idx1] + warp_buf1[idx2];
-      part_grad_gamma[blockIdx.y*n2+i2] = warp_buf2[idx1] + warp_buf2[idx2];
+      part_grad_beta[blockIdx.y*N+i2] = warp_buf1[idx1] + warp_buf1[idx2];
+      part_grad_gamma[blockIdx.y*N+i2] = warp_buf2[idx1] + warp_buf2[idx2];
     }
 }
 
@@ -932,8 +932,8 @@ void cuComputeGradGammaBeta(
     const T_ACC* part_grad_gamma,
     const T_ACC* part_grad_beta,
     const int part_size,
-    const int64_t n1,
-    const int64_t n2,
+    const int64_t M,
+    const int64_t N,
     T* grad_gamma,
     T* grad_beta)
 {
@@ -941,16 +941,16 @@ void cuComputeGradGammaBeta(
     SharedMemory<T_ACC> shared;
     T_ACC* buf = shared.getPointer();
     int i2 = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i2 < n2) {
+    if (i2 < N) {
       // each warp does sequential reductions until reduced part_size is num_warps
       int num_warp_reductions = part_size / blockDim.y;
       T_ACC sum_gamma = T_ACC(0);
       T_ACC sum_beta = T_ACC(0);
-      const T_ACC* part_grad_gamma_ptr = part_grad_gamma + threadIdx.y * num_warp_reductions * n2 + i2;
-      const T_ACC* part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * n2 + i2;
+      const T_ACC* part_grad_gamma_ptr = part_grad_gamma + threadIdx.y * num_warp_reductions * N + i2;
+      const T_ACC* part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * N + i2;
       for (int warp_offset = 0;  warp_offset < num_warp_reductions;  ++warp_offset) {
-        sum_gamma += part_grad_gamma_ptr[warp_offset*n2];
-        sum_beta += part_grad_beta_ptr[warp_offset*n2];
+        sum_gamma += part_grad_gamma_ptr[warp_offset*N];
+        sum_beta += part_grad_beta_ptr[warp_offset*N];
       }
       // inter-warp reductions
       const int nbsize3 = blockDim.x * blockDim.y / 2;
@@ -982,37 +982,37 @@ template<typename T, typename T_ACC> __global__
 void cuComputeGradInput(
     const T* __restrict__ dout,
     const T* __restrict__ input,
-    const int64_t n1,
-    const int64_t n2,
+    const int64_t M,
+    const int64_t N,
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
     const T* gamma,
     T* grad_input)
 {
-  for (int i1=blockIdx.y; i1 < n1; i1 += gridDim.y) {
+  for (int i1=blockIdx.y; i1 < M; i1 += gridDim.y) {
     T_ACC sum_loss1 = T_ACC(0);
     T_ACC sum_loss2 = T_ACC(0);
     T_ACC c_mean = mean[i1];
     const T_ACC c_rstd = rstd[i1];
-    const T* k_input = input + i1*n2;
-    const T* k_dout = dout + i1*n2;
+    const T* k_input = input + i1*N;
+    const T* k_dout = dout + i1*N;
     const int numx = blockDim.x * blockDim.y;
     const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
     if (gamma != NULL) {
       // Optimization for ROCm MI100
-      for( int l = 0; l < n2 ; l += numx) {
+      for( int l = 0; l < N ; l += numx) {
         int idx = l + thrx;
-        const T_ACC gamma_idx = static_cast<T_ACC>((idx<n2) ? gamma[idx] : T(0));
-        const T_ACC c_h = static_cast<T_ACC>((idx<n2) ? k_input[idx] : T(0));
-        const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
+        const T_ACC gamma_idx = static_cast<T_ACC>((idx<N) ? gamma[idx] : T(0));
+        const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
         sum_loss1 += c_loss * gamma_idx;
         sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
       }
     } else {
-      for( int l = 0; l < n2 ; l += numx) {
+      for( int l = 0; l < N ; l += numx) {
         int idx = l + thrx;
-        const T_ACC c_h = static_cast<T_ACC>((idx<n2) ? k_input[idx] : T(0));
-        const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
+        const T_ACC c_h = static_cast<T_ACC>((idx<N) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<N) ? k_dout[idx] : T(0));
         sum_loss1 += c_loss;
         sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
       }
@@ -1053,11 +1053,11 @@ void cuComputeGradInput(
       }
     }
     // all threads now have the two sums over l
-    T_ACC fH = (T_ACC)n2;
+    T_ACC fH = (T_ACC)N;
     T_ACC term1 = (T_ACC(1) / fH) * c_rstd;
-    T* k_grad_input = grad_input + i1*n2;
+    T* k_grad_input = grad_input + i1*N;
     if (gamma != NULL) {
-      for (int l = thrx;  l < n2;  l+=numx) {
+      for (int l = thrx;  l < N;  l+=numx) {
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss * gamma[l];
@@ -1067,7 +1067,7 @@ void cuComputeGradInput(
         k_grad_input[l] = static_cast<T>(f_grad_input);
       }
     } else {
-      for (int l = thrx;  l < n2;  l+=numx) {
+      for (int l = thrx;  l < N;  l+=numx) {
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss;
