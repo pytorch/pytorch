@@ -1159,8 +1159,13 @@ The following :mod:`torch` functions support sparse tensors:
 Unary functions
 ---------------
 
-All zero-preserving unary functions support sparse
-COO/CSR/CSC/BSR/CSR tensor inputs:
+We aim to support all zero-preserving unary functions.
+
+If you find that we are missing a zero-preserving unary function
+that you need, please feel encouraged to open an issue for a feature request.
+As always please kindly try the search function first before opening an issue.
+
+The following operators currently support sparse COO/CSR/CSC/BSR/CSR tensor inputs.
 
 :func:`~torch.abs`
 :func:`~torch.asin`
