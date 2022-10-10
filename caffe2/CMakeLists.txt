@@ -627,6 +627,7 @@ endif()
 
 if(USE_CUDA OR USE_ROCM)
   append_filelist("libtorch_cuda_core_sources" Caffe2_GPU_HIP_JIT_FUSERS_SRCS)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/runtime/register_backend_ops.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA")
 endif()
 
 if(USE_CUDA)
