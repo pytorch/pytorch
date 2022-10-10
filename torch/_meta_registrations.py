@@ -80,6 +80,7 @@ def meta_randperm(n, *, generator=None, out):
     assert out.ndim == 1 and out.size(0) == n
     return out
 
+
 @register_meta(aten.randint.default)
 def meta_randint(high, size, *, dtype=torch.long, **kwargs):
     return torch.empty(size, dtype=dtype, **kwargs)
@@ -595,6 +596,7 @@ def meta_adaptive_avg_pool3d(self, output_size):
     )
     return self.new_empty(self.shape[:-3] + tuple(output_size))
 
+
 @register_meta(aten._adaptive_avg_pool2d_backward.default)
 def meta__adaptive_avg_pool2d_backward(grad_out, self):
     ndim = grad_out.ndim
@@ -613,6 +615,7 @@ def meta__adaptive_avg_pool2d_backward(grad_out, self):
         lambda: f"expected dtype {self.dtype} for `grad_output` but got dtype {grad_out.dtype}",
     )
     return self.new_empty(self.shape)
+
 
 @register_meta(aten.repeat_interleave.Tensor)
 def meta_repeat_interleave_Tensor(repeats, output_size=None):
