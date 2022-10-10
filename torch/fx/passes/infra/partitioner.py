@@ -147,8 +147,8 @@ class CapabilityBasedPartitioner:
             merge_candidates_list = list(merge_candidates.keys())
             print("all candidates: ", merge_candidates_list)
             if len(merge_candidates_list) > 1:
-                print("candidate target: ", self_id)
                 self_id = merge_candidates_list[0]
+                print("candidate target: ", self_id)
                 for other_id in merge_candidates_list[1:]:
                     print("checking other partition: ", other_id)
                     # maybe_merge_partition(self_id, other_id)
