@@ -32,6 +32,9 @@ ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 
 SUPPORTED_DTYPES = (
+    # Boolean
+    torch.bool,
+    # Integers
     torch.uint8,
     torch.int8,
     torch.int16,
@@ -52,6 +55,8 @@ SUPPORTED_DTYPES = (
 )
 
 # Convenience tuples for creating dtype lists when skipping or xfailing tests
+
+BOOL_TYPES = (torch.bool,)
 
 INT_TYPES = (
     torch.int8,
@@ -182,7 +187,7 @@ EXPECTED_SKIPS_OR_FAILS = (
     ),
     skip(
         "ceil",
-        dtypes=INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
+        dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
         reason="Not supported by onnx",
     ),
     xfail(
@@ -192,19 +197,19 @@ EXPECTED_SKIPS_OR_FAILS = (
     ),
     skip(
         "sqrt",
-        dtypes=INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
+        dtypes=BOOL_TYPES + INT_TYPES + QINT_TYPES + COMPLEX_TYPES,
         reason="Not supported by onnx",
     ),
     xfail(
         "t",
-        dtypes=(torch.bfloat16,),
+        dtypes=(torch.bfloat16,) + COMPLEX_TYPES,
         reason="Transpose not implemented for bf64 in onnx runtime",
     ),
-    skip(
-        "t",
-        dtypes=COMPLEX_TYPES,
-        reason="Not supported by onnx",
-    ),
+    # skip(
+    #     "t",
+    #     dtypes=COMPLEX_TYPES,
+    #     reason="Not supported by onnx runtime",
+    # ),
 )
 
 
