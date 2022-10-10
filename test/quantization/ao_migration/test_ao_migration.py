@@ -381,9 +381,7 @@ class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
         self._test_package_import('modules.fused', base='nn.intrinsic')
 
     def test_package_import_nn_intrinsic(self):
-        skip = [
-            'quantized',
-        ]
+        skip = []
         self._test_package_import('intrinsic', base='nn', skip=skip)
 
     def test_modules_import_nn_intrinsic(self):
@@ -479,3 +477,43 @@ class TestAOMigrationNNIntrinsic(AOMigrationTestCase):
         ]
         self._test_function_import('linear_relu', function_list,
                                    base='nn.intrinsic.qat.modules')
+
+    def test_package_import_nn_intrinsic_quantized(self):
+        r"""Tests the migration of the torch.nn.intrinsic.quantized"""
+        self._test_package_import('quantized', base='nn.intrinsic')
+        self._test_package_import('quantized.modules', base='nn.intrinsic')
+
+    def test_modules_import_nn_intrinsic_quantized(self):
+        module_list = [
+            'BNReLU2d',
+            'BNReLU3d',
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+            'LinearReLU',
+        ]
+        self._test_function_import('quantized', module_list, base='nn.intrinsic')
+
+    def test_modules_intrinsic_quantized_bn_relu(self):
+        function_list = [
+            'BNReLU2d',
+            'BNReLU3d',
+        ]
+        self._test_function_import('bn_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
+
+    def test_modules_intrinsic_quantized_conv_relu(self):
+        function_list = [
+            'ConvReLU1d',
+            'ConvReLU2d',
+            'ConvReLU3d',
+        ]
+        self._test_function_import('conv_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
+
+    def test_modules_intrinsic_quantized_linear_relu(self):
+        function_list = [
+            'LinearReLU',
+        ]
+        self._test_function_import('linear_relu', function_list,
+                                   base='nn.intrinsic.quantized.modules')
