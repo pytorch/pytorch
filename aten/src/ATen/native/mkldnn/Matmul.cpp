@@ -1,7 +1,9 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Context.h>
 #include <ATen/native/mkldnn/Matmul.h>
+
 #if !AT_MKLDNN_ENABLED()
 
 namespace at {
@@ -71,7 +73,9 @@ bool mkldnn_bf16_gemm(
     op_attr = ideep::attr_t::fuse_sum();
   }
 
-  ideep::tensor::dims a_strides{{1, lda}}, b_strides{{1, ldb}}, c_strides{{1, ldc}};
+  // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
+  // Use identity: C = AB <=> C^T = B^T A^T
+  ideep::tensor::dims a_strides{{lda, 1}}, b_strides{{ldb, 1}}, c_strides{{ldc, 1}};
   if (transa != TransposeType::NoTranspose) {
     std::swap(a_strides[0], a_strides[1]);
   }
@@ -80,23 +84,23 @@ bool mkldnn_bf16_gemm(
   }
 
   ideep::tensor a({
-      /*sizes=*/{m, k},
+      /*sizes=*/{k, m},
       ideep::tensor::data_type::bf16,
       /*strides=*/a_strides},
     const_cast<c10::BFloat16*>(a_data));
   ideep::tensor b({
-      /*sizes=*/{k, n},
+      /*sizes=*/{n, k},
       ideep::tensor::data_type::bf16,
       /*strides=*/b_strides},
     const_cast<c10::BFloat16*>(b_data));
   ideep::tensor c({
-      /*sizes=*/{m, n},
+      /*sizes=*/{n, m},
       ideep::tensor::data_type::bf16,
       /*strides=*/c_strides},
     c_data);
 
   ideep::matmul_forward::compute(
-      a, b, c, alpha, beta,
+      b, a, c, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
 
   if (c.get_data_handle() != c_data){
@@ -104,7 +108,7 @@ bool mkldnn_bf16_gemm(
     // if given output format is not expected, ideep will re-init an output buffer
     // under this case, we need copy the re-inited buffer back to given buffer
     ideep::tensor real_output({
-        /*sizes=*/{m, n},
+        /*sizes=*/{n, m},
         ideep::tensor::data_type::bf16,
         /*strides=*/c_strides},
       c_data);
@@ -125,11 +129,24 @@ void mkldnn_matmul(
               (mat1.dim() == 2 && mat2.dim() == 1) || // aten::mv
               (mat1.dim() == 1 && mat2.dim() == 1),  // aten::dot
               "mkldnn_matmul:  unsupported dims for mat and mat2");
-  TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
-   mat2.scalar_type() == at::kBFloat16 &&
-   result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
+
   TORCH_CHECK(mkldnn_bf16_device_check(),
-    "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+    "mkldnn_matmul: mkldnn_matmul bf16 path needs the cpu support avx512bw, avx512vl and avx512dq, or AWS Graviton3");
+
+#if defined(__aarch64__)
+  if (mkldnn_bf16_device_check_arm()) {
+     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
+     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
+     TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
+                 ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
+                 "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  } else
+#endif
+  {
+     TORCH_CHECK(mat1.scalar_type() == at::kBFloat16 &&
+                 mat2.scalar_type() == at::kBFloat16 &&
+                 result.scalar_type() == at::kBFloat16, "mkldnn_matmul:  only enabled for bf16 path");
+  }
 
   auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
@@ -207,14 +224,29 @@ bool use_mkldnn_bf16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
-  return (
-      use_mkldnn_bf16_matmul() &&
-      mat1.scalar_type() == kBFloat16 &&
-      mat2.scalar_type() == kBFloat16 &&
-      (!result.defined() || result.scalar_type() == kBFloat16) &&
-      mat1.numel() != 0 &&
-      mat2.numel() != 0 &&
-      checksize(mat1, mat2));
+#if defined(__aarch64__)
+  if (mkldnn_bf16_device_check_arm()) {
+     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
+     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
+     return (
+        use_mkldnn_bf16_matmul() &&
+        (mat1.scalar_type() == mat2.scalar_type()) && (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
+        ((mat1.scalar_type() == kFloat) || (mat1.scalar_type() == kBFloat16)) &&
+        mat1.numel() != 0 &&
+        mat2.numel() != 0 &&
+        checksize(mat1, mat2));
+  } else
+#endif
+  {
+     return (
+        use_mkldnn_bf16_matmul() &&
+        mat1.scalar_type() == kBFloat16 &&
+        mat2.scalar_type() == kBFloat16 &&
+        (!result.defined() || result.scalar_type() == kBFloat16) &&
+        mat1.numel() != 0 &&
+        mat2.numel() != 0 &&
+        checksize(mat1, mat2));
+  }
 }
 
 } // namespace native

@@ -102,6 +102,7 @@ exclude_patterns = [
     'torch/distributed/elastic/agent/server/api.py',
     'torch/testing/_internal/**',
     'torch/distributed/fsdp/fully_sharded_data_parallel.py',
+    'torch/distributed/distributed_c10d.py',
     # TODO(suo): these exclusions were added just to get lint clean on master.
     # Follow up to do more target suppressions and remove them.
     'torch/distributed/fsdp/flatten_params_wrapper.py',
@@ -144,6 +145,7 @@ include_patterns = [
     '.github/**/*.py',
     'benchmarks/instruction_counts/**/*.py',
     'tools/**/*.py',
+    'torchgen/**/*.py',
     'torch/utils/_pytree.py',
     'torch/utils/benchmark/utils/common.py',
     'torch/utils/benchmark/utils/timer.py',
@@ -168,7 +170,6 @@ command = [
 [[linter]]
 code = 'CLANGTIDY'
 include_patterns = [
-    'torch/csrc/deploy/**/*.cpp',
     'torch/csrc/fx/**/*.cpp',
     'torch/csrc/generic/**/*.cpp',
     'torch/csrc/onnx/**/*.cpp',
@@ -181,7 +182,6 @@ exclude_patterns = [
     # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
     # in a follow up PR.
     # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
-    # deploy/interpreter files are excluded due to using macros and other techniquies
     # that are not easily converted to accepted c++
     'torch/csrc/jit/passes/onnx/helper.cpp',
     'torch/csrc/jit/passes/onnx/shape_type_inference.cpp',
@@ -195,11 +195,6 @@ exclude_patterns = [
     'torch/csrc/autograd/FunctionsManual.cpp',
     'torch/csrc/generic/*.cpp',
     'torch/csrc/jit/codegen/cuda/runtime/*',
-    'torch/csrc/deploy/interactive_embedded_interpreter.cpp',
-    'torch/csrc/deploy/interpreter/**',
-    'torch/csrc/deploy/test_deploy_python_ext.cpp',
-    'torch/csrc/deploy/test_deploy_missing_interpreter.cpp',
-    'torch/csrc/deploy/test_deploy_gpu.cpp',
     'torch/csrc/utils/disable_torch_function.cpp',
 ]
 init_command = [
@@ -382,6 +377,73 @@ command = [
     '--replace-pattern=s/#include "(.*)"$/#include <\1>/',
     """--error-description=\
         This #include uses quotes; please convert it to #include <xxxx>\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'PYBIND11_INCLUDE'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    'torch/csrc/utils/pybind.h',
+    'torch/utils/benchmark/utils/valgrind_wrapper/compat_bindings.cpp',
+    'caffe2/**/*',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=#include <pybind11\/',
+    '--allowlist-pattern=#include <torch\/csrc\/utils\/pybind.h>',
+    '--linter-name=PYBIND11_INCLUDE',
+    '--match-first-only',
+    '--error-name=direct include of pybind11',
+    # https://stackoverflow.com/a/33416489/23845
+    # NB: this won't work if the pybind11 include is on the first line;
+    # but that's fine because it will just mean the lint will still fail
+    # after applying the change and you will have to fix it manually
+    '--replace-pattern=1,/(#include <pybind11\/)/ s/(#include <pybind11\/)/#include <torch\/csrc\/utils\/pybind.h>\n\1/',
+    """--error-description=\
+        This #include directly includes pybind11 without also including \
+        #include <torch/csrc/utils/pybind.h>;  this means some important \
+        specializations may not be included.\
+    """,
+    '--',
+    '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'PYBIND11_SPECIALIZATION'
+include_patterns = [
+    '**/*.cpp',
+    '**/*.h',
+]
+exclude_patterns = [
+    # The place for all orphan specializations
+    'torch/csrc/utils/pybind.h',
+    # These specializations are non-orphan
+    'torch/csrc/distributed/c10d/init.cpp',
+    'torch/csrc/jit/python/pybind.h',
+    # These are safe to exclude as they do not have Python
+    'c10/**/*',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/grep_linter.py',
+    '--pattern=PYBIND11_DECLARE_HOLDER_TYPE',
+    '--linter-name=PYBIND11_SPECIALIZATION',
+    '--error-name=pybind11 specialization in non-standard location',
+    """--error-description=\
+        This pybind11 specialization (PYBIND11_DECLARE_HOLDER_TYPE) should \
+        be placed in torch/csrc/utils/pybind.h so that it is guaranteed to be \
+        included at any site that may potentially make use of it via py::cast. \
+        If your specialization is in the same header file as the definition \
+        of the holder type, you can ignore this lint by adding your header to \
+        the exclude_patterns for this lint in .lintrunner.toml.  For more \
+        information see https://github.com/pybind/pybind11/issues/4099 \
     """,
     '--',
     '@{{PATHSFILE}}'
@@ -650,7 +712,10 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
+    'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
+    'functorch/functorch/_src/aot_autograd.py',
+    'functorch/functorch/_src/compilers.py',
 ]
 command = [
     'python3',
@@ -666,6 +731,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
+    '--no-black-binary',
     'black==22.3.0',
     'ufmt==1.3.3',
     'usort==1.0.2',

@@ -1,8 +1,20 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAGuard.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/_aminmax.h>
+#include <ATen/ops/_fake_quantize_per_tensor_affine_cachemask_tensor_qparams.h>
+#include <ATen/ops/fake_quantize_per_channel_affine.h>
+#include <ATen/ops/fake_quantize_per_channel_affine_cachemask.h>
+#include <ATen/ops/fake_quantize_per_tensor_affine.h>
+#include <ATen/ops/fused_moving_avg_obs_fake_quant_native.h>
+#include <ATen/ops/ones_like.h>
+#endif
 
 #include <cmath>
 

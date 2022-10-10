@@ -1,11 +1,10 @@
 #include <chrono>
 #include <iostream>
 
-#include <c10d/FileStore.hpp>
-#include <c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/FileStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include "CUDATest.hpp"
 #include "TestUtils.hpp"
-#include "c10d/ProcessGroup.hpp"
 #include "c10d/Types.hpp"
 
 #include <c10/cuda/CUDAGuard.h>
@@ -18,7 +17,6 @@
 using namespace c10d::test;
 
 using at::cuda::CUDAStream;
-using c10d::ProcessGroup;
 
 class NCCLTestBase {
  public:
@@ -94,7 +92,7 @@ class NCCLTest : public NCCLTestBase {
   }
 
   void wait(
-      c10::intrusive_ptr<ProcessGroup::Work>& work,
+      c10::intrusive_ptr<c10d::Work>& work,
       std::chrono::milliseconds timeout = kNoTimeout) {
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait(timeout);
@@ -108,7 +106,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (const auto i : c10::irange(numDevices_)) {
-      cudaStreamSynchronize(streams_[i].stream());
+      C10_CUDA_CHECK(cudaStreamSynchronize(streams_[i].stream()));
       outputs[i] = tensors_[i].cpu();
     }
 
@@ -139,7 +137,7 @@ class NCCLTest : public NCCLTestBase {
 
     // Copy inputs to outputs
     for (const auto i : c10::irange(numDevices_)) {
-      cudaStreamSynchronize(streams_[i].stream());
+      C10_CUDA_CHECK(cudaStreamSynchronize(streams_[i].stream()));
       for (auto j = 0; j < worldSize_ * numDevices_; ++j) {
         outputs[i][j] = tensor_lists[i][j].cpu();
       }
@@ -179,7 +177,7 @@ class AllreduceNCCLTest : public NCCLTest {
   AllreduceNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -202,9 +200,7 @@ class BroadcastNCCLTest : public NCCLTest {
   BroadcastNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(
-      int rootRank,
-      int rootTensor) {
+  c10::intrusive_ptr<c10d::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -223,9 +219,7 @@ class ReduceNCCLTest : public NCCLTest {
   ReduceNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(
-      int rootRank,
-      int rootTensor) {
+  c10::intrusive_ptr<c10d::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -244,7 +238,7 @@ class AllgatherNCCLTest : public NCCLTest {
   AllgatherNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -262,7 +256,7 @@ class AllgatherBaseNCCLTest : public NCCLTest {
     output_tensor_ = at::empty({worldSize_, 3, 3}, at::kCUDA);
   }
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -292,7 +286,7 @@ struct ReduceScatterNCCLTest : NCCLTest {
   ReduceScatterNCCLTest(const std::string& path, int worldSize)
       : NCCLTest(path, worldSize) {}
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams
     c10::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -323,7 +317,7 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
     }
   }
 
-  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 

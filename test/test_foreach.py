@@ -9,7 +9,7 @@ import unittest
 
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW, skipIfTorchDynamo
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops)
 from torch.testing._internal.common_methods_invocations import (
@@ -97,7 +97,7 @@ class TestForeach(TestCase):
     # note(mkozuki): It might be the case that the expected number of `cudaLaunchKernel`s
     # is greater than 1 once foreach functions internally separate their input `TensorList`s by
     # devices & dtypes into vectors of tensors.
-    def _get_funcs(self, op, n_expected_cudaLaunchKernels):
+    def _get_funcs(self, op, n_expected_cudaLaunchKernels: int):
         return (
             ForeachFuncWrapper(op.method_variant, n_expected_cudaLaunchKernels),
             RegularFuncWrapper(op.ref),
@@ -370,11 +370,17 @@ class TestForeach(TestCase):
         for N in N_values:
             self._test_unary(device, dtype, op, N, is_fastpath=False)
 
+    # note(crcrpar): `torch.maximum` and `torch.minimum` support `out` arg but there seem to be no inplace versions.
+    # So, compare `inplace_op` results with `ref`'s outputs.
     def _minmax_test(self, opinfo, inputs, is_fastpath, n_expected_cudaLaunchKernels):
-        op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
-        self.assertEqual(ref(inputs), op(inputs, self.is_cuda, is_fastpath))
+        op, ref, inplace_op, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
+        expected = ref(inputs)
+        self.assertEqual(expected, op(inputs, self.is_cuda, is_fastpath))
 
-    # note(mkozuki): in-place of foreach_minimum and foreach_maximum aren't implemented.
+        inplace_inputs = [[t.clone() for t in inputs[0]], inputs[1]]
+        inplace_op(inplace_inputs, self.is_cuda, is_fastpath)
+        self.assertEqual(expected, inplace_inputs[0])
+
     @ops(foreach_minmax_op_db)
     def test_minmax_fastpath(self, device, dtype, op):
         for N in N_values:
@@ -470,6 +476,8 @@ class TestForeach(TestCase):
             runtime_error = e
         self.assertIsNone(runtime_error)
 
+
+    @skipIfTorchDynamo("Different error msgs, TODO")
     @ops(foreach_binary_op_db, dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_binary_op_list_error_cases(self, device, dtype, op):
         foreach_op, foreach_op_, ref, ref_ = op.method_variant, op.inplace_variant, op.ref, op.ref_inplace

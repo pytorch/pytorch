@@ -551,27 +551,7 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE pow(const Vectorized<float>& exp) const {
-    auto x = *this;
-    auto sign_bit = (*this) & sign_mask;
-    // |b|
-    auto exp_abs = exp.abs();
-    auto exp_trunc = exp.trunc();
-    Vectorized<float> odd_mask;
-    odd_mask._vecb0 = (vec_signed(exp._vec0) & vi_1) != vi_0;
-    odd_mask._vecb1 = (vec_signed(exp._vec1) & vi_1) != vi_0;
-    // using ln fuction
-    auto temp = (abs().log() * exp).exp();
-
-    // is odd or even check from Sleef
-    auto is_int = (exp == exp_trunc) | (exp_abs >= vcheck);
-    auto is_odd = odd_mask & is_int & (exp_abs < vcheck);
-    // if even then then pow result should be absolute
-    auto temp_sign = temp | sign_bit; // copy_sign
-    auto out = blendv(temp, temp_sign, is_odd);
-    // x<0 and y != N, then NAN
-    auto out1 = blendv(out, v_nan, ((exp.floor() != exp) & (x < zero)));
-    // y = 0 then 1
-    return blendv(out1, one, (exp_abs == zero));
+    return {Sleef_powf4_u10vsx(_vec0, exp._vec0), Sleef_powf4_u10vsx(_vec1, exp._vec1)};
   }
 
   Vectorized<float> fmod(const Vectorized<float>& b) const {
