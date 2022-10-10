@@ -138,57 +138,6 @@
     "set_multithreading_enabled",
     "variable"
   ],
-  "torch.autograd.function": [
-    "Any",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "with_metaclass"
-  ],
-  "torch.autograd.functional": [
-    "List",
-    "Tuple"
-  ],
-  "torch.autograd.graph": [
-    "Any",
-    "Callable"
-  ],
-  "torch.autograd.profiler": [
-    "Any",
-    "ContextDecorator",
-    "DeviceType",
-    "Dict",
-    "Future",
-    "List",
-    "Optional",
-    "ProfilerActivity",
-    "ProfilerConfig",
-    "ProfilerState",
-    "kineto_available",
-    "warn"
-  ],
-  "torch.autograd.profiler_legacy": [
-    "DeviceType",
-    "EventList",
-    "FunctionEvent",
-    "ProfilerConfig",
-    "ProfilerState",
-    "warn"
-  ],
-  "torch.autograd.profiler_util": [
-    "DeviceType",
-    "Dict",
-    "List",
-    "Optional",
-    "Tuple",
-    "attrgetter",
-    "defaultdict",
-    "namedtuple"
-  ],
-  "torch.autograd.variable": [
-    "ImperativeEngine",
-    "with_metaclass"
-  ],
   "torch.backends": [
     "contextmanager"
   ],
@@ -225,10 +174,6 @@
     "is_available",
     "unique_id",
     "version"
-  ],
-  "torch.cuda.profiler": [
-    "check_error",
-    "cudart"
   ],
   "torch.distributed": [
     "AllToAllOptions",
@@ -577,42 +522,6 @@
     "dispatch",
     "hashable",
     "isvar"
-  ],
-  "torch.fx.graph_module": [
-    "Any",
-    "Dict",
-    "Graph",
-    "Importer",
-    "List",
-    "Optional",
-    "PackageExporter",
-    "PackageImporter",
-    "Path",
-    "PythonCode",
-    "Set",
-    "Type",
-    "Union",
-    "compatibility"
-  ],
-  "torch.fx.operator_schemas": [
-    "Any",
-    "Callable",
-    "Dict",
-    "List",
-    "NamedTuple",
-    "OpOverload",
-    "OpOverloadPacket",
-    "Optional",
-    "Tuple",
-    "cast",
-    "compatibility"
-  ],
-  "torch.fx.passes.graph_drawer": [
-    "Any",
-    "Dict",
-    "TensorMetadata",
-    "chain",
-    "compatibility"
   ],
   "torch.fx.proxy": [
     "assert_fn"
