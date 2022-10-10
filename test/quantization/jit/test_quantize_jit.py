@@ -2674,6 +2674,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                     m.graph
                 )
 
+    @override_qengines
     def test_hardswish(self):
         class FunctionalHardswish(torch.nn.Module):
             def __init__(self, inplace):
