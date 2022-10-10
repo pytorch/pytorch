@@ -1288,12 +1288,8 @@ def native_layer_norm_backward(
     if M <= 0 or N <= 0:
         return (
             input.new_zeros(input_shape) if output_mask[0] else None,
-            input.new_zeros(input_shape[axis:])
-            if output_mask[1] and weight_cast
-            else None,
-            input.new_zeros(input_shape[axis:])
-            if output_mask[2] and bias_cast
-            else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[1] else None,
+            input.new_zeros(input_shape[axis:]) if output_mask[2] else None,
         )
 
     x_hat = (input_cast - mean) * rstd
@@ -1786,11 +1782,11 @@ def index_add_(
     # lambda: f"Index should have dimension 1 or 0 (got {index.ndim})",
     # )
     if alpha != 1:
-        python_type = utils.dtype_to_type(x.dtype)
-        utils.check(
-            utils.is_weakly_lesser_type(type(alpha), python_type),
-            lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
-        )
+        # python_type = utils.dtype_to_type(x.dtype)
+        # utils.check(
+        # utils.is_weakly_lesser_type(type(alpha), python_type),
+        # lambda: f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!",
+        # )
         tensor = tensor * alpha
     idx = (None,) * dim + (index,)
     torch.ops.aten.index_put_(x, idx, tensor, accumulate=True)
