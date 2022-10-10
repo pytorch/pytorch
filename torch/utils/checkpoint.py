@@ -226,7 +226,7 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
-        use_reentrant(bool, optional): Use (the default) checkpointing
+        use_reentrant(bool, optional): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
@@ -290,7 +290,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
-        use_reentrant(bool, optional): Use (the default) checkpointing
+        use_reentrant(bool, optional): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
             implementation that does not require re-entrant autograd. This
