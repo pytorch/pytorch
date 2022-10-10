@@ -670,40 +670,29 @@ bool loopBoundsAllEqual(const std::vector<ForPtr>& loops) {
 // indices where none would be needed, which would significantly complicate
 // vectorization.
 void fuseAllLoops(StmtPtr st) {
-  auto block = to<tensorexpr::Block>(st);
-  if (block == nullptr) {
-    return;
-  }
-
-  std::vector<std::vector<ForPtr>> all_outer_loops;
-  std::vector<ForPtr> outer_loops;
-  for (const auto& stmt : *block) {
-    auto loop = to<For>(stmt);
-    auto hasReduction = NodeFinder<ReduceOp>::find(stmt).size() != 0;
-    if (!loop || hasReduction) {
-      all_outer_loops.push_back(outer_loops);
-      outer_loops.clear();
-    } else {
-      outer_loops.push_back(loop);
+  if (auto block = to<tensorexpr::Block>(st)) {
+    std::vector<ForPtr> loopsToFuse;
+    for (auto stmt : *block) {
+      auto loop = to<For>(stmt);
+      if (!loop) {
+        // Block contains something that's not a loop.  Quit.
+        return;
+      }
+      loopsToFuse.push_back(loop);
     }
-  }
-  all_outer_loops.push_back(outer_loops);
-
-  for (const auto& outer_loops : all_outer_loops) {
-    if (outer_loops.empty()) {
-      continue;
+    if (loopsToFuse.empty()) {
+      return;
     }
-
-    if (!loopBoundsAllEqual(outer_loops)) {
-      continue;
+    // TODO: Support fusing some of the loops in a block.
+    // Currently, we only fuse all the loops in a block, which is restrictive.
+    if (!loopBoundsAllEqual(loopsToFuse)) {
+      return;
     }
-
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     ForPtr fusedLoop;
-    if (!LoopNest::fuseLoops(outer_loops, &fusedLoop)) {
-      continue;
+    if (!LoopNest::fuseLoops(loopsToFuse, &fusedLoop)) {
+      return;
     }
-
     fuseAllLoops(fusedLoop->body());
   }
 }
@@ -840,7 +829,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   if (backendType == kLLVMCodeGen) {
     fuseAllLoops(l.root_stmt());
     GRAPH_DEBUG("after fuse", *l.root_stmt());
-    parallelizeOuterLoops(l, bufsToBeParallelized_);
+    parallelizeOuterLoops(l, bufOutputs_);
     GRAPH_DEBUG("after parallelize", *l.root_stmt());
   }
 
@@ -1709,20 +1698,6 @@ void TensorExprKernel::compile() {
         if (output->hasUses()) {
           Tensor t = computeValue(output);
 
-          // If there are for-loops before ExternalCall as follows,
-          //   stmt1: for:
-          //   stmt2    for:
-          //   stmt3: ExternalCall
-          // the for-loops would not be parallelized. So we mark the
-          // buf args of ExternalCall as to be parallelized to make sure
-          // its previous loop still could be parallelized.
-          if (to<ExternalCall>(t.stmt())) {
-            auto _external_call = to<ExternalCall>(t.stmt());
-            for (const auto& _buf : _external_call->buf_args()) {
-              bufsToBeParallelized_.insert(_buf);
-            }
-          }
-
           if (output->type()->cast<TensorType>()) {
             // Value is tensor
             if (t.buf()) {
@@ -1776,7 +1751,6 @@ void TensorExprKernel::compile() {
     if (!output->type()->cast<TensorType>()) {
       // Scalar outputs are represented as 0-dim buffers.
       bufOutputs_.insert(bufs_.at(output));
-      bufsToBeParallelized_.insert(bufs_.at(output));
       bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
       tensorOutputTensorOptions_.emplace_back(
           c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
@@ -1827,7 +1801,6 @@ void TensorExprKernel::compile() {
     }
 
     bufOutputs_.insert(bufs_.at(output));
-    bufsToBeParallelized_.insert(bufs_.at(output));
     bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
     tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));

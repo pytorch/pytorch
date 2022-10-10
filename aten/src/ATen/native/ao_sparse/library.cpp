@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/library.h>
 
 #include <torch/custom_class.h>

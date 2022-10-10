@@ -237,7 +237,6 @@ class FileTimerServer:
             signal = 0
             expired_timer = None
             for timer in expired_timers:
-                self._log_event("timer expired", timer)
                 if timer.signal > 0:
                     signal = timer.signal
                     expired_timer = timer
@@ -299,12 +298,15 @@ class FileTimerServer:
             if expiration_time < 0:
                 if key in self._timers:
                     del self._timers[key]
+                    self._log_event("clear timer", request)
             else:
                 self._timers[key] = request
+                self._log_event("set timer", request)
 
     def clear_timers(self, worker_pids: Set[int]) -> None:
         for (pid, scope_id) in list(self._timers.keys()):
             if pid in worker_pids:
+                self._log_event("clear timer", self._timers[(pid, scope_id)])
                 del self._timers[(pid, scope_id)]
 
     def get_expired_timers(self, deadline: float) -> Dict[int, List[FileTimerRequest]]:

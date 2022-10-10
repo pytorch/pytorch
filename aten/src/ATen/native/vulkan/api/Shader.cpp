@@ -13,16 +13,6 @@ namespace api {
 // ShaderSource
 //
 
-ShaderSource::ShaderSource()
-    : type(ShaderSource::Type::SPIRV),
-      src_code{
-          .spirv =
-              {
-                  nullptr,
-                  0u,
-              },
-      } {}
-
 ShaderSource::ShaderSource(std::string name, const char* const glsl_src)
     : type(ShaderSource::Type::GLSL),
       src_code{

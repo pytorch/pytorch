@@ -1,15 +1,8 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <torch/library.h>
-#include <ATen/native/quantized/cpu/QuantizedOps.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
+#include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_empty_affine_quantized.h>
-#include <ATen/ops/threshold_native.h>
-#endif
+#include <torch/library.h>
+#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 
 #include <algorithm>
 

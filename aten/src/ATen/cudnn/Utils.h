@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Handle.h>

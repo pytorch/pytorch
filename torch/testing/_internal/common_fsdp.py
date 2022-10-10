@@ -890,7 +890,6 @@ class FSDPTest(MultiProcessTestCase):
         sharding_strategy: Optional[ShardingStrategy] = None,
         mixed_precision: Optional[MixedPrecision] = None,
         forward_prefetch: bool = False,
-        use_orig_params: bool = False,
         enable_sharded_grad_scaler: bool = False,
         use_pure_fp16: bool = False,
         norm_type: Optional[Union[float, int]] = None,
@@ -950,7 +949,6 @@ class FSDPTest(MultiProcessTestCase):
                 "sharding_strategy": sharding_strategy,
                 "mixed_precision": mixed_precision,
                 "forward_prefetch": forward_prefetch,
-                "use_orig_params": use_orig_params,
             }
         )
         try:

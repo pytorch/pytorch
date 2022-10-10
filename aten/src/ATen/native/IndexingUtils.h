@@ -48,18 +48,12 @@ static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTen
   return result;
 }
 
-static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices, bool allow_int=false) {
+static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices) {
   for (const auto& tensor : indices) {
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
-      if (allow_int) {
-        if (scalarType != kLong && scalarType != kByte && scalarType != kBool && scalarType != kInt) {
-            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
-        }
-      } else {
-        if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
-            TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
-        }
+      if (scalarType != kLong && scalarType != kByte && scalarType != kBool) {
+          TORCH_CHECK_INDEX(false, "tensors used as indices must be long, byte or bool tensors");
       }
     }
   }

@@ -1,17 +1,13 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/WrapDimUtils.h>
+#include <ATen/ATen.h>
+#include <torch/library.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_empty_affine_quantized.h>
-#include <ATen/ops/empty.h>
-#include <ATen/ops/topk_native.h>
-#endif
+#include <algorithm>
 
 namespace at {
 namespace native {

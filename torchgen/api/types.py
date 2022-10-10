@@ -450,11 +450,11 @@ class CppSignature:
             cpp_no_default_args=self.cpp_no_default_args,
         )
 
-    def name(self, *, suppress_symint_suffix: bool = False) -> str:
+    def name(self) -> str:
         n = cpp.name(
             self.func,
             faithful_name_for_out_overloads=self.faithful,
-            symint_overload=False if suppress_symint_suffix else self.symint,
+            symint_overload=self.symint,
         )
         if self.fallback_binding:
             n = f"__dispatch_{n}"
@@ -467,7 +467,6 @@ class CppSignature:
         name: Optional[str] = None,
         prefix: str = "",
         is_redispatching_fn: bool = False,
-        suppress_symint_suffix: bool = False,
     ) -> str:
         returns_type = cpp.returns_type(
             self.func.returns, symint=self.symint
@@ -477,7 +476,7 @@ class CppSignature:
             cpp_args = ["c10::DispatchKeySet dispatchKeySet"] + cpp_args
         cpp_args_str = ", ".join(cpp_args)
         if name is None:
-            name = prefix + self.name(suppress_symint_suffix=suppress_symint_suffix)
+            name = prefix + self.name()
         return f"{returns_type} {name}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including

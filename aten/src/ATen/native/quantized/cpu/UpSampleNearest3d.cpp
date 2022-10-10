@@ -1,16 +1,8 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
+#include <ATen/ATen.h>
 #include <ATen/native/UpSample.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_empty_affine_quantized.h>
-#include <ATen/ops/_upsample_nearest_exact3d_native.h>
-#include <ATen/ops/upsample_nearest3d_native.h>
-#endif
+#include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/quantized/Quantizer.h>
 
 #include <c10/util/irange.h>
 

@@ -1,6 +1,4 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <ATen/Dispatch.h>
+#include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
@@ -8,15 +6,10 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-#include <ATen/ops/_empty_affine_quantized.h>
-#include <ATen/ops/upsample_bilinear2d_native.h>
-#endif
-
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace at {
 namespace native {

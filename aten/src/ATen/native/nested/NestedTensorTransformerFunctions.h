@@ -96,7 +96,6 @@ Tensor flash_attention_helper(
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool need_attn_weights,
     bool causal);
 } // namespace native
 } // namespace at

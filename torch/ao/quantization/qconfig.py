@@ -321,8 +321,8 @@ def get_default_qat_qconfig(backend='x86', version=1):
     supported_backends = ["fbgemm", "x86", "qnnpack", "onednn"]
     if backend not in supported_backends:
         raise AssertionError(
-            "backend:" + str(backend) +
-            "not supported. backend must be one of {}".format(supported_backends)
+            "backend: " + str(backend) +
+            " not supported. backend must be one of {}".format(supported_backends)
         )
 
     # Histogram observer is too slow for quantization aware training
@@ -444,7 +444,6 @@ def assert_valid_qconfig(qconfig: Optional[QConfig],
 
 # TODO: remove QConfigAny and replace it with Optional[QConfig]
 QConfigAny = Optional[QConfig]
-QConfigAny.__module__ = "torch.ao.quantization.qconfig"
 
 def add_module_to_qconfig_obs_ctr(
         qconfig: QConfigAny,

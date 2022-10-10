@@ -1,4 +1,3 @@
-#include <ATen/ATen.h>
 #include <ATen/Config.h>
 #include <ATen/Utils.h>
 #include <ATen/core/symbol.h>

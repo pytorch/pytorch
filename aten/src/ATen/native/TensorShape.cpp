@@ -11,7 +11,6 @@
 #include <ATen/core/DimVector.h>
 #include <ATen/core/IListRef.h>
 #include <ATen/native/Copy.h>
-#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
@@ -743,14 +742,14 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
   TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
-  const auto dim_size = self.sym_size(dim_);
+  const auto dim_size = self.size(dim_);
   std::vector<Tensor> splits(sections);
-  auto min_split_size = dim_size / sections;
-  auto num_splits_one_extra = dim_size % sections;
-  c10::SymInt start_idx = 0;
+  int64_t min_split_size = dim_size / sections;
+  int64_t num_splits_one_extra = dim_size % sections;
+  int64_t start_idx = 0;
   for (const auto split_idx : c10::irange(sections)) {
-    auto split_size = (num_splits_one_extra > split_idx) ? (min_split_size + 1) : min_split_size;
-    splits[split_idx] = at::slice_symint(self, dim_, start_idx, start_idx + split_size);
+    int64_t split_size = (split_idx < num_splits_one_extra) ? (min_split_size + 1) : min_split_size;
+    splits[split_idx] = at::slice(self, dim_, start_idx, start_idx + split_size);
     start_idx += split_size;
   }
   return splits;
@@ -1137,24 +1136,11 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   return at::slice(self, dim, start, start + length, 1);
 }
 
-Tensor narrow_symint(const Tensor& self, int64_t dim, SymInt start, SymInt length) {
-  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
-  auto cur_size = self.sym_size(dim);
-  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
-    start = maybe_wrap_dim(start, cur_size);
-  }
-  TORCH_CHECK(length >= 0 && start <= cur_size - length,
-           "start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
-  return at::slice_symint(self, dim, start, start + length, 1);
-}
-
-// This overload exists purely for XLA, because they wanted to pass in "symbolic"
-// start via Tensor.
-Tensor narrow_tensor_symint(const Tensor& self, int64_t dim, const Tensor& start, SymInt length) {
+Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t length) {
   TORCH_CHECK(start.dim() == 0 && isIntegralType(start.scalar_type(), /*includeBool=*/false),
               "start must be an 0-dim integral Tensor.");
   int64_t st = start.item<int64_t>();
-  return at::narrow_symint(self, dim, c10::SymInt(st), length);
+  return at::narrow(self, dim, st, length);
 }
 
 std::tuple<DimVector, DimVector, std::vector<int64_t>>
@@ -3357,25 +3343,35 @@ Tensor detach(const Tensor& self) {
     /*allow_tensor_metadata_change=*/false));
 }
 
-Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
-  // some special handling to deal with allow d == 0 when self.dim() == 0
-  auto ndim = self.dim();
-  d = at::maybe_wrap_dim(d, ndim, /*wrap_scalar=*/true);
+Tensor unfold(const Tensor& self, int64_t dimension, int64_t size, int64_t step) {
+  // some special handling to deal with allow dimension == 0 when self.dim() == 0
+  dimension = at::maybe_wrap_dim(dimension, self.dim(), /*wrap_scalar=*/true);
 
-  auto sizes = self.sizes().vec();
-  auto strides = self.strides().vec();
-  int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
-  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
+  const auto sizes = self.sizes();
+  const auto strides = self.strides();
+  int64_t max_size = self.dim() == 0 ? 1 : sizes[dimension];
+  TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", dimension,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");
-  sizes.push_back(size);
-  strides.push_back(self.dim() == 0 ? 1 : strides[d]);
-  // The if handles the self.dim() == 0 case
-  if (d < ndim) {
-    sizes[d] = (sizes[d] - size) / step + 1;
-    strides[d] *= step;
+
+  DimVector new_size(self.dim() + 1);
+  DimVector new_stride(self.dim() + 1);
+
+  new_size[self.dim()] = size;
+  new_stride[self.dim()] = self.dim() == 0 ? 1 : strides[dimension];
+  for(const auto d : c10::irange(self.dim())) {
+    const auto self_size = sizes[d];
+    const auto self_stride = strides[d];
+    if(d == dimension) {
+      new_size[d] = (self_size - size) / step + 1;
+      new_stride[d] = step*self_stride;
+    } else {
+      new_size[d] = self_size;
+      new_stride[d] = self_stride;
+    }
   }
-  return self.as_strided(sizes, strides);
+
+  return self.as_strided(new_size, new_stride);
 }
 
 template <typename scalar_t>
@@ -3891,14 +3887,6 @@ at::Tensor& alias_copy_out(const at::Tensor & self, at::Tensor & out) {
   auto tmp = self.alias();
   out.copy_(tmp);
   return out;
-}
-
-int64_t sparse_dim_strided(const at::Tensor& self) {
-  return 0;
-}
-
-int64_t dense_dim_strided(const at::Tensor& self) {
-  return self.dim();
 }
 
 } // namespace native

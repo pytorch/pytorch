@@ -514,7 +514,8 @@ class TestModuleInterface(JitTestCase):
         m = torch.jit.script(TestModule())
         m.proxy_mod = m.sub
         m.eval()
-        mf = torch._C._freeze_module(m._c, freezeInterfaces=True)
+        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
+            mf = torch._C._freeze_module(m._c, freezeInterfaces=True)
 
     def test_freeze_module_with_inplace_mutation_in_interface(self):
         class SubModule(torch.nn.Module):
@@ -560,7 +561,8 @@ class TestModuleInterface(JitTestCase):
         m.proxy_mod = m.sub
         m.sub.b = m.proxy_mod.b
         m.eval()
-        mf = torch._C._freeze_module(m._c, freezeInterfaces=True)
+        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
+            mf = torch._C._freeze_module(m._c, freezeInterfaces=True)
 
     def test_freeze_module_with_mutated_interface(self):
         class SubModule(torch.nn.Module):
@@ -604,7 +606,7 @@ class TestModuleInterface(JitTestCase):
 
         m = torch.jit.script(TestModule())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "Freezing does not support SetAttr on an interface type."):
+        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
             mf = torch._C._freeze_module(m._c, freezeInterfaces=True)
 
     def test_freeze_module_with_interface_and_fork(self):

@@ -760,31 +760,30 @@ PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   } else {
     node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
   }
-  const auto nodes_in_graph =
-      torch::autograd::get_current_graph_task_nodes_in_graph();
-  bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
-  if (ret && !exec_info->empty()) {
+  if (exec_info->empty()) {
+    // .backward() without inputs= arg
+    const auto nodes_in_graph =
+        torch::autograd::get_current_graph_task_nodes_in_graph();
+    auto it = nodes_in_graph->find(node);
+    if (it == nodes_in_graph->end()) {
+      Py_RETURN_FALSE;
+    } else {
+      Py_RETURN_TRUE;
+    }
+  } else {
+    // .grad or .backward when inputs= is passed
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
-      ret = false;
+      Py_RETURN_FALSE;
     } else {
-      TORCH_CHECK(
+      THPUtils_assert(
           !(node->topological_nr() == 0 && it->second.captures_),
           "A leaf node was passed to _will_engine_execute_node but we are "
           "currently running autograd.grad(). This is currently not supported.");
+      Py_RETURN_TRUE;
     }
   }
-  if (ret) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
 
-PyObject* THPModule_getCurrentGraphTaskId(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  return THPUtils_packInt64(torch::autograd::get_current_graph_task_id());
   END_HANDLE_TH_ERRORS
 }
 
@@ -981,10 +980,6 @@ static PyMethodDef TorchMethods[] = {
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,
-     nullptr},
-    {"_current_graph_task_id",
-     THPModule_getCurrentGraphTaskId,
-     METH_NOARGS,
      nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
@@ -1386,21 +1381,25 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_has_storage", [](const at::Tensor& x) { return x.has_storage(); });
 
-  py_module.def("_set_meta_in_tls_dispatch_include", [](bool meta_in_tls) {
+  py_module.def("_add_meta_to_tls_dispatch_include", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
     c10::DispatchKeySet key_set({at::DispatchKey::Meta});
-    if (meta_in_tls) {
-      local_keyset.included_ = local_keyset.included_ | key_set;
-    } else {
-      local_keyset.included_ =
-          local_keyset.included_.remove_backend(c10::BackendComponent::MetaBit);
-    }
+    local_keyset.included_ = local_keyset.included_ | key_set;
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
+  });
+  py_module.def("_remove_meta_from_tls_dispatch_include", []() {
+    auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    auto k = key_set.highestBackendKey();
+    local_keyset.included_ = local_keyset.included_.remove_backend(k);
     c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
   });
 
   py_module.def("_meta_in_tls_dispatch_include", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    return local_keyset.included_.has_backend(c10::BackendComponent::MetaBit);
+    c10::DispatchKeySet key_set({at::DispatchKey::Meta});
+    auto k = key_set.highestBackendKey();
+    return local_keyset.included_.has_backend(k);
   });
 
   py_module.def("_dump_local_tls_set", []() {
@@ -1413,6 +1412,14 @@ Call this whenever a new thread is created in order to propagate values from
       "_should_allow_numbers_as_tensors", [](const std::string& name) {
         return torch::should_allow_numbers_as_tensors(name);
       });
+
+  py_module.def("_is_deploy_enabled", []() {
+#if defined(USE_DEPLOY)
+    return true;
+#else
+    return false;
+#endif
+  });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
   THPDefaultCPUGenerator =
