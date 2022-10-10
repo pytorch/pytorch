@@ -285,7 +285,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     context = disable_autocast_manager if disable_amp else nullcontext
 
     with context(), track_graph_compiling("inference"):
-            compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
 
     @wraps(compiled_fw)
     def new_fn(args):
