@@ -9,6 +9,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
@@ -841,7 +842,8 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
   }
   auto grads_tensors = fmap(grads, [&](const Variable& v) {
     return (
-        v.defined() ? static_cast<Tensor>(v) : at::zeros({}, o).expand_symint(sizes));
+        v.defined() ? static_cast<Tensor>(v)
+                    : at::zeros({}, o).expand_symint(sizes));
   });
   return at::stack(grads_tensors, dim);
 }
@@ -1198,7 +1200,7 @@ Tensor convolution_backward_jvp_grad_bias(
 
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
-// set, this function returns its strides or throws an error if the tensor
+// set, this function returns its strides or an empty array if the tensor
 // is sparse. If requires_grad is not set, an empty array is returned since
 // there will be no backward pass. There has one special case, if input is
 // MKLDNN tensor and has requires_grad set, just return an empty array, the
@@ -1219,17 +1221,9 @@ at::SymIntArrayRef strides_or_error(
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
   if (input.requires_grad()) {
-    TORCH_CHECK(
-        !input.is_sparse(),
-        "The backward pass for this operation requires the '",
-        input_name,
-        "' tensor to be strided, but a sparse tensor was given instead. ",
-        "Please either use a strided tensor or set requires_grad=False for '",
-        input_name,
-        "'");
     if (input.is_mkldnn())
       return {};
-    if (input.is_sparse_csr())
+    if (input.is_sparse() || at::sparse_csr::is_sparse_compressed(input))
       return {};
     return input.sym_strides();
   } else {
@@ -1814,9 +1808,9 @@ Tensor pinv_backward(const Tensor& grad, const Tensor& pinvA, const Tensor& A) {
 
 Tensor split_with_sizes_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    IntArrayRef split_sizes,
+    c10::SymIntArrayRef split_sizes,
     int64_t dim,
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sizes,
     const at::TensorOptions& options) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
 
@@ -1830,7 +1824,7 @@ Tensor split_with_sizes_backward(
       auto length = split_sizes[j];
       auto grad_size = sizes.vec();
       grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros(grad_size, options);
+      grads_all_defined[j] = at::zeros_symint(grad_size, options);
     }
   }
 
@@ -1840,17 +1834,17 @@ Tensor split_with_sizes_backward(
 
 Tensor split_backward(
     const std::vector<torch::autograd::Variable>& grads,
-    int64_t split_size,
+    c10::SymInt split_size,
     int64_t dim,
-    IntArrayRef sizes,
+    c10::SymIntArrayRef sym_sizes,
     const at::TensorOptions& options) {
-  dim = at::maybe_wrap_dim(dim, sizes.size());
-  int64_t dim_size = sizes[dim];
+  dim = at::maybe_wrap_dim(dim, sym_sizes.size());
+  auto dim_size = sym_sizes[dim];
   int64_t num_splits = grads.size();
-  std::vector<int64_t> split_sizes(num_splits, split_size);
+  std::vector<c10::SymInt> split_sizes(num_splits, split_size);
   split_sizes[num_splits - 1] =
       split_size - (split_size * num_splits - dim_size);
-  return split_with_sizes_backward(grads, split_sizes, dim, sizes, options);
+  return split_with_sizes_backward(grads, split_sizes, dim, sym_sizes, options);
 }
 
 Tensor max_pool_double_backward(
