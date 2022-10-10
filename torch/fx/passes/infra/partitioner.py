@@ -45,7 +45,6 @@ class CapabilityBasedPartitioner:
         self.graph_module = graph_module
         self.operator_support = operator_support
         self.allows_single_node_partition = allows_single_node_partition
-        print("original graph:\n", self.graph_module.graph)
 
     def __get_supported_nodes(self) -> NodeList:
         logging.debug("Collecting supported nodes...")
@@ -69,25 +68,16 @@ class CapabilityBasedPartitioner:
 
         def maybe_merge_partition(self_id: int, other_id: int):
             # merged nodes
-            #merged_nodes = copy(partitions_by_id[self_id].nodes).update(partitions_by_id[other_id].nodes)
             merged_nodes = copy(partitions_by_id[self_id].nodes)
-            print("self_id: ", merged_nodes)
             merged_nodes.update(partitions_by_id[other_id].nodes)
-            print("self_id merged with other: ", merged_nodes)
-            print("merging: ", self_id, " and ", other_id)
-            print("assignment: ", assignment)
-            print("partitions_by_id: ", partitions_by_id)
 
             # def merge_breaks_dagpartitions: List[Partition]):
             visited: NodeSet = set()
 
             def dfs_find_cycle(node):
-                print("visiting node: ", node)
                 if node in visited:
-                    print("visited, return false")
                     return False
                 if node in merged_nodes:
-                    print("cycle found")
                     return True  # found cycle, return
 
                 # branching on partition or not
@@ -133,7 +123,6 @@ class CapabilityBasedPartitioner:
         logging.debug("Proposing partitions...")
 
         def mergeAcyclicUserPartitions(node):
-            print("merge acyclic user partitions: ", node)
             # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
             merge_candidates: Dict[int, None] = {}
 
@@ -141,7 +130,6 @@ class CapabilityBasedPartitioner:
                 partition_id = next(new_partition_id)
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
-                print("creating single node candidate\n")
 
             for user_node in node.users:
                 if user_node in assignment:
@@ -150,17 +138,10 @@ class CapabilityBasedPartitioner:
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
             merge_candidates_list = list(merge_candidates.keys())
-            print("all candidates: ", merge_candidates_list)
             if len(merge_candidates_list) > 1:
                 self_id = merge_candidates_list[0]
-                print("candidate target: ", self_id)
                 for other_id in merge_candidates_list[1:]:
-                    print("checking other partition: ", other_id)
-                    # maybe_merge_partition(self_id, other_id)
-                    if maybe_merge_partition(self_id, other_id):
-                        print("TTT merging: ", self_id, " and ", other_id)
-                    else:
-                        print("XXX not merging: ", self_id, " and ", other_id)
+                    maybe_merge_partition(self_id, other_id)
 
         # visit candidates in reversed topological order
         # for node in reversed(candidates):
