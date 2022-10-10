@@ -19,6 +19,7 @@ def pt_operator_library(
         train = False,
         model = None,
         include_all_operators = False,
+        include_base_operators = True,
         **kwargs):
     (model_name, model_versions, model_assets, model_traced_backends) = validate_and_extract_model_information(
         name,
@@ -28,8 +29,9 @@ def pt_operator_library(
     ops = [op.strip() for op in ops]
 
     # If ops are specified, then we are in static selective build mode, so we append
-    # base ops to this list to avoid additional special case logic in subsequent code.
-    if len(ops) > 0:
+    # base ops to this list to avoid additional special case logic in subsequent code,
+    # unless include_base_operators is explicitly set to False (the default is True)
+    if len(ops) > 0 and include_base_operators:
         ops.extend(PT_BASE_OPS)
 
     labels = kwargs.pop("labels", [])

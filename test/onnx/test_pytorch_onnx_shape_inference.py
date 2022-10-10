@@ -21,7 +21,7 @@ def expect_tensor(scalar_type, shape=None):
 
 class TestONNXShapeInference(common_utils.TestCase):
     def setUp(self):
-        self.opset_version = _constants.onnx_main_opset
+        self.opset_version = _constants.ONNX_MAX_OPSET
         symbolic_helper._set_onnx_shape_inference(True)
         symbolic_helper._set_opset_version(self.opset_version)
 
@@ -267,6 +267,20 @@ class TestONNXShapeInference(common_utils.TestCase):
             nearest_mode_s="floor",
         )
         self.run_test(g, resize.node(), expect_tensor("Float", shape=(4, 32, 128, 128)))
+
+    def test_reduce_prod_with_axes(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
+        reduce_prod = g.op("ReduceProd", input, axes_i=[0])
+        self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
+
+    def test_reduce_prod_without_axes(self):
+        g = self.create_empty_graph()
+        input = g.addInput()
+        input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
+        reduce_prod = g.op("ReduceProd", input)
+        self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
 
 
 if __name__ == "__main__":

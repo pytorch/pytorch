@@ -4,7 +4,7 @@ import warnings
 
 import torch
 import torch.nn as nn
-import torch.nn.quantized as nnq
+import torch.ao.nn.quantized as nnq
 from torch.nn.intrinsic import _FusedModule
 
 from torch.ao.quantization.quantization_mappings import (
@@ -27,6 +27,24 @@ from torch.ao.quantization.qconfig import (
     float_qparams_weight_only_qconfig_4bit,
     activation_is_memoryless)
 from torch.nn.utils.parametrize import type_before_parametrizations
+
+__all__ = [
+    "get_default_custom_config_dict",
+    "is_activation_post_process",
+    "propagate_qconfig_",
+    "register_activation_post_process_hook",
+    "add_observer_",
+    "get_unique_devices_",
+    "add_quant_dequant",
+    "prepare",
+    "quantize",
+    "quantize_dynamic",
+    "prepare_qat",
+    "quantize_qat",
+    "convert",
+    "swap_module",
+    "get_observer_dict",
+]
 
 _DEFAULT_CUSTOM_CONFIG_DICT = {
     'float_to_observed_custom_module_class': {

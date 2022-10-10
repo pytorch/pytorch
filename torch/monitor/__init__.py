@@ -16,6 +16,7 @@ class TensorboardEventHandler:
     This currently only supports ``torch.monitor.Stat`` events which are logged
     as scalars.
 
+    >>> # xdoctest: +REQUIRES(module:tensorboard)
     >>> from torch.utils.tensorboard import SummaryWriter
     >>> from torch.monitor import TensorboardEventHandler, register_event_handler
     >>> writer = SummaryWriter("log_dir")

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Set, Tuple
+from typing import Any, Dict, Set, Tuple, Callable
 from collections import OrderedDict
 import torch
 from torch.ao.quantization.fx._model_report.detector import (
@@ -6,12 +6,14 @@ from torch.ao.quantization.fx._model_report.detector import (
     DETECTOR_OBS_ARGS_KEY,
     DETECTOR_OBS_TO_INSERT_KEY,
     DETECTOR_IS_POST_OBS_KEY,
-    DETECTOR_TARGET_NODE_KEY
+    DETECTOR_TARGET_NODE_KEY,
+    DetectorQConfigInfo
 )
 from torch.ao.quantization.fx._model_report.model_report_visualizer import ModelReportVisualizer
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
-
+from torch.ao.quantization.qconfig_mapping import QConfigMapping, QConfig
+from torch.ao.quantization.fx._equalize import EqualizationQConfig
 
 class ModelReport:
     r"""
@@ -71,8 +73,10 @@ class ModelReport:
             - Table
             - Histogram
             - Line plot
+    8.) Call model_report.generate_qconfigs to generate the qconfigs based on the report suggestions
 
     Example (with QuantizationTracer):
+        >>> # xdoctest: +SKIP
         >>> # get the necessary qconfig
         >>> config = PrepareCustomConfig()
         >>> skipped_module_names, skipped_module_classes = get_skipped_module_name_and_classes(config, False)
@@ -94,6 +98,12 @@ class ModelReport:
 
         >>> # finally we generate the reports and optionally remove the observers we inserted
         >>> reports = tracer_reporter.generate_model_report(remove_inserted_observers=True)
+
+        >>> # Optional: we can generate the qconfig mapping based on the suggestions
+        >>> qconfigs = model_report.generate_qconfig_mapping()
+
+        >>> # Optional: we can generate the equalization mapping based on the suggestions
+        >>> qconfigs = model_report.generate_equalization_mapping()
 
         >>> # Optional: we get a ModelReportVisualizer instance to do any visualizations desired
         >>> model_report_visualizer = tracer_reporter.generate_visualizer()
@@ -330,7 +340,7 @@ class ModelReport:
             dict_a_val = info_dict_a[key]
             dict_b_val = info_dict_b[key]
 
-            # if it's a tensor we have to handle seperately
+            # if it's a tensor we have to handle separately
             if type(dict_a_val) == torch.Tensor:
                 # if dict_b_val not tensor, automatically false
                 if type(dict_b_val) != torch.Tensor or sum(dict_a_val != dict_b_val) != 0:
@@ -415,3 +425,182 @@ class ModelReport:
         visualizer: ModelReportVisualizer = ModelReportVisualizer(module_fqns_to_features)
 
         return visualizer
+
+    def _generate_qconfig_mapping_helper(
+        self,
+        detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo],
+        generation_function: Callable
+    ) -> QConfigMapping:
+        r"""
+        This helper takes in the compiled detector qconfig info that
+        has been compiled together and merges it into a QConfigMapping
+        """
+        # keep track of the qconfigmapping
+        qconfig_mapping = QConfigMapping()
+
+        # loop through each module / fqn and attempt to create QConfigMapping
+        for fqn, module in self._model.named_modules():
+            # if we have a qconfig info for this module
+            if fqn in detector_qconfig_info_combined:
+                qconfig_info_compiled = detector_qconfig_info_combined[fqn]
+
+                # now generate the qconfig and add it to the mapping
+                generated_qconfig = generation_function(qconfig_info_compiled, module)
+
+                # add to our config
+                qconfig_mapping.set_module_name(fqn, generated_qconfig)
+
+        # return compiled mapping
+        return qconfig_mapping
+
+    def _update_detector_quantizaiton_qconfig_info(self, combined_info: DetectorQConfigInfo, new_info: DetectorQConfigInfo):
+        r"""
+        Takes in the old and new information and updates the combined information.
+
+        Args:
+            combined_info (DetectorQConfigInfo): The DetectorQConfigInfo we are compiling all of the information in
+            new_info (DetectorQConfigInfo): The DetectorQConfigInfo with the information we are trying to merge the new info
+                into it
+        """
+        combined_info.is_activation_dynamic = combined_info.is_activation_dynamic or new_info.is_activation_dynamic
+        combined_info.is_weight_per_channel = combined_info.is_weight_per_channel or new_info.is_weight_per_channel
+
+    def _update_detector_equalization_qconfig_info(self, combined_info: DetectorQConfigInfo, new_info: DetectorQConfigInfo):
+        r"""
+        Takes in the old and new information and updates the combined information.
+
+        Args:
+            combined_info (DetectorQConfigInfo): The DetectorQConfigInfo we are compiling all of the information in
+            new_info (DetectorQConfigInfo): The DetectorQConfigInfo with the information we are trying to merge the new info
+                into it
+        """
+        is_equalization_recommended = combined_info.is_equalization_recommended or new_info.is_equalization_recommended
+        combined_info.is_equalization_recommended = is_equalization_recommended
+
+    def _generate_module_fqn_to_detector_info_mapping(
+        self,
+        update_qconfig_info_function: Callable
+    ) -> Dict[str, DetectorQConfigInfo]:
+        r"""
+        Generates a QConfigMapping based on the suggestions of the
+        ModelReport API. The generated mapping encompasses all the
+        different types of feedback from the different detectors
+        all into one place.
+
+        These configs are based on the suggestions provided by the ModelReport API
+        and can only be generated once the reports have been generated.
+
+        Args:
+            update_qconfig_info_function (Callable) takes in a function that takes in two DetectorQConfigInfo
+            and updates the one that is being compiled
+
+        Returns a Dict mapping module_fqns to DetectorQConfigInfo objects
+
+        Note:
+            Throws exception if we try to generate mapping on model we already removed observers from
+            Throws exception if we try to generate mapping without preparing for callibration
+        """
+        # if we haven't prepped model for callibration, then we shouldn't generate mapping yet
+        if not self._prepared_flag:
+            raise Exception("Cannot generate report without preparing model for callibration")
+
+        # if we already removed the observers, we cannot mapping
+        if self._removed_observers:
+            raise Exception("Cannot generate report on model you already removed observers from")
+
+        # keep track of qconfig info for each module across detectors
+        detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo] = {}
+
+        for detector in self._desired_report_detectors:
+            # get the info from the detector
+            detector_info: Dict[str, DetectorQConfigInfo] = detector.get_qconfig_info(self._model)
+
+            # we go through the modules
+            for module_fqn in detector_info:
+                # see if we already have info on it
+                if module_fqn in detector_qconfig_info_combined:
+                    # we combine the current options with what is there
+                    current_options = detector_qconfig_info_combined[module_fqn]
+                    detector_options = detector_info[module_fqn]
+
+                    update_qconfig_info_function(current_options, detector_options)
+                else:
+                    # we just use this for now
+                    detector_qconfig_info_combined[module_fqn] = detector_info[module_fqn]
+
+        return detector_qconfig_info_combined
+
+    def generate_qconfig_mapping(self) -> QConfigMapping:
+        r"""
+        Generates a QConfigMapping based on the suggestions of the
+        ModelReport API. The generated mapping encompasses all the
+        different types of feedback from the different detectors
+        all into one place.
+
+        These configs are based on the suggestions provided by the ModelReport API
+        and can only be generated once the reports have been generated.
+
+        Returns a QConfigMapping for the quantization configuration
+
+        Note:
+            Throws exception if we try to generate mapping on model we already removed observers from
+            Throws exception if we try to generate mapping without preparing for callibration
+        """
+        # get the mapping info
+        detector_qconfig_info_combined = self._generate_module_fqn_to_detector_info_mapping(
+            self._update_detector_quantizaiton_qconfig_info
+        )
+
+        # we will do a bit of processing and remove fqns that don't have input weight recommended
+
+        # now we generate the QConfig for each of the options
+        mapping: QConfigMapping = self._generate_qconfig_mapping_helper(
+            detector_qconfig_info_combined,
+            self._quantization_config_generator
+        )
+
+        # return the generated mapping
+        return mapping
+
+    def _quantization_config_generator(self, detector_qconfig_info: DetectorQConfigInfo, module: torch.nn.Module) -> QConfig:
+        r"""
+        Returns the quantization configuration generated by the DetectorQConfigInfo object
+        """
+        return detector_qconfig_info.generate_quantization_qconfig(module)
+
+    def _equalization_config_generator(
+        self,
+        detector_qconfig_info: DetectorQConfigInfo,
+        module: torch.nn.Module
+    ) -> EqualizationQConfig:
+        r"""
+        We ignore the module argument here, and only focus on thedetector_qconfig_info
+
+        Returns the equalization configuration generated by the DetectorQConfigInfo object
+        """
+        return detector_qconfig_info.generate_equalization_qconfig()
+
+    def generate_equalization_mapping(self) -> QConfigMapping:
+        r"""
+        Generates a QConfigMapping based on the suggestions of the
+        ModelReport API for equalization. The generated mapping encompasses all the
+        different types of feedback from the input-weight equalization detector.
+
+        These configs are based on the suggestions provided by the ModelReport API
+        and can only be generated once the reports have been generated.
+
+        Returns a QConfigMapping for the equalization configuration
+        """
+        # get the mapping info
+        detector_qconfig_info_combined = self._generate_module_fqn_to_detector_info_mapping(
+            self._update_detector_equalization_qconfig_info
+        )
+
+        # now we generate the QConfig for each of the options
+        mapping: QConfigMapping = self._generate_qconfig_mapping_helper(
+            detector_qconfig_info_combined,
+            self._equalization_config_generator
+        )
+
+        # return the generated mapping
+        return mapping
