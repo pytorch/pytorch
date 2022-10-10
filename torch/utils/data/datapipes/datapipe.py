@@ -82,6 +82,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
 
     Examples:
         General Usage:
+            >>> # xdoctest: +SKIP
             >>> from torchdata.datapipes.iter import IterableWrapper, Mapper
             >>> dp = IterableWrapper(range(10))
             >>> map_dp_1 = Mapper(dp, lambda x: x + 1)  # Using class constructor
@@ -152,9 +153,10 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """
+        state = self.__dict__
         if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        return self.__dict__
+            return IterDataPipe.getstate_hook(state)
+        return state
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
@@ -223,6 +225,7 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         DataPipe with non-integral indices/keys, a custom sampler must be provided.
 
     Example:
+        >>> # xdoctest: +SKIP
         >>> from torchdata.datapipes.map import SequenceWrapper, Mapper
         >>> dp = SequenceWrapper(range(10))
         >>> map_dp_1 = dp.map(lambda x: x + 1)  # Using functional form (recommended)
@@ -273,9 +276,10 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
         If this doesn't cover your custom DataPipe's use case, consider writing custom methods for
         `__getstate__` and `__setstate__`, or use `pickle.dumps` for serialization.
         """
+        state = self.__dict__
         if MapDataPipe.getstate_hook is not None:
-            return MapDataPipe.getstate_hook(self)
-        return self.__dict__
+            return MapDataPipe.getstate_hook(state)
+        return state
 
     def __reduce_ex__(self, *args, **kwargs):
         if MapDataPipe.reduce_ex_hook is not None:

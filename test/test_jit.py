@@ -55,7 +55,6 @@ from jit.test_typing import TestTyping  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 from jit.test_complex import TestComplex  # noqa: F401
 from jit.test_jit_utils import TestJitUtils  # noqa: F401
-from jit.test_schema_check import TestSchemaCheck  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
@@ -70,7 +69,6 @@ from jit.test_attr import TestGetDefaultAttr  # noqa: F401
 from jit.test_aten_pow import TestAtenPow  # noqa: F401
 from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobilePreserveDebugInfo  # noqa: F401
 from jit.test_union import TestUnion  # noqa: F401
-from jit.test_legacy_upgraders import TestLegacyUpgraders  # noqa: F401
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
 from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
 from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
@@ -1860,6 +1858,7 @@ graph(%Ra, %Rb):
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
+    @skipIfTorchDynamo("Torchdynamo cannot correctly handle profiler.profile calls")
     def test_dropout_func_requires_grad(self):
         def dropout_training(input):
             return F.dropout(input, 0.5, training=True)
@@ -5754,10 +5753,9 @@ a")
             return a * a
         ''')
         inputs = [torch.ones(10, 10, dtype=torch.long)]
-        outputs = torch.ones(10, 10)
+        outputs = torch.ones(10, 10, dtype=torch.long)
 
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(cu.test_integral_shape_inference(*inputs), outputs)
+        self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
     @unittest.skipIf(RUN_CUDA, 'This tests the CPU fuser')
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
@@ -7327,9 +7325,7 @@ a")
                 if inp == 'empty_list':
                     # torchscript returns int tensor, python returns float tensor
                     self.assertNotEqual(t1.dtype, t2.dtype)
-
-                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-                self.assertEqualIgnoreType(t1, t2)
+                self.assertEqual(t1, t2, exact_dtype=False)
                 self.assertEqual(t1.device, t2.device)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple Executor doesn't have any shapes to propagate")
@@ -7441,6 +7437,9 @@ a")
                 for option in option_pairs:
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
+                        continue
+                    # Skip unsigned tensor initializaton for signed values on 3.10
+                    if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
@@ -15351,8 +15350,7 @@ dedent """
             # TODO: re-enable module hook when Python printing of attributes is
             # supported
             m = M({char : torch.ones(1) + ord(char) - ord("a") for char in "abcdefg"})
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(m("c"), torch.tensor([103]))
+            self.assertEqual(m("c"), torch.tensor([103.]))
 
     def test_module_none_attrs(self):
         class MyMod(torch.jit.ScriptModule):

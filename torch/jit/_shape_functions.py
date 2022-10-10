@@ -5,9 +5,17 @@ number = Union[int, float]
 
 ###
 # There are generated files that depend on this file
-# To re-generate, please run:
-# cd ~/pytorch && python
-# torchgen/shape_functions/gen_jit_shape_functions.py
+# To re-generate, please run from the root of the repo:
+# python torchgen/shape_functions/gen_jit_shape_functions.py
+
+# How to test:
+# After regenerating files, compile PyTorch.
+# Then run: ./build/bin/test_jit --gtest_filter=TestShapeGraphLinting.Basic
+# If you have enabled opinfo testing for the op, also run:
+# python test/test_ops_jit.py TestJitCPU::test_variant_consistency_jit_[FAILING_OP]_cpu_float32
+# to reproduce errors from opinfo tests.
+
+# Example PR: https://github.com/pytorch/pytorch/pull/80860/files
 ####
 
 import torch
@@ -153,8 +161,13 @@ def view_one_unused(self: List[int], sizes: List[int], *, implicit: bool = False
     return view(self, sizes)
 
 
-def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
+def sum_mean_dim(self: List[int], opt_dims: Optional[List[int]], keep_dim: bool, dt: Any):
     out: List[int] = []
+    if opt_dims is None or len(opt_dims) == 0:
+        dims: List[int] = list(range(len(self)))
+    else:
+        dims = opt_dims
+
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:
@@ -168,7 +181,7 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
     return out
 
 def max_dim(self: List[int], dim: int, keep_dim: bool):
-    out = mean_dim(self, [dim], keep_dim, None)
+    out = sum_mean_dim(self, [dim], keep_dim, None)
     return out, out
 
 # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
@@ -342,6 +355,10 @@ def upsample_nearest2d(
     out: List[int] = []
     out.append(input[0])
     out.append(input[1])
+
+    if (scale_factors is None and output_size is None):
+        assert 0, "Either output_size or scale_factors must be presented"
+
     if output_size is not None:
         assert (
             scale_factors is None
@@ -349,7 +366,6 @@ def upsample_nearest2d(
         assert len(output_size) == 2
         out.append(output_size[0])
         out.append(output_size[1])
-        return out
 
     if scale_factors is not None:
         assert (
@@ -358,8 +374,8 @@ def upsample_nearest2d(
         assert len(scale_factors) == 2
         out.append(int(input[2] * scale_factors[0]))
         out.append(int(input[3] * scale_factors[1]))
-        return out
-    assert 0, "Either output_size or scale_factors must be presented"
+
+    return out
 
 
 def mm(self: List[int], mat2: List[int]):
@@ -728,6 +744,48 @@ def conv_backwards(grad_output: List[int], input:List[int], weight:List[int], bi
     # Bias gradient is always generated regardess of if biases is supplied
     return _copy(input), _copy(weight), [grad_output[1]]
 
+def conv_transpose2d_input(input: List[int], weight: List[int], bias: Optional[List[int]] = None, stride: Optional[List[int]] = None, padding: Optional[List[int]] = None, output_padding: Optional[List[int]] = None, groups: int = 1, dilation: Optional[List[int]] = None) -> List[int]:
+    if stride is None:
+        stride = [1, 1]
+    if padding is None:
+        padding = [0, 0]
+    if output_padding is None:
+        output_padding = [0, 0]
+    if dilation is None:
+        dilation = [1, 1]
+    has_dilation = len(dilation) > 0
+    dim = len(input)
+    output_size: List[int] = []
+    input_batch_size_dim = 0
+    weight_output_channels_dim = 1
+    output_size.append(input[input_batch_size_dim])
+    output_size.append(weight[weight_output_channels_dim])
+
+    for d in range(2, dim):
+        dilation_ = dilation[d - 2] if has_dilation else 1
+        kernel = dilation_ * (weight[d] - 1)
+        output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+    return output_size
+
+def conv_forwards(input: List[int], weight: List[int], bias: Optional[List[int]], stride: List[int], padding: List[int], dilation: List[int], transposed: bool, output_padding: List[int], groups: int) -> List[int]:
+    has_dilation = len(dilation) > 0
+    dim = len(input)
+    output_size: List[int] = []
+    input_batch_size_dim = 0
+    weight_output_channels_dim = 1 if transposed else 0
+    output_size.append(input[input_batch_size_dim])
+    output_size.append(weight[weight_output_channels_dim])
+
+    for d in range(2, dim):
+        dilation_ = dilation[d - 2] if has_dilation else 1
+        if transposed:
+            kernel = dilation_ * (weight[d] - 1)
+            output_size.append((input[d] - 1) * stride[d - 2] - 2 * padding[d - 2] + kernel + 1)
+        else:
+            kernel = dilation_ * (weight[d] - 1) + 1
+            output_size.append((input[d] + (2 * padding[d - 2]) - kernel) // stride[d - 2] + 1)
+    return output_size
+
 def batch_norm(
     input: List[int],
     weight: Optional[List[int]],
@@ -922,14 +980,24 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
         _size = [0]
     return _copy(input), _size, _size
 
-# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
-# def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
-#     assert len(indices) <= len(self), "More indices than dimensions to index"
-#     broadcasted_shape: List[int] = []
-#     for index_tensor_shape in indices:
-#         if index_tensor_shape is not None:
-#             broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
-#     return broadcasted_shape
+"""
+Currently deferring the enabling of this, as part of the propoasal to suspend
+adding ops.
+There are currently cases in the test case where this is being called
+in the SSA opinfo tests with with unexpected values (eg list of two ints, see the first
+opinfo test). The behavoir of index is significantly dependent on the inputs.
+
+This could be an error with how we are matching up shape functions, or that this
+function needs to just implement everything.
+
+def index_Tensor(self: List[int], indices: List[Optional[List[int]]]) -> List[int]:
+    assert len(indices) <= len(self), "More indices than dimensions to index"
+    broadcasted_shape: List[int] = []
+    for index_tensor_shape in indices:
+        if index_tensor_shape is not None:
+            broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
+    return broadcasted_shape
+"""
 
 ScriptFn = torch._C.ScriptFunction
 shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
@@ -997,14 +1065,16 @@ add_shape_compute_mapping("aten::conv2d(Tensor input, Tensor weight, Tensor? bia
 add_shape_compute_mapping("aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", batch_norm)
 add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", conv3d)
 add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
+add_shape_compute_mapping("aten::convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor", conv_forwards)
+add_shape_compute_mapping("aten::conv_transpose2d.input(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] output_padding=0, int groups=1, int[2] dilation=1) -> Tensor", conv_transpose2d_input)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
-add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
-add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)
+add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
+add_shape_compute_mapping("aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", sum_mean_dim)
 add_shape_compute_mapping("aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)", max_dim)
 add_shape_compute_mapping("aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
 add_shape_compute_mapping("aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor", zero_dim_tensor)
@@ -1021,8 +1091,7 @@ add_shape_compute_mapping("aten::topk(Tensor self, int k, int dim=-1, bool large
 add_shape_compute_mapping("aten::nll_loss_forward(Tensor self, Tensor target, Tensor? weight, int reduction, int ignore_index) -> (Tensor output, Tensor total_weight)", nll_loss_forward)
 add_shape_compute_mapping("aten::native_layer_norm(Tensor input, int[] normalized_shape, Tensor? weight, Tensor? bias, float eps) -> (Tensor, Tensor, Tensor)", native_layer_norm)
 add_shape_compute_mapping("aten::native_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)", native_batch_norm)
-# TODO: Add support for List[Optional[List[int]]] arguments (i.e. `Tensor?[]`).
-#add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
+# add_shape_compute_mapping("aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor", index_Tensor)
 
 # TODO: migrate over all of symbolic_shape_registry_util.cpp
 # These are duplicated here so that the functions will be serialiazed
