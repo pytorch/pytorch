@@ -1017,6 +1017,140 @@ void cuComputeGradGammaBeta(
     }
 }
 
+template<typename T, typename T_ACC> __global__
+void cuComputeGradInput(
+    const T* __restrict__ dout,
+    const T* __restrict__ input,
+    const int64_t n1,
+    const int64_t n2,
+    const T_ACC* __restrict__ mean,
+    const T_ACC* __restrict__ invvar,
+    const T* gamma,
+    T* grad_input,
+    bool rms_only)
+{
+  for (int i1=blockIdx.y; i1 < n1; i1 += gridDim.y) {
+    T_ACC sum_loss1 = T_ACC(0);
+    T_ACC sum_loss2 = T_ACC(0);
+    T_ACC c_mean;
+    if (!rms_only) {
+      c_mean = mean[i1];
+    }
+    const T_ACC c_invvar = invvar[i1];
+    const T* k_input = input + i1*n2;
+    const T* k_dout = dout + i1*n2;
+    const int numx = blockDim.x * blockDim.y;
+    const int thrx = threadIdx.x + threadIdx.y * blockDim.x;
+    if (gamma != NULL) {
+      // Optimization for ROCm MI100
+      for( int l = 0; l < n2 ; l += numx) {
+        int idx = l + thrx;
+        const T_ACC gamma_idx = static_cast<T_ACC>((idx<n2) ? gamma[idx] : T(0));
+        const T_ACC c_h = static_cast<T_ACC>((idx<n2) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
+        if (!rms_only) {
+          sum_loss1 += c_loss * gamma_idx;
+          sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_invvar;
+        } else {
+          sum_loss2 += c_loss * gamma_idx * (c_h) * c_invvar;
+        }
+      }
+    } else {
+      for( int l = 0; l < n2 ; l += numx) {
+        int idx = l + thrx;
+        const T_ACC c_h = static_cast<T_ACC>((idx<n2) ? k_input[idx] : T(0));
+        const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
+        if (!rms_only) {
+          sum_loss1 += c_loss;
+          sum_loss2 += c_loss * (c_h - c_mean) * c_invvar;
+        } else {
+          sum_loss2 += c_loss * (c_h) * c_invvar;
+        }
+      }
+    }
+    // intra-warp reductions
+    for (int mask = blockDim.x/2;  mask > 0;  mask /= 2) {
+      if (!rms_only) {
+        sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
+      }
+      sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask);
+    }
+    // inter-warp reductions
+    if (blockDim.y > 1) {
+      SharedMemory<T_ACC> shared;
+      T_ACC* buf = shared.getPointer();
+      for (int offset = blockDim.y/2;  offset > 0;  offset /= 2) {
+        // upper half of warps write to shared
+        if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
+          const int wrt_i = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
+          if (!rms_only) {
+            buf[2*wrt_i] = sum_loss1;
+          }
+          buf[2*wrt_i+1] = sum_loss2;
+        }
+        __syncthreads();
+        // lower half merges
+        if (threadIdx.y < offset) {
+          const int read_i = threadIdx.y * blockDim.x + threadIdx.x;
+          if (!rms_only) {
+            sum_loss1 += buf[2*read_i];
+          }
+          sum_loss2 += buf[2*read_i+1];
+        }
+        __syncthreads();
+      }
+      if (threadIdx.y == 0) {
+        if (!rms_only) {
+          buf[2*threadIdx.x] = sum_loss1;
+        }
+        buf[2*threadIdx.x+1] = sum_loss2;
+      }
+      __syncthreads();
+      if (threadIdx.y !=0) {
+        if (!rms_only) {
+          sum_loss1 = buf[2*threadIdx.x];
+        }
+        sum_loss2 = buf[2*threadIdx.x+1];
+      }
+    }
+    // all threads now have the two sums over l
+    T_ACC fH = (T_ACC)n2;
+    T_ACC term1 = (T_ACC(1) / fH) * c_invvar;
+    T* k_grad_input = grad_input + i1*n2;
+    if (gamma != NULL) {
+      for (int l = thrx;  l < n2;  l+=numx) {
+        const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
+        const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
+        T_ACC f_grad_input = fH * c_loss * gamma[l];
+        if (!rms_only) {
+          f_grad_input -= sum_loss1;
+          f_grad_input -= (c_h - c_mean) * c_invvar * sum_loss2;
+        } else {
+          f_grad_input -= (c_h) * c_invvar * sum_loss2;
+        }
+        f_grad_input *= term1;
+        k_grad_input[l] = static_cast<T>(f_grad_input);
+      }
+    } else {
+      for (int l = thrx;  l < n2;  l+=numx) {
+        const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
+        const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
+        T_ACC f_grad_input = fH * c_loss;
+        if (!rms_only) {
+          f_grad_input -= sum_loss1;
+          f_grad_input -= (c_h - c_mean) * c_invvar * sum_loss2;
+        } else {
+          f_grad_input -= (c_h) * c_invvar * sum_loss2;
+        }
+        f_grad_input *= term1;
+        k_grad_input[l] = static_cast<T>(f_grad_input);
+      }
+    }
+    // prevent race where buf is written again before reads are done
+    __syncthreads();
+  }
+}
+
 template <typename T>
 void LayerNormBackwardKernelImplInternal(
     const Tensor& dY,
@@ -1045,12 +1179,24 @@ void LayerNormBackwardKernelImplInternal(
       gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
+  const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
-    const int warp_size = at::cuda::warp_size();
-    const dim3 blocks(M);
-    int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
-    layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
-    X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+    const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+    const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
+    dim3 threads1(warp_size,4,1);
+    int nshared =
+            threads1.y > 1 ?
+            threads1.y*threads1.x*sizeof(T_ACC) :
+            0;
+    cuComputeGradInput<<<blocks1, threads1, nshared, cuda_stream>>>(
+            dY_data,
+            X_data,
+            M,N,
+            mean_data,
+            rstd_data,
+            gamma_data,
+            dX_data,
+            false);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
@@ -1074,8 +1220,8 @@ void LayerNormBackwardKernelImplInternal(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
 
-      const int part_size = 16;
-      const dim3 threads2(32,4,1);
+      const int part_size = warp_size;
+      const dim3 threads2(warp_size,4,1);
       const dim3 blocks2((N+threads2.x-1)/threads2.x,part_size,1);
       const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
       const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
