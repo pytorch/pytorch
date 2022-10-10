@@ -797,16 +797,11 @@ void cuLoadWriteStridedInputs(
     const int i1_end,
     const int64_t n2,
     const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ rstd,
-    bool rms_only
-    )
+    const T_ACC* __restrict__ rstd)
 {
   int i1 = i1_block+thr_load_row_off;
   if (i1 < i1_end) {
-    T curr_mean;
-    if (!rms_only) {
-      curr_mean = mean[i1];
-    }
+    T curr_mean = mean[i1];
     T curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
@@ -815,25 +810,17 @@ void cuLoadWriteStridedInputs(
       if (i2<n2) {
         T curr_input = static_cast<T>(input[load_idx]);
         T curr_dout = static_cast<T>(dout[load_idx]);
-        if (!rms_only) {
-          warp_buf1[write_idx] = curr_dout;
-          warp_buf2[write_idx] = curr_dout * (curr_input - curr_mean) * curr_rstd;
-        } else {
-          warp_buf2[write_idx] = curr_dout * (curr_input) * curr_rstd;
-        }
+        warp_buf1[write_idx] = curr_dout;
+        warp_buf2[write_idx] = curr_dout * (curr_input - curr_mean) * curr_rstd;
       } else {
-        if (!rms_only) {
-          warp_buf1[write_idx] = T(0);
-        }
+        warp_buf1[write_idx] = T(0);
         warp_buf2[write_idx] = T(0);
       }
     }
   } else {
     for (int k = 0;  k < blockDim.y;  ++k) {
       int write_idx = thr_load_row_off*row_stride+thr_load_col_off+k;
-      if (!rms_only) {
-        warp_buf1[write_idx] = T(0);
-      }
+      warp_buf1[write_idx] = T(0);
       warp_buf2[write_idx] = T(0);
     }
   }
@@ -853,16 +840,11 @@ void cuLoadAddStridedInputs(
     const int i1_end,
     const int64_t n2,
     const T_ACC* __restrict__ mean,
-    const T_ACC* __restrict__ rstd,
-    bool rms_only
-    )
+    const T_ACC* __restrict__ rstd)
 {
   int i1 = i1_block+thr_load_row_off;
   if (i1 < i1_end) {
-    T_ACC curr_mean;
-    if (!rms_only) {
-      curr_mean = mean[i1];
-    }
+    T_ACC curr_mean = mean[i1];
     T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
@@ -871,12 +853,8 @@ void cuLoadAddStridedInputs(
       if (i2<n2) {
         T_ACC curr_input = static_cast<T_ACC>(input[load_idx]);
         T_ACC curr_dout = static_cast<T_ACC>(dout[load_idx]);
-        if (!rms_only) {
-          warp_buf1[write_idx] += curr_dout;
-          warp_buf2[write_idx] += curr_dout * (curr_input - curr_mean) * curr_rstd;
-        } else {
-          warp_buf2[write_idx] += curr_dout * (curr_input) * curr_rstd;
-        }
+        warp_buf1[write_idx] += curr_dout;
+        warp_buf2[write_idx] += curr_dout * (curr_input - curr_mean) * curr_rstd;
       }
     }
   }
@@ -891,8 +869,7 @@ void cuComputePartGradGammaBeta(
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
     T_ACC* part_grad_gamma,
-    T_ACC* part_grad_beta,
-    bool rms_only)
+    T_ACC* part_grad_beta)
 {
     const int numsegs_n1 = (n1+blockDim.y*blockDim.y-1) / (blockDim.y*blockDim.y);
     const int segs_per_block = (numsegs_n1 + gridDim.y - 1) / gridDim.y;
@@ -909,9 +886,9 @@ void cuComputePartGradGammaBeta(
     T_ACC* warp_buf2 = warp_buf1 + blockDim.y * blockDim.y * row_stride;
     // compute partial sums from strided inputs
     // do this to increase number of loads in flight
-    cuLoadWriteStridedInputs(i1_beg,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd, rms_only);
+    cuLoadWriteStridedInputs(i1_beg,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd);
     for (int i1_block = i1_beg+blockDim.y*blockDim.y;  i1_block < i1_end;  i1_block+=blockDim.y*blockDim.y) {
-      cuLoadAddStridedInputs(i1_block,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd, rms_only);
+      cuLoadAddStridedInputs(i1_block,thr_load_row_off,thr_load_col_off,i2_off,row_stride,warp_buf1,warp_buf2,input,dout,i1_end,n2,mean,rstd);
     }
     __syncthreads();
     // inter-warp reductions
@@ -921,14 +898,10 @@ void cuComputePartGradGammaBeta(
     for (int k = 0;  k < blockDim.y;  ++k) {
       int row1 = threadIdx.y + k*blockDim.y;
       int idx1 = row1*row_stride + threadIdx.x;
-      if (!rms_only) {
-        acc1 += warp_buf1[idx1];
-      }
+      acc1 += warp_buf1[idx1];
       acc2 += warp_buf2[idx1];
     }
-    if (!rms_only) {
-      warp_buf1[threadIdx.y*row_stride+threadIdx.x] = acc1;
-    }
+    warp_buf1[threadIdx.y*row_stride+threadIdx.x] = acc1;
     warp_buf2[threadIdx.y*row_stride+threadIdx.x] = acc2;
     __syncthreads();
     // sum all warps
@@ -938,9 +911,7 @@ void cuComputePartGradGammaBeta(
         int row2 = threadIdx.y + offset;
         int idx1 = row1*row_stride + threadIdx.x;
         int idx2 = row2*row_stride + threadIdx.x;
-        if (!rms_only) {
-          warp_buf1[idx1] += warp_buf1[idx2];
-        }
+        warp_buf1[idx1] += warp_buf1[idx2];
         warp_buf2[idx1] += warp_buf2[idx2];
       }
       __syncthreads();
@@ -951,9 +922,7 @@ void cuComputePartGradGammaBeta(
       int row2 = threadIdx.y + 1;
       int idx1 = row1*row_stride + threadIdx.x;
       int idx2 = row2*row_stride + threadIdx.x;
-      if (!rms_only) {
-        part_grad_beta[blockIdx.y*n2+i2] = warp_buf1[idx1] + warp_buf1[idx2];
-      }
+      part_grad_beta[blockIdx.y*n2+i2] = warp_buf1[idx1] + warp_buf1[idx2];
       part_grad_gamma[blockIdx.y*n2+i2] = warp_buf2[idx1] + warp_buf2[idx2];
     }
 }
@@ -966,8 +935,7 @@ void cuComputeGradGammaBeta(
     const int64_t n1,
     const int64_t n2,
     T* grad_gamma,
-    T* grad_beta,
-    bool rms_only)
+    T* grad_beta)
 {
     // sum partial gradients for gamma and beta
     SharedMemory<T_ACC> shared;
@@ -982,9 +950,7 @@ void cuComputeGradGammaBeta(
       const T_ACC* part_grad_beta_ptr = part_grad_beta + threadIdx.y * num_warp_reductions * n2 + i2;
       for (int warp_offset = 0;  warp_offset < num_warp_reductions;  ++warp_offset) {
         sum_gamma += part_grad_gamma_ptr[warp_offset*n2];
-        if (!rms_only) {
-          sum_beta += part_grad_beta_ptr[warp_offset*n2];
-        }
+        sum_beta += part_grad_beta_ptr[warp_offset*n2];
       }
       // inter-warp reductions
       const int nbsize3 = blockDim.x * blockDim.y / 2;
@@ -993,27 +959,21 @@ void cuComputeGradGammaBeta(
         if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
           const int write_idx = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
           buf[write_idx] = sum_gamma;
-          if (!rms_only) {
-            buf[write_idx+nbsize3] = sum_beta;
-          }
+          buf[write_idx+nbsize3] = sum_beta;
         }
         __syncthreads();
         // bottom half sums
         if (threadIdx.y < offset) {
           const int read_idx = threadIdx.y * blockDim.x + threadIdx.x;
           sum_gamma += buf[read_idx];
-          if (!rms_only) {
-            sum_beta += buf[read_idx+nbsize3];
-          }
+          sum_beta += buf[read_idx+nbsize3];
         }
         __syncthreads();
       }
       // write out fully summed gradients
       if (threadIdx.y == 0) {
         grad_gamma[i2] = sum_gamma;
-        if (!rms_only) {
-          grad_beta[i2] = sum_beta;
-        }
+        grad_beta[i2] = sum_beta;
       }
     }
 }
@@ -1027,16 +987,12 @@ void cuComputeGradInput(
     const T_ACC* __restrict__ mean,
     const T_ACC* __restrict__ rstd,
     const T* gamma,
-    T* grad_input,
-    bool rms_only)
+    T* grad_input)
 {
   for (int i1=blockIdx.y; i1 < n1; i1 += gridDim.y) {
     T_ACC sum_loss1 = T_ACC(0);
     T_ACC sum_loss2 = T_ACC(0);
-    T_ACC c_mean;
-    if (!rms_only) {
-      c_mean = mean[i1];
-    }
+    T_ACC c_mean = mean[i1];
     const T_ACC c_rstd = rstd[i1];
     const T* k_input = input + i1*n2;
     const T* k_dout = dout + i1*n2;
@@ -1049,31 +1005,21 @@ void cuComputeGradInput(
         const T_ACC gamma_idx = static_cast<T_ACC>((idx<n2) ? gamma[idx] : T(0));
         const T_ACC c_h = static_cast<T_ACC>((idx<n2) ? k_input[idx] : T(0));
         const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
-        if (!rms_only) {
-          sum_loss1 += c_loss * gamma_idx;
-          sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
-        } else {
-          sum_loss2 += c_loss * gamma_idx * (c_h) * c_rstd;
-        }
+        sum_loss1 += c_loss * gamma_idx;
+        sum_loss2 += c_loss * gamma_idx * (c_h - c_mean) * c_rstd;
       }
     } else {
       for( int l = 0; l < n2 ; l += numx) {
         int idx = l + thrx;
         const T_ACC c_h = static_cast<T_ACC>((idx<n2) ? k_input[idx] : T(0));
         const T_ACC c_loss = static_cast<T_ACC>((idx<n2) ? k_dout[idx] : T(0));
-        if (!rms_only) {
-          sum_loss1 += c_loss;
-          sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
-        } else {
-          sum_loss2 += c_loss * (c_h) * c_rstd;
-        }
+        sum_loss1 += c_loss;
+        sum_loss2 += c_loss * (c_h - c_mean) * c_rstd;
       }
     }
     // intra-warp reductions
     for (int mask = blockDim.x/2;  mask > 0;  mask /= 2) {
-      if (!rms_only) {
-        sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
-      }
+      sum_loss1 += WARP_SHFL_XOR(sum_loss1, mask);
       sum_loss2 += WARP_SHFL_XOR(sum_loss2, mask);
     }
     // inter-warp reductions
@@ -1084,33 +1030,25 @@ void cuComputeGradInput(
         // upper half of warps write to shared
         if (threadIdx.y >= offset && threadIdx.y < 2*offset) {
           const int wrt_i = (threadIdx.y - offset) * blockDim.x + threadIdx.x;
-          if (!rms_only) {
-            buf[2*wrt_i] = sum_loss1;
-          }
+          buf[2*wrt_i] = sum_loss1;
           buf[2*wrt_i+1] = sum_loss2;
         }
         __syncthreads();
         // lower half merges
         if (threadIdx.y < offset) {
           const int read_i = threadIdx.y * blockDim.x + threadIdx.x;
-          if (!rms_only) {
-            sum_loss1 += buf[2*read_i];
-          }
+          sum_loss1 += buf[2*read_i];
           sum_loss2 += buf[2*read_i+1];
         }
         __syncthreads();
       }
       if (threadIdx.y == 0) {
-        if (!rms_only) {
-          buf[2*threadIdx.x] = sum_loss1;
-        }
+        buf[2*threadIdx.x] = sum_loss1;
         buf[2*threadIdx.x+1] = sum_loss2;
       }
       __syncthreads();
       if (threadIdx.y !=0) {
-        if (!rms_only) {
-          sum_loss1 = buf[2*threadIdx.x];
-        }
+        sum_loss1 = buf[2*threadIdx.x];
         sum_loss2 = buf[2*threadIdx.x+1];
       }
     }
@@ -1123,12 +1061,8 @@ void cuComputeGradInput(
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss * gamma[l];
-        if (!rms_only) {
-          f_grad_input -= sum_loss1;
-          f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
-        } else {
-          f_grad_input -= (c_h) * c_rstd * sum_loss2;
-        }
+        f_grad_input -= sum_loss1;
+        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
         f_grad_input *= term1;
         k_grad_input[l] = static_cast<T>(f_grad_input);
       }
@@ -1137,12 +1071,8 @@ void cuComputeGradInput(
         const T_ACC c_h = static_cast<T_ACC>(k_input[l]);
         const T_ACC c_loss = static_cast<T_ACC>(k_dout[l]);
         T_ACC f_grad_input = fH * c_loss;
-        if (!rms_only) {
-          f_grad_input -= sum_loss1;
-          f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
-        } else {
-          f_grad_input -= (c_h) * c_rstd * sum_loss2;
-        }
+        f_grad_input -= sum_loss1;
+        f_grad_input -= (c_h - c_mean) * c_rstd * sum_loss2;
         f_grad_input *= term1;
         k_grad_input[l] = static_cast<T>(f_grad_input);
       }
@@ -1197,8 +1127,7 @@ void LayerNormBackwardKernelImplInternal(
                 mean_data,
                 rstd_data,
                 gamma_data,
-                dX_data,
-                false);
+                dX_data);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
         const dim3 blocks(M);
@@ -1246,8 +1175,7 @@ void LayerNormBackwardKernelImplInternal(
                           mean_data,
                           rstd_data,
                           part_grad_gamma.template data_ptr<T_ACC>(),
-                          part_grad_beta.template data_ptr<T_ACC>(),
-                          false);
+                          part_grad_beta.template data_ptr<T_ACC>());
           C10_CUDA_KERNEL_LAUNCH_CHECK();
 
           const dim3 threads3(32,8,1);
@@ -1259,8 +1187,7 @@ void LayerNormBackwardKernelImplInternal(
                           part_size,
                           M,N,
                           dgamma_data,
-                          dbeta_data,
-                          false);
+                          dbeta_data);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
       } else {
           dim3 threads{16, 32};
