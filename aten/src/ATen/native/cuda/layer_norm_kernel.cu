@@ -1181,23 +1181,31 @@ void LayerNormBackwardKernelImplInternal(
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
   if (dX_data != nullptr) {
-    const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
-    const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
-    dim3 threads1(warp_size,4,1);
-    int nshared =
-            threads1.y > 1 ?
-            threads1.y*threads1.x*sizeof(T_ACC) :
-            0;
-    cuComputeGradInput<<<blocks1, threads1, nshared, cuda_stream>>>(
-            dY_data,
-            X_data,
-            M,N,
-            mean_data,
-            rstd_data,
-            gamma_data,
-            dX_data,
-            false);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    if(c10::utils::check_env("ENABLE_APEX_GRADINPUT")) {
+        const uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
+        const dim3 blocks1(1, std::min((uint64_t)M, maxGridY), 1);
+        dim3 threads1(warp_size,4,1);
+        int nshared =
+                threads1.y > 1 ?
+                threads1.y*threads1.x*sizeof(T_ACC) :
+                0;
+        cuComputeGradInput<<<blocks1, threads1, nshared, cuda_stream>>>(
+                dY_data,
+                X_data,
+                M,N,
+                mean_data,
+                rstd_data,
+                gamma_data,
+                dX_data,
+                false);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+        const dim3 blocks(M);
+        int nshared = (num_threads()/warp_size) * sizeof(T_ACC);
+        layer_norm_grad_input_kernel<<<blocks, num_threads(), nshared, cuda_stream>>>(dY_data,
+        X_data, mean_data, rstd_data, gamma_data, dX_data, N);
+        C10_CUDA_KERNEL_LAUNCH_CHECK(); 
+    }
   }
 
   if (dgamma->defined() || dbeta->defined()) {
@@ -1219,41 +1227,55 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
+      if(c10::utils::check_env("ENABLE_APEX_GAMMABETA")) {
+          const int part_size = warp_size;
+          const dim3 threads2(warp_size,4,1);
+          const dim3 blocks2((N+threads2.x-1)/threads2.x,part_size,1);
+          const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
+          const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
+          const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
 
-      const int part_size = warp_size;
-      const dim3 threads2(warp_size,4,1);
-      const dim3 blocks2((N+threads2.x-1)/threads2.x,part_size,1);
-      const int nshared2_a = 2 * sizeof(T_ACC) * threads2.y * threads2.y * (threads2.x + 1);
-      const int nshared2_b = threads2.x * threads2.y * sizeof(T_ACC);
-      const int nshared2 = nshared2_a > nshared2_b ? nshared2_a : nshared2_b;
+          const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
+          Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
+          Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
+          cuComputePartGradGammaBeta<<<blocks2, threads2, nshared2, cuda_stream>>>(
+                          dY_data,
+                          X_data,
+                          M,N,
+                          mean_data,
+                          rstd_data,
+                          part_grad_gamma.template data_ptr<T_ACC>(),
+                          part_grad_beta.template data_ptr<T_ACC>(),
+                          false);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-      const auto part_grad_dtype = at::toAccumulateType(X.scalar_type(), true);
-      Tensor part_grad_gamma = at::empty({part_size,N}, gamma.options().dtype(part_grad_dtype));
-      Tensor part_grad_beta = at::native::empty_like(part_grad_gamma);
-
-      cuComputePartGradGammaBeta<<<blocks2, threads2, nshared2, cuda_stream>>>(
-                      dY_data,
-                      X_data,
-                      M,N,
-                      mean_data,
-                      rstd_data,
-                      part_grad_gamma.template data_ptr<T_ACC>(),
-                      part_grad_beta.template data_ptr<T_ACC>(),
-                      false);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-      const dim3 threads3(32,8,1);
-      const dim3 blocks3((N+threads2.x-1)/threads2.x,1,1);
-      const int nshared3 = threads3.x * threads3.y * sizeof(T);
-      cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
-                      part_grad_gamma.template data_ptr<T_ACC>(),
-                      part_grad_beta.template data_ptr<T_ACC>(),
-                      part_size,
-                      M,N,
-                      dgamma_data,
-                      dbeta_data,
-                      false);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+          const dim3 threads3(32,8,1);
+          const dim3 blocks3((N+threads2.x-1)/threads2.x,1,1);
+          const int nshared3 = threads3.x * threads3.y * sizeof(T);   
+          cuComputeGradGammaBeta<<<blocks3, threads3, nshared3, cuda_stream>>>(
+                          part_grad_gamma.template data_ptr<T_ACC>(),
+                          part_grad_beta.template data_ptr<T_ACC>(),
+                          part_size,
+                          M,N,
+                          dgamma_data,
+                          dbeta_data,
+                          false);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+      } else {
+          dim3 threads{16, 32};
+          int blocks = (N + threads.x-1)/threads.x;
+          GammaBetaBackwardCUDAKernel<T, T_ACC> 
+              <<<blocks, threads, 2 * sizeof(T_ACC) * threads.x * threads.y, cuda_stream>>>(
+                  M,
+                  N,
+                  dY_data,
+                  X_data,
+                  mean_data,
+                  rstd_data,
+                  dgamma_data,
+                  dbeta_data);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+      }
     }
   }
 }
