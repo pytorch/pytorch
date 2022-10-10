@@ -2179,6 +2179,15 @@ class FullyShardedDataParallel(nn.Module):
             fqn = f"{module_name}{param_name}"
             yield fqn, param_name, module_name
 
+    @property
+    def _shared_param_fqns(self) -> Iterator[Tuple[str, str, str]]:
+        for param_name, module_name in (
+            self._fsdp_wrapped_module.handle.shared_parameter_module_names()
+        ):
+            module_name = self._convert_to_wrapped_module_name(module_name)
+            fqn = f"{module_name}{param_name}"
+            yield fqn, param_name, module_name
+
     def _full_post_state_dict_hook(
         self,
         state_dict: Dict[str, Any],
@@ -2556,10 +2565,12 @@ class FullyShardedDataParallel(nn.Module):
         # gather all the parameters in this layer. This can be achieved by
         # concatenated all the local shards and then append the padding.
         # https://github.com/pytorch/pytorch/issues/77461
+        shared_fqns = [fqn for fqn, _, _ in self._shared_param_fqns]
         for fqn, _, _ in self._param_fqns:
             full_fqn = f"{prefix}{FSDP_WRAPPED_MODULE}.{fqn}"
             param = state_dict.pop(full_fqn)
-
+            if fqn in shared_fqns:
+                continue
             # All-gather the param (ShardedTensor)
             param, shards = _ext_pre_load_state_dict_transform(param)
             assert len(shards) < 2, (
