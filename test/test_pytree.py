@@ -202,8 +202,6 @@ class TestPytree(TestCase):
         # Check that it looks sane
         pytree = (0, [0, 0, 0])
         _, spec = tree_flatten(pytree)
-        print()
-        print(repr(spec))
         self.assertEqual(repr(spec), ("TreeSpec(tuple, None, [*,\n"
                                       "                       TreeSpec(list, None, [*,\n"
                                       "                                             *,\n"
