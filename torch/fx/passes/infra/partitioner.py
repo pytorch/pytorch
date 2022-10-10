@@ -92,7 +92,7 @@ class CapabilityBasedPartitioner:
 
                 # branching on partition or not
                 visited.add(node)
-                if node in assigment:
+                if node in assignment:
                     for p_node in partitions_by_id[assignment[node]].nodes:
                         for user_node in p_node.users:
                             if dfs_find_cycle(user_node):
