@@ -168,7 +168,10 @@ class TestPartitionFunctions:
         x1 = c0.relu()
         b1 = b0 + x1
         c1 = c0 + 1.2
-        # c2 has dependency on x0 & b0, when we merge {c0, c1, c2}, this dependency should be updated to the fusion group and reflected on the decision to not fuse b0 & b1, which forms a cyclic dependency in the new graph
+        # c2 has dependency on x0 & b0, when we merge {c0, c1, c2}
+        # this dependency should be updated to the fusion group and reflected
+        # on the decision to not fuse b0 & b1, which forms a cyclic dependency in
+        # the new graph
         c2 = x0 + c0
         return b1, c2
 
