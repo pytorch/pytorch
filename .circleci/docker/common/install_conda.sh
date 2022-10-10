@@ -55,8 +55,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Ensure we run conda in a directory that jenkins has write access to
   pushd /opt/conda
 
-  # Track latest conda update
-  as_jenkins conda update -y -n base conda
+  # Prevent conda from updating to 4.14.0, which causes docker build failures
+  # See https://hud.pytorch.org/pytorch/pytorch/commit/754d7f05b6841e555cea5a4b2c505dd9e0baec1d
+  # Uncomment the below when resolved to track the latest conda update
+  # as_jenkins conda update -y -n base conda
 
   # Install correct Python version
   as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"

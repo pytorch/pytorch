@@ -41,7 +41,7 @@ here is the basic process.
    requests are small; in that case, no need to let us know about what
    you want to do, just get cracking. But if the change is going to be
    large, it's usually a good idea to get some design comments about it
-   first.
+   first by `submitting an RFC <https://github.com/pytorch/rfcs/blob/master/README.md>`__.
 
    -  If you don't know how big a change is going to be, we can help you
       figure it out! Just post about it on
@@ -73,11 +73,13 @@ here is the basic process.
 
 -  **Open a pull request.**
 
-   -  If you are not ready for the pull request to be reviewed, tag it
-      with [WIP]. We will ignore it when doing review passes. If you are
-      working on a complex change, it's good to start things off as WIP,
-      because you will need to spend time looking at CI results to see
-      if things worked out or not.
+   -  If you are not ready for the pull request to be reviewed, create a draft
+      pull request first - you can later convert it to a full PR by pressing
+      "Ready for review" button. You can also prepend the title of the PR with
+      "[WIP]" ("work in progress") while it's still in draft. We will ignore
+      draft PRs when doing review passes. If you are working on a complex change,
+      it's good to start things off as a draft, because you will need to spend
+      time looking at CI results to see if things worked out or not.
    -  Find an appropriate reviewer for your change. We have some folks
       who regularly go through the PR queue and try to review
       everything, but if you happen to know who the maintainer for a

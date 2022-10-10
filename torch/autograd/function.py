@@ -8,6 +8,9 @@ import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional
 
+__all__ = ["FunctionCtx", "BackwardCFunction", "FunctionMeta", "Function", "once_differentiable", "traceable",
+           "InplaceFunction", "NestedIOFunction"]
+
 # Formerly known as: _ContextMethodMixin
 class FunctionCtx(object):
 
@@ -83,6 +86,7 @@ class FunctionCtx(object):
         See :ref:`extending-autograd` for more details on how to use this method.
 
         Example::
+            >>> # xdoctest: +SKIP
             >>> class Func(torch.autograd.Function):
             >>>     @staticmethod
             >>>     def forward(ctx, x: torch.Tensor, y: torch.Tensor, z: int):
@@ -149,6 +153,7 @@ class FunctionCtx(object):
             >>> b = a * a
             >>> Inplace.apply(a)  # This would lead to wrong gradients!
             >>>                   # but the engine would not know unless we mark_dirty
+            >>> # xdoctest: +SKIP
             >>> b.backward() # RuntimeError: one of the variables needed for gradient
             >>>              # computation has been modified by an inplace operation
 
@@ -314,6 +319,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, FunctionCtx, _Hook
         >>>         return grad_output * result
         >>>
         >>> # Use it by calling the apply method:
+        >>> # xdoctest: +SKIP
         >>> output = Exp.apply(input)
     """
     def __init__(self, *args, **kwargs):

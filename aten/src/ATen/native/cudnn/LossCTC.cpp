@@ -1,9 +1,21 @@
-#include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
 #if AT_CUDNN_ENABLED()
   #include <ATen/cudnn/Descriptors.h>
+#endif
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_cudnn_ctc_loss.h>
+#include <ATen/ops/_cudnn_ctc_loss_native.h>
+#include <ATen/ops/_use_cudnn_ctc_loss.h>
+#include <ATen/ops/_use_cudnn_ctc_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #endif
 
 #if (!AT_CUDNN_ENABLED()) || (CUDNN_VERSION < 7600)
@@ -21,7 +33,27 @@ bool _use_cudnn_ctc_loss(
   return false;
 }
 
+bool _use_cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK) {
+  return false;
+}
+
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool deterministic, bool zero_infinity) {
+  AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
+}
+
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK,
+    bool deterministic,
+    bool zero_infinity) {
   AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
 }
 
@@ -66,6 +98,20 @@ bool _use_cudnn_ctc_loss(
     }
   }
   return use_cudnn;
+}
+
+bool _use_cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK) {
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  return at::_use_cudnn_ctc_loss(
+      log_probs, targets, il, tl, BLANK);
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
@@ -138,6 +184,21 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   return std::make_tuple(costs, grad);
 }
 
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    const Tensor& input_lengths,
+    const Tensor& target_lengths,
+    int64_t BLANK,
+    bool deterministic,
+    bool zero_infinity) {
+  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+  return at::_cudnn_ctc_loss(
+      log_probs, targets, il, tl, BLANK, deterministic, zero_infinity);
+}
 
 }}  // namespace at::native
 

@@ -455,7 +455,7 @@ bool is2D)
         auto totalWeightPlaceholder   = Placeholder(cachedGraph->totalWeightTensor_, total_weight);
         auto gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
-        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [[NSMutableDictionary alloc] initWithCapacity: 4];
+        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [[[NSMutableDictionary alloc] initWithCapacity: 4] autorelease];
         feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
         feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
         feeds[totalWeightPlaceholder.getMPSGraphTensor()] = totalWeightPlaceholder.getMPSGraphTensorData();
@@ -697,7 +697,7 @@ void nllnd_loss_forward_impl
         Placeholder totalWeightsPlaceholder = Placeholder(cachedGraph->totalWeightTensor_, total_weight);
 
         // Create dictionary of inputs and outputs
-        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [[NSMutableDictionary alloc] initWithCapacity: 4];
+        NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [[[NSMutableDictionary alloc] initWithCapacity: 4] autorelease];
         feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
         feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
         feeds[batchSizePlaceholder.getMPSGraphTensor()] = batchSizePlaceholder.getMPSGraphTensorData();
@@ -766,10 +766,6 @@ void smooth_l1_loss_impl(
           MPSGraphTensor *targetTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(target.scalar_type()));
 
           // Setup tensors
-          MPSGraphTensor *mpsGraphZeroTensor = [mpsGraph constantWithScalar: 0.0
-                                                                   dataType: inputTensor.dataType];
-          MPSGraphTensor *mpsGraphOneTensor = [mpsGraph constantWithScalar: 1.0
-                                                                  dataType: inputTensor.dataType];
           MPSGraphTensor *mpsGraphHalfTensor = [mpsGraph constantWithScalar: 0.5
                                                                    dataType: inputTensor.dataType];
           MPSGraphTensor *betaTensor = [mpsGraph constantWithScalar: beta
@@ -1066,8 +1062,6 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
         MPSGraphTensor* outputTensor_ = nil;
     };
     MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
-    MPSStream* stream = getCurrentMPSStream();
 
     @autoreleasepool {
         string key = op_name + ":" + reductionToString(reduction) + ":" + std::to_string(delta) + ":" + getTensorsStringKey({input, target});

@@ -265,12 +265,22 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
             return shard
     raise ValueError(f"Could not find shard at '{index.offset}' for FQN: '{index.fqn}'")
 
+def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
+    if isinstance(tensor, ShardedTensor):
+        return _find_shard(tensor, index).tensor
+    if index.offset is not None:
+        # special case looking up a tensor by origin
+        if index.offset == torch.Size([0] * len(tensor.size())):
+            return tensor
+        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
+    return tensor
+
 def find_state_dict_object(state_dict: STATE_DICT_TYPE, index: MetadataIndex) -> Any:
     if index.fqn not in state_dict:
         raise ValueError(f"Could not find FQN: '{index.fqn}'")
     obj = state_dict[index.fqn]
-    if isinstance(obj, ShardedTensor):
-        return _find_shard(obj, index).tensor
-    if index.offset is not None:
-        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset")
+    if isinstance(obj, torch.Tensor):
+        return find_tensor_shard(obj, index)
+    elif index.offset is not None:
+        raise ValueError(f"FQN: '{index.fqn}' is not a ShardedTensor, can't find by offset: '{index.offset}'")
     return obj

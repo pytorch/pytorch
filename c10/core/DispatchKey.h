@@ -401,6 +401,10 @@ enum class DispatchKey : uint16_t {
   // for a usage example
   TESTING_ONLY_GenericMode,
 
+  // This is a bypass that allows you to skip running the C++ dispatcher
+  // entirely
+  PythonDispatcher,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   EndOfFunctionalityKeys, // End of functionality keys.
 
@@ -439,6 +443,8 @@ enum class DispatchKey : uint16_t {
   Autograd,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
+  CompositeImplicitAutogradNestedTensor, // registered at
+  // build/aten/src/ATen/RegisterCompositeImplicitAutogradNestedTensor.cpp
   CompositeExplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeExplicitAutograd.cpp
   // See Note [CompositeExplicitAutogradNonFunctional Key]

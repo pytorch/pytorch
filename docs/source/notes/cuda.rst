@@ -355,7 +355,7 @@ Use of a caching allocator can interfere with memory checking tools such as
 
 The behavior of caching allocator can be controlled via environment variable
 ``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2><value2>...``
+The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``max_split_size_mb`` prevents the allocator from splitting blocks larger
@@ -379,6 +379,10 @@ Available options:
   the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
   them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
   will be rounded to 1280 as the nearest ceiling of power-2 division.
+* ``roundup_bypass_threshold_mb`` bypass rounding the requested allocation size,
+  for allocation requests larger than the threshold value (in MB). This can help
+  reduce the memory footprint when making large allocations that are expected to
+  be persistent or have a large lifetime.
 * ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
   avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
   which can be unfavorable to latency-critical GPU applications (e.g., servers).

@@ -307,7 +307,8 @@ Val* getProducerIndexWithPartialSplit(
   }
 
   return SimplifyingIrBuilder::addExpr(
-      producer_index, SimplifyingIrBuilder::create<Int>(diff_eval.value()));
+      producer_index,
+      SimplifyingIrBuilder::create<Int>(diff_eval->as<int64_t>()));
 }
 
 } // namespace
@@ -527,13 +528,43 @@ void IndexCompute::handle(Swizzle2D* swizzle_2d) {
   const auto out_x_ind = out_x_it->second;
   const auto out_y_ind = out_y_it->second;
 
-  // Actual swizzle operation is handled via IndexSwizzle pass
-  //  all behavior in this pass is directly forward through the
-  //  index and extent.
-  index_map_[in_x_id] = out_x_ind;
-  index_map_[in_y_id] = out_y_ind;
-  extent_map_[in_y_id] = getExtent(out_y_id);
-  extent_map_[in_x_id] = getExtent(out_x_id);
+  if (swizzle_mode_ == SwizzleMode::NoSwizzle ||
+      swizzle_mode_ != swizzle_2d->swizzleMode()) {
+    // Handle inactive swizzles by just passing through index
+    //  and extend information.
+
+    TORCH_INTERNAL_ASSERT(
+        index_map_.count(in_x_id) == index_map_.count(in_y_id),
+        "input index should be either both defined or both undefined");
+    if (index_map_.count(in_x_id)) {
+      // Only propagate original index through if
+      //  the input index hasn't been computed.
+      // TODO:
+      //  This part should be cleaner once we remove the
+      // second index traversal pass.
+      return;
+    }
+    index_map_[in_x_id] = out_x_ind;
+    index_map_[in_y_id] = out_y_ind;
+    extent_map_[in_y_id] = getExtent(out_y_id);
+    extent_map_[in_x_id] = getExtent(out_x_id);
+  } else {
+    // Generate integer swizzle math if the
+    //  swizzle is activated. See also
+    //  [Note on swizzle mode].
+
+    auto out_pair = IrBuilder::swizzle2DIntExpr(
+        out_x_ind,
+        out_y_ind,
+        getExtent(out_x_id),
+        getExtent(out_y_id),
+        swizzle_2d->swizzleType());
+
+    index_map_[in_x_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
+    index_map_[in_y_id] =
+        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
+  }
 }
 
 void IndexCompute::handle(Expr* e) {
@@ -616,11 +647,102 @@ IndexCompute::IndexCompute(
       reference_halo_extent_map_(std::move(reference_halo_extent_map)) {
   FUSER_PERF_SCOPE("GpuLower::Lower::IndexCompute::IndexCompute");
   concrete_id_pass_ = true;
+  swizzle_mode_ = SwizzleMode::Loop;
 }
 
 void IndexCompute::run(const LoopIndexing& loop_indexing) {
+  TORCH_INTERNAL_ASSERT(
+      concrete_id_pass_, "concrete pass only for this option");
+  // Apply loop swizzles if there are any that outputs to
+  //  the loop domains.
+  // Currently only support loop swizzles that directly output
+  //  to concrete loop domains and these are validated in
+  //  validate swizzle pass.
+  // TODO:
+  //  will gradually enable replaying and mapping of loop
+  // swizzles in the IR infrastructure and once that's piped
+  // through this part of logic will be removed.
+  std::unordered_set<Expr*> visited;
+  for (auto loop_id : loop_indexing.loopDomains()) {
+    auto loop_id_def = loop_id->definition();
+    if (loop_id_def != nullptr && loop_id_def->isA<Swizzle2D>()) {
+      if (visited.insert(loop_id_def).second) {
+        handle(loop_id_def);
+      }
+    }
+  }
+
+  // Resolve the index vals that could be resolved with only
+  //  the loops that consumer_tv doesn't share with any of its
+  //  consumers, i.e. the not-inlined loops that define consumer_tv
+  //  values.
+  collectIndexIntoPermissiveMap(loop_indexing);
+
+  // Run through the loop indexing expressions and generate
+  //  the indexing integer math for the concrete ids.
   for (auto expr : loop_indexing.getBackwardExprList()) {
+    // Resolve missing values from permissive map.
+    updateIndexMapFromPermissiveMap(expr);
+
     handle(expr);
+  }
+}
+
+void IndexCompute::collectIndexIntoPermissiveMap(
+    const LoopIndexing& loop_indexing) {
+  // Visit the expressions that only produces un-inlined iterdomains,
+  //  in reverse topological order.
+  for (auto expr : loop_indexing.getBackwardOutOfLineExprList()) {
+    // Compute indexing vals for the expression inputs.
+    //
+    // This stage should run before any indexing computation so it could be
+    //  made sure that all index values computed at this stage are
+    //  the ones that can be resolved only with the not-inlined
+    //  iterdomains.
+    //
+    auto id_outputs = ir_utils::filterByType<IterDomain>(expr->outputs());
+    if (std::all_of(
+            id_outputs.begin(), id_outputs.end(), [this](IterDomain* id) {
+              return index_map_.count(ir_utils::caMapExactConcreteId(id));
+            })) {
+      // Visit this expression:
+      // LoopIndexingAnalysis::traverseFromDomainVals made sure that each
+      //  concrete index is bound exactly once so computing these expressions
+      //  early should still be consistent.
+      handle(expr);
+
+      auto id_inputs = ir_utils::filterByType<IterDomain>(expr->inputs());
+      for (auto id : id_inputs) {
+        // Collect backward pass results from this expression if they are
+        //  made available in by this expression.
+        auto idx_it = index_map_.find(ir_utils::caMapExactConcreteId(id));
+
+        if (idx_it != index_map_.end()) {
+          permissive_index_map_
+              [GpuLower::current()->caMap()->getConcreteMappedID(
+                  id, IdMappingMode::PERMISSIVE)] = idx_it->second;
+        }
+      }
+    }
+  }
+}
+
+void IndexCompute::updateIndexMapFromPermissiveMap(const Expr* id_expr) {
+  auto id_outputs = ir_utils::filterByType<IterDomain>(id_expr->outputs());
+  for (auto id : id_outputs) {
+    auto concrete_id = ir_utils::caMapExactConcreteId(id);
+    // Only try to copy index val from permissive map when
+    //  the index is missing.
+    if (!index_map_.count(concrete_id)) {
+      auto permissive_id = GpuLower::current()->caMap()->getConcreteMappedID(
+          id, IdMappingMode::PERMISSIVE);
+      // Write the permissive index val into index_map_ if the
+      //  missing value is found here.
+      auto permissive_it = permissive_index_map_.find(permissive_id);
+      if (permissive_it != permissive_index_map_.end()) {
+        index_map_[concrete_id] = permissive_it->second;
+      }
+    }
   }
 }
 
@@ -955,6 +1077,7 @@ void IndexSwizzle::run() {
     UpdateLeafIndices update_leaves(td_, indexMap(), extentMap());
     index_map_ = update_leaves.indexMap();
     extent_map_ = update_leaves.extentMap();
+    IndexCompute::swizzle_mode_ = SwizzleMode::Data;
     IndexCompute::run();
   }
 }
@@ -969,7 +1092,8 @@ void IndexSwizzle::handle(Expr* e) {
             return swizzled_ids_.find(id) != swizzled_ids_.end();
           }) ||
       (e->isA<Swizzle2D>() &&
-       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle);
+       e->as<Swizzle2D>()->swizzleType() != Swizzle2DType::NoSwizzle &&
+       e->as<Swizzle2D>()->swizzleMode() == SwizzleMode::Data);
   if (!needs_update) {
     return;
   }
@@ -983,8 +1107,6 @@ void IndexSwizzle::handle(Expr* e) {
 void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
   auto out_x_id = swizzle_2d->outX();
   auto out_y_id = swizzle_2d->outY();
-  auto in_x_id = swizzle_2d->inX();
-  auto in_y_id = swizzle_2d->inY();
 
   auto out_x_it = index_map_.find(out_x_id);
   auto out_y_it = index_map_.find(out_y_id);
@@ -998,28 +1120,7 @@ void IndexSwizzle::handle(Swizzle2D* swizzle_2d) {
       out_x_it != index_map_.end() && out_y_it != index_map_.end(),
       "Swizzle output indices were not propagated through");
 
-  const auto out_x_ind = out_x_it->second;
-  const auto out_y_ind = out_y_it->second;
-
-  // Can propagate zero only for a few
-  //  swizzle types (TODO)
-
-  if (swizzle_2d->swizzleType() != Swizzle2DType::NoSwizzle) {
-    auto out_pair = IrBuilder::swizzle2DIntExpr(
-        out_x_ind,
-        out_y_ind,
-        getExtent(out_x_id),
-        getExtent(out_y_id),
-        swizzle_2d->swizzleType());
-
-    index_map_[in_x_id] =
-        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::X);
-    index_map_[in_y_id] =
-        IrBuilder::pairSelectExpr(out_pair, kir::PairSelect::Selection::Y);
-
-    swizzled_ids_.insert(in_x_id);
-    swizzled_ids_.insert(in_y_id);
-  }
+  IndexCompute::handle(swizzle_2d);
 }
 
 // Used for local and shared index mapping. Returns a map from loops
@@ -1125,7 +1226,16 @@ indexMapFromTV(
         // Similarly for local memory tensors, zero replacement can be
         // only done when there's a matching domain with the same
         // parallel type
-        (loop->iter_domain()->isThread() && is_local && same_parallel_type)) {
+        (loop->iter_domain()->isThread() && is_local && same_parallel_type) ||
+        // MMA operands are currently indexed in units of "fragments",
+        //  so each mma tensor domain would be zero-ed and the tensor index
+        //  calculated here would be the fragment index.
+        // TODO: This is a quick WAR to enable iterating over a register array
+        //  of MMA fragments, so we could generate unrolled mma loops.
+        //  Eventually we still want IdGraph to be able to analyze the
+        //  in-register layout of mma fragments for more unified indexing math
+        //  as well as more flexibility in swizzling loops.
+        (loop->iter_domain()->isMma() && !as_consumer)) {
       idx = GpuLower::current()->kernel()->zeroVal();
       zero_loops.insert(loop);
     } else {
@@ -1139,8 +1249,11 @@ indexMapFromTV(
     }
 
     if (loop == double_buffer_loop) {
+      auto stage_depth =
+          GpuLower::current()->doubleBufferInfo().getStageDepthFor(
+              loop->iter_domain());
       idx = SimplifyingIrBuilder::addExpr(
-          idx, GpuLower::current()->kernel()->oneVal());
+          idx, SimplifyingIrBuilder::create<Int>(stage_depth - 1));
     }
 
     loop_to_ind_map[loop] = idx;
@@ -1218,7 +1331,8 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
     const TensorView* tv,
     const IndexCompute& indexing,
     Val* index) {
-  if (isDisabled(DisableOption::IndexHoist) || index->definition() == nullptr) {
+  if (isOptionDisabled(DisableOption::IndexHoist) ||
+      index->definition() == nullptr) {
     return c10::nullopt;
   }
 
@@ -1802,14 +1916,16 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
     }
   }
 
-  if (producer_tv->isDoubleBuffered()) {
+  if (producer_tv->isDoubleBuffered() || producer_tv->isCircularBuffered()) {
     auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
         producer_tv, loops, true);
     if (db_loop != nullptr) {
+      auto stage_depth = gpu_lower->doubleBufferInfo().getStageDepthFor(
+          db_loop->iter_domain());
       auto loop_index =
           db_loop->isTrivial() ? db_loop->start() : db_loop->index();
       auto db_switch_index = SimplifyingIrBuilder::modExpr(
-          loop_index, SimplifyingIrBuilder::create<Int>(2));
+          loop_index, SimplifyingIrBuilder::create<Int>(stage_depth));
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(producer_tv);
       auto db_strided_index =
@@ -1819,6 +1935,36 @@ std::vector<Val*> Index::getNonGlobalProducerStridedIndices(
   }
 
   return strided_inds;
+}
+
+std::vector<Val*> Index::getLinearIndex(
+    TensorView* consumer_tv,
+    const std::vector<kir::ForLoop*>& loops) {
+  // Use domain guard to ignore the contiguity of
+  //  consumer tv.
+  TensorDomain* consumer_tv_no_contiguity_domain = nullptr;
+  auto contiguity_vector =
+      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), true);
+  if (consumer_tv->hasRFactor()) {
+    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
+        consumer_tv->getRootDomain(),
+        consumer_tv->getRFactorDomain(),
+        consumer_tv->domain()->domain(),
+        contiguity_vector);
+  } else {
+    consumer_tv_no_contiguity_domain = IrBuilder::create<TensorDomain>(
+        consumer_tv->getRootDomain(),
+        consumer_tv->domain()->domain(),
+        contiguity_vector);
+  }
+
+  ir_utils::TVDomainGuard domain_guard(
+      consumer_tv, consumer_tv_no_contiguity_domain);
+
+  // TODO:
+  //  More optimization on the underlying tensor layout
+  //   will be done in a follow up.
+  return getGlobalConsumerStridedIndices(consumer_tv, loops);
 }
 
 std::vector<Val*> Index::getGlobalConsumerStridedIndices(
@@ -2068,14 +2214,36 @@ std::vector<Val*> Index::getNonGlobalConsumerStridedIndices(
   TORCH_INTERNAL_ASSERT(
       strided_inds.size() == consumer_tv->getMaybeRFactorDomain().size());
 
-  if (consumer_tv->isDoubleBuffered()) {
-    auto db_loop = gpu_lower->doubleBufferInfo().getDoubleBufferLoop(
-        consumer_tv, loops, true);
-    if (db_loop != nullptr) {
-      auto db_switch_index = SimplifyingIrBuilder::subExpr(
-          gpu_lower->kernel()->oneVal(),
-          SimplifyingIrBuilder::modExpr(
-              db_loop->index(), SimplifyingIrBuilder::create<Int>(2)));
+  if (consumer_tv->isDoubleBuffered() || consumer_tv->isCircularBuffered()) {
+    auto db_loop =
+        gpu_lower->doubleBufferInfo().getDoubleBufferLoop(consumer_tv, loops);
+    auto stage_depth =
+        gpu_lower->doubleBufferInfo().getStageDepthFor(db_loop->iter_domain());
+    bool is_circular_buffer_loop = stage_depth > 2;
+    bool is_prolog =
+        db_loop->doubleBufferLoopStage() == DoubleBufferLoopStage::Prolog;
+
+    Val* db_switch_index = nullptr;
+
+    // In double buffered we don't materialize the prolog loop as there will
+    //  be only one iteration. In circular buffer case we materialize the
+    //  prolog loop as well covering the first N-1 iterations, N being the
+    //  stage depth.
+    if (!is_prolog || is_circular_buffer_loop) {
+      if (is_prolog && is_circular_buffer_loop) {
+        // The buffer switching logic is the same as original index
+        //  in the case of circular buffer prolog.
+        db_switch_index = db_loop->index();
+      } else {
+        // Switching index generated for main loop or epilog component.
+        db_switch_index = SimplifyingIrBuilder::modExpr(
+            SimplifyingIrBuilder::addExpr(
+                db_loop->index(),
+                SimplifyingIrBuilder::create<Int>(stage_depth - 1)),
+            SimplifyingIrBuilder::create<Int>(stage_depth));
+      }
+
+      // Use the generated switching buffer index to access the buffer space.
       auto original_alloc_size =
           gpu_lower->doubleBufferInfo().getOriginalAllocSize(consumer_tv);
       auto db_strided_index =
@@ -2110,7 +2278,8 @@ std::vector<Val*> Index::getProducerStridedIndices(
   TORCH_INTERNAL_ASSERT(
       strided_indices.size() ==
       producer->getMaybeRFactorDomain().size() +
-          (producer->isDoubleBuffered() ? 1 : 0));
+          (producer->isDoubleBuffered() || producer->isCircularBuffered() ? 1
+                                                                          : 0));
 
   return strided_indices;
 }
@@ -2721,14 +2890,14 @@ std::pair<Val*, Val*> hoistPredicates(
     Val* stop_index,
     const std::vector<kir::ForLoop*>& loops,
     std::vector<IterDomain*> loop_domains,
-    const std::unordered_map<IterDomain*, Val*> start_initial_loop_index_map,
-    const std::unordered_map<IterDomain*, Val*> stop_initial_loop_index_map,
+    const std::unordered_map<IterDomain*, Val*>& start_initial_loop_index_map,
+    const std::unordered_map<IterDomain*, Val*>& stop_initial_loop_index_map,
     kir::ForLoop* unswitch_or_vec_loop,
     IterDomain* predicated_consumer_id,
     TensorView* predicated_consumer_tv) {
   const std::pair<Val*, Val*> same_indices{start_index, stop_index};
 
-  if (isDisabled(DisableOption::IndexHoist)) {
+  if (isOptionDisabled(DisableOption::IndexHoist)) {
     return same_indices;
   }
 
@@ -2769,6 +2938,22 @@ std::pair<Val*, Val*> hoistPredicates(
   }
 
   return {hoisted_start_index, hoisted_stop_index};
+}
+
+// Updates a loop index map with a loop index protected by magic zero
+std::unordered_map<IterDomain*, Val*> updateInitialLoopIndexMap(
+    const std::unordered_map<IterDomain*, Val*>& initial_loop_index_map,
+    const IndexMagicZeroInfo& magic_zero_info) {
+  if (magic_zero_info.original_loop_index != nullptr) {
+    TORCH_INTERNAL_ASSERT(magic_zero_info.protected_loop_index != nullptr);
+    auto concrete_loop_id = GpuLower::current()->caMap()->getConcreteMappedID(
+        magic_zero_info.loop_id, IdMappingMode::EXACT);
+    auto updated_map = initial_loop_index_map;
+    updated_map[concrete_loop_id] = magic_zero_info.protected_loop_index;
+    return updated_map;
+  } else {
+    return initial_loop_index_map;
+  }
 }
 
 } // namespace
@@ -2886,13 +3071,38 @@ std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
     auto stop_index = consumer_stop_indexing_it->second;
     auto start_index = consumer_start_index_map.at(contig_id);
 
+    IndexMagicZeroInfo start_magic_zero_info;
+    IndexMagicZeroInfo stop_magic_zero_info;
+
+    // When the start and stop indices are not the same, apply the
+    // magic-zero protection separately for both of them.
+    if (stop_index != start_index) {
+      start_magic_zero_info = protectPredicateIndexWithMagicZero(
+          start_index, start_indexing_from_idgraph, loops);
+      stop_magic_zero_info = protectPredicateIndexWithMagicZero(
+          stop_index, stop_indexing_from_idgraph, loops);
+    } else {
+      stop_magic_zero_info = protectPredicateIndexWithMagicZero(
+          stop_index, stop_indexing_from_idgraph, loops);
+      start_magic_zero_info = stop_magic_zero_info;
+    }
+
+    start_index = start_magic_zero_info.index;
+    stop_index = stop_magic_zero_info.index;
+
+    // Update the loop-index map with the magic-zero protection info
+    // before passing it to the hoisting function
     std::tie(start_index, stop_index) = hoistPredicates(
         start_index,
         stop_index,
         loops,
         stop_indexing_from_idgraph.resolved_loop_domains,
-        start_indexing_from_idgraph.initial_concrete_index_map,
-        stop_indexing_from_idgraph.initial_concrete_index_map,
+        updateInitialLoopIndexMap(
+            start_indexing_from_idgraph.initial_concrete_index_map,
+            start_magic_zero_info),
+        updateInitialLoopIndexMap(
+            stop_indexing_from_idgraph.initial_concrete_index_map,
+            stop_magic_zero_info),
         unswitch_or_vec_loop,
         contig_id,
         consumer_tv);
@@ -2933,19 +3143,6 @@ std::vector<RootPredicateInfo> Index::getReferenceRootPredicates(
   }
 
   return pred_info_vec;
-}
-
-bool Index::protectWithMagicZero(
-    kir::ForLoop* loop,
-    IterDomain* reference_domain,
-    Val* ind) {
-  bool ref_dom_simple =
-      (reference_domain == nullptr ? true
-                                   : reference_domain->definition() != nullptr);
-  bool ind_simple =
-      (ind == nullptr ? true
-                      : ind->definition() != nullptr && !ind->isZeroInt());
-  return loop->isUnrolled() && (!ref_dom_simple || !ind_simple);
 }
 
 RootPredicateInfo RootPredicateInfo::getFalseInfo() {

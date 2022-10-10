@@ -81,6 +81,8 @@ class TestMedatadaIndex(TestCase):
 
         a = find_state_dict_object(state_dict, MetadataIndex("a"))
         self.assertEqual(a, state_dict["a"])
+        a = find_state_dict_object(state_dict, MetadataIndex("a", [0]))
+        self.assertEqual(a, state_dict["a"])
         a = find_state_dict_object(state_dict, MetadataIndex("a", index=99))
         self.assertEqual(a, state_dict["a"])
 
@@ -91,8 +93,6 @@ class TestMedatadaIndex(TestCase):
 
         with self.assertRaisesRegex(ValueError, "FQN"):
             find_state_dict_object(state_dict, MetadataIndex("c"))
-        with self.assertRaisesRegex(ValueError, "ShardedTensor"):
-            find_state_dict_object(state_dict, MetadataIndex("a", [0]))
         with self.assertRaisesRegex(ValueError, "ShardedTensor"):
             find_state_dict_object(state_dict, MetadataIndex("b", [1]))
 

@@ -149,13 +149,13 @@ const std::vector<std::string> functions = {
             return std_out, backward
 
         def std_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             std_out = torch.std(self, dim, unbiased, keepdim)
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output / (std_out * 2), self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output / (std_out * 2), self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return std_out, backward
@@ -182,12 +182,12 @@ const std::vector<std::string> functions = {
             return torch.var(self, unbiased), backward
 
         def var_1(self,
-                  dim: List[int],
+                  dim: Optional[List[int]],
                   unbiased: bool,
                   keepdim: bool):
             def backward(grad_output):
                 correction = AD_bool_to_int(unbiased)
-                grad_self = AD_var_backward_1(grad_output, self, dim, correction, keepdim)
+                grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
                 return grad_self, None, None, None
 
             return torch.var(self, dim, unbiased, keepdim), backward
@@ -925,6 +925,13 @@ const std::vector<std::string> functions = {
             result = torch.gelu(self, approximate=approximate)
             def backward(grad_output):
                 return torch.gelu_backward(grad_output, self, approximate=approximate), None
+            return result, backward
+
+        def silu(self):
+            result = torch.silu(self)
+            def backward(grad_output):
+                input_sigmoid = torch.sigmoid(self)
+                return grad_output * (input_sigmoid * (1 + self * (1 - input_sigmoid)))
             return result, backward
 
         def hardswish(self):
