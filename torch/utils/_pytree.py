@@ -1,8 +1,7 @@
 from typing import NamedTuple, Callable, Any, Tuple, List, Dict, Type, cast, Optional, TypeVar, overload, Union
 import functools
 from collections import namedtuple, OrderedDict
-from dataclasses import dataclass, asdict
-import pprint
+from dataclasses import dataclass
 
 
 T = TypeVar('T')
@@ -120,17 +119,24 @@ class TreeSpec:
     def __post_init__(self) -> None:
         self.num_leaves: int = sum([spec.num_leaves for spec in self.children_specs])
 
-    def __repr__(self) -> str:
-        # Represent leaf node with '*', root node with dictionary
-        def dict_factory(tuples: List[Any]) -> Any:
-            d: Dict[Any, Any] = dict(tuples)
-            return '*' if d['type'] is None else d
-        return pprint.pformat(asdict(self, dict_factory=dict_factory))
+    def __repr__(self, indent: int = 0) -> str:
+        repr_prefix: str = f'TreeSpec({self.type.__name__}, {self.context}, ['
+        children_specs_str: str = ''
+        if len(self.children_specs):
+            indent += len(repr_prefix)
+            children_specs_str += self.children_specs[0].__repr__(indent) + ','
+            children_specs_str += ','.join(['\n' + ' ' * indent + child.__repr__(indent) for child in self.children_specs[1:]])
+        repr_suffix: str = f'{children_specs_str}])'
+        return repr_prefix + repr_suffix
+
 
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
         self.num_leaves = 1
+
+    def __repr__(self, indent: int = 0) -> str:
+        return '*'
 
 def tree_flatten(pytree: PyTree) -> Tuple[List[Any], TreeSpec]:
     """Flattens a pytree into a list of values and a TreeSpec that can be used
