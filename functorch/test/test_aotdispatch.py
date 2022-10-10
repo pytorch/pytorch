@@ -37,6 +37,7 @@ from common_utils import (
     skip,
     skipOps,
 )
+from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 USE_TORCHVISION = False
 try:
@@ -724,7 +725,6 @@ aot_autograd_failures = {
 }
 
 symbolic_aot_autograd_failures = {
-    xfail('__getitem__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('__rmatmul__', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addbmm', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('addcdiv', ''),  # aten.fill_.Scalar - couldn't find symbolic meta function/decomposition
@@ -790,7 +790,6 @@ symbolic_aot_autograd_failures = {
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('index_copy', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('index_put', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('index_select', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -984,11 +983,7 @@ symbolic_aot_autograd_failures = {
     xfail('scatter_reduce', 'sum'),  # aten.scatter_reduce.two - couldn't find symbolic meta function/decomp...
     xfail('segment_reduce', 'lengths'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail('segment_reduce', 'offsets'),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail('select', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('select_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sgn', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('slice', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('slice_scatter', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('sort', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('special.entr', ''),  # aten.special_entr.default - couldn't find symbolic meta function/decomposition
     xfail('special.erfcx', ''),  # aten.special_erfcx.default - couldn't find symbolic meta function/decompos...
@@ -1001,7 +996,6 @@ symbolic_aot_autograd_failures = {
     xfail('split', 'list_args'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('split_with_sizes', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('squeeze', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('stack', ''),  # aten.select.int - couldn't find symbolic meta function/decomposition
     xfail('std', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('std_mean', ''),  # Cannot call numel() on tensor with symbolic sizes/strides
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -1070,30 +1064,33 @@ def _test_aot_autograd_helper(self, device, dtype, op):
 
         compiled_f = compiled_function(f, nop, nop)
 
-        reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
+        try:
+            reset_grads()
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
 
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+            reset_grads()
+            call_forwards_backwards(f)
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
 
-        def create_new_arg(x):
-            if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
-                return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
-            return x
+            def create_new_arg(x):
+                if isinstance(x, torch.Tensor) and x.dtype == torch.float32:
+                    return x.detach().uniform_(0, 1).requires_grad_(x.requires_grad)
+                return x
 
-        args = pytree.tree_map(create_new_arg, args)
+            args = pytree.tree_map(create_new_arg, args)
 
-        reset_grads()
-        call_forwards_backwards(compiled_f)
-        compiled_grad = get_grads(args)
+            reset_grads()
+            call_forwards_backwards(compiled_f)
+            compiled_grad = get_grads(args)
 
-        reset_grads()
-        call_forwards_backwards(f)
-        orig_grad = get_grads(args)
-        self.assertEqual(orig_grad, compiled_grad)
+            reset_grads()
+            call_forwards_backwards(f)
+            orig_grad = get_grads(args)
+            self.assertEqual(orig_grad, compiled_grad)
+        except DynamicOutputShapeException:
+            self.skipTest("Dynamic output shape operation in trace")
 
 class TestEagerFusionOpInfo(AOTTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
