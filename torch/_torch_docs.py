@@ -183,7 +183,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.abs(torch.tensor([-1, -2, 3]))
     tensor([ 1,  2,  3])
@@ -218,7 +218,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -260,7 +260,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4).uniform_(1, 2)
     >>> a
@@ -401,7 +401,7 @@ Keyword args:
     alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
     {out}
 
-Example:
+Example::
 
     >>> M = torch.randn(3, 5)
     >>> batch1 = torch.randn(10, 3, 4)
@@ -452,7 +452,7 @@ Keyword args:
     value (Number, optional): multiplier for :math:`\text{{tensor1}} / \text{{tensor2}}`
     {out}
 
-Example:
+Example::
 
     >>> t = torch.randn(1, 3)
     >>> t1 = torch.randn(3, 1)
@@ -494,7 +494,7 @@ Keyword args:
     value (Number, optional): multiplier for :math:`tensor1 .* tensor2`
     {out}
 
-Example:
+Example::
 
     >>> t = torch.randn(1, 3)
     >>> t1 = torch.randn(3, 1)
@@ -548,7 +548,7 @@ Keyword args:
     alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     {out}
 
-Example:
+Example::
 
     >>> M = torch.randn(2, 3)
     >>> mat1 = torch.randn(2, 3)
@@ -570,7 +570,7 @@ Returns a view of the tensor conjugated and with the last two dimensions transpo
 ``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
 to ``x.transpose(-2, -1)`` for real tensors.
 
-Example:
+Example::
     >>> x = torch.arange(4, dtype=torch.float)
     >>> A = torch.complex(x, x).reshape(2, 2)
     >>> A
@@ -660,7 +660,7 @@ Keyword args:
     alpha (Number, optional): multiplier for :math:`mat @ vec` (:math:`\alpha`)
     {out}
 
-Example:
+Example::
 
     >>> M = torch.randn(2)
     >>> mat = torch.randn(2, 3)
@@ -707,7 +707,7 @@ Keyword args:
     alpha (Number, optional): multiplier for :math:`\text{{vec1}} \otimes \text{{vec2}}` (:math:`\alpha`)
     {out}
 
-Example:
+Example::
 
     >>> vec1 = torch.arange(1., 4.)
     >>> vec2 = torch.arange(1., 3.)
@@ -742,7 +742,7 @@ Args:
     rtol (float, optional): relative tolerance. Default: 1e-05
     equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be considered equal. Default: ``False``
 
-Example:
+Example::
 
     >>> torch.allclose(torch.tensor([10000., 1e-07]), torch.tensor([10000.1, 1e-08]))
     False
@@ -766,7 +766,7 @@ Tests if all elements in :attr:`input` evaluate to `True`.
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
 
-Example:
+Example::
 
     >>> a = torch.rand(1, 2).bool()
     >>> a
@@ -795,7 +795,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.rand(4, 2).bool()
     >>> a
@@ -823,7 +823,7 @@ Tests if any element in :attr:`input` evaluates to `True`.
           output of dtype `bool` for all supported dtypes except `uint8`.
           For `uint8` the dtype of output is `uint8` itself.
 
-Example:
+Example::
 
     >>> a = torch.rand(1, 2).bool()
     >>> a
@@ -852,7 +852,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 2) < 0
     >>> a
@@ -891,7 +891,7 @@ Keyword args:
           the function would return zero for all real numbers and not propagate
           floating-point NaNs.
 
-Example:
+Example::
 
     >>> torch.angle(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))*180/3.14159
     tensor([ 135.,  135,  -45])
@@ -924,7 +924,7 @@ Args:
     storage_offset (int, optional): the offset in the underlying storage of the output tensor.
     If ``None``, the storage_offset of the output tensor will match the input tensor.
 
-Example:
+Example::
 
     >>> x = torch.randn(3, 3)
     >>> x
@@ -972,7 +972,7 @@ Args:
         the result tensor is constructed on the CPU.
 
 
-Example:
+Example::
 
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.as_tensor(a)
@@ -1011,7 +1011,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -1049,7 +1049,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -1087,7 +1087,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -1130,7 +1130,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -1172,7 +1172,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4).uniform_(-1, 1)
     >>> a
@@ -1259,7 +1259,7 @@ Keyword args:
            is also a tensor with an autograd history then the returned tensor will have
            the same history.
 
-Example:
+Example::
 
     >>> a = torch.tensor([1, 2, 3])
     >>> # Shares memory with tensor 'a'
@@ -1339,7 +1339,7 @@ Keyword args:
     alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
     {out}
 
-Example:
+Example::
 
     >>> M = torch.randn(10, 3, 5)
     >>> batch1 = torch.randn(10, 3, 4)
@@ -1384,7 +1384,7 @@ Keyword args:
     {generator}
     {out}
 
-Example:
+Example::
 
     >>> a = torch.empty(3, 3).uniform_(0, 1)  # generate a uniform random matrix with range [0, 1]
     >>> a
@@ -1439,7 +1439,7 @@ Returns:
     output (Tensor): a tensor of shape ``Size([max(input) + 1])`` if
     :attr:`input` is non-empty, else ``Size(0)``
 
-Example:
+Example::
 
     >>> input = torch.randint(0, 8, (5,), dtype=torch.int64)
     >>> weights = torch.linspace(0, 1, steps=5)
@@ -1471,7 +1471,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_not(torch.tensor([-1, -2, 3], dtype=torch.int8))
     tensor([ 0,  1, -4], dtype=torch.int8)
@@ -1513,7 +1513,7 @@ Args:
 Keyword Args:
     {out}
 
-Example:
+Example::
 
     >>> input = torch.randn(10, 3, 4)
     >>> mat2 = torch.randn(10, 4, 5)
@@ -1540,7 +1540,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_and(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([1, 0,  3], dtype=torch.int8)
@@ -1566,7 +1566,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_or(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-1, -2,  3], dtype=torch.int8)
@@ -1592,7 +1592,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_xor(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-2, -2,  0], dtype=torch.int8)
@@ -1625,7 +1625,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_left_shift(torch.tensor([-1, -2, 3], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-2, -2, 24], dtype=torch.int8)
@@ -1656,7 +1656,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.bitwise_right_shift(torch.tensor([-2, -7, 31], dtype=torch.int8), torch.tensor([1, 0, 3], dtype=torch.int8))
     tensor([-1, -7,  3], dtype=torch.int8)
@@ -1677,7 +1677,7 @@ Args:
     {input}
     shape (list, tuple, or :class:`torch.Size`): the new shape.
 
-Example:
+Example::
 
     >>> x = torch.tensor([1, 2, 3])
     >>> torch.broadcast_to(x, (3, 3))
@@ -1725,7 +1725,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([1, 2, 3])
     >>> b = torch.tensor([4, 5, 6])
@@ -1758,7 +1758,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([1, 2, 3])
     >>> b = torch.tensor([4, 5, 6])
@@ -1796,7 +1796,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([1, 2, 3])
     >>> b = torch.tensor([4, 5, 6])
@@ -1848,7 +1848,7 @@ Args:
 
     dim (int, optional): dimension along which to split the tensor. Default: ``0``
 
-Example:
+Example::
 
     >>> x = torch.arange(8)
     >>> torch.tensor_split(x, 3)
@@ -1910,7 +1910,7 @@ Arguments:
     chunks (int): number of chunks to return
     dim (int): dimension along which to split the tensor
 
-Example:
+Example::
     >>> torch.arange(11).chunk(6)
     (tensor([0, 1]),
      tensor([2, 3]),
@@ -1990,7 +1990,7 @@ Args:
     input (Tensor): tensor to split.
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
-Example:
+Example::
     >>> t = torch.arange(16.0).reshape(4,4)
     >>> t
     tensor([[ 0.,  1.,  2.,  3.],
@@ -2039,7 +2039,7 @@ Args:
     input (Tensor): tensor to split.
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
-Example:
+Example::
     >>> t = torch.arange(16.0).reshape(4,4)
     >>> t
     tensor([[ 0.,  1.,  2.,  3.],
@@ -2080,7 +2080,7 @@ Args:
     input (Tensor): tensor to split.
     indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
-Example:
+Example::
     >>> t = torch.arange(16.0).reshape(2, 2, 4)
     >>> t
     tensor([[[ 0.,  1.,  2.,  3.],
@@ -2123,7 +2123,7 @@ Args:
     from (dtype): The original :class:`torch.dtype`.
     to (dtype): The target :class:`torch.dtype`.
 
-Example:
+Example::
 
     >>> torch.can_cast(torch.double, torch.float)
     True
@@ -2161,7 +2161,7 @@ Returns:
 
         :func:`torch.cov` covariance matrix.
 
-Example:
+Example::
 
     >>> x = torch.tensor([[0, 1, 2], [2, 1, 0]])
     >>> torch.corrcoef(x)
@@ -2232,7 +2232,7 @@ Returns:
 
         :func:`torch.corrcoef` normalized covariance matrix.
 
-Example:
+Example::
     >>> x = torch.tensor([[0, 2], [1, 1], [2, 0]]).T
     >>> x
     tensor([[0, 1, 2],
@@ -2278,7 +2278,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> x = torch.randn(2, 3)
     >>> x
@@ -2340,7 +2340,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -2363,7 +2363,7 @@ The returned tensor and :attr:`self` share the same underlying storage.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
@@ -2390,7 +2390,7 @@ The returned tensor and :attr:`self` share the same underlying storage.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
@@ -2419,7 +2419,7 @@ represents the real and imaginary components of complex numbers.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x=torch.randn(4, dtype=torch.cfloat)
     >>> x
@@ -2455,7 +2455,7 @@ components of complex numbers.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x=torch.randn(4, 2)
     >>> x
@@ -2492,7 +2492,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -2560,7 +2560,7 @@ Args:
 Keyword args:
     out (Tensor, optional): the output matrix
 
-Example:
+Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = a @ a.mT + 1e-3 # make symmetric positive-definite
@@ -2625,7 +2625,7 @@ Args:
 Keyword args:
     out (Tensor, optional): the output tensor for `c`
 
-Example:
+Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
@@ -2684,7 +2684,7 @@ Args:
 Keyword args:
     out (Tensor, optional): the output tensor for `inv`
 
-Example:
+Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) + 1e-05 * torch.eye(3) # make symmetric positive definite
@@ -2761,7 +2761,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -2803,7 +2803,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([1, 2, 3])
     >>> b = torch.tensor([4, 5, 6])
@@ -2843,7 +2843,7 @@ Keyword args:
         ``torch.complex64``. If the inputs are ``torch.float64``, must be
         ``torch.complex128``.
 
-Example:
+Example::
 
     >>> real = torch.tensor([1, 2], dtype=torch.float32)
     >>> imag = torch.tensor([3, 4], dtype=torch.float32)
@@ -2888,7 +2888,7 @@ Keyword args:
         ``torch.complex64``. If the inputs are ``torch.float64``, must be
         ``torch.complex128``.
 
-Example:
+Example::
 
     >>> import numpy as np
     >>> abs = torch.tensor([1, 2], dtype=torch.float64)
@@ -2924,7 +2924,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.conj_physical(torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j]))
     tensor([-1 - 1j, -2 - 2j, 3 + 3j])
@@ -2952,7 +2952,7 @@ this function just returns :attr:`input`.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
     >>> x.is_conj()
@@ -2976,7 +2976,7 @@ else returns :attr:`input`. The output tensor will always have its conjugate bit
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
     >>> y = x.conj()
@@ -3002,7 +3002,7 @@ else returns :attr:`input`. The output tensor will always have its negative bit 
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x = torch.tensor([-1 + 1j, -2 + 2j, 3 - 3j])
     >>> y = x.conj()
@@ -3046,7 +3046,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(5)
     >>> a
@@ -3097,7 +3097,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -3127,7 +3127,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -3175,7 +3175,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 3)
     >>> a
@@ -3223,7 +3223,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(10)
     >>> torch.logcumsumexp(a, dim=0)
@@ -3252,7 +3252,7 @@ Args:
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
 
-Example:
+Example::
 
     >>> a = torch.randn(10)
     >>> a
@@ -3286,7 +3286,7 @@ Args:
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
 
-Example:
+Example::
 
     >>> a = torch.randn(10)
     >>> a
@@ -3324,7 +3324,7 @@ Keyword args:
     {dtype}
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(10)
     >>> a
@@ -3365,7 +3365,7 @@ Keyword args:
     {dtype}
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(10)
     >>> a
@@ -3391,7 +3391,7 @@ Args:
     {input}
     dim (int or tuple of ints, optional): Dim or tuple of dims along which to count non-zeros.
 
-Example:
+Example::
 
     >>> x = torch.zeros(3,3)
     >>> x[torch.randn(3,3) > 0.5] = 1
@@ -3527,7 +3527,7 @@ Args:
     dim2 (int, optional): second dimension with respect to which to
         take diagonal. Default: -1.
 
-Example:
+Example::
 
     >>> a = torch.randn(2, 3)
     >>> torch.diag_embed(a)
@@ -3747,7 +3747,7 @@ Args:
     into :attr:`input`. Specifically, it should have the same shape as
     `torch.as_strided(input, size, stride, storage_offset)`
 
-Example:
+Example::
 
     >>> a = torch.arange(4).reshape(2, 2) + 1
     >>> a
@@ -3791,7 +3791,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([1, 3, 2])
     >>> torch.diff(a)
@@ -3834,7 +3834,7 @@ Args:
     other (Tensor): the Right-hand-side input tensor
     p (float, optional): the norm to be computed
 
-Example:
+Example::
 
     >>> x = torch.randn(4)
     >>> x
@@ -3953,7 +3953,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
@@ -3998,7 +3998,7 @@ Keyword args:
 """
     + r"""
 
-Example:
+Example::
 
     >>> torch.vdot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
@@ -4031,7 +4031,7 @@ Keyword args:
 Returns:
     A boolean tensor that is True where :attr:`input` is equal to :attr:`other` and False elsewhere
 
-Example:
+Example::
 
     >>> torch.eq(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[ True, False],
@@ -4048,7 +4048,7 @@ equal(input, other) -> bool
 
 ``True`` if two tensors have the same size and elements, ``False`` otherwise.
 
-Example:
+Example::
 
     >>> torch.equal(torch.tensor([1, 2]), torch.tensor([1, 2]))
     True
@@ -4100,7 +4100,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.exp(torch.tensor([0, math.log(2.)]))
     tensor([ 1.,  2.])
@@ -4148,7 +4148,7 @@ Keyword arguments:
 Returns:
     Tensor: A 2-D tensor with ones on the diagonal and zeros elsewhere
 
-Example:
+Example::
 
     >>> torch.eye(3)
     tensor([[ 1.,  0.,  0.],
@@ -4180,7 +4180,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -4221,7 +4221,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([4.0, 3.0])
     >>> b = torch.tensor([2.0, 2.0])
@@ -4275,7 +4275,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([-1., -0., -1.,  1.,  0.,  1.])
@@ -4297,7 +4297,7 @@ Computes the fractional portion of each element in :attr:`input`.
 .. math::
     \text{out}_{i} = \text{input}_{i} - \left\lfloor |\text{input}_{i}| \right\rfloor * \operatorname{sgn}(\text{input}_{i})
 
-Example:
+Example::
 
     >>> torch.frac(torch.tensor([1, 2.5, -3.2]))
     tensor([ 0.0000,  0.5000, -0.2000])
@@ -4323,7 +4323,7 @@ Args:
 Keyword args:
     out (tuple, optional): the output tensors
 
-Example:
+Example::
 
     >>> x = torch.arange(9.)
     >>> mantissa, exponent = torch.frexp(x)
@@ -4355,7 +4355,7 @@ and ``numpy.bool``.
 .. warning::
     Writing to a tensor created from a read-only NumPy array is not supported and will result in undefined behavior.
 
-Example:
+Example::
 
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.from_numpy(a)
@@ -4420,7 +4420,7 @@ Keyword args:
         the buffer. Default: 0.
     {requires_grad}
 
-Example:
+Example::
 
     >>> import array
     >>> a = array.array('i', [1, 2, 3])
@@ -4465,7 +4465,7 @@ Args:
     start_dim (int): the first dim to flatten
     end_dim (int): the last dim to flatten
 
-Example:
+Example::
 
     >>> t = torch.tensor([[[1, 2],
     ...                    [3, 4]],
@@ -4543,7 +4543,7 @@ Keyword arguments:
     sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
     out (Tensor, optional): the destination tensor
 
-Example:
+Example::
 
     >>> t = torch.tensor([[1, 2], [3, 4]])
     >>> torch.gather(t, 1, torch.tensor([[0, 0], [1, 0]]))
@@ -4572,7 +4572,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([5, 10, 15])
     >>> b = torch.tensor([3, 4, 5])
@@ -4608,7 +4608,7 @@ Keyword args:
 Returns:
     A boolean tensor that is True where :attr:`input` is greater than or equal to :attr:`other` and False elsewhere
 
-Example:
+Example::
 
     >>> torch.ge(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[True, True], [False, True]])
@@ -4812,7 +4812,7 @@ Keyword args:
     out (Tensor, optional): Optional output tensor to write result into. The output
                             shape is `input.shape[:-1] + other.shape[:-1]`.
 
-Example:
+Example::
 
     # Dot product
     >>> torch.inner(torch.tensor([1, 2, 3]), torch.tensor([0, 2, 1]))
@@ -4866,7 +4866,7 @@ Args:
 Keyword args:
     out (Tensor, optional): optional output matrix
 
-Example:
+Example::
 
     >>> v1 = torch.arange(1., 5.)
     >>> v2 = torch.arange(1., 4.)
@@ -4898,7 +4898,7 @@ get_default_dtype() -> torch.dtype
 
 Get the current default floating point :class:`torch.dtype`.
 
-Example:
+Example::
 
     >>> torch.get_default_dtype()  # initial default for floating point is torch.float32
     torch.float32
@@ -4953,7 +4953,7 @@ Keyword args:
 Returns:
     A boolean tensor that is True where :attr:`input` is greater than :attr:`other` and False elsewhere
 
-Example:
+Example::
 
     >>> torch.gt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, True], [False, False]])
@@ -4996,7 +4996,7 @@ Keyword args:
 Returns:
     Tensor: Histogram represented as a tensor
 
-Example:
+Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
     tensor([ 0.,  2.,  1.,  0.])
@@ -5041,7 +5041,7 @@ Returns:
     hist (Tensor): 1D Tensor containing the values of the histogram.
     bin_edges(Tensor): 1D Tensor containing the edges of the histogram bins.
 
-Example:
+Example::
 
     >>> torch.histogram(torch.tensor([1., 2, 1]), bins=4, range=(0., 3.), weight=torch.tensor([1., 2., 4.]))
     (tensor([ 0.,  5.,  2.,  0.]), tensor([0., 0.75, 1.5, 2.25, 3.]))
@@ -5123,7 +5123,7 @@ Returns:
     hist (Tensor): N-dimensional Tensor containing the values of the histogram.
     bin_edges(Tensor[]): sequence of N 1D Tensors containing the bin edges.
 
-Example:
+Example::
     >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
     ...                   weight=torch.tensor([1., 2., 4., 8.]))
         torch.return_types.histogramdd(
@@ -5167,7 +5167,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
     tensor([5.0000, 5.6569, 6.4031])
@@ -5229,7 +5229,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> x = torch.randn(3, 4)
     >>> x
@@ -5283,7 +5283,7 @@ Returns:
     A boolean tensor of the same shape as :attr:`elements` that is True for elements in
     :attr:`test_elements` and False otherwise
 
-Example:
+Example::
     >>> torch.isin(torch.tensor([[1, 2], [3, 4]]), torch.tensor([2, 3]))
     tensor([[False,  True],
             [ True, False]])
@@ -5308,7 +5308,7 @@ Args:
 Returns:
     A boolean tensor that is True where :attr:`input` is infinite and False elsewhere
 
-Example:
+Example::
 
     >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
     tensor([False,  True,  False,  True,  False])
@@ -5329,7 +5329,7 @@ Args:
 Keyword args:
   {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
     >>> torch.isposinf(a)
@@ -5351,7 +5351,7 @@ Args:
 Keyword args:
   {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
     >>> torch.isneginf(a)
@@ -5412,7 +5412,7 @@ Args:
 Returns:
     A boolean tensor that is True where :attr:`input` is finite and False elsewhere
 
-Example:
+Example::
 
     >>> torch.isfinite(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
     tensor([True,  False,  True,  False,  False])
@@ -5436,7 +5436,7 @@ Arguments:
 Returns:
     A boolean tensor that is True where :attr:`input` is NaN and False elsewhere
 
-Example:
+Example::
 
     >>> torch.isnan(torch.tensor([1, float('nan'), 2]))
     tensor([False, True, False])
@@ -5459,7 +5459,7 @@ Arguments:
 Returns:
     A boolean tensor that is True where :attr:`input` is real and False elsewhere
 
-Example:
+Example::
 
     >>> torch.isreal(torch.tensor([1, 1+1j, 2+0j]))
     tensor([True, False, True])
@@ -5685,7 +5685,7 @@ Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor)
                            can be optionally given to be used as output buffers
 
-Example:
+Example::
 
     >>> x = torch.arange(1., 6.)
     >>> x
@@ -5723,7 +5723,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([5, 10, 15])
     >>> b = torch.tensor([3, 4, 5])
@@ -5760,7 +5760,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.ldexp(torch.tensor([1.]), torch.tensor([1]))
     tensor([2.])
@@ -5796,7 +5796,7 @@ Returns:
     A boolean tensor that is True where :attr:`input` is less than or equal to
     :attr:`other` and False elsewhere
 
-Example:
+Example::
 
     >>> torch.le(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[True, False], [True, True]])
@@ -5838,7 +5838,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> start = torch.arange(1., 5.)
     >>> end = torch.empty(4).fill_(10)
@@ -5872,7 +5872,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.arange(0.5, 2, 0.5)
     >>> torch.lgamma(a)
@@ -5917,7 +5917,7 @@ Keyword arguments:
     {requires_grad}
 
 
-Example:
+Example::
 
     >>> torch.linspace(3, 10, steps=5)
     tensor([  3.0000,   4.7500,   6.5000,   8.2500,  10.0000])
@@ -5951,7 +5951,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.rand(5) * 5
     >>> a
@@ -5982,7 +5982,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.rand(5)
     >>> a
@@ -6017,7 +6017,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(5)
     >>> a
@@ -6048,7 +6048,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.rand(5)
     >>> a
@@ -6086,7 +6086,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> torch.logaddexp(torch.tensor([-1.0]), torch.tensor([-1.0, -2, -3]))
     tensor([-0.3069, -0.6867, -0.8731])
@@ -6144,7 +6144,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.logical_and(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ True, False, False])
@@ -6177,7 +6177,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.logical_not(torch.tensor([True, False]))
     tensor([False,  True])
@@ -6207,7 +6207,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.logical_or(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([ True, False,  True])
@@ -6241,7 +6241,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.logical_xor(torch.tensor([True, False, True]), torch.tensor([True, False, False]))
     tensor([False, False,  True])
@@ -6301,7 +6301,7 @@ Keyword arguments:
     {device}
     {requires_grad}
 
-Example:
+Example::
 
     >>> torch.logspace(start=-10, end=10, steps=5)
     tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
@@ -6340,7 +6340,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(3, 3)
     >>> torch.logsumexp(a, 1)
@@ -6374,7 +6374,7 @@ Keyword args:
 Returns:
     A boolean tensor that is True where :attr:`input` is less than :attr:`other` and False elsewhere
 
-Example:
+Example::
 
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, False], [True, False]])
@@ -6477,7 +6477,7 @@ Arguments:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3, 1)
@@ -6512,7 +6512,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> x = torch.randn(3, 4)
     >>> x
@@ -6562,7 +6562,7 @@ Returns the maximum value of all elements in the ``input`` tensor.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
@@ -6594,7 +6594,7 @@ Args:
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (max, max_indices)
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -6633,7 +6633,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor((1, 2, -1))
     >>> b = torch.tensor((3, 0, 4))
@@ -6667,7 +6667,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([9.7, float('nan'), 3.1, float('nan')])
     >>> b = torch.tensor([-2.2, 0.5, float('nan'), float('nan')])
@@ -6704,7 +6704,7 @@ Args:
 Keyword args:
   {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -6734,7 +6734,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -6758,7 +6758,7 @@ Args:
     {dim} If ``None``, the argmax of the flattened input is returned.
     {keepdim} Ignored if ``dim=None``.
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -6795,7 +6795,7 @@ non-zero elements in the :attr:`input` tensor.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> t = torch.tensor([1, 0, 1])
     >>> torch.argwhere(t)
@@ -6823,7 +6823,7 @@ Args:
 Keyword args:
     {dtype}
 
-Example:
+Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
@@ -6853,7 +6853,7 @@ Keyword args:
 
     :func:`torch.nanmean` computes the mean value of `non-NaN` elements.
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -6900,7 +6900,7 @@ Keyword args:
 
     :func:`torch.mean` computes the mean value, propagating `NaN`.
 
-Example:
+Example::
 
     >>> x = torch.tensor([[torch.nan, 1, 2], [1, 2, 3]])
     >>> x.mean()
@@ -6938,7 +6938,7 @@ Returns the median of the values in :attr:`input`.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
@@ -6982,7 +6982,7 @@ Keyword args:
                                       tensor, which must have dtype long, with their indices in the dimension
                                       :attr:`dim` of :attr:`input`.
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 5)
     >>> a
@@ -7012,7 +7012,7 @@ If all the elements in :attr:`input` are ``NaN`` it will also return ``NaN``.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> a = torch.tensor([1, float('nan'), 3, 2])
     >>> a.median()
@@ -7041,7 +7041,7 @@ Keyword args:
                                       tensor, which must have dtype long, with their indices in the dimension
                                       :attr:`dim` of :attr:`input`.
 
-Example:
+Example::
 
     >>> a = torch.tensor([[2, 3, 1], [float('nan'), 1, float('nan')]])
     >>> a
@@ -7092,7 +7092,7 @@ Keyword arguments:
                             Default is ``linear``.
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(2, 3)
     >>> a
@@ -7152,7 +7152,7 @@ Keyword arguments:
                             Default is ``linear``.
     {out}
 
-Example:
+Example::
 
     >>> t = torch.tensor([float('nan'), 1, 2])
     >>> t.quantile(0.5)
@@ -7185,7 +7185,7 @@ Returns the minimum value of all elements in the :attr:`input` tensor.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
@@ -7217,7 +7217,7 @@ Args:
 Keyword args:
     out (tuple, optional): the tuple of two output tensors (min, min_indices)
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -7255,7 +7255,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor((1, 2, -1))
     >>> b = torch.tensor((3, 0, 4))
@@ -7289,7 +7289,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([2.2, float('nan'), 2.1, float('nan')])
     >>> b = torch.tensor([-9.3, 0.1, float('nan'), float('nan')])
@@ -7326,7 +7326,7 @@ Args:
 Keyword args:
   {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -7381,7 +7381,7 @@ Raises:
     :func:`torch.amin` computes just the minimum value
     :func:`torch.amax` computes just the maximum value
 
-Example:
+Example::
 
     >>> torch.aminmax(torch.tensor([1, -3, 5]))
     torch.return_types.aminmax(
@@ -7422,7 +7422,7 @@ Args:
     {dim} If ``None``, the argmin of the flattened input is returned.
     {keepdim}.
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -7471,7 +7471,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
@@ -7551,7 +7551,7 @@ Arguments:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> # vector x vector
     >>> tensor1 = torch.randn(3)
@@ -7611,7 +7611,7 @@ Args:
 Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
 
-Example:
+Example::
 
     >>> a = torch.randint(10, (5,))
     >>> a
@@ -7724,7 +7724,7 @@ Keyword args:
     {generator}
     {out}
 
-Example:
+Example::
 
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
     >>> torch.multinomial(weights, 2)
@@ -7759,7 +7759,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> mat = torch.randn(2, 3)
     >>> vec = torch.randn(3)
@@ -7955,7 +7955,7 @@ Args:
     start (Tensor or int): the starting dimension
     length (int): the distance to the ending dimension
 
-Example:
+Example::
 
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> torch.narrow(x, 0, 0, 2)
@@ -7986,7 +7986,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> torch.narrow_copy(x, 0, 0, 2)
@@ -8038,7 +8038,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> x = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
     >>> torch.nan_to_num(x)
@@ -8075,7 +8075,7 @@ Keyword args:
 Returns:
     A boolean tensor that is True where :attr:`input` is not equal to :attr:`other` and False elsewhere
 
-Example:
+Example::
 
     >>> torch.ne(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, True], [True, False]])
@@ -8110,7 +8110,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(5)
     >>> a
@@ -8148,7 +8148,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> eps = torch.finfo(torch.float32).eps
     >>> torch.nextafter(torch.tensor([1.0, 2.0]), torch.tensor([2.0, 1.0])) == torch.tensor([eps + 1, 2 - eps])
@@ -8214,7 +8214,7 @@ Returns:
     each dimension, containing the indices of each nonzero element along that
     dimension.
 
-Example:
+Example::
 
     >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]))
     tensor([[ 0],
@@ -8274,7 +8274,7 @@ Keyword args:
     {generator}
     {out}
 
-Example:
+Example::
 
     >>> torch.normal(mean=torch.arange(1., 11.), std=torch.arange(1, 0, -0.1))
     tensor([  1.0425,   3.5672,   2.7969,   4.2925,   4.7229,   6.2134,
@@ -8293,7 +8293,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.normal(mean=0.5, std=torch.arange(1., 6.))
     tensor([-1.2793, -1.0732, -2.0687,  5.1177, -1.2303])
@@ -8311,7 +8311,7 @@ Args:
 Keyword args:
     out (Tensor, optional): the output tensor
 
-Example:
+Example::
 
     >>> torch.normal(mean=torch.arange(1., 6.))
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
@@ -8330,7 +8330,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.normal(2, 3, size=(1, 4))
     tensor([[-1.3987, -1.9544,  3.6048,  0.7909]])
@@ -8349,7 +8349,7 @@ Returns the total number of elements in the :attr:`input` tensor.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> a = torch.randn(1, 2, 3, 4, 5)
     >>> torch.numel(a)
@@ -8382,7 +8382,7 @@ Keyword arguments:
     {device}
     {requires_grad}
 
-Example:
+Example::
 
     >>> torch.ones(2, 3)
     tensor([[ 1.,  1.,  1.],
@@ -8420,7 +8420,7 @@ Keyword arguments:
     {requires_grad}
     {memory_format}
 
-Example:
+Example::
 
     >>> input = torch.empty(2, 3)
     >>> torch.ones_like(input)
@@ -8491,7 +8491,7 @@ Args:
     {input}
     dims (tuple of int): The desired ordering of dimensions
 
-Example:
+Example::
     >>> x = torch.randn(2, 3, 5)
     >>> x.size()
     torch.Size([2, 3, 5])
@@ -8522,7 +8522,7 @@ Args:
 Keyword args:
     {generator}
 
-Example:
+Example::
 
     >>> rates = torch.rand(4, 4) * 5  # rate parameter between 0 and 5
     >>> torch.poisson(rates)
@@ -8556,7 +8556,7 @@ Throws a runtime error if :attr:`input` is a bool tensor.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> t = torch.randn(5)
     >>> t
@@ -8600,7 +8600,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -8635,7 +8635,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> exp = torch.arange(1., 5.)
     >>> base = 2
@@ -8669,7 +8669,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randint(10, (4,))
     >>> a
@@ -8703,7 +8703,7 @@ Args:
 Keyword args:
     {dtype}
 
-Example:
+Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
@@ -8727,7 +8727,7 @@ Args:
 Keyword args:
     {dtype}
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 2)
     >>> a
@@ -8756,7 +8756,7 @@ Args:
     type1 (:class:`torch.dtype`)
     type2 (:class:`torch.dtype`)
 
-Example:
+Example::
 
     >>> torch.promote_types(torch.int32, torch.float32)
     torch.float32
@@ -8820,7 +8820,7 @@ Keyword args:
     out (tuple, optional): tuple of `Q` and `R` tensors.
                 The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
 
-Example:
+Example::
 
     >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
     >>> q, r = torch.qr(a)
@@ -8863,7 +8863,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([[3.142, -3.142], [6.283, -6.283], [1.570, -1.570]])
     >>> torch.rad2deg(a)
@@ -8890,7 +8890,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([[180.0, -180.0], [360.0, -360.0], [90.0, -90.0]])
     >>> torch.deg2rad(a)
@@ -8927,7 +8927,7 @@ Args:
 Keyword arguments:
     {out}
 
-Example:
+Example::
 
     >>> input = torch.tensor([-1.5, 0, 2.0])
     >>> values = torch.tensor([0.5])
@@ -8967,7 +8967,7 @@ Keyword args:
     {requires_grad}
     {pin_memory}
 
-Example:
+Example::
 
     >>> torch.rand(4)
     tensor([ 0.5204,  0.2503,  0.3525,  0.5673])
@@ -9033,7 +9033,7 @@ Keyword args:
     {device}
     {requires_grad}
 
-Example:
+Example::
 
     >>> torch.randint(3, 5, (3,))
     tensor([4, 3, 4])
@@ -9115,7 +9115,7 @@ Keyword args:
     {requires_grad}
     {pin_memory}
 
-Example:
+Example::
 
     >>> torch.randn(4)
     tensor([-2.1436,  0.9966,  2.3426, -0.6366])
@@ -9174,7 +9174,7 @@ Keyword args:
     {requires_grad}
     {pin_memory}
 
-Example:
+Example::
 
     >>> torch.randperm(4)
     tensor([2, 1, 0, 3])
@@ -9215,7 +9215,7 @@ Keyword args:
     {pin_memory}
 
 
-Example:
+Example::
 
     >>> torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
     tensor([[ 0.1000,  1.2000],
@@ -9273,7 +9273,7 @@ Keyword args:
     {device}
     {requires_grad}
 
-Example:
+Example::
 
     >>> torch.range(1, 4)
     tensor([ 1.,  2.,  3.,  4.])
@@ -9317,7 +9317,7 @@ Keyword args:
     {device}
     {requires_grad}
 
-Example:
+Example::
 
     >>> torch.arange(5)
     tensor([ 0,  1,  2,  3,  4])
@@ -9340,7 +9340,7 @@ Return a contiguous flattened tensor. A copy is made only if needed.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> t = torch.tensor([[[1, 2],
     ...                    [3, 4]],
@@ -9389,7 +9389,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
@@ -9420,7 +9420,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> x = torch.ones(3, 3)
     >>> x[1].fill_(2)
@@ -9460,7 +9460,7 @@ Args:
     input (Tensor): the tensor to be reshaped
     shape (tuple of int): the new shape
 
-Example:
+Example::
 
     >>> a = torch.arange(4.)
     >>> torch.reshape(a, (2, 2))
@@ -9486,7 +9486,7 @@ Args:
     tensor1 (Tensor or Number): an input tensor or number
     tensor2 (Tensor or Number): an input tensor or number
 
-Example:
+Example::
 
     >>> torch.result_type(torch.tensor([1, 2], dtype=torch.int), 1.0)
     torch.float32
@@ -9539,7 +9539,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> torch.round(torch.tensor((4.7, -2.3, 9.1, -7.7)))
     tensor([ 5.,  -2.,  9., -8.])
@@ -9579,7 +9579,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -9662,7 +9662,7 @@ Args:
     into :attr:`input`. Specifically, it should have the same shape as
     ``torch.select(input, dim, index)``
 
-Example:
+Example::
 
     >>> a = torch.zeros(2, 2)
     >>> b = torch.ones(2)
@@ -9692,7 +9692,7 @@ Args:
     end (Optional[int]): the end index of where to insert the slice
     step (int): the how many elements to skip in
 
-Example:
+Example::
 
     >>> a = torch.zeros(8, 8)
     >>> b = torch.ones(8)
@@ -9735,7 +9735,7 @@ is only supported on x86 architectures supporting SSE3.
 Args:
     mode (bool): Controls whether to enable flush denormal mode or not
 
-Example:
+Example::
 
     >>> torch.set_flush_denormal(True)
     True
@@ -9811,7 +9811,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> a
@@ -9836,7 +9836,7 @@ Args:
 Keyword args:
   {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
     >>> torch.signbit(a)
@@ -9878,7 +9878,7 @@ Args:
 Keyword args:
   {out}
 
-Example:
+Example::
 
     >>> t = torch.tensor([3+4j, 7-24j, 0, 1+2j])
     >>> t.sgn()
@@ -9905,7 +9905,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -9944,7 +9944,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -9992,7 +9992,7 @@ Keyword args:
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
         be optionally given to be used as output buffers
 
-Example:
+Example::
 
     >>> x = torch.randn(3, 4)
     >>> sorted, indices = torch.sort(x)
@@ -10049,7 +10049,7 @@ Args:
     descending (bool, optional): controls the sorting order (ascending or descending)
     stable (bool, optional): controls the relative order of equivalent elements
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -10086,7 +10086,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> t = torch.randn(3, 4)
     >>> t
@@ -10154,7 +10154,7 @@ Keyword args:
         CUDA tensor types.
     {requires_grad}
 
-Example:
+Example::
     >>> compressed_indices = [0, 2, 4]
     >>> plain_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10212,7 +10212,7 @@ Keyword args:
         CUDA tensor types.
     {requires_grad}
 
-Example:
+Example::
     >>> crow_indices = [0, 2, 4]
     >>> col_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10272,7 +10272,7 @@ Keyword args:
         CUDA tensor types.
     {requires_grad}
 
-Example:
+Example::
     >>> ccol_indices = [0, 2, 4]
     >>> row_indices = [0, 1, 0, 1]
     >>> values = [1, 2, 3, 4]
@@ -10334,7 +10334,7 @@ Keyword args:
         CUDA tensor types.
     {requires_grad}
 
-Example:
+Example::
     >>> crow_indices = [0, 1, 2]
     >>> col_indices = [0, 1]
     >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
@@ -10398,7 +10398,7 @@ Keyword args:
         CUDA tensor types.
     {requires_grad}
 
-Example:
+Example::
     >>> ccol_indices = [0, 1, 2]
     >>> row_indices = [0, 1]
     >>> values = [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
@@ -10452,7 +10452,7 @@ Keyword args:
     {requires_grad}
 
 
-Example:
+Example::
 
     >>> i = torch.tensor([[0, 1, 1],
     ...                   [2, 0, 2]])
@@ -10520,7 +10520,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -10545,7 +10545,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -10585,7 +10585,7 @@ Args:
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
 
-Example:
+Example::
 
     >>> x = torch.zeros(2, 1, 2, 1, 2)
     >>> x.size()
@@ -10634,7 +10634,7 @@ Args:
     {input}
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
 
-Example:
+Example::
 
     >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
     >>> torch.std(a, unbiased=False)
@@ -10681,7 +10681,7 @@ Args:
 Returns:
     A tuple (std, mean) containing the standard deviation and mean.
 
-Example:
+Example::
 
     >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
     >>> torch.std_mean(a, unbiased=False)
@@ -10714,7 +10714,7 @@ Keyword args:
     alpha (Number): the multiplier for :attr:`other`.
     {out}
 
-Example:
+Example::
 
     >>> a = torch.tensor((1, 2))
     >>> b = torch.tensor((0, 1))
@@ -10747,7 +10747,7 @@ Args:
 Keyword args:
     {dtype}
 
-Example:
+Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
@@ -10772,7 +10772,7 @@ Args:
 Keyword args:
     {dtype}
 
-Example:
+Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
@@ -10803,7 +10803,7 @@ Args:
 Keyword args:
     {dtype}
 
-Example:
+Example::
 
     >>> a = torch.tensor([1., 2., float('nan'), 4.])
     >>> torch.nansum(a)
@@ -10826,7 +10826,7 @@ Args:
 Keyword args:
     {dtype}
 
-Example:
+Example::
 
     >>> torch.nansum(torch.tensor([1., float("nan")]))
     1.0
@@ -10942,7 +10942,7 @@ Args:
 Keyword args:
     out (tuple, optional): the output tuple of tensors
 
-Example:
+Example::
 
     >>> a = torch.randn(5, 3)
     >>> a
@@ -11089,7 +11089,7 @@ is equivalent to ``transpose(input, 0, 1)``.
 Args:
     {input}
 
-Example:
+Example::
 
     >>> x = torch.randn(())
     >>> x
@@ -11132,7 +11132,7 @@ Args:
     {input}
     dims (a list or tuple): axis to flip on
 
-Example:
+Example::
 
     >>> x = torch.arange(8).view(2, 2, 2)
     >>> x
@@ -11173,7 +11173,7 @@ Note:
 Args:
     input (Tensor): Must be at least 2-dimensional.
 
-Example:
+Example::
 
     >>> x = torch.arange(4).view(2, 2)
     >>> x
@@ -11208,7 +11208,7 @@ Note:
 Args:
     input (Tensor): Must be at least 1-dimensional.
 
-Example:
+Example::
 
     >>> x = torch.arange(4).view(2, 2)
     >>> x
@@ -11240,7 +11240,7 @@ Args:
         value
     dims (int or tuple of ints): Axis along which to roll
 
-Example:
+Example::
 
     >>> x = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(4, 2)
     >>> x
@@ -11286,7 +11286,7 @@ Args:
     k (int): number of times to rotate. Default value is 1
     dims (a list or tuple): axis to rotate. Default value is [0, 1]
 
-Example:
+Example::
 
     >>> x = torch.arange(4).view(2, 2)
     >>> x
@@ -11327,7 +11327,7 @@ Args:
     {input}
     index (LongTensor): the indices into tensor
 
-Example:
+Example::
 
     >>> src = torch.tensor([[4, 3, 5],
     ...                     [6, 7, 8]])
@@ -11360,7 +11360,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> t = torch.tensor([[10, 30, 20], [60, 40, 50]])
     >>> max_idx = torch.argmax(t)
@@ -11392,7 +11392,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -11422,7 +11422,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -11466,7 +11466,7 @@ Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be
         optionally given to be used as output buffers
 
-Example:
+Example::
 
     >>> x = torch.arange(1., 6.)
     >>> x
@@ -11485,7 +11485,7 @@ trace(input) -> Tensor
 
 Returns the sum of the elements of the diagonal of the input 2-D matrix.
 
-Example:
+Example::
 
     >>> x = torch.arange(1., 10.).view(3, 3)
     >>> x
@@ -11532,7 +11532,7 @@ Args:
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
 
-Example:
+Example::
 
     >>> x = torch.randn(2, 3)
     >>> x
@@ -11650,7 +11650,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(3, 3)
     >>> a
@@ -11723,7 +11723,7 @@ Keyword args:
     {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 
-Example:
+Example::
 
     >>> a = torch.tril_indices(3, 3)
     >>> a
@@ -11771,7 +11771,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(3, 3)
     >>> a
@@ -11852,7 +11852,7 @@ Keyword args:
     {device}
     layout (:class:`torch.layout`, optional): currently only support ``torch.strided``.
 
-Example:
+Example::
 
     >>> a = torch.triu_indices(3, 3)
     >>> a
@@ -11899,7 +11899,7 @@ Args:
 Keyword args:
     {out}
 
-Example:
+Example::
 
     >>> a = torch.randn(4)
     >>> a
@@ -11938,7 +11938,7 @@ Args:
 Returns:
     Tensor: A newly fake_quantized ``torch.float32`` tensor
 
-Example:
+Example::
 
     >>> x = torch.randn(4)
     >>> x
@@ -11978,7 +11978,7 @@ Args:
 Returns:
     Tensor: A newly fake_quantized per channel ``torch.float32`` tensor
 
-Example:
+Example::
 
     >>> x = torch.randn(2, 2, 2)
     >>> x
@@ -12029,7 +12029,7 @@ Args:
     {input}
     dim (int): the index at which to insert the singleton dimension
 
-Example:
+Example::
 
     >>> x = torch.tensor([1, 2, 3, 4])
     >>> torch.unsqueeze(x, 0)
@@ -12073,7 +12073,7 @@ Args:
     {input}
     unbiased (bool): whether to use Bessel's correction (:math:`\delta N = 1`).
 
-Example:
+Example::
 
     >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
     >>> torch.var(a, unbiased=False)
@@ -12120,7 +12120,7 @@ Args:
 Returns:
     A tuple (var, mean) containing the variance and mean.
 
-Example:
+Example::
 
     >>> a = torch.tensor([[-0.8166, -1.3802, -0.3560]])
     >>> torch.var_mean(a, unbiased=False)
@@ -12149,7 +12149,7 @@ Keyword args:
     {device}
     {requires_grad}
 
-Example:
+Example::
 
     >>> torch.zeros(2, 3)
     tensor([[ 0.,  0.,  0.],
@@ -12186,7 +12186,7 @@ Keyword args:
     {requires_grad}
     {memory_format}
 
-Example:
+Example::
 
     >>> input = torch.empty(2, 3)
     >>> torch.zeros_like(input)
@@ -12219,7 +12219,7 @@ Keyword args:
     {pin_memory}
     {memory_format}
 
-Example:
+Example::
 
     >>> torch.empty((2,3), dtype=torch.int64)
     tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
@@ -12248,7 +12248,7 @@ Keyword args:
     {requires_grad}
     {memory_format}
 
-Example:
+Example::
 
     >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
     >>> torch.empty_like(a)
@@ -12281,7 +12281,7 @@ Keyword args:
     {requires_grad}
     {pin_memory}
 
-Example:
+Example::
 
     >>> a = torch.empty_strided((2, 3), (1, 2))
     >>> a
@@ -12316,7 +12316,7 @@ Keyword args:
     {device}
     {requires_grad}
 
-Example:
+Example::
 
     >>> torch.full((2, 3), 3.141592)
     tensor([[ 3.1416,  3.1416,  3.1416],
@@ -12388,7 +12388,7 @@ Arguments:
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
 
-Example:
+Example::
 
     >>> x = torch.randn(3, 2)
     >>> y = torch.ones(3, 2)
@@ -12444,7 +12444,7 @@ Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
                 batch dimensions.
 
-Example:
+Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
@@ -12755,7 +12755,7 @@ Returns:
     the second :math:`x^{{(N-2)}}` and so forth. If increasing is True, the columns
     are :math:`x^0, x^1, ..., x^{{(N-1)}}`.
 
-Example:
+Example::
 
     >>> x = torch.tensor([1, 2, 3, 5])
     >>> torch.vander(x)
@@ -12793,7 +12793,7 @@ Arguments:
     input (Tensor): the tensor to unbind
     dim (int): dimension to remove
 
-Example:
+Example::
 
     >>> torch.unbind(torch.tensor([[1, 2, 3],
     >>>                            [4, 5, 6],
@@ -12822,7 +12822,7 @@ Returns:
     `itertools.combinations` or `itertools.combinations_with_replacement` on these
     lists, and finally convert the resulting list into tensor.
 
-Example:
+Example::
 
     >>> a = [1, 2, 3]
     >>> list(itertools.combinations(a, r=2))
@@ -13085,7 +13085,7 @@ Keyword args:
 Returns:
     Tensor: Repeated tensor which has the same shape as input, except along the given axis.
 
-Example:
+Example::
 
     >>> x = torch.tensor([1, 2, 3])
     >>> x.repeat_interleave(2)
@@ -13145,7 +13145,7 @@ Args:
     input (Tensor): the tensor whose elements to repeat.
     dims (tuple): the number of repetitions per dimension.
 
-Example:
+Example::
 
     >>> x = torch.tensor([1, 2, 3])
     >>> x.tile((2,))
@@ -13176,7 +13176,7 @@ Arguments:
 Returns:
     Tensor: A newly quantized tensor or list of quantized tensors.
 
-Example:
+Example::
 
     >>> torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.quint8)
     tensor([-1.,  0.,  1.,  2.], size=(4,), dtype=torch.quint8,
@@ -13213,7 +13213,7 @@ Arguments:
 Returns:
     Tensor: A newly (dynamically) quantized tensor
 
-Example:
+Example::
 
     >>> t = torch.quantize_per_tensor_dynamic(torch.tensor([-1.0, 0.0, 1.0, 2.0]), torch.quint8, False)
     >>> print(t)
@@ -13243,7 +13243,7 @@ Arguments:
 Returns:
     Tensor: A newly quantized tensor
 
-Example:
+Example::
 
     >>> x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
     >>> torch.quantize_per_channel(x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8)
@@ -13283,7 +13283,7 @@ Arguments:
 Returns:
     Tensor: A quantized tensor with batch normalization applied.
 
-Example:
+Example::
 
     >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_batch_norm(qx, torch.ones(2), torch.zeros(2), torch.rand(2), torch.rand(2), 0.00001, 0.2, 2)
@@ -13324,7 +13324,7 @@ Arguments:
 Returns:
     Tensor: A quantized tensor with max_pool1d applied.
 
-Example:
+Example::
 
     >>> qx = torch.quantize_per_tensor(torch.rand(2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_max_pool1d(qx, [2])
@@ -13355,7 +13355,7 @@ Arguments:
 Returns:
     Tensor: A quantized tensor with max_pool2d applied.
 
-Example:
+Example::
 
     >>> qx = torch.quantize_per_tensor(torch.rand(2, 2, 2, 2), 1.5, 3, torch.quint8)
     >>> torch.quantized_max_pool2d(qx, [2,2])
@@ -13387,7 +13387,7 @@ Arguments:
 Returns:
     Generator: An torch.Generator object.
 
-Example:
+Example::
 
     >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
     >>> g_cpu = torch.Generator()
@@ -13406,7 +13406,7 @@ Sets the Generator state.
 Arguments:
     new_state (torch.ByteTensor): The desired state.
 
-Example:
+Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu_other = torch.Generator()
@@ -13426,7 +13426,7 @@ Returns:
     Tensor: A ``torch.ByteTensor`` which contains all the necessary bits
     to restore a Generator to a specific point in time.
 
-Example:
+Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu.get_state()
@@ -13452,7 +13452,7 @@ Arguments:
 Returns:
     Generator: An torch.Generator object.
 
-Example:
+Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu.manual_seed(2147483647)
@@ -13467,7 +13467,7 @@ Generator.initial_seed() -> int
 
 Returns the initial seed for generating random numbers.
 
-Example:
+Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu.initial_seed()
@@ -13484,7 +13484,7 @@ Generator.seed() -> int
 Gets a non-deterministic random number from std::random_device or the current
 time and uses it to seed a Generator.
 
-Example:
+Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu.seed()
@@ -13500,7 +13500,7 @@ Generator.device -> device
 
 Gets the current device of the generator.
 
-Example:
+Example::
 
     >>> g_cpu = torch.Generator()
     >>> g_cpu.device
@@ -13586,7 +13586,7 @@ Keyword args:
                             ascending order on the innermost dimension
 
 
-Example:
+Example::
 
     >>> sorted_sequence = torch.tensor([[1, 3, 5, 7, 9], [2, 4, 6, 8, 10]])
     >>> sorted_sequence
@@ -13649,7 +13649,7 @@ Keyword args:
     out (Tensor, optional): the output tensor, must be the same size as :attr:`input` if provided.
 
 
-Example:
+Example::
 
     >>> boundaries = torch.tensor([1, 3, 5, 7, 9])
     >>> boundaries
