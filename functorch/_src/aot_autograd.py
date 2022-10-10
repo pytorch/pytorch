@@ -514,8 +514,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Tensor], aot_config: AOTConfi
                         CompiledFunction.compiled_bw, all_args, steal_args=True
                     )
             else:
-                fw_outs = call_func_with_args(
-                    CompiledFunction.compiled_fw, deduped_flat_tensor_args
+                out = call_func_with_args(
+                    CompiledFunction.compiled_bw, all_args, steal_args=True
                 )
             return tuple(out)
 
