@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
+from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision
@@ -168,8 +169,6 @@ class TestCommunicationHooks(FSDPTest):
 
             # For each worker, the gradient on the weight should be worker_rank.
             grad = net_default_hook.params[0].grad
-            if sharding_strategy != ShardingStrategy.NO_SHARD:
-                self.assertTrue(net_default_hook.params[0]._is_sharded, "Expected parameter to be a sharded chunk.")
             expected_grad = (
                 sum(i for i in range(dist.get_world_size())) / dist.get_world_size()
             )
@@ -423,7 +422,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None)
+        state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.fp16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.float16, has_wrapping)
@@ -450,7 +449,7 @@ class TestCommunicationHooks(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy]
     ):
 
-        state = default_hooks.LowPrecisionState(process_group=None)
+        state = default_hooks.LowPrecisionState(process_group=_get_default_group())
         hook = default_hooks.bf16_compress_hook
 
         self._check_low_precision_hook(state, hook, sharding_strategy, torch.bfloat16, has_wrapping)

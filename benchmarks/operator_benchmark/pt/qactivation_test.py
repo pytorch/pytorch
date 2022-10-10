@@ -1,5 +1,5 @@
 import torch
-import torch.nn.quantized.functional as qF
+import torch.ao.nn.quantized.functional as qF
 
 import operator_benchmark as op_bench
 

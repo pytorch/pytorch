@@ -16,9 +16,11 @@ fi
 pip install "unittest-xml-reporting<=3.2.0,>=2.0.0" \
   pytest \
   pytest-xdist \
+  pytest-shard \
   pytest-rerunfailures \
   "xdoctest==1.0.2" \
-  "pygments==2.12.0"
+  "pygments==2.12.0" \
+  "opt-einsum>=3.3"
 
 if [ -z "${CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
@@ -172,12 +174,11 @@ test_jit_hooks() {
 
 test_dynamo() {
   pushd ../torchdynamo
-  pytest tests
+  pytest test
   popd
 }
 
 if [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  install_functorch
   test_functorch
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"

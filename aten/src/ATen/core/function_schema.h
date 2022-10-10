@@ -216,6 +216,7 @@ enum struct TORCH_API SchemaArgType { input, output };
 struct TORCH_API SchemaArgument {
   SchemaArgType type;
   size_t index;
+  SchemaArgument(SchemaArgType tpe, size_t idx) : type(tpe), index(idx) {}
   bool operator==(const SchemaArgument& rhs) const {
     return type == rhs.type && index == rhs.index;
   }
@@ -474,7 +475,7 @@ struct TORCH_API FunctionSchema {
   FunctionSchema cloneWithRemappedTypes(
       const std::function<TypePtr(TypePtr)> type_map) const;
 
-  FunctionSchema cloneWithRealTypes() const;
+  FunctionSchema cloneWithRealTypes(bool with_symint=true) const;
 
   // Check that inputs have the correct types and appends any missing default
   // values.
@@ -550,19 +551,31 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
-  auto type = arg.type();
+  // real_type versus fake_type: in order to be compatible with FunctionSchema
+  // parser, printing an argument with either MemoryFormat or Layout type should
+  // give us the original schema string, hence printing out real_type.
+  auto type = arg.real_type();
   bool is_opt = type->kind() == OptionalType::Kind;
   auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 
-  if (unopt_type->kind() == ListType::Kind && arg.N()) {
+  if (unopt_type->kind() == ListType::Kind) {
     // sized lists get size N from arg, not type
     auto list = unopt_type->cast<c10::ListType>();
-    out << list->getElementType()->str() << "[" << *arg.N() << "]";
+    out << list->getElementType()->str();
+    if (arg.alias_info() && !arg.alias_info()->containedTypes().empty()){
+      out << arg.alias_info()->containedTypes()[0];
+    }
+    std::string N = "";
+    if (arg.N()) {
+        N = std::to_string(*arg.N());
+    }
+    out << "[" << N << "]";
   } else {
     out << unopt_type->str();
   }
 
-  if (arg.alias_info()) {
+  // print alias info if it has beforeSets.
+  if (arg.alias_info() && !arg.alias_info()->beforeSets().empty()) {
     out << *arg.alias_info();
   }
 

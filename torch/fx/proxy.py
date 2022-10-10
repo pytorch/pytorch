@@ -95,14 +95,23 @@ class TracerBase:
         symbolic tracing.
         """
         # We have to do a little dance here. Basically, walk up the callstack and
-        # record the first frame not in the FX source. This is the frame executing
+        # record the first frame not in the pytorch source. This is the frame executing
         # the user code during tracing.
         frame = inspect.currentframe()
 
-        fx_files = ['torch/fx/proxy.py', 'torch/fx/_symbolic_trace.py']
+        pt_files = ['torch/fx/proxy.py',
+                    'torch/fx/_symbolic_trace.py',
+                    'torch/fx/experimental/proxy_tensor.py',
+                    'torch/_ops.py',
+                    'torch/_tensor.py',
+                    'torch/utils/_python_dispatch.py',
+                    'torch/_prims_common/wrappers.py',
+                    'torch/_refs/__init__.py',
+                    'torch/_refs/nn/functional/__init__.py'
+                    ]
         while frame:
             frame = frame.f_back
-            if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):
+            if frame and all(not frame.f_code.co_filename.endswith(file) for file in pt_files):
                 break
 
         if not frame:
@@ -140,7 +149,7 @@ class TracerBase:
                 def no_node(arg):
                     if isinstance(arg, Node):
                         raise RuntimeError("Keys for dictionaries used as an argument cannot contain a "
-                                           "Node. Got key: {k}")
+                                           f"Node. Got key: {k}")
                 map_aggregate(k, no_node)
 
                 r[k] = self.create_arg(v)
@@ -153,7 +162,6 @@ class TracerBase:
             return a.node
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
-
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     @compatibility(is_backward_compatible=True)
