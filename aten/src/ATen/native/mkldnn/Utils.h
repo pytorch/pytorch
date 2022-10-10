@@ -35,6 +35,8 @@ using AttrFunction = std::function<ideep::attr_t(
 
 const std::map<std::string, AttrFunction>& fx_fusion_attr_map();
 
+const std::map<std::string, ideep::algorithm>& fusion_binary_alg_map();
+
 #endif // AT_MKLDNN_ENABLED()
 };
 
