@@ -772,13 +772,23 @@ std::tuple<Tensor, Tensor> householder_product_backward(
     const Tensor& grad,
     const Tensor& result,
     const Tensor& input,
-    const Tensor& tau);
+    const Tensor& tau,
+    const bool flip_order = false);
 Tensor householder_product_jvp(
     const Tensor& dV,
     const Tensor& dtau,
     const Tensor& prod,
     const Tensor& V,
     const Tensor& tau);
+std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
+    const Tensor& grad,
+    const Tensor& result,
+    const Tensor& self,
+    const Tensor& tau,
+    const Tensor& other,
+    bool left,
+    bool transpose,
+    std::array<bool, 3> grad_output_mask);
 std::tuple<Tensor, Tensor> polar_backward(
     const Tensor& grad,
     const Tensor& result);

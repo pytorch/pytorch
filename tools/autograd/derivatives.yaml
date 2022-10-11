@@ -1248,10 +1248,8 @@
   input, tau: householder_product_backward(grad, result, input, tau)
   result: householder_product_jvp(input_t, tau_t, result, input_p, tau_p)
 
-- name: ormqr(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False) -> Tensor
-  self: not_implemented("ormqr")
-  input2: not_implemented("ormqr")
-  input3: not_implemented("ormqr")
+- name: ormqr(Tensor self, Tensor tau, Tensor other, bool left=True, bool transpose=False) -> Tensor
+  self, tau, other: ormqr_backward(grad, result, self, tau, other, left, transpose, grad_input_mask)
 
 - name: permute(Tensor(a) self, int[] dims) -> Tensor(a)
   self: permute_backwards(grad, dims)
