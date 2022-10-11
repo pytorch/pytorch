@@ -1,9 +1,28 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/native/quantized/cpu/XnnpackUtils.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/quantized/Quantizer.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_empty_affine_quantized.h>
+#include <ATen/ops/_empty_affine_quantized_native.h>
+#include <ATen/ops/empty_like.h>
+#endif
 
 #include <algorithm>
 
@@ -36,6 +55,124 @@ Tensor _mul_out(Tensor& out, const Tensor& self, const Tensor& other) {
   }
   return out;
 }
+
+#ifdef USE_XNNPACK
+template <typename scalar_t, bool ReLUFused = false>
+Tensor _mul_out_xnnpack(
+    const Tensor& self,
+    const Tensor& other,
+    double output_scale,
+    int64_t output_zero_point) {
+  using underlying_t = typename scalar_t::underlying;
+
+  const string func_name = "xnnp_mul()";
+  TORCH_CHECK(self.ndimension() > 0, func_name, ": Got empty input tensor.");
+  TORCH_CHECK(
+      at::native::xnnpack::available(), func_name, ": XNNPACK is not available")
+
+  // using qa memory format for qb to allow xnnpack kernel to flatten all the
+  // dims
+  auto qa_mem_format = self.suggest_memory_format();
+  Tensor self_contig = self.contiguous(qa_mem_format);
+  Tensor other_contig = other.contiguous(qa_mem_format);
+
+  Tensor out = at::native::empty_affine_quantized(
+      at::infer_size_dimvector(self_contig.sizes(), other_contig.sizes()),
+      self.scalar_type(),
+      c10::nullopt /* layout */,
+      kCPU,
+      c10::nullopt /* pin_memory */,
+      output_scale,
+      output_zero_point,
+      qa_mem_format);
+
+  if (self_contig.size(0) == 0) {
+    return out;
+  }
+
+  int64_t self_zero_point = self_contig.q_zero_point();
+  double self_scale = self_contig.q_scale();
+  int64_t other_zero_point = other_contig.q_zero_point();
+  double other_scale = other_contig.q_scale();
+
+  int64_t output_min = std::numeric_limits<underlying_t>::min();
+  int64_t output_max = std::numeric_limits<underlying_t>::max();
+
+  if(ReLUFused) {
+    /*
+     * FIXME: use acticationLimits<T>()
+     * With <T>, MSVC runs into "error C3862: indetifier activationLimits not
+     * found".
+     */
+    constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
+    constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
+    int64_t qvalue = static_cast<int64_t>(output_zero_point);
+    qvalue = std::max<int64_t>(qvalue, qmin);
+    output_min = static_cast<underlying_t>(std::min<int64_t>(qvalue, qmax));
+  }
+
+  xnn_operator_t xnnp_op = nullptr;
+  xnnpack_operator xnnp_qmul_operator;
+
+  // create xnnpack multiply operator ...
+  auto status = xnn_create_multiply_nd_qs8(
+      self_zero_point,
+      self_scale,
+      other_zero_point,
+      other_scale,
+      static_cast<underlying_t>(output_zero_point),
+      static_cast<float>(output_scale),
+      output_min,
+      output_max,
+      0,
+      &xnnp_op);
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn create operator failed(",
+      status,
+      ")!");
+  xnnp_qmul_operator = xnnpack_operator(xnnp_op);
+
+
+  const auto self_shape = xnnp_utils::get_mem_format_aware_shape(self_contig);
+  const auto other_shape = xnnp_utils::get_mem_format_aware_shape(other_contig);
+
+  // set up operator
+  status = xnn_setup_multiply_nd_qs8(
+      xnnp_qmul_operator.get(),
+      self_shape.size(),
+      self_shape.data(),
+      other_shape.size(),
+      other_shape.data(),
+      reinterpret_cast<const underlying_t*>(self_contig.data_ptr<scalar_t>()),
+      reinterpret_cast<const underlying_t*>(other_contig.data_ptr<scalar_t>()),
+      reinterpret_cast<underlying_t*>(out.data_ptr<scalar_t>()),
+      caffe2::pthreadpool_());
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn setup operator failed(",
+      status,
+      ")!");
+
+  // Run the operator
+  status = xnn_run_operator(
+      xnnp_qmul_operator.get(), /* xnn_operator_t op */
+      caffe2::pthreadpool_()); /* pthreadpool_t threadpool */
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn run operator failed(",
+      status,
+      ")");
+
+  return out;
+}
+
+#endif // use XNNPACK
 
 template <bool ReLUFused = false>
 Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
@@ -100,19 +237,27 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   });
 
   return out;
-}
+  }
 
 template <bool ReLUFused = false>
 class QMul final {
  public:
   static Tensor run(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
+#ifdef USE_XNNPACK
+    int64_t q_max = std::numeric_limits<c10::qint8::underlying>::max();
+    if (zero_point < q_max && qa.scalar_type() == kQInt8) {
+      return _mul_out_xnnpack<c10::qint8, ReLUFused>(qa, qb, scale, zero_point);
+    }
+#endif // USE_XNNPACK
+
     auto qc = at::_empty_affine_quantized(
         infer_size_dimvector(qa.sizes(), qb.sizes()),
         at::device(kCPU).dtype(qa.scalar_type()),
         scale,
         zero_point,
         qa.suggest_memory_format());
+
     return _mul_out<ReLUFused>(qc, qa, qb);
   }
 };
