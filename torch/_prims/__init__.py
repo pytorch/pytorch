@@ -186,6 +186,10 @@ __all__ = [
     "scalar_tensor",
     "arange",
     #
+    # Data conversion and movement Prims
+    #
+    "clone",
+    #
     # Linear algebra (linalg) Prims
     #
     "svd",
@@ -592,6 +596,21 @@ conj_physical = _make_prim(
     meta=_conj_physical_meta,
     impl_aten=torch._conj_physical,
     doc="Returns the physical conjugation of a complex tensor",
+    return_type=RETURN_TYPE.NEW,
+)
+
+
+def _clone_meta(
+    input: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
+) -> TensorLikeType:
+    return TensorMeta(input)
+
+
+clone = _make_prim(
+    schema="clone(Tensor self, *, MemoryFormat? memory_format=None) -> Tensor",
+    meta=_clone_meta,
+    impl_aten=torch.clone,
+    doc="Returns the copy of a tensor",
     return_type=RETURN_TYPE.NEW,
 )
 
