@@ -237,10 +237,9 @@ class TestMkldnnFusion(JitTestCase):
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
                 options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
                 for bias, dilation, groups, memory_format in options:
-                    N = torch.randint(3, 10, (1,)).item()
-                    oC = torch.randint(1, 3, (1,)).item() * groups
-                    iC = torch.randint(1, 3, (1,)).item() * groups
-                    x_shape = (N, iC) + input_shapes[dim]
+                    oC = 10 * groups
+                    iC = 3 * groups
+                    x_shape = (1, iC) + input_shapes[dim]
                     x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
                     mod = M(pointwise_info.pointwise_module, dim, iC, oC, dilation, groups, bias, kernel_size=3)
                     mod = mod.to(memory_format=memory_format).eval()
@@ -274,10 +273,9 @@ class TestMkldnnFusion(JitTestCase):
                 channels_last = torch.channels_last if dim == 2 else torch.channels_last_3d
                 options = itertools.product([True, False], [1, 2], [1, 4], [torch.contiguous_format, channels_last])
                 for bias, dilation, groups, memory_format in options:
-                    N = torch.randint(3, 10, (1,)).item()
-                    oC = torch.randint(1, 3, (1,)).item() * groups
-                    iC = torch.randint(1, 3, (1,)).item() * groups
-                    x_shape = (N, iC) + input_shapes[dim]
+                    oC = 10 * groups
+                    iC = 3 * groups
+                    x_shape = (1, iC) + input_shapes[dim]
                     x = torch.randn(x_shape, dtype=torch.float32).to(memory_format=memory_format)
                     mod = M(binary_fn, dim, iC, oC, dilation, groups, bias, kernel_size=3)
                     mod = mod.to(memory_format=memory_format).eval()
@@ -285,7 +283,7 @@ class TestMkldnnFusion(JitTestCase):
                     with torch.no_grad():
                         ref = mod(x, other)
                         attr = pointwise_name
-                        fused = torch.ops.mkldnn._convolution_binary(
+                        fused = torch.ops.mkldnn._convolution_pointwise(
                             x, other, mod.conv.weight, mod.conv.bias, mod.conv.padding, mod.conv.stride, mod.conv.dilation,
                             mod.conv.groups, attr
                         )
