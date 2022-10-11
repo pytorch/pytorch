@@ -1,10 +1,12 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
-#include <frameobject.h>
-#include <pystate.h>
 
 // Only Python 3.7 through 3.10 supported
-#if PY_VERSION_HEX < 0x03110000
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION < 11
+#define _PY_VERSION_OK
+
+#include <frameobject.h>
+#include <pystate.h>
 
 // see https://bugs.python.org/issue35886
 #if PY_VERSION_HEX >= 0x03080000
@@ -584,7 +586,7 @@ static struct PyModuleDef _module = {
     _methods};
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
-#if PY_VERSION_HEX < 0x03110000
+#ifdef _PY_VERSION_OK
   extra_index = _PyEval_RequestCodeExtraIndex(ignored);
 
   int result = PyThread_tss_create(&eval_frame_callback_key);
