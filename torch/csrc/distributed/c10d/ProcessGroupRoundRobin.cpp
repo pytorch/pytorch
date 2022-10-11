@@ -1,4 +1,4 @@
-#include <c10d/ProcessGroupRoundRobin.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupRoundRobin.hpp>
 
 namespace c10d {
 
