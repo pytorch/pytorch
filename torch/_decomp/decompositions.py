@@ -988,16 +988,6 @@ def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     return result
 
 
-# Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
-@register_decomposition(aten.addcmul)
-@pw_cast_for_opmath
-def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
-    if self.is_floating_point() or self.is_complex():
-        return self + value * tensor1 * tensor2
-    else:
-        return self + int(value) * tensor1 * tensor2
-
-
 @register_decomposition(aten.rsub.Tensor)
 def rsub_Tensor(self: Tensor, other: Tensor, alpha: float = 1) -> Tensor:
     return torch.sub(other, self, alpha=alpha)

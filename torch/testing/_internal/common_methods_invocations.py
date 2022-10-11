@@ -1093,7 +1093,7 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
         sample_inputs.append(SampleInput(
             args[0],
             args=args[1:],
-            kwargs=dict(value=3.14), broadcasts_input=broadcasts_input))
+            kwargs=dict(value=3.14 if dtype.is_floating_point or dtype.is_complex else 3), broadcasts_input=broadcasts_input))
 
     return tuple(sample_inputs)
 
@@ -17531,6 +17531,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.addcdiv",
         torch_opinfo_name="addcdiv",
+    ),
+    PythonRefInfo(
+        "_refs.addcmul",
+        torch_opinfo_name="addcmul",
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
