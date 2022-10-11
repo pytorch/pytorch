@@ -693,7 +693,7 @@ jobs:
       - run_brew_for_macos_build
       - run:
           name: Test
-          no_output_timeout: "1h"
+          no_output_timeout: "2h"
           command: |
             set -x
 
@@ -985,10 +985,43 @@ jobs:
     macos:
       xcode: "12.5.1"
     steps:
-      - checkout
+      - run:
+          name: checkout with retry
+          command: |
+            checkout() {
+              set -ex
+              # Workaround old docker images with incorrect $HOME
+              # check https://github.com/docker/docker/issues/2968 for details
+              if [ "${HOME}" = "/" ]
+                then
+                export HOME=$(getent passwd $(id -un) | cut -d: -f6)
+              fi
+
+              mkdir -p ~/.ssh
+
+              echo 'github.com ssh-rsa AAAAB3NzaC1yc2EAAAABIwAAAQEAq2A7hRGmdnm9tUDbO9IDSwBK6TbQa+PXYPCPy6rbTrTtw7PHkccKrpp0yVhp5HdEIcKr6pLlVDBfOLX9QUsyCOV0wzfjIJNlGEYsdlLJizHhbn2mUjvSAHQqZETYP81eFzLQNnPHt4EVVUh7VfDESU84KezmD5QlWpXLmvU31/yMf+Se8xhHTvKSCZIFImWwoG6mbUoWf9nzpIoaSjB+weqqUUmpaaasXVal72J+UX2B+2RPW3RcT0eOzQgqlJL3RKrTJvdsjE3JEAvGq3lGHSZXy28G3skua2SmVi/w4yCE6gbODqnTWlg7+wC604ydGXA8VJiS5ap43JXiUFFAaQ==
+              ' >> ~/.ssh/known_hosts
+
+              # use git+ssh instead of https
+              git config --global url."ssh://git@github.com".insteadOf "https://github.com" || true
+              git config --global gc.auto 0 || true
+
+              echo 'Cloning git repository'
+              mkdir -p '/Users/distiller/project'
+              cd '/Users/distiller/project'
+              git clone "$CIRCLE_REPOSITORY_URL" .
+              echo 'Checking out branch'
+              git checkout --force -B "$CIRCLE_BRANCH" "$CIRCLE_SHA1"
+              git --no-pager log --no-color -n 1 --format='HEAD is now at %h %s'
+            }
+
+            retry () {
+              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
+            }
+            retry checkout
       - run_brew_for_ios_build
       - run:
-          name: Run Fastlane
+          name: Setup Fastlane
           no_output_timeout: "1h"
           command: |
             set -e
@@ -996,20 +1029,6 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp
             # install fastlane
             sudo gem install bundler && bundle install
-            # install certificates
-            echo ${IOS_CERT_KEY_2022} >> cert.txt
-            base64 --decode cert.txt -o Certificates.p12
-            rm cert.txt
-            bundle exec fastlane install_root_cert
-            bundle exec fastlane install_dev_cert
-            # install the provisioning profile
-            PROFILE=PyTorch_CI_2022.mobileprovision
-            PROVISIONING_PROFILES=~/Library/MobileDevice/Provisioning\ Profiles
-            mkdir -pv "${PROVISIONING_PROFILES}"
-            cd "${PROVISIONING_PROFILES}"
-            echo ${IOS_SIGN_KEY_2022} >> cert.txt
-            base64 --decode cert.txt -o ${PROFILE}
-            rm cert.txt
       - run:
           name: Build
           no_output_timeout: "1h"
@@ -1067,18 +1086,12 @@ jobs:
           command: |
             set -e
             PROJ_ROOT=/Users/distiller/project
-            PROFILE=PyTorch_CI_2022
             # run the ruby build script
             if ! [ -x "$(command -v xcodebuild)" ]; then
               echo 'Error: xcodebuild is not installed.'
               exit 1
             fi
-            echo ${IOS_DEV_TEAM_ID}
-            if [ ${IOS_PLATFORM} != "SIMULATOR" ]; then
-              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM} -c ${PROFILE} -t ${IOS_DEV_TEAM_ID}
-            else
-              ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
-            fi
+            ruby ${PROJ_ROOT}/scripts/xcode_build.rb -i ${PROJ_ROOT}/build_ios/install -x ${PROJ_ROOT}/ios/TestApp/TestApp.xcodeproj -p ${IOS_PLATFORM}
             if ! [ "$?" -eq "0" ]; then
               echo 'xcodebuild failed!'
               exit 1
@@ -1436,6 +1449,11 @@ workflows:
           name: macos-12-py3-x86-64-build
           build-environment: macos-12-py3-x86-64
           xcode-version: "13.3.1"
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - mac_test:
           name: macos-12-py3-x86-64-test-1-2-default
           build-environment: macos-12-py3-x86-64
@@ -1444,6 +1462,11 @@ workflows:
           num-test-shards: "2"
           requires:
             - macos-12-py3-x86-64-build
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - mac_test:
           name: macos-12-py3-x86-64-test-2-2-default
           build-environment: macos-12-py3-x86-64
@@ -1452,6 +1475,11 @@ workflows:
           num-test-shards: "2"
           requires:
             - macos-12-py3-x86-64-build
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - mac_test:
           name: macos-12-py3-x86-64-test-1-1-functorch
           build-environment: macos-12-py3-x86-64
@@ -1461,64 +1489,63 @@ workflows:
           test-config: functorch
           requires:
             - macos-12-py3-x86-64-build
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - mac_build:
           name: macos-12-py3-x86-64-lite-interpreter-build-test
           build-environment: macos-12-py3-lite-interpreter-x86-64
           xcode-version: "13.3.1"
           build-generates-artifacts: false
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - mac_build:
           name: macos-12-py3-arm64-build
           build-environment: macos-12-py3-arm64
           xcode-version: "13.3.1"
           python-version: "3.9.12"
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - upload_test_stats:
           name: upload test status
           requires:
             - macos-12-py3-x86-64-test-1-2-default
             - macos-12-py3-x86-64-test-2-2-default
             - macos-12-py3-x86-64-test-1-1-functorch
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
       - pytorch_ios_build:
           build_environment: ios-12-5-1-x86-64
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "1"
           name: ios-12-5-1-x86-64
       - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64-metal
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64-metal
-          use_metal: "1"
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64-custom-ops
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64-custom-ops
-          op_list: mobilenetv2.yaml
-      - pytorch_ios_build:
           build_environment: ios-12-5-1-x86-64-coreml
+          filters:
+            branches:
+              ignore:
+                - nightly
+                - postnightly
           ios_arch: x86_64
           ios_platform: SIMULATOR
           lite_interpreter: "1"
           name: ios-12-5-1-x86-64-coreml
-          use_coreml: "1"
-      - pytorch_ios_build:
-          build_environment: ios-12-5-1-arm64-coreml
-          context: org-member
-          ios_arch: arm64
-          ios_platform: OS
-          lite_interpreter: "1"
-          name: ios-12-5-1-arm64-coreml
           use_coreml: "1"
     when: << pipeline.parameters.run_build >>

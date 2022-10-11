@@ -8,16 +8,15 @@ namespace torch_dispatch_mode {
 struct StashTorchDispatchModeGuard {
  public:
   StashTorchDispatchModeGuard() {
-    saved_ = c10::impl::TorchDispatchModeTLS::get_state();
-    c10::impl::TorchDispatchModeTLS::set_state(nullptr);
+    c10::impl::TorchDispatchModeTLS::swap_mode(saved_mode_);
   }
 
   ~StashTorchDispatchModeGuard() {
-    c10::impl::TorchDispatchModeTLS::set_state(saved_);
+    c10::impl::TorchDispatchModeTLS::set_mode(std::move(saved_mode_));
   }
 
  private:
-  std::shared_ptr<at::SafePyObject> saved_;
+  std::shared_ptr<at::SafePyObject> saved_mode_;
 };
 
 } // namespace torch_dispatch_mode

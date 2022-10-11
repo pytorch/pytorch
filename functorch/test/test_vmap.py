@@ -45,9 +45,9 @@ import types
 from collections import namedtuple
 
 import functorch
-from functorch import vmap, grad, grad_and_value, jvp, vjp
+from functorch import vmap, grad, grad_and_value, jvp, vjp, jacfwd
 from functorch.experimental import chunk_vmap
-from functorch._C import reshape_dim_into, reshape_dim_outof
+from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
 
 FALLBACK_REGEX = 'There is a performance drop'
@@ -3194,9 +3194,13 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('__getitem__'),  # dynamic mask
         xfail('index_put'),  # dynamic mask
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('masked_select'),  # dynamic op
         xfail('nonzero'),  # dynamic op
+        xfail('unique', ''),  # dynamic op
+        xfail('unique_consecutive', ''),  # dynamic op
         xfail('allclose'),  # returns a boolean
+        xfail('uniform'),  # randomness is tested separately
         xfail('rand_like'),  # randomness is tested separately
         xfail('randint_like'),  # randomness is tested separately
         xfail('randn_like'),  # randomness is tested separately
@@ -3219,6 +3223,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('arange', ''),  # test runner can't handle factory functions
         xfail('logspace', ''),  # test runner can't handle factory functions
         xfail('empty', ''),  # test runner can't handle factory functions
+        xfail('ones', ''),  # test runner can't handle factory functions
+        xfail('zeros', ''),  # test runner can't handle factory functions
         xfail('eye', ''),  # non-tensor input
         xfail('broadcast_shapes', ''),  # test runner can't handle non-Tensor ops
         xfail('sparse.sampled_addmm'),  # sparse
@@ -3227,6 +3233,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         xfail('linalg.svd', device_type='cuda'),  # not unique, see test_linalg_svd for manual test
         skip('linalg.eigh', ''),  # not unique, see test_linalg_eigh for manual test
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         # ----------------------------------------------------------------------
 
         # ---------------------------- BUGS ------------------------------------
@@ -3242,6 +3249,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),  # embedding renorm vmap inplace incompatible
         xfail('__rpow__'),  # https://github.com/pytorch/functorch/issues/617
         xfail('column_stack', ''),  # Batching rule not implemented for aten::column_stack
+        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
 
         # required rank 4 tensor to use channels_last format
         xfail('bfloat16'),
@@ -3274,7 +3282,10 @@ class TestVmapOperatorsOpInfo(TestCase):
              {torch.float32: tol(atol=1e-04, rtol=1e-02)}, device_type='cuda'),
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
-    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
+    @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail.union({
+        xfail('cat'),
+        xfail('native_batch_norm'),
+    }))
     def test_vmap_exhaustive(self, device, dtype, op):
         # needs to be fixed
         inplace_failure_list = (
@@ -3289,27 +3300,29 @@ class TestVmapOperatorsOpInfo(TestCase):
     ))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
+        skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
+        xfail('cat'),
         xfail('complex'),
         xfail('copysign'),
-        xfail('eig'),
+        xfail('native_batch_norm'),
         xfail('histogram'),
         xfail('index_fill'),
         xfail('nansum'),
         xfail('nanmean'),
+        xfail('scatter_reduce', 'sum'),
+        xfail('scatter_reduce', 'mean'),
+        xfail('scatter_reduce', 'amax'),
+        xfail('scatter_reduce', 'amin'),
         # `index_put` OpInfo in pytorch/pytorch has
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('linalg.matrix_rank'),
-        xfail('linalg.matrix_rank', 'hermitian'),
-        xfail('linalg.pinv'),
-        xfail('linalg.pinv', 'hermitian'),
-        xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
+        xfail('narrow_copy'),  # hit the vmap fallback which is currently disabled
         xfail('ormqr'),
         xfail('put'),
         xfail('quantile'),
@@ -3325,6 +3338,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('count_nonzero'),
         xfail('nanmean'),
         xfail('nn.functional.dropout'),  # works, can't check against for loop because of randomness inconsistency
+        xfail('nn.functional._scaled_dot_product_attention'),  # randomness
         xfail('resize_'),
         xfail('view_as_complex'),
         xfail('matrix_exp'),
@@ -3366,6 +3380,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('svd_lowrank', ''),
         xfail('diagflat', ''),
         xfail('special.log_ndtr'),
+        xfail('narrow'),  # Batching rule not implemented for aten::narrow.Tensor
         xfail('nn.functional.triplet_margin_loss', ''),
         xfail('nn.functional.pdist', ''),
         xfail('scatter_reduce', 'sum'),
@@ -3412,7 +3427,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('jiterator_4inputs_with_extra_args', device_type='cuda'),
         xfail('linalg.vander', ''),
         xfail('segment_reduce', 'lengths'),
-        xfail('linalg.lu_solve', ''),
+        xfail('lu_solve', ''),
         xfail('special.bessel_y1'),
         xfail('special.hermite_polynomial_he'),
         xfail('special.scaled_modified_bessel_k0'),
@@ -3830,6 +3845,8 @@ class TestVmapOperatorsOpInfo(TestCase):
     @ops(filter(lambda op: "linalg" in op.name, op_db + additional_op_db), allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_linalg_failure_1D_input', {
         xfail('linalg.vector_norm'),  # can accept vector inputs
+        xfail('linalg.norm'),  # can accept vector inputs
+        xfail('linalg.norm', 'subgradients_at_zero'),  # can accept vector inputs
         xfail('linalg.cross'),  # can accept vector inputs
         skip('linalg.multi_dot'),  # accepts list of tensor inputs, has its own special test
         xfail('linalg.vander'),
@@ -4432,7 +4449,7 @@ class TestRandomness(TestCase):
             orig_passed_size = passed.shape[:2] if batched_call else passed.shape[:1]
             passed = passed.flatten(0, 1) if batched_call else passed
             expected = op(passed, always_batched)
-            expected.reshape(*orig_passed_size, 10)
+            expected = expected.reshape(*orig_passed_size, 10)
             self._assert_all_slices_unique(vmap_result)
             self.assertEqual(vmap_result, expected)
         else:
@@ -4477,6 +4494,19 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
+    def test_jacfwd_with_random(self):
+        # checks on behavior are above, this just checks that jacfwd respects
+        # the randomness param
+
+        x = torch.rand(3, 4)
+        with self.assertRaisesRegex(RuntimeError, r"called random operation while in randomness error mode"):
+            jacfwd(torch.bernoulli)(x)
+
+        # x isn't batched so use bernoulli since it doesn't do inplace randomness
+        jacfwd(torch.bernoulli, randomness="same")(x)
+        jacfwd(torch.bernoulli, randomness="different")(x)
+
+
 class TestTransformFailure(TestCase):
     @parametrize('transform', ['vmap', 'grad', 'grad_and_value', 'vjp', 'jvp', 'jacrev', 'jacfwd'])
     def test_fails_with_autograd_function(self, device, transform):
@@ -4509,7 +4539,6 @@ class TestTransformFailure(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "autograd.Function"):
             transform(input)
-
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestVmapOperatorsOpInfo, globals(), only_for=only_for)
